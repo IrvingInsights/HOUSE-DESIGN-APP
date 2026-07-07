@@ -3868,21 +3868,29 @@ function App() {
       assumptions: [],
       questions: []
     };
-    const result = await requestServerAppliedBim({
-      prompt: promptText,
-      bim: spec,
-      spec,
-      state: currentDashboardState(),
-      selected,
-      selectedObjectId: selected?.id || selectedRoom,
-      addToTarget,
-      attachedImages: [],
-      chatMessages: chatMessages.slice(-12),
-      projectBrain,
-      contextPacket: buildContextPacket(spec, projectBrain, selected, promptText),
-      plan,
-      persist
-    });
+    let result;
+    try {
+      result = await requestServerAppliedBim({
+        prompt: promptText,
+        bim: spec,
+        spec,
+        state: currentDashboardState(),
+        selected,
+        selectedObjectId: selected?.id || selectedRoom,
+        addToTarget,
+        attachedImages: [],
+        chatMessages: chatMessages.slice(-12),
+        projectBrain,
+        contextPacket: buildContextPacket(spec, projectBrain, selected, promptText),
+        plan,
+        persist
+      });
+    } catch (error) {
+      // A change must never vanish silently — say so where the user is looking.
+      setLastModelChange(`"${promptText}" did not apply — the design service didn't respond. Try it again.`);
+      setChatMessages((items) => [...items, { role: 'studio', speaker: 'Studio', text: `"${promptText}" didn't save (${error?.message || 'no response'}). Nothing changed — try it once more.` }]);
+      return null;
+    }
     const report = result.report;
     rememberRevision();
     setSpec(report.spec);
@@ -4739,7 +4747,8 @@ function App() {
       lastModelChange: savedChange,
       operationAudit,
       projectBrain,
-      chatMessages: chatWithNotice
+      chatMessages: chatWithNotice,
+      modelLayers
     });
     window.localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(payload));
     setSavedAt(now);
