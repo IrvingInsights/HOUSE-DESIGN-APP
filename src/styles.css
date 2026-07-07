@@ -2790,12 +2790,15 @@ textarea:focus-visible {
 }
 
 /* ============================================================
-   Dark workspace: the middle column is a deep moss-charcoal
+   Dark chrome: all three columns are a deep moss-charcoal
    matte, so the sunlit model preview is the brightest thing on
-   screen. Re-tokened locally; side panels stay paper.
+   screen. Re-tokened via scoped CSS variables.
    ============================================================ */
-.workspace {
+.leftPanel,
+.workspace,
+.rightPanel {
   background: #252B28;
+  color: #EAE8DD;
   --ink: #EAE8DD;
   --ink2: #BCC1B5;
   --ink3: #939A90;
@@ -2979,3 +2982,81 @@ textarea:focus-visible {
 .workspace .layersToggle.filtered { color: #A9781F; }
 .workspace .layersPanel { color: #22251F; }
 .workspace .viewFilterBadge { color: #7a6120; }
+
+/* Side panels join the dark matte: the remaining hardcoded-light spots. */
+body {
+  background: #202523;
+}
+
+.app {
+  background: #202523;
+}
+
+.leftPanel { border-right-color: #1B201E; }
+.rightPanel { border-left-color: #1B201E; }
+
+.brand,
+.panelBlock,
+.elementLibrary details {
+  background: #2A302D;
+  border-color: var(--line);
+}
+
+h1,
+.blockTitle,
+.sectionHead,
+.miniHead,
+.assembly em,
+.systemsDrawer > summary,
+.elementLibrary summary {
+  color: var(--plum, #A9C6D0);
+}
+
+.statGrid div {
+  background: var(--ivory);
+  border: 1px solid var(--line);
+}
+
+.statGrid span { color: var(--ink3); }
+
+.checksSummary { border-color: var(--line2); }
+.checksSummary.ok { border-color: #3E5C48; }
+.checksSummary.warn { border-color: #5C5233; }
+.checksSummary.bad { border-color: #5C3E33; }
+.statGrid .stateStat.ok { border-color: #3E5C48; }
+.statGrid .stateStat.bad { border-color: #5C3E33; }
+
+.reviewTabs button {
+  background: var(--ivory);
+  color: var(--ink2);
+  border-color: var(--line);
+}
+
+.reviewTabs button.active {
+  background: var(--active, #33434B);
+  color: var(--plum);
+  border-color: var(--active-line, #7FA8B5);
+}
+
+button.ghost.backButton:not(:disabled) {
+  border-color: var(--active-line, #7FA8B5);
+  color: var(--plum, #A9C6D0);
+}
+
+button.ghost.saveButton {
+  border-color: #C9A24B;
+  color: #E4C87E;
+  background: #383223;
+}
+
+.roomRow.element { background: #363328; }
+.roomRow.element.active { background: #453E28; border-color: #C9A24B; }
+.roomRow.wall { background: #2C3736; border-left-color: var(--active-line, #7FA8B5); }
+.roomRow.wall.active { background: var(--sage); }
+.roomRow.special { background: #38332A; border-left-color: #C9A24B; }
+.roomRow.special.active { background: #453E28; }
+
+.chatBubble.user { border-color: rgba(127, 168, 181, 0.4); }
+.chatBubble img,
+.uploadBox img,
+.attachmentChip img { background: #202523; }
