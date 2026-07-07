@@ -590,6 +590,46 @@ function storeyInfo(shell = {}) {
   return { storeys, baseWallFt, extraFt: (storeys - 1) * baseWallFt };
 }
 
+const UTILITY_DEFAULTS = {
+  waterSource: 'well',
+  tankGal: 0,
+  wasteMethod: 'septic',
+  wellSepticFt: 120,
+  powerMode: 'offgrid',
+  heatSource: 'wood_stove',
+  diyWalls: false,
+  diyRoof: false,
+  diyHeat: false
+};
+
+const SITE_DEFAULTS = { zip: '', latitudeDeg: 43, rainInYr: 38 };
+
+function siteOf(spec) {
+  return { ...SITE_DEFAULTS, ...(spec.site || {}) };
+}
+
+function utilitiesOf(spec) {
+  return { ...UTILITY_DEFAULTS, ...(spec.utilities || {}) };
+}
+
+// Offline ZIP -> region estimate (the assistant/geocoder refines this later).
+function zipRegionInfo(zip) {
+  if (!/^\d{5}$/.test(zip)) return null;
+  const regions = {
+    0: { name: 'New England / NJ', lat: 42.5, rain: 46 },
+    1: { name: 'NY · PA · DE', lat: 41.5, rain: 42 },
+    2: { name: 'Mid-Atlantic / Carolinas', lat: 37.5, rain: 45 },
+    3: { name: 'Deep South / Florida', lat: 31, rain: 54 },
+    4: { name: 'Great Lakes / Ohio Valley', lat: 40, rain: 40 },
+    5: { name: 'Upper Midwest / N. Plains', lat: 45, rain: 30 },
+    6: { name: 'Central Plains', lat: 39, rain: 38 },
+    7: { name: 'South Central / Texas', lat: 31, rain: 40 },
+    8: { name: 'Mountain West', lat: 39, rain: 16 },
+    9: { name: 'West Coast', lat: 39, rain: 24 }
+  };
+  return regions[zip[0]] || null;
+}
+
 function directionalHeightFromText(text, directionWords) {
   const directionPattern = directionWords.join('|');
   const afterDirection = new RegExp(`\\b(?:${directionPattern})\\b[^.;\\n]{0,70}?(\\d+(?:\\.\\d+)?)\\s*(?:ft|feet|foot|')`, 'i');
@@ -1494,6 +1534,8 @@ function applyStructuredDesignPlan(currentSpec, plan) {
   next.elements ||= [];
   next.openings ||= [];
   next.levels ||= [{ id: 'level-1', name: 'Level 01', elevationFt: 0, heightFt: next.shell.wallHeightFt || 10 }];
+  next.site = { ...SITE_DEFAULTS, ...(next.site || {}) };
+  next.utilities = { ...UTILITY_DEFAULTS, ...(next.utilities || {}) };
 
   const actions = [];
   const warnings = [...(plan?.warnings || [])];
@@ -1517,6 +1559,35 @@ function applyStructuredDesignPlan(currentSpec, plan) {
       else if (field === 'storeys') next.shell.storeys = clamp(numeric, 1, 3);
       else if (field) next.shell[field] = operation.value;
       actions.push(operationDescription(operation, next));
+      continue;
+    }
+
+    if (operation.type === 'set_site') {
+      const field = operation.field;
+      if (field === 'zip') next.site.zip = String(operation.value || '').replace(/\D/g, '').slice(0, 5);
+      else if (field === 'latitudeDeg') next.site.latitudeDeg = clamp(Number(operation.value), 0, 70);
+      else if (field === 'rainInYr') next.site.rainInYr = clamp(Number(operation.value), 0, 200);
+      actions.push(`Set site ${field} to ${operation.value}.`);
+      continue;
+    }
+
+    if (operation.type === 'set_utility') {
+      const field = operation.field;
+      const value = String(operation.value || '');
+      const allowed = {
+        waterSource: ['well', 'spring', 'catchment', 'town'],
+        wasteMethod: ['septic', 'composting', 'reedbed'],
+        powerMode: ['offgrid', 'hybrid', 'gridtie'],
+        heatSource: ['rocket_mass', 'masonry', 'wood_stove', 'minisplit']
+      };
+      if (field === 'tankGal') next.utilities.tankGal = clamp(Number(operation.value) || 0, 0, 50000);
+      else if (field === 'wellSepticFt') next.utilities.wellSepticFt = clamp(Number(operation.value) || 0, 0, 2000);
+      else if (field === 'diyWalls' || field === 'diyRoof' || field === 'diyHeat') {
+        next.utilities[field] = value === 'true' || operation.value === true || value === '1';
+      } else if (allowed[field]) {
+        next.utilities[field] = allowed[field].includes(value) ? value : next.utilities[field];
+      }
+      actions.push(`Set ${field} to ${operation.value}.`);
       continue;
     }
 
@@ -1924,6 +1995,37 @@ function detectIssues(spec) {
     && !(spec.elements || []).some((element) => /stair|ladder/i.test(element.name))) {
     issues.push({ severity: 'warning', title: 'Upper storey has no stair', owner: 'Architect', system: 'rooms', fix: 'Add a stair (about 3 × 10 ft plus a landing) — or a ladder for a loft — so the upper floor is reachable.' });
   }
+
+  // Ported from the add-on's aiCritic (Appendix S / 75-A style rules).
+  const derivedForChecks = deriveDesign(spec, getWallSections(spec));
+  const { extraFt: storeyLiftFt } = storeyInfo(spec.shell);
+  for (const side of WALL_SIDES) {
+    const resolved = resolveWallSide(spec, side);
+    if (resolved.omitted || resolved.assemblyKey !== 'straw-bale') continue;
+    const slenderness = (resolved.heightFt + storeyLiftFt) / Math.max(resolved.thicknessFt, 0.1);
+    if (slenderness > 15) {
+      issues.push({ severity: 'critical', title: `${titleCase(side)} bale wall is too tall for its thickness (${slenderness.toFixed(1)}:1)`, owner: 'Engineer', system: 'walls', fix: 'Load-bearing straw bale is typically limited to 15:1 height-to-thickness (Appendix S R325.8-style). Thicken the wall, lower it, or switch that side to a framed/infill system.' });
+      break;
+    }
+    if (slenderness > 12) {
+      issues.push({ severity: 'warning', title: `${titleCase(side)} bale wall slenderness is high (${slenderness.toFixed(1)}:1)`, owner: 'Engineer', system: 'walls', fix: 'Compliant, but consider intermediate posts or a timber frame with bale infill.' });
+      break;
+    }
+  }
+  const utilitiesForChecks = derivedForChecks.utilities;
+  const usesWell = utilitiesForChecks.waterSource === 'well' || utilitiesForChecks.waterSource === 'spring';
+  if (usesWell && utilitiesForChecks.wasteMethod === 'septic' && Number(utilitiesForChecks.wellSepticFt) < 100) {
+    issues.push({ severity: 'critical', title: `Well is only ${Math.round(utilitiesForChecks.wellSepticFt)} ft from the septic field`, owner: 'Engineer', system: 'waste', fix: 'Health code (NYS 75-A-style) wants at least 100 ft between a well and a septic field. Move one of them — confirm the exact figure with your health department.' });
+  }
+  if (Number.isFinite(derivedForChecks.supplyGpd) && derivedForChecks.supplyGpd < derivedForChecks.waterGpd) {
+    issues.push({ severity: 'warning', title: `Water source gives ~${Math.round(derivedForChecks.supplyGpd)} gal/day but you'll use ~${Math.round(derivedForChecks.waterGpd)}`, owner: 'Engineer', system: 'water', fix: 'Add storage, add a second source, or cut demand — the source has to cover what the household uses.' });
+  }
+  if (derivedForChecks.panels > 0 && derivedForChecks.panels > derivedForChecks.panelRoom) {
+    issues.push({ severity: 'warning', title: `Solar needs ${derivedForChecks.panels} panels but the roof holds ~${derivedForChecks.panelRoom}`, owner: 'Engineer', system: 'power', fix: 'Grow the roof, cut electric loads (a wood heat source helps), or plan a ground-mount array.' });
+  }
+  if (derivedForChecks.total > 324700) {
+    issues.push({ severity: 'warning', title: 'Cost is over the owner-builder loan ceiling', owner: 'Project Manager', system: 'shell', fix: `Estimated ${'$' + Math.round(derivedForChecks.total).toLocaleString()} exceeds a typical USDA direct-loan limit ($324,700). Shrink the footprint, simplify systems, or take on more sweat equity.` });
+  }
   if (issues.length === 0) {
     issues.push({ severity: 'pass', title: 'Schematic passes current council checks', owner: 'Project Manager', fix: 'Ready for PE/architect review, structural sizing, jurisdictional code check, and stamped drawing development.' });
   }
@@ -1942,10 +2044,13 @@ function runCouncil(spec) {
   });
 }
 
-// The dependency engine (v1): derive live quantities every system page reads.
-// Formulas and constants come from the control-face prototype's engine —
-// directional early-design numbers, not stamped calculations.
+// The dependency engine (v2): quantities every system page reads. Cost,
+// sweat-equity, and carbon math lifted from the add-on's computeDerivedState
+// (natural_house_designer/web/app.js); water/sun/power sizing from the
+// control-face prototype. Directional early-design numbers, not stamped calcs.
 function deriveDesign(spec, wallSections) {
+  const site = siteOf(spec);
+  const utilities = utilitiesOf(spec);
   const w = Number(spec.shell.widthFt) || 0;
   const d = Number(spec.shell.depthFt) || 0;
   const floor = w * d;
@@ -1965,25 +2070,62 @@ function deriveDesign(spec, wallSections) {
   const roofR = 38;
   const heatUA = Math.max(0, wallArea - southGlass) / Math.max(wallR, 1) + roofArea / roofR + southGlass * 0.5;
   const heatLoadKbtu = (heatUA * 70) / 1000;
+
   const bedrooms = Math.max(1, spec.rooms.filter((room) => room.type === 'sleeping').length);
   const people = bedrooms + 1;
+
+  // Water: what you use vs what the source can give (gal/day).
   const waterGpd = people * 50;
+  const catchmentGpd = roofArea * (Number(site.rainInYr) || 0) * 0.6 * 0.623 / 365;
+  const supplyGpd = utilities.waterSource === 'catchment' ? catchmentGpd
+    : utilities.waterSource === 'well' ? 600
+    : utilities.waterSource === 'spring' ? 220
+    : Infinity;
   const septicGpd = bedrooms * 110;
-  const loadKwhDay = 2 + people * 2.2 + 2;
-  const panels = Math.ceil(loadKwhDay / (4.2 * 0.78) / 0.4);
+
+  // Power: loads collect here (well pump, electric heat), sized against sun.
+  const peakSunHrs = Math.min(6, Math.max(3.2, 6 - (Number(site.latitudeDeg) - 20) * 0.05));
+  let loadKwhDay = 2 + people * 2.2;
+  if (utilities.waterSource === 'well') loadKwhDay += 2;
+  if (utilities.heatSource === 'minisplit') loadKwhDay += 6;
+  const panels = utilities.powerMode === 'gridtie' ? 0 : Math.ceil(loadKwhDay / (peakSunHrs * 0.78) / 0.4);
   const panelRoom = Math.floor(roofArea / 22);
+  const batteryKwh = utilities.powerMode === 'offgrid' ? Math.round(loadKwhDay * 2 / 0.8) : 0;
+
+  // Costs (add-on constants, keyed to the structured utility choices).
+  const heatCostBySource = { rocket_mass: 2500, masonry: 6000, wood_stove: 3000, minisplit: 4500 };
+  const waterCostBySource = { well: 7500, spring: 2500, catchment: 3500, town: 1500 };
+  const wasteCostByMethod = { septic: 8500, composting: 1500, reedbed: 1200 };
   const cost = {
     foundation: floor * 10,
     upperFloors: (storeys - 1) * floor * 12,
     walls: wallsCost,
     roof: roofArea * 10,
-    heat: 2500,
-    water: 7500,
-    waste: 8500,
-    power: panels * 900 + 3000
+    heat: heatCostBySource[utilities.heatSource] ?? 3000,
+    water: (waterCostBySource[utilities.waterSource] ?? 5000) + (Number(utilities.tankGal) || 0) * 1.5,
+    waste: wasteCostByMethod[utilities.wasteMethod] ?? 5000,
+    power: utilities.powerMode === 'gridtie' ? 4200 : panels * 900 + batteryKwh * 500 + 3000
   };
-  const total = Object.values(cost).reduce((sum, part) => sum + part, 0);
-  return { floor, heatedFloor, storeys, roofArea, wallArea, wallR, southGlass, glassPct, heatLoadKbtu, bedrooms, people, waterGpd, septicGpd, loadKwhDay, panels, panelRoom, cost, total, pitch };
+  const totalBeforeSweat = Object.values(cost).reduce((sum, part) => sum + part, 0);
+
+  // Sweat equity: labor fraction of each trade you take on yourself
+  // (add-on laborFractionByCategory: walls .8, roof .55, utilities .45).
+  const sweat = (utilities.diyWalls ? cost.walls * 0.8 : 0)
+    + (utilities.diyRoof ? cost.roof * 0.55 : 0)
+    + (utilities.diyHeat ? cost.heat * 0.45 : 0);
+  const total = totalBeforeSweat - sweat;
+
+  // Embodied carbon (kg CO2e, directional/comparative — add-on coefficients).
+  const wallCarbonPsf = { 'straw-bale': 6, 'rammed-earth': 20, cob: 8, 'hemp-lime': 4, cordwood: 8, 'light-straw-clay': 7, framed: 8 };
+  const wallCarbon = wallSections.reduce((sum, wall) => sum + wall.lengthFt * (wall.heightFt + storeyExtraFt) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0);
+  const carbonKg = floor * 10 + wallCarbon + roofArea * 12 + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
+
+  return {
+    site, utilities, floor, heatedFloor, storeys, roofArea, wallArea, wallR, southGlass, glassPct,
+    heatLoadKbtu, bedrooms, people, waterGpd, catchmentGpd, supplyGpd, septicGpd,
+    peakSunHrs, loadKwhDay, panels, panelRoom, batteryKwh,
+    cost, totalBeforeSweat, sweat, total, carbonKg, pitch
+  };
 }
 
 const fmtMoney = (value) => `$${Math.round(value).toLocaleString()}`;
@@ -2000,7 +2142,10 @@ const SYSTEM_META = {
     label: 'Site',
     why: 'Where the house sits and how it faces the sun — every other system leans on this. Sun angles drive passive solar and panel output; rainfall decides whether a roof can supply your water.',
     feeds: ['Windows', 'Water', 'Power'],
-    reads: () => []
+    reads: (dd) => [
+      ['Peak sun', dd.peakSunHrs.toFixed(1), 'hrs/day', 'drives panel sizing'],
+      ['Roof could catch', fmtNum(dd.catchmentGpd), 'gal/day', 'if you choose catchment']
+    ]
   },
   rooms: {
     label: 'Rooms',
@@ -2034,7 +2179,9 @@ const SYSTEM_META = {
     feeds: ['Heat', 'Cost'],
     reads: (dd) => [
       ['Insulation', `R-${Math.round(dd.wallR)}`, '', 'area-weighted across sides'],
-      ['This system', fmtMoney(dd.cost.walls), '', '']
+      ['This system', fmtMoney(dd.cost.walls), '', ''],
+      ...(dd.utilities.diyWalls ? [['You save', fmtMoney(dd.cost.walls * 0.8), '', 'raising them yourself']] : []),
+      ['Embodied carbon', fmtNum(dd.carbonKg / 1000), 't CO₂e', 'whole build, directional']
     ]
   },
   roof: {
@@ -2071,7 +2218,8 @@ const SYSTEM_META = {
     feeds: ['Power', 'Waste'],
     reads: (dd) => [
       ['You will use', fmtNum(dd.waterGpd), 'gal/day', `about ${dd.people} people`],
-      ['This system', fmtMoney(dd.cost.water), '', '']
+      ['Source gives', Number.isFinite(dd.supplyGpd) ? fmtNum(dd.supplyGpd) : 'town main', Number.isFinite(dd.supplyGpd) ? 'gal/day' : '', Number.isFinite(dd.supplyGpd) ? (dd.supplyGpd >= dd.waterGpd ? 'covers the household' : 'falls short') : ''],
+      ['This system', fmtMoney(dd.cost.water), '', dd.utilities.tankGal > 0 ? `${fmtNum(dd.utilities.tankGal)} gal storage` : '']
     ]
   },
   waste: {
@@ -2088,8 +2236,9 @@ const SYSTEM_META = {
     why: 'Everything in the house that draws electricity collects here, then panels are sized against your roof and sun.',
     feeds: ['Roof', 'Cost'],
     reads: (dd) => [
-      ['You use', dd.loadKwhDay.toFixed(1), 'kWh/day', ''],
-      ['Panels needed', String(dd.panels), '', dd.panels <= dd.panelRoom ? 'fits the roof' : 'more than the roof holds'],
+      ['You use', dd.loadKwhDay.toFixed(1), 'kWh/day', dd.utilities.heatSource === 'minisplit' ? 'includes the mini-split' : dd.utilities.waterSource === 'well' ? 'includes the well pump' : ''],
+      ['Panels needed', dd.panels > 0 ? String(dd.panels) : '—', '', dd.panels === 0 ? 'grid only' : dd.panels <= dd.panelRoom ? 'fits the roof' : 'more than the roof holds'],
+      ['Battery', dd.batteryKwh > 0 ? String(dd.batteryKwh) : '—', dd.batteryKwh > 0 ? 'kWh' : '', ''],
       ['This system', fmtMoney(dd.cost.power), '', '']
     ]
   },
@@ -3816,6 +3965,38 @@ function App() {
     });
   }
 
+  function updateSite(field, value) {
+    void applyBackendOperations({
+      operations: [{ type: 'set_site', field, value: String(value) }],
+      promptText: `Set site ${field}`,
+      logPrefix: 'Site'
+    });
+  }
+
+  function applyZip(zip) {
+    const cleaned = String(zip || '').replace(/\D/g, '').slice(0, 5);
+    const info = zipRegionInfo(cleaned);
+    const operations = [{ type: 'set_site', field: 'zip', value: cleaned }];
+    if (info) {
+      operations.push({ type: 'set_site', field: 'latitudeDeg', value: String(info.lat) });
+      operations.push({ type: 'set_site', field: 'rainInYr', value: String(info.rain) });
+    }
+    void applyBackendOperations({
+      operations,
+      promptText: `Set site ZIP ${cleaned}`,
+      logPrefix: 'Site',
+      chatText: info ? `ZIP ${cleaned} looks like ${info.name} — about ${info.lat.toFixed(1)}°N and ${info.rain}" of rain a year. Fine-tune below if you know better.` : undefined
+    });
+  }
+
+  function updateUtility(field, value) {
+    void applyBackendOperations({
+      operations: [{ type: 'set_utility', field, value: String(value) }],
+      promptText: `Set ${field} to ${value}`,
+      logPrefix: 'Systems'
+    });
+  }
+
   function updateProjectName(value) {
     setSpec((current) => {
       const next = structuredClone(current);
@@ -4234,7 +4415,7 @@ function App() {
 
         <section className="panelBlock compact consoleSummary">
           <div className="statGrid four">
-            <div><strong>${estimatedCost.toLocaleString()}</strong><span>est. cost</span></div>
+            <div><strong>${estimatedCost.toLocaleString()}</strong><span>{derived.sweat > 0 ? `est. cost · sweat saves $${Math.round(derived.sweat / 1000)}k` : 'est. cost'}</span></div>
             <div><strong>{spec.rooms.length}</strong><span>room{spec.rooms.length === 1 ? '' : 's'} · {area} sf</span></div>
             <div><strong>{openFlagCount}</strong><span>code flag{openFlagCount === 1 ? '' : 's'}</span></div>
             <div className={openFlagCount === 0 ? 'stateStat ok' : 'stateStat bad'}><strong>{openFlagCount === 0 ? 'Yes' : 'Not yet'}</strong><span>adds up</span></div>
@@ -4342,6 +4523,10 @@ function App() {
                   <label>Width (ft)<input type="number" value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
                   <label>Length (ft)<input type="number" value={spec.shell.depthFt} onChange={(event) => updateShell('depthFt', event.target.value)} /></label>
                 </div>
+                <label className="diyToggle">
+                  <input type="checkbox" checked={utilitiesOf(spec).diyWalls} onChange={(event) => updateUtility('diyWalls', event.target.checked)} />
+                  <span>I'll raise the walls myself (sweat equity — walls are the most DIY-able system)</span>
+                </label>
                 <p className="systemNote">Height here sets <b>all four walls to one height</b> (it clears any per-side heights below). Width is the north/south wall length; Length is the east/west wall length. Break open below to mix systems and heights per side — bale on the cold north, timber-and-glass on the south.</p>
 
                 <div className="breakOpenRow">
@@ -4391,6 +4576,92 @@ function App() {
             );
           })()}
 
+          {systemView === 'site' && (
+            <div className="systemPage">
+              <div className="sectionHead">Where the house sits</div>
+              <div className="controlGrid">
+                <label>ZIP code<input type="text" inputMode="numeric" maxLength="5" placeholder="e.g. 14801" defaultValue={siteOf(spec).zip} onBlur={(event) => { if (event.target.value !== siteOf(spec).zip) applyZip(event.target.value); }} onKeyDown={(event) => { if (event.key === 'Enter') applyZip(event.target.value); }} /></label>
+                <label>Latitude (°N)<input type="number" step="0.5" min="0" max="70" value={siteOf(spec).latitudeDeg} onChange={(event) => updateSite('latitudeDeg', event.target.value)} /></label>
+                <label>Yearly rain (in)<input type="number" min="0" max="200" value={siteOf(spec).rainInYr} onChange={(event) => updateSite('rainInYr', event.target.value)} /></label>
+              </div>
+              <p className="systemNote">Type a ZIP and press Enter for an offline regional estimate of latitude and rainfall — fine-tune the numbers if you know your land better. Latitude sets sun angles and solar output; rain decides whether the roof can be your water source.</p>
+            </div>
+          )}
+
+          {systemView === 'water' && (
+            <div className="systemPage">
+              <div className="sectionHead">Where water comes from</div>
+              <div className="controlGrid">
+                <label>Source
+                  <select value={utilitiesOf(spec).waterSource} onChange={(event) => updateUtility('waterSource', event.target.value)}>
+                    <option value="well">Drilled well — reliable, needs a pump</option>
+                    <option value="spring">Spring — cheap if the land has one</option>
+                    <option value="catchment">Rain catchment — roof + rain</option>
+                    <option value="town">Town main — simplest</option>
+                  </select>
+                </label>
+                <label>Storage tank (gal)<input type="number" min="0" max="50000" step="100" value={utilitiesOf(spec).tankGal} onChange={(event) => updateUtility('tankGal', event.target.value)} /></label>
+              </div>
+              <p className="systemNote">A well adds a pump to your power load. Catchment leans on the roof area and your site's rainfall — the readouts below show whether it covers the household.</p>
+            </div>
+          )}
+
+          {systemView === 'waste' && (
+            <div className="systemPage">
+              <div className="sectionHead">Where used water goes</div>
+              <div className="controlGrid">
+                <label>Method
+                  <select value={utilitiesOf(spec).wasteMethod} onChange={(event) => updateUtility('wasteMethod', event.target.value)}>
+                    <option value="septic">Septic + leach field — conventional</option>
+                    <option value="composting">Composting toilet + greywater</option>
+                    <option value="reedbed">Reed bed / constructed wetland</option>
+                  </select>
+                </label>
+                {utilitiesOf(spec).wasteMethod === 'septic' && (
+                  <label>Well → septic distance (ft)<input type="number" min="0" max="2000" step="5" value={utilitiesOf(spec).wellSepticFt} onChange={(event) => updateUtility('wellSepticFt', event.target.value)} /></label>
+                )}
+              </div>
+              <p className="systemNote">A septic field must sit at least 100 ft from a well, and bedrooms size the field. Composting sidesteps most of that.</p>
+            </div>
+          )}
+
+          {systemView === 'power' && (
+            <div className="systemPage">
+              <div className="sectionHead">Where electricity comes from</div>
+              <div className="controlGrid">
+                <label>Mode
+                  <select value={utilitiesOf(spec).powerMode} onChange={(event) => updateUtility('powerMode', event.target.value)}>
+                    <option value="offgrid">Off-grid — panels + battery, independent</option>
+                    <option value="hybrid">Grid + solar — panels, grid as backup</option>
+                    <option value="gridtie">Grid only — simplest, no battery</option>
+                  </select>
+                </label>
+              </div>
+              <p className="systemNote">The well pump and an electric heater land here as loads; panels are then sized against your roof and your site's sun.</p>
+            </div>
+          )}
+
+          {systemView === 'heat' && (
+            <div className="systemPage">
+              <div className="sectionHead">How you stay warm</div>
+              <div className="controlGrid">
+                <label>Source
+                  <select value={utilitiesOf(spec).heatSource} onChange={(event) => updateUtility('heatSource', event.target.value)}>
+                    <option value="rocket_mass">Rocket mass heater — wood, huge mass, very DIY</option>
+                    <option value="masonry">Masonry heater — wood, slow steady radiant</option>
+                    <option value="wood_stove">Wood stove — simple, familiar</option>
+                    <option value="minisplit">Electric mini-split — no wood, draws power</option>
+                  </select>
+                </label>
+              </div>
+              <label className="diyToggle">
+                <input type="checkbox" checked={utilitiesOf(spec).diyHeat} onChange={(event) => updateUtility('diyHeat', event.target.checked)} />
+                <span>I'll build the heater myself (sweat equity)</span>
+              </label>
+              <p className="systemNote">Your walls, roof, and windows set the heat load below. A mini-split moves the burden onto Power; the wood options need a chimney and clearances.</p>
+            </div>
+          )}
+
           {systemView === 'roof' && (
             <div className="systemPage">
               <div className="sectionHead">Roof shape</div>
@@ -4405,11 +4676,15 @@ function App() {
                 </label>
                 <label>Pitch <em className="pitchHint">≈ {Math.round(Number(spec.shell.roofPitch || 0.32) * 12)}:12</em><input type="number" step="0.01" value={spec.shell.roofPitch} onChange={(event) => updateShell('roofPitch', event.target.value)} /></label>
               </div>
+              <label className="diyToggle">
+                <input type="checkbox" checked={utilitiesOf(spec).diyRoof} onChange={(event) => updateUtility('diyRoof', event.target.checked)} />
+                <span>I'll frame the roof myself (sweat equity)</span>
+              </label>
               <p className="systemNote">A different north vs south wall height on the Shell page also makes a shed roof. Overhangs and covering are coming next — ask the assistant meanwhile.</p>
             </div>
           )}
 
-          {!['shell', 'rooms', 'walls', 'roof'].includes(systemView) && (
+          {!['shell', 'rooms', 'walls', 'roof', 'site', 'water', 'waste', 'power', 'heat'].includes(systemView) && (
             <div className="systemPage">
               <div className="sectionHead">{SYSTEM_META[systemView]?.label || systemView}</div>
               <p className="systemNote">This system's own controls are coming next. For now, tell the assistant what you want — for example "add a well and a 500 gallon tank" — and it will set it up in the model.</p>

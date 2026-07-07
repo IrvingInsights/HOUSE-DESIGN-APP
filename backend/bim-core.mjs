@@ -261,6 +261,20 @@ export function operationDescription(operation, spec) {
   return op.reason || 'No model change.';
 }
 
+export const UTILITY_DEFAULTS = {
+  waterSource: 'well',
+  tankGal: 0,
+  wasteMethod: 'septic',
+  wellSepticFt: 120,
+  powerMode: 'offgrid',
+  heatSource: 'wood_stove',
+  diyWalls: false,
+  diyRoof: false,
+  diyHeat: false
+};
+
+export const SITE_DEFAULTS = { zip: '', latitudeDeg: 43, rainInYr: 38 };
+
 export function applyBimOperations(currentSpec, plan) {
   const next = structuredClone(currentSpec);
   next.rooms ||= [];
@@ -268,6 +282,8 @@ export function applyBimOperations(currentSpec, plan) {
   next.openings ||= [];
   next.levels ||= [{ id: 'level-1', name: 'Level 01', elevationFt: 0, heightFt: next.shell.wallHeightFt || 10 }];
   next.walls ||= {};
+  next.site = { ...SITE_DEFAULTS, ...(next.site || {}) };
+  next.utilities = { ...UTILITY_DEFAULTS, ...(next.utilities || {}) };
 
   const actions = [];
   const warnings = [...(plan?.warnings || [])];
@@ -379,6 +395,38 @@ export function applyBimOperations(currentSpec, plan) {
         next.shell.omittedWalls = [...set];
       }
       actions.push(operationDescription(operation, next));
+      continue;
+    }
+
+    if (operation.type === 'set_site') {
+      const field = operation.field;
+      if (field === 'zip') next.site.zip = String(operation.value || '').replace(/\D/g, '').slice(0, 5);
+      else if (field === 'latitudeDeg') next.site.latitudeDeg = clamp(Number(operation.value), 0, 70);
+      else if (field === 'rainInYr') next.site.rainInYr = clamp(Number(operation.value), 0, 200);
+      actions.push(`Set site ${field} to ${operation.value}.`);
+      continue;
+    }
+
+    if (operation.type === 'set_utility') {
+      const field = operation.field;
+      const value = String(operation.value || '');
+      const allowed = {
+        waterSource: ['well', 'spring', 'catchment', 'town'],
+        wasteMethod: ['septic', 'composting', 'reedbed'],
+        powerMode: ['offgrid', 'hybrid', 'gridtie'],
+        heatSource: ['rocket_mass', 'masonry', 'wood_stove', 'minisplit']
+      };
+      if (field === 'tankGal') next.utilities.tankGal = clamp(Number(operation.value) || 0, 0, 50000);
+      else if (field === 'wellSepticFt') next.utilities.wellSepticFt = clamp(Number(operation.value) || 0, 0, 2000);
+      else if (field === 'diyWalls' || field === 'diyRoof' || field === 'diyHeat') {
+        next.utilities[field] = value === 'true' || operation.value === true || value === '1';
+      } else if (allowed[field]) {
+        next.utilities[field] = allowed[field].includes(value) ? value : next.utilities[field];
+        // Keep the free-text systems summary in step for briefs/exports.
+        if (field === 'waterSource') next.systems.water = { well: 'drilled well', spring: 'gravity spring', catchment: 'roof rain catchment', town: 'municipal water' }[next.utilities.waterSource];
+        if (field === 'powerMode') next.systems.energy = { offgrid: 'off-grid solar + battery', hybrid: 'grid-tied solar with battery backup', gridtie: 'grid power' }[next.utilities.powerMode];
+      }
+      actions.push(`Set ${field} to ${operation.value}.`);
       continue;
     }
 

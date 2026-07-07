@@ -2455,3 +2455,30 @@ textarea,
   padding: 3px 10px;
   color: var(--ink2, #565A4F);
 }
+
+.diyToggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 10px 0 2px;
+  padding: 9px 12px;
+  background: var(--raise, #fff);
+  border: 1px solid var(--line, #DBD9CE);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.diyToggle input {
+  accent-color: #3C6472;
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.diyToggle:has(input:checked) {
+  background: var(--sage, #E2ECEE);
+  border-color: #3C6472;
+  color: var(--plum, #26424C);
+}
