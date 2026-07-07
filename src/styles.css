@@ -129,7 +129,7 @@ button.danger:hover {
 .app {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: minmax(410px, 470px) minmax(620px, 1fr);
+  grid-template-columns: minmax(360px, 420px) minmax(520px, 1fr) minmax(300px, 360px);
   position: relative;
   z-index: 1;
 }
@@ -146,6 +146,29 @@ button.danger:hover {
 
 .leftPanel {
   border-right: 1px solid var(--line);
+}
+
+/* Right panel: the always-on Studio chat (controls left, model center, chat right) */
+.rightPanel {
+  height: 100vh;
+  overflow: auto;
+  padding: 12px;
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+}
+
+.rightPanel .chatPanel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.rightPanel .chatStream {
+  flex: 1;
+  min-height: 180px;
+  max-height: none;
 }
 
 .reviewTabs {
@@ -1577,7 +1600,16 @@ textarea {
 
 @media (max-width: 1180px) {
   .app {
-    grid-template-columns: 400px minmax(0, 1fr);
+    grid-template-columns: 380px minmax(0, 1fr);
+  }
+
+  /* Narrow screens: the chat drops to a full-width strip under the model. */
+  .rightPanel {
+    grid-column: 1 / -1;
+    height: auto;
+    max-height: 42vh;
+    border-left: none;
+    border-top: 1px solid var(--line);
   }
 }
 
@@ -1590,7 +1622,7 @@ textarea {
     height: 100vh;
     min-height: 0;
     overflow: hidden;
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
   }
 
   .app {
@@ -1605,6 +1637,14 @@ textarea {
     padding: 10px;
     overflow: auto;
     border-right: 1px solid var(--line);
+  }
+
+  .rightPanel {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    height: auto;
+    max-height: 36vh;
+    padding: 10px;
   }
 
   .workspace {
@@ -1997,7 +2037,7 @@ button.danger {
 }
 
 .app {
-  grid-template-columns: minmax(450px, 520px) minmax(620px, 1fr);
+  grid-template-columns: minmax(360px, 420px) minmax(520px, 1fr) minmax(300px, 360px);
   background: #0d1110;
 }
 
@@ -2005,6 +2045,12 @@ button.danger {
   background:
     linear-gradient(180deg, rgba(21, 26, 24, 0.98), rgba(13, 17, 16, 0.98));
   border-right: 1px solid #28322f;
+}
+
+.rightPanel {
+  background:
+    linear-gradient(180deg, rgba(21, 26, 24, 0.98), rgba(13, 17, 16, 0.98));
+  border-left: 1px solid #28322f;
 }
 
 .workspace {

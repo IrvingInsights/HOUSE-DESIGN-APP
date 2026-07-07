@@ -3117,7 +3117,7 @@ function App() {
   const [operationAudit, setOperationAudit] = useState(() => initialSaved?.operationAudit || []);
   const [projectBrain, setProjectBrain] = useState(() => ensureProjectBrain(initialSaved?.projectBrain, initialSaved?.spec || seedSpec));
   const [clipboardObject, setClipboardObject] = useState(null);
-  const [consoleView, setConsoleView] = useState('studio');
+  const [consoleView, setConsoleView] = useState('systems');
   const [inspectorView, setInspectorView] = useState('inspect');
   const [dimensionPreview, setDimensionPreview] = useState(null);
   const [savedAt, setSavedAt] = useState(() => initialSaved?.savedAt || '');
@@ -4033,13 +4033,12 @@ function App() {
         </section>
 
         <nav className="consoleTabs" aria-label="Project console">
-          <button className={consoleView === 'studio' ? 'active' : ''} onClick={() => setConsoleView('studio')}><Send size={14} /> Studio</button>
+          <button className={consoleView === 'systems' ? 'active' : ''} onClick={() => setConsoleView('systems')}><Grid3X3 size={14} /> Systems</button>
           <button className={consoleView === 'os' ? 'active' : ''} onClick={() => setConsoleView('os')}><ClipboardCheck size={14} /> OS</button>
           <button className={consoleView === 'review' ? 'active' : ''} onClick={() => setConsoleView('review')}><ShieldCheck size={14} /> Review</button>
           <button className={consoleView === 'experts' ? 'active' : ''} onClick={() => setConsoleView('experts')}><Users size={14} /> Experts</button>
           <button className={consoleView === 'audit' ? 'active' : ''} onClick={() => setConsoleView('audit')}><FileJson size={14} /> Audit</button>
           <button className={consoleView === 'log' ? 'active' : ''} onClick={() => setConsoleView('log')}><Layers size={14} /> Log</button>
-          <button className={consoleView === 'systems' ? 'active' : ''} onClick={() => setConsoleView('systems')}><Grid3X3 size={14} /> Systems</button>
         </nav>
 
         {consoleView === 'systems' && <section className="panelBlock consolePanel systemsPanel">
@@ -4184,86 +4183,6 @@ function App() {
           )}
         </section>}
 
-        {consoleView === 'studio' && <section className="panelBlock consolePanel">
-          <div className="blockTitle"><Send size={16} /> Studio</div>
-          <p className="studioHint">Type a design edit, attach a sketch, or consult the team.</p>
-          <div className="chatTargets compactTargets">
-            <button className={chatTarget === 'design' ? 'chatTarget active' : 'chatTarget'} onClick={() => chooseChatTarget('design')}>
-              <Hammer size={15} />
-              <span>Design</span>
-            </button>
-            <button className={chatTarget === 'team' ? 'chatTarget active' : 'chatTarget'} onClick={() => chooseChatTarget('team')}>
-              <Users size={15} />
-              <span>Team</span>
-            </button>
-          </div>
-          {chatTarget === 'design' && (
-            <label className="addToSelector">
-              <span>Add to:</span>
-              <select value={addToTarget} onChange={(event) => setAddToTarget(event.target.value)}>
-                {addToTargets.map((target) => (
-                  <option key={target.value} value={target.value}>
-                    {target.value === 'selected' && selected?.name ? `Selected: ${selected.name}` : target.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <div className="chatStream" ref={chatStreamRef}>
-            {chatMessages.map((message, index) => (
-              <div key={`${message.role}-${index}`} className={`chatBubble ${message.role}`}>
-                {message.image && <img src={message.image} alt="Attached design reference" />}
-                {message.speaker && <b>{message.speaker}</b>}
-                <span>{message.text}</span>
-              </div>
-            ))}
-          </div>
-          <textarea
-            value={chatTarget === 'design' ? prompt : expertQuestion}
-            onChange={(event) => chatTarget === 'design' ? setPrompt(event.target.value) : setExpertQuestion(event.target.value)}
-            onPaste={handleChatPaste}
-            placeholder={chatTarget === 'design' ? 'Ask for edits: move primary bedroom to NE corner, make kitchen 14 x 12, add pantry 8 x 10...' : 'Ask the team about structure, materials, layout, code, water, farm workflow, cost, or sequencing...'}
-          />
-          <div className="buttonRow">
-            <button onClick={submitChat} disabled={isPlanning}>{chatTarget === 'design' ? <Play size={16} /> : <Send size={16} />} {isPlanning ? 'Planning...' : chatTarget === 'design' ? 'Apply Design' : 'Consult'}</button>
-            <button className="secondary" onClick={loopRevisions}><RefreshCcw size={16} /> Council Loop</button>
-          </div>
-          <label
-            className="uploadBox slimUpload"
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => {
-              event.preventDefault();
-              handleImage(event.dataTransfer.files?.[0]);
-            }}
-          >
-            {imagePreview ? (
-              <span className="uploadPreview">
-                <img src={imagePreview} alt="Uploaded drawing reference" />
-                <span>Add another image or drop a sketch here</span>
-              </span>
-            ) : (
-              <>
-                <Upload size={20} />
-                <span>Add photo, drawing, or handwriting</span>
-              </>
-            )}
-            <input type="file" accept="image/*" onChange={handleImageInput} />
-          </label>
-          {attachedImages.length > 0 && (
-            <div className="attachmentTray" aria-label="Chat image attachments">
-              {attachedImages.map((image) => (
-                <div className="attachmentChip" key={image.id}>
-                  <img src={image.src} alt={image.name} />
-                  <span>{image.name}</span>
-                  <button className="ghost iconButton" onClick={() => removeAttachedImage(image.id)} aria-label={`Remove ${image.name}`}>
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>}
-
         {consoleView === 'os' && <section className="panelBlock consolePanel projectOS">
             <div className="blockTitle"><ClipboardCheck size={16} /> Project OS</div>
             <div className="osStage">
@@ -4322,7 +4241,7 @@ function App() {
               {council.map((expert) => {
                 const Icon = expert.icon;
                 return (
-                  <button key={expert.id} className={`expert ${expert.status}`} onClick={() => { chooseChatTarget(expert.id); setConsoleView('studio'); }}>
+                  <button key={expert.id} className={`expert ${expert.status}`} onClick={() => chooseChatTarget(expert.id)}>
                     <Icon size={17} />
                     <div><b>{expert.name}</b><span>{expert.notes}</span></div>
                   </button>
@@ -4624,6 +4543,88 @@ function App() {
           </section>
         </div>
       </section>
+
+      <aside className="rightPanel">
+        <section className="panelBlock consolePanel chatPanel">
+          <div className="blockTitle"><Send size={16} /> Studio</div>
+          <p className="studioHint">Type a design edit, attach a sketch, or consult the team.</p>
+          <div className="chatTargets compactTargets">
+            <button className={chatTarget === 'design' ? 'chatTarget active' : 'chatTarget'} onClick={() => chooseChatTarget('design')}>
+              <Hammer size={15} />
+              <span>Design</span>
+            </button>
+            <button className={chatTarget === 'team' ? 'chatTarget active' : 'chatTarget'} onClick={() => chooseChatTarget('team')}>
+              <Users size={15} />
+              <span>Team</span>
+            </button>
+          </div>
+          {chatTarget === 'design' && (
+            <label className="addToSelector">
+              <span>Add to:</span>
+              <select value={addToTarget} onChange={(event) => setAddToTarget(event.target.value)}>
+                {addToTargets.map((target) => (
+                  <option key={target.value} value={target.value}>
+                    {target.value === 'selected' && selected?.name ? `Selected: ${selected.name}` : target.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <div className="chatStream" ref={chatStreamRef}>
+            {chatMessages.map((message, index) => (
+              <div key={`${message.role}-${index}`} className={`chatBubble ${message.role}`}>
+                {message.image && <img src={message.image} alt="Attached design reference" />}
+                {message.speaker && <b>{message.speaker}</b>}
+                <span>{message.text}</span>
+              </div>
+            ))}
+          </div>
+          <textarea
+            value={chatTarget === 'design' ? prompt : expertQuestion}
+            onChange={(event) => chatTarget === 'design' ? setPrompt(event.target.value) : setExpertQuestion(event.target.value)}
+            onPaste={handleChatPaste}
+            placeholder={chatTarget === 'design' ? 'Ask for edits: move primary bedroom to NE corner, make kitchen 14 x 12, add pantry 8 x 10...' : 'Ask the team about structure, materials, layout, code, water, farm workflow, cost, or sequencing...'}
+          />
+          <div className="buttonRow">
+            <button onClick={submitChat} disabled={isPlanning}>{chatTarget === 'design' ? <Play size={16} /> : <Send size={16} />} {isPlanning ? 'Planning...' : chatTarget === 'design' ? 'Apply Design' : 'Consult'}</button>
+            <button className="secondary" onClick={loopRevisions}><RefreshCcw size={16} /> Council Loop</button>
+          </div>
+          <label
+            className="uploadBox slimUpload"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              handleImage(event.dataTransfer.files?.[0]);
+            }}
+          >
+            {imagePreview ? (
+              <span className="uploadPreview">
+                <img src={imagePreview} alt="Uploaded drawing reference" />
+                <span>Add another image or drop a sketch here</span>
+              </span>
+            ) : (
+              <>
+                <Upload size={20} />
+                <span>Add photo, drawing, or handwriting</span>
+              </>
+            )}
+            <input type="file" accept="image/*" onChange={handleImageInput} />
+          </label>
+          {attachedImages.length > 0 && (
+            <div className="attachmentTray" aria-label="Chat image attachments">
+              {attachedImages.map((image) => (
+                <div className="attachmentChip" key={image.id}>
+                  <img src={image.src} alt={image.name} />
+                  <span>{image.name}</span>
+                  <button className="ghost iconButton" onClick={() => removeAttachedImage(image.id)} aria-label={`Remove ${image.name}`}>
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </aside>
 
     </main>
   );
