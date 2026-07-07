@@ -638,6 +638,34 @@ function outdoorItemPresent(spec, item) {
   return (spec.elements || []).some((element) => element.name === item.name);
 }
 
+// Model-view layers: every group in the scene can be shown/hidden in any
+// combination for inspection (walls per side, roof, floors, rooms, openings,
+// site, element categories), plus x-ray walls. Persisted with the design.
+const DEFAULT_MODEL_LAYERS = {
+  wallNorth: true,
+  wallSouth: true,
+  wallEast: true,
+  wallWest: true,
+  roof: true,
+  upperFloors: true,
+  rooms: true,
+  openings: true,
+  elements: true,
+  pad: true,
+  ground: true,
+  labels: true,
+  xray: false,
+  hiddenCats: []
+};
+
+const LAYER_PRESETS = {
+  all: { ...DEFAULT_MODEL_LAYERS },
+  structure: { ...DEFAULT_MODEL_LAYERS, rooms: false, openings: false, elements: false, labels: false },
+  plan: { ...DEFAULT_MODEL_LAYERS, roof: false, upperFloors: false, wallNorth: false, wallSouth: false, wallEast: false, wallWest: false, openings: false },
+  interior: { ...DEFAULT_MODEL_LAYERS, roof: false, xray: true },
+  site: { ...DEFAULT_MODEL_LAYERS, roof: true, rooms: false, openings: false, labels: false }
+};
+
 const SITE_DEFAULTS = { zip: '', latitudeDeg: 43, rainInYr: 38 };
 
 function siteOf(spec) {
@@ -1915,7 +1943,8 @@ function buildDashboardStatePayload({
   lastModelChange,
   operationAudit,
   projectBrain,
-  chatMessages
+  chatMessages,
+  modelLayers
 }) {
   return {
     version: 1,
@@ -1934,7 +1963,8 @@ function buildDashboardStatePayload({
     lastModelChange,
     operationAudit: operationAudit.slice(0, 40),
     projectBrain,
-    chatMessages: compactChatForStorage(chatMessages)
+    chatMessages: compactChatForStorage(chatMessages),
+    modelLayers
   };
 }
 
@@ -2787,7 +2817,7 @@ function createDrawingSetHtml(spec, qualityScore, issues) {
 </html>`;
 }
 
-function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview }) {
+function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview }) {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraStateRef = useRef(null);
@@ -2911,8 +2941,9 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
       slab.name = `Site pad (${padRect.w}' x ${padRect.d}')`;
       slab.userData.roomId = 'site-pad';
       slab.userData.footprint = { w: padRect.w, d: padRect.d };
-      roomMeshes.push(slab);
-      if (selectedRoom === 'site-pad') {
+      slab.visible = layers.pad;
+      if (layers.pad) roomMeshes.push(slab);
+      if (layers.pad && selectedRoom === 'site-pad') {
         const padObject = {
           id: 'site-pad',
           name: 'Site Pad',
@@ -2941,7 +2972,7 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
         east: resolveWallSide(spec, 'east'),
         west: resolveWallSide(spec, 'west')
       };
-      const wallMatFor = (side) => new THREE.MeshStandardMaterial({ color: wallResolved[side].assembly.color, roughness: 0.88 });
+      const wallMatFor = (side) => new THREE.MeshStandardMaterial({ color: wallResolved[side].assembly.color, roughness: 0.88, transparent: layers.xray, opacity: layers.xray ? 0.34 : 1 });
       const tN = wallResolved.north.thicknessFt;
       const tS = wallResolved.south.thicknessFt;
       const tE = wallResolved.east.thicknessFt;
@@ -2965,6 +2996,7 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
         ];
       wallMeshSpecs.forEach(({ side, mesh }) => {
         if (omittedWalls.has(side) || wallResolved[side].omitted) return;
+        if (!layers[`wall${titleCase(side)}`]) return;
         mesh.name = `${titleCase(side)} Wall - ${wallResolved[side].assembly.label}`;
         mesh.userData.roomId = `wall-${side}`;
         roomMeshes.push(mesh);
@@ -2972,13 +3004,15 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
       });
 
       const roofLabel = roofSpec.roofType === 'shed' ? `shed roof S ${southWallHeight}' / N ${northWallHeight}'` : 'gable roof';
-      const assemblyLabel = makeLabel(`${wallProfile.label} - ${wallT}' walls - ${roofLabel}`, 16);
-      assemblyLabel.position.set(width / 2, wallHeight + 1.4, depth / 2);
-      group.add(assemblyLabel);
+      if (layers.labels) {
+        const assemblyLabel = makeLabel(`${wallProfile.label} - ${wallT}' walls - ${roofLabel}`, 16);
+        assemblyLabel.position.set(width / 2, wallHeight + 1.4, depth / 2);
+        group.add(assemblyLabel);
+      }
 
       // Upper floor plate(s): one deck per full-or-partial storey above the first,
       // seated on the ground-storey wall tops, inset by the wall thicknesses.
-      if (storeys > 1) {
+      if (storeys > 1 && layers.upperFloors) {
         const plateMat = new THREE.MeshStandardMaterial({ color: 0xb3a284, roughness: 0.85, transparent: true, opacity: 0.92 });
         const plate = box(
           Math.max(1, width - tE - tW), 0.4, Math.max(1, depth - tN - tS),
@@ -2988,7 +3022,7 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
         group.add(plate);
       }
 
-      spec.rooms.forEach((room) => {
+      if (layers.rooms) spec.rooms.forEach((room) => {
         const roomLift = (Math.max(1, Number(room.level || 1)) - 1) * baseStoreyFt + (Number(room.level || 1) > 1 ? 0.42 : 0);
         const material = new THREE.MeshStandardMaterial({
           color: zonePalette[room.type] || 0x86a0a8,
@@ -3012,13 +3046,16 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
           addResizeHandles(group, parts, room.id, room.x, room.y, room.w, room.d, 0.72 + roomLift);
         }
 
-        const label = makeLabel(room.name, room.w);
-        label.position.set(room.x + room.w / 2, 0.42 + roomLift, room.y + room.d / 2);
-        parts.label = label;
-        group.add(label);
+        if (layers.labels) {
+          const label = makeLabel(room.name, room.w);
+          label.position.set(room.x + room.w / 2, 0.42 + roomLift, room.y + room.d / 2);
+          parts.label = label;
+          group.add(label);
+        }
       });
 
       (spec.elements || []).forEach((element) => {
+        if (!layers.elements || (layers.hiddenCats || []).includes(element.category || 'custom')) return;
         const elementHeight = element.h || 1.2;
         const elevation = Number(element.z || 0);
         const material = new THREE.MeshStandardMaterial({
@@ -3043,17 +3080,19 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
           addResizeHandles(group, parts, element.id, element.x, element.y, element.w, element.d, elevation + elementHeight + 0.65);
         }
 
-        const label = makeLabel(element.name, Math.max(element.w, 8));
-        label.position.set(element.x + element.w / 2, elevation + elementHeight + 0.8, element.y + element.d / 2);
-        parts.label = label;
-        group.add(label);
+        if (layers.labels) {
+          const label = makeLabel(element.name, Math.max(element.w, 8));
+          label.position.set(element.x + element.w / 2, elevation + elementHeight + 0.8, element.y + element.d / 2);
+          parts.label = label;
+          group.add(label);
+        }
       });
 
       const doorMat = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.75 });
       const bayFrameMat = new THREE.MeshStandardMaterial({ color: 0xa08258, roughness: 0.8 });
       const overhangsNow = resolveOverhangs(spec.shell);
       const gableRise = depth * Number(spec.shell.roofPitch || 0.32);
-      spec.openings.forEach((opening, index) => {
+      if (layers.openings) spec.openings.forEach((opening, index) => {
         const size = opening.widthFt;
         const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
         const openH = profile.h;
@@ -3110,14 +3149,21 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
         }
       });
 
-      const roof = makeRoof(width, depth, wallHeight, spec.shell.roofPitch, roofMat, roofSpec, resolveOverhangs(spec.shell));
-      roof.userData.roomId = 'roof-main';
-      roomMeshes.push(roof);
-      group.add(roof);
+      if (layers.roof) {
+        if (layers.xray) {
+          roofMat.transparent = true;
+          roofMat.opacity = 0.4;
+        }
+        const roof = makeRoof(width, depth, wallHeight, spec.shell.roofPitch, roofMat, roofSpec, resolveOverhangs(spec.shell));
+        roof.userData.roomId = 'roof-main';
+        roomMeshes.push(roof);
+        group.add(roof);
+      }
 
       const fixedGridSize = Number(spec.shell.outdoorGridSizeFt || DEFAULT_OUTDOOR_GRID_SIZE_FT);
       // The land itself: a soft green ground plane under everything, so the
       // model reads as a house on a site rather than a box in a void.
+      if (layers.ground) {
       const groundPlane = new THREE.Mesh(
         new THREE.PlaneGeometry(fixedGridSize * 2.5, fixedGridSize * 2.5),
         new THREE.MeshStandardMaterial({ color: 0xa8b18d, roughness: 1 })
@@ -3137,6 +3183,7 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
       grid.name = `Fixed outdoor reference grid (${fixedGridSize}' x ${fixedGridSize}')`;
       grid.userData.generated = true;
       group.add(grid);
+      }
 
       scene.add(group);
     }
@@ -3474,7 +3521,7 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
       mount.removeChild(renderer.domElement);
       renderer.dispose();
     };
-  }, [spec, selectedRoom]);
+  }, [spec, selectedRoom, layers]);
 
   return <div className="scene" ref={mountRef} aria-label="Interactive 3D BIM model" />;
 }
@@ -3632,6 +3679,8 @@ function App() {
   const [dimensionPreview, setDimensionPreview] = useState(null);
   const [savedAt, setSavedAt] = useState(() => initialSaved?.savedAt || '');
   const [libraryActionMode, setLibraryActionMode] = useState(() => initialSaved?.libraryActionMode || 'apply');
+  const [modelLayers, setModelLayers] = useState(() => ({ ...DEFAULT_MODEL_LAYERS, ...(initialSaved?.modelLayers || {}) }));
+  const [layersOpen, setLayersOpen] = useState(false);
   const [isPlanning, setIsPlanning] = useState(false);
   const planDragRevisionRef = useRef(false);
   const chatStreamRef = useRef(null);
@@ -3679,6 +3728,7 @@ function App() {
     setProjectBrain(ensureProjectBrain(snapshot.projectBrain, snapshot.spec));
     setSavedAt(snapshot.savedAt || '');
     setLibraryActionMode(snapshot.libraryActionMode || 'apply');
+    setModelLayers({ ...DEFAULT_MODEL_LAYERS, ...(snapshot.modelLayers || {}) });
   }
 
   function currentDashboardState(custom = {}) {
@@ -3699,6 +3749,7 @@ function App() {
       operationAudit,
       projectBrain,
       chatMessages,
+      modelLayers,
       ...custom
     });
   }
@@ -3814,7 +3865,8 @@ function App() {
       lastModelChange,
       operationAudit,
       projectBrain,
-      chatMessages
+      chatMessages,
+      modelLayers
     });
     window.clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = window.setTimeout(() => {
@@ -3827,7 +3879,7 @@ function App() {
     }, 250);
     if (!savedAt) setSavedAt(now);
     return () => window.clearTimeout(autosaveTimerRef.current);
-  }, [projectId, spec, selectedRoom, libraryActionMode, chatMessages, chatTarget, addToTarget, selectedExpertId, expertQuestion, prompt, operationAudit, projectBrain]);
+  }, [projectId, spec, selectedRoom, libraryActionMode, chatMessages, chatTarget, addToTarget, selectedExpertId, expertQuestion, prompt, operationAudit, projectBrain, modelLayers]);
 
   useEffect(() => {
     const stream = chatStreamRef.current;
@@ -5200,12 +5252,61 @@ function App() {
           <ThreeScene
             spec={spec}
             selectedRoom={selectedRoom}
+            layers={modelLayers}
             onSelectRoom={setSelectedRoom}
             onMoveStart={beginPlanMove}
             onMoveEnd={finishPlanMove}
             onResizeEnd={finishPlanResize}
             onDimensionPreview={setDimensionPreview}
           />
+          <button className={layersOpen ? 'layersToggle open' : 'layersToggle'} onClick={() => setLayersOpen((open) => !open)} title="Show / hide model layers">
+            <Layers size={14} /> Layers
+          </button>
+          {layersOpen && (() => {
+            const set = (patch) => setModelLayers((current) => ({ ...current, ...patch }));
+            const check = (key, label) => (
+              <label className="layerCheck" key={key}>
+                <input type="checkbox" checked={Boolean(modelLayers[key])} onChange={(event) => set({ [key]: event.target.checked })} />
+                <span>{label}</span>
+              </label>
+            );
+            const presentCats = [...new Set((spec.elements || []).map((element) => element.category || 'custom'))];
+            const hiddenCats = modelLayers.hiddenCats || [];
+            return (
+              <div className="layersPanel">
+                <div className="layersPresets">
+                  {Object.entries({ all: 'All', structure: 'Structure', plan: 'Plan', interior: 'Interior', site: 'Site' }).map(([key, label]) => (
+                    <button key={key} onClick={() => setModelLayers({ ...LAYER_PRESETS[key] })}>{label}</button>
+                  ))}
+                </div>
+                <div className="layersGroup"><span className="layersEyebrow">Building</span>
+                  {check('wallNorth', 'North wall')}
+                  {check('wallSouth', 'South wall')}
+                  {check('wallEast', 'East wall')}
+                  {check('wallWest', 'West wall')}
+                  {check('roof', 'Roof')}
+                  {storeyInfo(spec.shell).storeys > 1 && check('upperFloors', 'Upper floors')}
+                  {check('openings', 'Windows & doors')}
+                  {check('rooms', 'Rooms')}
+                </div>
+                <div className="layersGroup"><span className="layersEyebrow">Site</span>
+                  {check('pad', 'Site pad')}
+                  {check('ground', 'Ground & grid')}
+                  {check('elements', 'Elements')}
+                  {modelLayers.elements && presentCats.map((cat) => (
+                    <label className="layerCheck sub" key={`cat-${cat}`}>
+                      <input type="checkbox" checked={!hiddenCats.includes(cat)} onChange={(event) => set({ hiddenCats: event.target.checked ? hiddenCats.filter((item) => item !== cat) : [...hiddenCats, cat] })} />
+                      <span>{titleCase(cat)}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="layersGroup"><span className="layersEyebrow">Display</span>
+                  {check('labels', 'Labels')}
+                  {check('xray', 'X-ray walls & roof')}
+                </div>
+              </div>
+            );
+          })()}
           <div className="viewBadge"><Camera size={15} /> drag rooms, drag corner handles to resize</div>
           <div className="changeBadge" key={`${spec.revision}-${selectedRoom}`}><Sparkles size={14} /> Rev {spec.revision}: {lastModelChange}</div>
           {dimensionPreview && (
