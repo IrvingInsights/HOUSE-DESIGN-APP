@@ -4171,16 +4171,18 @@ function App() {
 
   function handleImage(file) {
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setChatMessages((items) => [...items, { role: 'studio', speaker: 'Studio', text: 'That file is not an image. Add a photo, drawing, screenshot, or handwriting image.' }]);
+    const studioSays = (text) => setChatMessages((items) => [...items, { role: 'studio', speaker: 'Studio', text }]);
+    // Windows often reports an empty MIME type — fall back to the extension.
+    const looksLikeImage = file.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|svg|avif|heic|heif|tiff?)$/i.test(file.name);
+    if (!looksLikeImage) {
+      studioSays(`"${file.name}" doesn't look like an image. Add a photo, drawing, screenshot, or handwriting image (JPG or PNG work best).`);
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
+    const attach = (src) => {
       const image = {
         id: `${Date.now()}-${file.name}`,
         name: file.name,
-        src: String(reader.result),
+        src,
         size: file.size
       };
       setImagePreview(image.src);
@@ -4190,6 +4192,41 @@ function App() {
         { role: 'user', speaker: 'You', text: `Attached reference image: ${file.name}`, image: image.src },
         { role: 'studio', speaker: 'Studio', text: 'Image attached to chat. Tell me what to use from it, such as "trace the handwritten room labels", "match this roof shape", or "turn this sketch into a 32 x 24 plan".' }
       ]);
+    };
+    const reader = new FileReader();
+    reader.onerror = reader.onabort = () => {
+      studioSays(`I couldn't read "${file.name}" from disk. If it lives in cloud storage (Google Drive, OneDrive), it may be online-only — open it once or copy it somewhere local, then try again.`);
+    };
+    reader.onload = () => {
+      const raw = String(reader.result || '');
+      if (!raw.startsWith('data:')) {
+        studioSays(`I couldn't read "${file.name}" — the file came back empty. Try copying it somewhere local first.`);
+        return;
+      }
+      // Decode + downscale before attaching: huge photos stay fast, and
+      // formats the browser can't decode fail with an explanation instead
+      // of silently attaching garbage.
+      const probe = new Image();
+      probe.onload = () => {
+        const longest = Math.max(probe.width, probe.height);
+        if (longest > 1600) {
+          const scale = 1600 / longest;
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(probe.width * scale);
+          canvas.height = Math.round(probe.height * scale);
+          canvas.getContext('2d').drawImage(probe, 0, 0, canvas.width, canvas.height);
+          attach(canvas.toDataURL('image/jpeg', 0.85));
+        } else {
+          attach(raw);
+        }
+      };
+      probe.onerror = () => {
+        const isHeic = /\.(heic|heif)$/i.test(file.name) || /hei[cf]/.test(file.type);
+        studioSays(isHeic
+          ? `"${file.name}" is a HEIC photo — browsers can't display those. Export it as JPG or PNG (or screenshot it) and add that instead.`
+          : `I can't decode "${file.name}" in the browser. A JPG, PNG, or screenshot will work.`);
+      };
+      probe.src = raw;
     };
     reader.readAsDataURL(file);
   }
