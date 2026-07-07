@@ -2788,3 +2788,194 @@ textarea:focus-visible {
 .modelShell {
   box-shadow: inset 0 1px 0 var(--line), inset 0 -10px 24px -18px rgba(34, 37, 31, 0.35);
 }
+
+/* ============================================================
+   Dark workspace: the middle column is a deep moss-charcoal
+   matte, so the sunlit model preview is the brightest thing on
+   screen. Re-tokened locally; side panels stay paper.
+   ============================================================ */
+.workspace {
+  background: #252B28;
+  --ink: #EAE8DD;
+  --ink2: #BCC1B5;
+  --ink3: #939A90;
+  --ivory: #2C3330;
+  --raise: #343C38;
+  --vellum: #252B28;
+  --line: #3D4642;
+  --line2: #4B554F;
+  --sage: #33434B;
+  --plum: #A9C6D0;
+  --evergreen: #5E93A3;
+  --canvas: #202523;
+  --muted: #9AA096;
+  --field: #262C29;
+  --field-border: #4B554F;
+  --active: #33434B;
+  --active-line: #7FA8B5;
+  --panel-2: #2A302D;
+  --panel-3: #262C29;
+  --good: #86C79A;
+  --good-bg: #2C3A31;
+  --warn: #D9B36A;
+  --warn-bg: #3A3424;
+  --bad: #E09880;
+  --bad-bg: #402E27;
+}
+
+.workspace .topBar {
+  background: color-mix(in srgb, #252B28 90%, transparent);
+  border-bottom-color: var(--line);
+}
+
+.workspace .bimEditor,
+.workspace .planMove {
+  background: #2A302D;
+  border-color: var(--line);
+}
+
+.workspace .sectionHead,
+.workspace .blockTitle,
+.workspace .miniHead,
+.workspace .assembly em,
+.workspace h1 {
+  color: var(--plum);
+}
+
+.workspace .assembly b {
+  color: var(--ink);
+}
+
+/* Ghost + tab buttons on the dark matte */
+.workspace button.ghost,
+.workspace .inspectorTabs button {
+  background: var(--ivory);
+  color: var(--ink2);
+  border-color: var(--line2);
+}
+
+.workspace button.ghost:hover,
+.workspace .inspectorTabs button:hover {
+  background: var(--raise);
+  border-color: var(--active-line);
+  color: var(--plum);
+}
+
+.workspace .inspectorTabs button.active {
+  background: var(--active);
+  border-color: var(--active-line);
+  color: var(--plum);
+}
+
+.workspace button.ghost.backButton:not(:disabled) {
+  border-color: var(--active-line);
+  color: var(--plum);
+}
+
+.workspace button.ghost.saveButton {
+  border-color: #C9A24B;
+  color: #E4C87E;
+  background: #383223;
+}
+
+.workspace button.secondary {
+  background: var(--raise);
+  color: var(--ink2);
+  border-color: var(--line2);
+}
+
+.workspace button.secondary:hover {
+  background: var(--sage);
+  border-color: var(--active-line);
+  color: var(--plum);
+}
+
+/* Schedule cards + row tints on dark */
+.workspace .roomRow,
+.workspace .elementCard,
+.workspace .chatTarget {
+  background: var(--raise);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.workspace .roomRow.element { background: #363328; }
+.workspace .roomRow.element.active { background: #453E28; border-color: #C9A24B; }
+.workspace .roomRow.wall { background: #2C3736; border-left-color: var(--active-line); }
+.workspace .roomRow.wall.active { background: var(--sage); }
+.workspace .roomRow.special { background: #38332A; border-left-color: #C9A24B; }
+.workspace .roomRow.special.active { background: #453E28; }
+
+.workspace .roomRow:hover,
+.workspace .roomRow.active,
+.workspace .elementCard:hover {
+  background: var(--active);
+  border-color: var(--active-line);
+  color: var(--plum);
+}
+
+/* Identity, hints, and notes */
+.workspace .projectIdentity input { color: var(--ink); border-bottom-color: var(--line2); }
+.workspace .projectIdentity input:focus { background: var(--raise); outline-color: rgba(127, 168, 181, 0.5); }
+.workspace .projectIdentity span,
+.workspace .topBar p,
+.workspace .topBar .saveStatus,
+.workspace .microcopy { color: var(--ink3); }
+.workspace .selectedSummary,
+.workspace .modelEditHint,
+.workspace .fixedNote {
+  background: var(--ivory);
+  border-color: var(--line);
+  color: var(--ink2);
+}
+.workspace .elementNote { color: var(--ink2) !important; }
+.workspace .scheduleFocus { border-color: var(--line2); color: var(--ink2); background: var(--ivory); }
+
+/* The model frame: darkest ring so the bright scene floats */
+.workspace .modelShell {
+  background: var(--canvas);
+  border-bottom-color: #1B201E;
+  box-shadow: inset 0 0 0 1px #1B201E, inset 0 -12px 26px -18px rgba(0, 0, 0, 0.55);
+}
+
+.workspace .lowerDeck { background: #252B28; }
+
+/* Scrollbars inside the dark column */
+.workspace *::-webkit-scrollbar-thumb {
+  background: var(--line2);
+  border-color: #252B28;
+}
+
+/* The overlays float on the BRIGHT scene, not the dark matte — pin them back
+   to the paper palette so they stay crisp light chips. */
+.workspace .viewBadge,
+.workspace .changeBadge,
+.workspace .dimensionBadge,
+.workspace .northBadge,
+.workspace .layersToggle,
+.workspace .layersPanel,
+.workspace .viewFilterBadge {
+  --ink: #22251F;
+  --ink2: #565A4F;
+  --ink3: #868A7C;
+  --plum: #26424C;
+  --line: #DBD9CE;
+  --line2: #CAC8BB;
+  --raise: #FFFFFF;
+  --ivory: #FBFAF6;
+  --sage: #E2ECEE;
+  --warn: #A9781F;
+  --warn-bg: #F3EAD3;
+  --bad: #AE452F;
+}
+
+.workspace .viewBadge,
+.workspace .changeBadge,
+.workspace .northBadge {
+  color: #26424C;
+}
+
+.workspace .layersToggle { color: #26424C; }
+.workspace .layersToggle.filtered { color: #A9781F; }
+.workspace .layersPanel { color: #22251F; }
+.workspace .viewFilterBadge { color: #7a6120; }
