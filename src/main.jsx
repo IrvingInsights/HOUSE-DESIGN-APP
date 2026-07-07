@@ -3708,6 +3708,11 @@ function App() {
   const [libraryActionMode, setLibraryActionMode] = useState(() => initialSaved?.libraryActionMode || 'apply');
   const [modelLayers, setModelLayers] = useState(() => ({ ...DEFAULT_MODEL_LAYERS, ...(initialSaved?.modelLayers || {}) }));
   const [layersOpen, setLayersOpen] = useState(false);
+  // First run (nothing saved anywhere): ask how to begin instead of silently
+  // dropping the visitor into a finished sample house. Also reusable as "New".
+  const [welcomeOpen, setWelcomeOpen] = useState(() => !initialSaved);
+  const [welcomeIsFirstRun, setWelcomeIsFirstRun] = useState(() => !initialSaved);
+  const [welcomeName, setWelcomeName] = useState('');
   const [isPlanning, setIsPlanning] = useState(false);
   const planDragRevisionRef = useRef(false);
   const chatStreamRef = useRef(null);
@@ -3786,6 +3791,33 @@ function App() {
       modelLayers,
       ...custom
     });
+  }
+
+  function startNewDesign(template) {
+    const next = structuredClone(seedSpec);
+    next.revision = 1;
+    if (template === 'blank') {
+      next.rooms = [];
+      next.elements = [];
+      next.openings = [];
+      next.levels = [];
+    }
+    next.projectName = welcomeName.trim() || (template === 'blank' ? 'My Natural Home' : 'Sample Homestead Study');
+    const startLine = template === 'blank'
+      ? 'Rev 1: A fresh start — an empty shell on the land. Add rooms, or describe the home you want in the chat.'
+      : 'Rev 1: Sample homestead loaded as a starting point — everything in it is yours to change.';
+    setSpec(next);
+    setHistory([]);
+    setRevisionLog([startLine]);
+    setChatMessages([]);
+    setOperationAudit([]);
+    setSelectedRoom(next.rooms[0]?.id || 'site-pad');
+    setLastModelChange(template === 'blank' ? 'Fresh start on empty land.' : 'Sample homestead loaded.');
+    setProjectBrain(ensureProjectBrain(null, next));
+    setModelLayers({ ...DEFAULT_MODEL_LAYERS });
+    setWelcomeName('');
+    setWelcomeOpen(false);
+    setWelcomeIsFirstRun(false);
   }
 
   async function answerConsultativePrompt(submittedPrompt) {
@@ -3870,7 +3902,11 @@ function App() {
     (async () => {
       try {
         const result = await requestCurrentProjectState();
-        if (!cancelled && result?.state?.spec) restoreDashboardState(result.state);
+        if (!cancelled && result?.state?.spec) {
+          restoreDashboardState(result.state);
+          setWelcomeOpen(false);
+          setWelcomeIsFirstRun(false);
+        }
       } catch (error) {
         console.warn('Backend project load skipped:', error);
       } finally {
@@ -5274,6 +5310,7 @@ function App() {
             {savedAt && <p className="saveStatus">Saved in app: {savedAt}</p>}
           </div>
           <div className="exportActions">
+            <button className="ghost" title="Start a new design" onClick={() => setWelcomeOpen(true)}><Plus size={16} /> New</button>
             <button className="ghost backButton" onClick={goBackRevision} disabled={history.length === 0}><Undo2 size={16} /> Back</button>
             <button className="ghost saveButton" onClick={saveHouseState}><Save size={16} /> Save House</button>
             <button className="ghost" onClick={exportSheetSet}><FileText size={16} /> Permit Set</button>
@@ -5592,6 +5629,42 @@ function App() {
           </section>
         </div>
       </section>
+
+      {welcomeOpen && (
+        <div className="welcomeOverlay">
+          <div className="welcomeCard">
+            <div className="welcomeMark" aria-hidden="true"><span className="brandGable" /></div>
+            <h2>{welcomeIsFirstRun ? 'Welcome — let\'s design a natural home' : 'Start a new design'}</h2>
+            <p className="welcomeIntro">Design system by system — walls, roof, water, power — with live cost and code checks, and a real BIM model at the end.</p>
+            <label className="welcomeName">
+              <span>Name your design</span>
+              <input
+                type="text"
+                placeholder="e.g. Cedar Hollow Homestead"
+                value={welcomeName}
+                onChange={(event) => setWelcomeName(event.target.value)}
+                autoFocus
+              />
+            </label>
+            <div className="welcomeChoices">
+              <button className="welcomeChoice" onClick={() => startNewDesign('blank')}>
+                <b>Start on empty land</b>
+                <small>Just the shell on the site. Add rooms yourself, or tell the assistant what you need.</small>
+              </button>
+              <button className="welcomeChoice" onClick={() => startNewDesign('sample')}>
+                <b>Start from the sample homestead</b>
+                <small>A small working house — rooms, systems, and checks already alive. Change everything.</small>
+              </button>
+            </div>
+            {!welcomeIsFirstRun && (
+              <div className="welcomeFoot">
+                <span>This replaces the design that's open now.</span>
+                <button className="welcomeCancel" onClick={() => { setWelcomeName(''); setWelcomeOpen(false); }}>Keep working instead</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <aside className="rightPanel">
         <section className="panelBlock consolePanel chatPanel">
