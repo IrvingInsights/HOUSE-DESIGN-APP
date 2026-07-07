@@ -3201,9 +3201,9 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       groundPlane.userData.generated = true;
       group.add(groundPlane);
 
-      const grid = new THREE.GridHelper(fixedGridSize, Math.max(48, Math.round(fixedGridSize / 4)), 0xa39d88, 0xb5b09c);
+      const grid = new THREE.GridHelper(fixedGridSize, Math.max(48, Math.round(fixedGridSize / 4)), 0x6e6a58, 0x8b8672);
       grid.material.transparent = true;
-      grid.material.opacity = 0.6;
+      grid.material.opacity = 0.8;
       // Just above the pad's top surface (y=0) so the scale grid peeks through
       // the site pad instead of being buried under it.
       grid.position.set(width / 2, 0.03, depth / 2);
