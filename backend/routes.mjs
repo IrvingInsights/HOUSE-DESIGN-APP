@@ -1,4 +1,5 @@
 import { aiPlan } from './planner.mjs';
+import { ensureBlenderRunning } from './blender-launcher.mjs';
 import { readJson, sendJson } from './http.mjs';
 import { DEFAULT_PROJECT_ID } from './config.mjs';
 import { listProjects, loadProjectRevisions, loadProjectState, saveProjectState } from './project-store.mjs';
@@ -35,6 +36,16 @@ export async function handleApiRoute(req, res, pathname) {
       projectId: result.projectId,
       summary: result.summary
     });
+    return true;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/blender/ensure') {
+    try {
+      const result = await ensureBlenderRunning();
+      sendJson(res, result.running ? 200 : 503, result);
+    } catch (error) {
+      sendJson(res, 500, { running: false, started: false, error: error?.message || String(error) });
+    }
     return true;
   }
 

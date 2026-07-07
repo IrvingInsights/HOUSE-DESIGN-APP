@@ -92,7 +92,19 @@ export function specToDashboardState(spec) {
   };
 }
 
+// Ask the studio backend to start a headless Blender (with the add-on server)
+// if one isn't already running. First boot can take ~20-40 s.
+export async function ensureBlender() {
+  const res = await fetch('/api/blender/ensure', { method: 'POST' });
+  const result = await res.json().catch(() => ({}));
+  if (!result.running) {
+    throw new Error(result.error || 'Blender could not be started automatically.');
+  }
+  return result;
+}
+
 export async function pushToBlender(spec) {
+  await ensureBlender();
   const state = specToDashboardState(spec);
   const res = await fetch(`${BLENDER_URL}/api/update`, {
     method: 'POST',
