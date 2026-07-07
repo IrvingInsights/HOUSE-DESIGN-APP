@@ -9,6 +9,8 @@
 // north, origin at SW corner). The Dashboard uses site coords centered on the
 // house (x east, y north). Translate by centering.
 
+import { WALL_SIDES, resolveWallSide } from '../backend/bim-core.mjs';
+
 const BLENDER_URL = 'http://localhost:8000';
 
 export function specToDashboardState(spec) {
@@ -17,6 +19,23 @@ export function specToDashboardState(spec) {
   const depthFt = Number(shell.depthFt) || 28;   // plan Y (north-south) -> Dashboard "width"
   const hN = Number(shell.northWallHeightFt || shell.wallHeightFt) || 10;
   const hS = Number(shell.southWallHeightFt || shell.wallHeightFt) || 10;
+
+  // Per-wall assembly + height for the four sides, so the procedural rebuild and
+  // the IFC export can vary system/thickness/height per wall (not just N/S).
+  const walls = WALL_SIDES.map((side) => {
+    const r = resolveWallSide(spec, side);
+    return {
+      side,
+      heightFt: r.heightFt,
+      assembly: r.assemblyKey,
+      assemblyLabel: r.assembly.label,
+      thicknessFt: r.thicknessFt,
+      rValue: r.assembly.rValue,
+      interiorFinish: r.interiorFinish,
+      exteriorFinish: r.exteriorFinish,
+      omitted: r.omitted,
+    };
+  });
 
   const roofMap = { gable: 'gable', shed: 'shed', flat: 'living', living: 'living', hip: 'hip', gambrel: 'gambrel' };
   const roofType = roofMap[String(shell.roofType || 'gable').toLowerCase()] || 'gable';
@@ -66,6 +85,7 @@ export function specToDashboardState(spec) {
     roofType,
     showRafters: true,
     hasGreenhouse: false, // this app's specs are conventional envelopes by default
+    walls,
     customOpenings,
     rooms,
     naturalElements,

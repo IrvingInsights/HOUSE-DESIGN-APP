@@ -127,6 +127,7 @@ const seedSpec = {
   projectName: 'Untitled Natural Building Study',
   revision: 1,
   shell: { widthFt: 36, depthFt: 28, wallHeightFt: 10, roofPitch: 0.32, roofType: 'gable', southWallHeightFt: 10, northWallHeightFt: 10, padExtensionFt: DEFAULT_SITE_PAD_EXTENSION_FT },
+  walls: {},
   site: { climate: 'mixed humid', north: 'top', wind: 'west', solar: 'south' },
   elements: [],
   rooms: [
@@ -739,27 +740,39 @@ function addOpeningFromText(spec, text) {
 }
 
 function getWallSections(spec) {
-  const profile = wallAssemblyProfile(spec.systems.envelope);
-  const roof = roofProfile(spec.shell);
-  const omitted = new Set(spec.shell.omittedWalls || []);
-  const walls = [
-    { id: 'wall-north', name: 'North Wall', side: 'north', lengthFt: spec.shell.widthFt, heightFt: roof.roofType === 'shed' ? roof.northWallHeightFt : roof.highWallHeightFt, x: 0, y: 0 },
-    { id: 'wall-south', name: 'South Wall', side: 'south', lengthFt: spec.shell.widthFt, heightFt: roof.roofType === 'shed' ? roof.southWallHeightFt : roof.highWallHeightFt, x: 0, y: spec.shell.depthFt },
-    { id: 'wall-west', name: 'West Wall', side: 'west', lengthFt: spec.shell.depthFt, heightFt: roof.highWallHeightFt, x: 0, y: 0 },
-    { id: 'wall-east', name: 'East Wall', side: 'east', lengthFt: spec.shell.depthFt, heightFt: roof.highWallHeightFt, x: spec.shell.widthFt, y: 0 }
-  ];
-  return walls
-    .filter((wall) => !omitted.has(wall.side))
-    .map((wall) => ({
-      ...wall,
-      category: 'wall-section',
-      type: 'wall',
-      w: wall.side === 'north' || wall.side === 'south' ? wall.lengthFt : profile.thicknessFt,
-      d: wall.side === 'east' || wall.side === 'west' ? wall.lengthFt : profile.thicknessFt,
-      h: wall.heightFt,
-      assembly: profile.label,
-      note: `${profile.label}; ${wall.lengthFt}' long, ${wall.heightFt}' high. Openings on this side: ${spec.openings.filter((opening) => opening.wall === wall.side).length}.`
-    }));
+  const layout = {
+    north: { name: 'North Wall', lengthFt: spec.shell.widthFt, x: 0, y: 0 },
+    south: { name: 'South Wall', lengthFt: spec.shell.widthFt, x: 0, y: spec.shell.depthFt },
+    west: { name: 'West Wall', lengthFt: spec.shell.depthFt, x: 0, y: 0 },
+    east: { name: 'East Wall', lengthFt: spec.shell.depthFt, x: spec.shell.widthFt, y: 0 }
+  };
+  return WALL_SIDES
+    .map((side) => ({ side, ...layout[side], resolved: resolveWallSide(spec, side) }))
+    .filter((wall) => !wall.resolved.omitted)
+    .map((wall) => {
+      const r = wall.resolved;
+      return {
+        id: `wall-${wall.side}`,
+        name: wall.name,
+        side: wall.side,
+        lengthFt: wall.lengthFt,
+        heightFt: r.heightFt,
+        x: wall.x,
+        y: wall.y,
+        category: 'wall-section',
+        type: 'wall',
+        w: wall.side === 'north' || wall.side === 'south' ? wall.lengthFt : r.thicknessFt,
+        d: wall.side === 'east' || wall.side === 'west' ? wall.lengthFt : r.thicknessFt,
+        h: r.heightFt,
+        assembly: r.assembly.label,
+        assemblyKey: r.assemblyKey,
+        thicknessFt: r.thicknessFt,
+        rValue: r.assembly.rValue,
+        interiorFinish: r.interiorFinish,
+        exteriorFinish: r.exteriorFinish,
+        note: `${r.assembly.label} (R≈${r.assembly.rValue}, ${r.thicknessFt.toFixed(2)}' thick); ${wall.lengthFt}' long, ${r.heightFt}' high. Interior: ${r.interiorFinish}. Openings on this side: ${spec.openings.filter((opening) => opening.wall === wall.side).length}.`
+      };
+    });
 }
 
 function getSpecialBimObjects(spec) {
@@ -1012,6 +1025,60 @@ function wallAssemblyProfile(envelopeText = '') {
     rgb: [0.78, 0.78, 0.72],
     finish: 'vapor-open wall, rainscreen cladding, and raised heel roof trusses'
   };
+}
+
+// --- Per-wall assembly model (kept in sync with backend/bim-core.mjs) --------
+const WALL_SIDES = ['north', 'south', 'east', 'west'];
+const WALL_SIDE_LABELS = { north: 'North', south: 'South', east: 'East', west: 'West' };
+
+const WALL_ASSEMBLIES = {
+  'straw-bale':       { key: 'straw-bale',       label: 'Straw Bale',          thicknessFt: 1.6,  color: 0xd8bf79, rValue: 33, finish: 'lime / clay plaster' },
+  'hemp-lime':        { key: 'hemp-lime',        label: 'Hemp-Lime',           thicknessFt: 1.25, color: 0xb9c49b, rValue: 22, finish: 'vapor-open plaster' },
+  'cob':              { key: 'cob',              label: 'Cob',                 thicknessFt: 1.8,  color: 0xb9835e, rValue: 14, finish: 'earthen plaster' },
+  'rammed-earth':     { key: 'rammed-earth',     label: 'Rammed Earth',        thicknessFt: 1.35, color: 0x9d7456, rValue: 12, finish: 'sealed / waxed earth' },
+  'cordwood':         { key: 'cordwood',         label: 'Cordwood',            thicknessFt: 1.25, color: 0x9b7652, rValue: 18, finish: 'lime mortar joints' },
+  'light-straw-clay': { key: 'light-straw-clay', label: 'Light Straw-Clay',    thicknessFt: 1.0,  color: 0xc6b077, rValue: 20, finish: 'clay plaster' },
+  'framed':           { key: 'framed',           label: 'Framed (vapor-open)', thicknessFt: 0.55, color: 0xd9d5c8, rValue: 23, finish: 'plaster / cladding' }
+};
+
+function wallAssemblyKeyFromText(text) {
+  const t = String(text || '').toLowerCase();
+  if (/light straw|straw.?clay/.test(t)) return 'light-straw-clay';
+  if (/straw bale|strawbale|straw/.test(t)) return 'straw-bale';
+  if (/hemp/.test(t)) return 'hemp-lime';
+  if (/cob/.test(t)) return 'cob';
+  if (/rammed/.test(t)) return 'rammed-earth';
+  if (/cordwood/.test(t)) return 'cordwood';
+  return 'framed';
+}
+
+function resolveWallSide(spec, side) {
+  const shell = spec.shell || {};
+  const w = (spec.walls || {})[side] || {};
+  const assemblyKey = w.assembly && WALL_ASSEMBLIES[w.assembly] ? w.assembly : wallAssemblyKeyFromText(spec.systems?.envelope);
+  const assembly = WALL_ASSEMBLIES[assemblyKey] || WALL_ASSEMBLIES.framed;
+  const defaultHeight = side === 'south' ? Number(shell.southWallHeightFt || shell.wallHeightFt || 10)
+    : side === 'north' ? Number(shell.northWallHeightFt || shell.wallHeightFt || 10)
+      : Number(shell.wallHeightFt || 10);
+  const omittedSet = new Set(shell.omittedWalls || []);
+  return {
+    side,
+    heightFt: Number(w.heightFt ?? defaultHeight),
+    assemblyKey,
+    assembly,
+    thicknessFt: Number(w.thicknessFt ?? assembly.thicknessFt),
+    interiorFinish: w.interiorFinish || assembly.finish,
+    exteriorFinish: w.exteriorFinish || 'rainscreen / lime render',
+    omitted: Boolean(w.omitted) || omittedSet.has(side)
+  };
+}
+
+// True when any side carries a per-wall override (drives the "mixed" hint).
+function wallsAreMixed(spec) {
+  const resolved = WALL_SIDES.map((side) => resolveWallSide(spec, side));
+  const keys = new Set(resolved.map((r) => r.assemblyKey));
+  const heights = new Set(resolved.map((r) => Math.round(r.heightFt * 10)));
+  return keys.size > 1 || heights.size > 1;
 }
 
 function applyLibraryItemToSystems(spec, item) {
@@ -2541,22 +2608,39 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
       group.add(slab);
 
       const omittedWalls = new Set(spec.shell.omittedWalls || []);
+      // Per-wall assembly + height: each side reads its own resolved profile so
+      // color (material), thickness, and height can differ N/S/E/W.
+      const wallResolved = {
+        north: resolveWallSide(spec, 'north'),
+        south: resolveWallSide(spec, 'south'),
+        east: resolveWallSide(spec, 'east'),
+        west: resolveWallSide(spec, 'west')
+      };
+      const wallMatFor = (side) => new THREE.MeshStandardMaterial({ color: wallResolved[side].assembly.color, roughness: 0.88 });
+      const tN = wallResolved.north.thicknessFt;
+      const tS = wallResolved.south.thicknessFt;
+      const tE = wallResolved.east.thicknessFt;
+      const tW = wallResolved.west.thicknessFt;
+      const hN = roofSpec.roofType === 'shed' ? northWallHeight : wallResolved.north.heightFt;
+      const hS = roofSpec.roofType === 'shed' ? southWallHeight : wallResolved.south.heightFt;
+      const hE = wallResolved.east.heightFt;
+      const hW = wallResolved.west.heightFt;
       const wallMeshSpecs = roofSpec.roofType === 'shed'
         ? [
-          { side: 'north', mesh: box(width, northWallHeight, wallT, width / 2, northWallHeight / 2, wallT / 2, wallMat) },
-          { side: 'south', mesh: box(width, southWallHeight, wallT, width / 2, southWallHeight / 2, depth - wallT / 2, wallMat) },
-          { side: 'west', mesh: makeShedSideWall(0, wallT, depth, northWallHeight, southWallHeight, wallMat) },
-          { side: 'east', mesh: makeShedSideWall(width - wallT, wallT, depth, northWallHeight, southWallHeight, wallMat) }
+          { side: 'north', mesh: box(width, hN, tN, width / 2, hN / 2, tN / 2, wallMatFor('north')) },
+          { side: 'south', mesh: box(width, hS, tS, width / 2, hS / 2, depth - tS / 2, wallMatFor('south')) },
+          { side: 'west', mesh: makeShedSideWall(0, tW, depth, northWallHeight, southWallHeight, wallMatFor('west')) },
+          { side: 'east', mesh: makeShedSideWall(width - tE, tE, depth, northWallHeight, southWallHeight, wallMatFor('east')) }
         ]
         : [
-          { side: 'north', mesh: box(width, wallHeight, wallT, width / 2, wallHeight / 2, wallT / 2, wallMat) },
-          { side: 'south', mesh: box(width, wallHeight, wallT, width / 2, wallHeight / 2, depth - wallT / 2, wallMat) },
-          { side: 'west', mesh: box(wallT, wallHeight, depth, wallT / 2, wallHeight / 2, depth / 2, wallMat) },
-          { side: 'east', mesh: box(wallT, wallHeight, depth, width - wallT / 2, wallHeight / 2, depth / 2, wallMat) }
+          { side: 'north', mesh: box(width, hN, tN, width / 2, hN / 2, tN / 2, wallMatFor('north')) },
+          { side: 'south', mesh: box(width, hS, tS, width / 2, hS / 2, depth - tS / 2, wallMatFor('south')) },
+          { side: 'west', mesh: box(tW, hW, depth, tW / 2, hW / 2, depth / 2, wallMatFor('west')) },
+          { side: 'east', mesh: box(tE, hE, depth, width - tE / 2, hE / 2, depth / 2, wallMatFor('east')) }
         ];
       wallMeshSpecs.forEach(({ side, mesh }) => {
-        if (omittedWalls.has(side)) return;
-        mesh.name = `${titleCase(side)} Wall - ${wallProfile.label}`;
+        if (omittedWalls.has(side) || wallResolved[side].omitted) return;
+        mesh.name = `${titleCase(side)} Wall - ${wallResolved[side].assembly.label}`;
         mesh.userData.roomId = `wall-${side}`;
         roomMeshes.push(mesh);
         group.add(mesh);
@@ -3124,6 +3208,8 @@ function App() {
   const [projectId, setProjectId] = useState(() => initialSaved?.projectId || 'current-project');
   const [spec, setSpec] = useState(() => initialSaved?.spec || seedSpec);
   const [systemView, setSystemView] = useState('shell');
+  const [wallBreakOpen, setWallBreakOpen] = useState(false);
+  const [shellWallBreakOpen, setShellWallBreakOpen] = useState(false);
   const [prompt, setPrompt] = useState(() => initialSaved?.prompt || DEFAULT_PROMPT);
   const [selectedRoom, setSelectedRoom] = useState(() => initialSaved?.selectedRoom || 'great');
   const [imagePreview, setImagePreview] = useState('');
@@ -3616,6 +3702,20 @@ function App() {
       operations.push({ type: 'set_shell', field, value: String(field === 'roofPitch' ? clamp(numeric, 0.08, 0.75) : clamp(numeric, field === 'wallHeightFt' ? 7 : 18, field === 'depthFt' ? 80 : field === 'widthFt' ? 96 : field === 'padExtensionFt' ? 200 : 24)) });
     }
     void applyBackendOperations({ operations, promptText: `Update shell ${field}`, logPrefix: 'Shell edit' });
+  }
+
+  // Per-wall edit: system / height / thickness / finish / omit, per N/S/E/W side.
+  function updateWallSide(side, field, rawValue) {
+    let value = rawValue;
+    if (field === 'heightFt') value = clamp(Number(rawValue), 7, 40);
+    else if (field === 'thicknessFt') value = clamp(Number(rawValue), 0.2, 3.5);
+    else if (field === 'omitted') value = Boolean(rawValue);
+    void applyBackendOperations({
+      operations: [{ type: 'set_wall_side', wall: side, field, value }],
+      promptText: `Set ${side} wall ${field}`,
+      logPrefix: 'Wall edit',
+      nextSelectedId: `wall-${side}`
+    });
   }
 
   function updateProjectName(value) {
@@ -4121,6 +4221,29 @@ function App() {
                 </label>
               </div>
               <p className="systemNote">Footprint: {spec.shell.widthFt} × {spec.shell.depthFt} ft = {Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt))} sf. Changes here update the 3D model live.</p>
+
+              <div className="breakOpenRow">
+                <div className="sectionHead">Wall height by side</div>
+                <button className="breakOpen" onClick={() => setShellWallBreakOpen((open) => !open)}>
+                  {shellWallBreakOpen ? '▾ one height for all' : '▸ break open per side (N/S/E/W)'}
+                </button>
+              </div>
+              {!shellWallBreakOpen ? (
+                <p className="systemNote">All four walls follow {spec.shell.wallHeightFt} ft. Break open to set North / South / East / West heights independently (a different N vs S makes a shed roof).</p>
+              ) : (
+                <div className="wallSideGrid">
+                  {WALL_SIDES.map((side) => {
+                    const r = resolveWallSide(spec, side);
+                    return (
+                      <label key={side} className="wallSideCell">
+                        <span className="wallSideLabel">{WALL_SIDE_LABELS[side]}</span>
+                        <input type="number" min="7" max="40" value={r.heightFt} onChange={(event) => updateWallSide(side, 'heightFt', event.target.value)} />
+                        <span className="wallSideUnit">ft</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -4136,7 +4259,72 @@ function App() {
             </div>
           )}
 
-          {!['shell', 'rooms'].includes(systemView) && (
+          {systemView === 'walls' && (() => {
+            const resolvedSides = WALL_SIDES.map((side) => ({ side, r: resolveWallSide(spec, side) }));
+            const globalKey = wallAssemblyKeyFromText(spec.systems?.envelope);
+            const mixed = wallsAreMixed(spec);
+            return (
+              <div className="systemPage">
+                <div className="sectionHead">Wall system (all sides)</div>
+                <div className="controlGrid">
+                  <label>Assembly
+                    <select value={mixed ? '' : globalKey} onChange={(event) => WALL_SIDES.forEach((side) => updateWallSide(side, 'assembly', event.target.value))}>
+                      {mixed && <option value="" disabled>Mixed — see per-side</option>}
+                      {Object.values(WALL_ASSEMBLIES).map((assembly) => (
+                        <option key={assembly.key} value={assembly.key}>{assembly.label} (R≈{assembly.rValue})</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <p className="systemNote">Set one wall system for the whole house, or break open to mix systems per side — bale on the cold north, timber-and-glass on the south.</p>
+
+                <div className="breakOpenRow">
+                  <div className="sectionHead">Per side (N / S / E / W)</div>
+                  <button className="breakOpen" onClick={() => setWallBreakOpen((open) => !open)}>
+                    {wallBreakOpen ? '▾ collapse' : '▸ break open per side'}
+                  </button>
+                </div>
+
+                {!wallBreakOpen ? (
+                  <p className="systemNote">{mixed ? 'Walls currently differ by side — break open to see and edit each.' : 'All four sides share the settings above. Break open to give each side its own system, height, thickness, and finish.'}</p>
+                ) : (
+                  <div className="wallSideList">
+                    {resolvedSides.map(({ side, r }) => (
+                      <div key={side} className={r.omitted ? 'wallSideCard omitted' : 'wallSideCard'}>
+                        <div className="wallSideCardHead">
+                          <strong>{WALL_SIDE_LABELS[side]} wall</strong>
+                          <label className="wallOmitToggle">
+                            <input type="checkbox" checked={r.omitted} onChange={(event) => updateWallSide(side, 'omitted', event.target.checked)} />
+                            <span>open / no wall</span>
+                          </label>
+                        </div>
+                        {!r.omitted && (
+                          <>
+                            <div className="controlGrid tight">
+                              <label>System
+                                <select value={r.assemblyKey} onChange={(event) => updateWallSide(side, 'assembly', event.target.value)}>
+                                  {Object.values(WALL_ASSEMBLIES).map((assembly) => (
+                                    <option key={assembly.key} value={assembly.key}>{assembly.label}</option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label>Height (ft)<input type="number" min="7" max="40" value={r.heightFt} onChange={(event) => updateWallSide(side, 'heightFt', event.target.value)} /></label>
+                              <label>Thickness (ft)<input type="number" step="0.05" min="0.2" max="3.5" value={r.thicknessFt} onChange={(event) => updateWallSide(side, 'thicknessFt', event.target.value)} /></label>
+                              <label>Interior finish<input type="text" value={r.interiorFinish} onChange={(event) => updateWallSide(side, 'interiorFinish', event.target.value)} /></label>
+                              <label>Exterior finish<input type="text" value={r.exteriorFinish} onChange={(event) => updateWallSide(side, 'exteriorFinish', event.target.value)} /></label>
+                            </div>
+                            <p className="wallSideMeta">R≈{r.assembly.rValue} · {r.thicknessFt.toFixed(2)}' thick · {spec.openings.filter((opening) => opening.wall === side).length} opening(s)</p>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {!['shell', 'rooms', 'walls'].includes(systemView) && (
             <div className="systemPage">
               <div className="sectionHead">{systemView.charAt(0).toUpperCase() + systemView.slice(1)}</div>
               <p className="systemNote">This system's own controls are coming next. For now, tell the assistant what you want — for example "add a well and a 500 gallon tank" — and it will set it up in the model.</p>

@@ -2273,3 +2273,21 @@ textarea,
 /* System<->Schedule coordination (2026-07-07) */
 .scheduleFocus { font-size: 12px; opacity: .85; margin: 4px 0 8px; padding: 6px 8px; border-radius: 6px; border: 1px solid rgba(128,128,128,.3); line-height: 1.45; }
 .scheduleEmpty { font-size: 13px; opacity: .8; padding: 10px 4px; line-height: 1.5; }
+
+/* Per-side / per-wall "break open" controls (2026-07-07 — per-wall convergence) */
+.systemPage .controlGrid.tight { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 8px; margin: 6px 0; }
+.breakOpenRow { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; }
+.breakOpen { padding: 4px 8px; font-size: 12px; border-radius: 6px; border: 1px solid rgba(128,128,128,.35); background: transparent; color: inherit; cursor: pointer; white-space: nowrap; }
+.breakOpen:hover { border-color: currentColor; }
+.wallSideGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 8px 0; }
+.wallSideCell { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; }
+.wallSideLabel { font-weight: 600; opacity: .85; }
+.wallSideCell input { width: 100%; text-align: center; }
+.wallSideUnit { font-size: 11px; opacity: .6; }
+.wallSideList { display: flex; flex-direction: column; gap: 10px; margin: 10px 0 0; }
+.wallSideCard { border: 1px solid rgba(128,128,128,.28); border-radius: 8px; padding: 10px; }
+.wallSideCard.omitted { opacity: .6; }
+.wallSideCardHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+.wallOmitToggle { flex-direction: row !important; align-items: center; gap: 5px; font-size: 11px; opacity: .8; }
+.wallOmitToggle input { width: auto; }
+.wallSideMeta { font-size: 11px; opacity: .7; margin: 6px 0 0; }

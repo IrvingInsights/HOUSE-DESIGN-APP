@@ -69,6 +69,54 @@ function wallAssemblyProfile(envelopeText = '') {
   return { key: 'framed', label: 'Framed Vapor-Open Wall Assembly', thicknessFt: 0.55 };
 }
 
+// --- Per-wall assembly model (shared shape with the client in src/main.jsx) ---
+export const WALL_SIDES = ['north', 'south', 'east', 'west'];
+
+export const WALL_ASSEMBLIES = {
+  'straw-bale':       { key: 'straw-bale',       label: 'Straw Bale',          thicknessFt: 1.6,  color: 0xd8bf79, rValue: 33, finish: 'lime / clay plaster' },
+  'hemp-lime':        { key: 'hemp-lime',        label: 'Hemp-Lime',           thicknessFt: 1.25, color: 0xb9c49b, rValue: 22, finish: 'vapor-open plaster' },
+  'cob':              { key: 'cob',              label: 'Cob',                 thicknessFt: 1.8,  color: 0xb9835e, rValue: 14, finish: 'earthen plaster' },
+  'rammed-earth':     { key: 'rammed-earth',     label: 'Rammed Earth',        thicknessFt: 1.35, color: 0x9d7456, rValue: 12, finish: 'sealed / waxed earth' },
+  'cordwood':         { key: 'cordwood',         label: 'Cordwood',            thicknessFt: 1.25, color: 0x9b7652, rValue: 18, finish: 'lime mortar joints' },
+  'light-straw-clay': { key: 'light-straw-clay', label: 'Light Straw-Clay',    thicknessFt: 1.0,  color: 0xc6b077, rValue: 20, finish: 'clay plaster' },
+  'framed':           { key: 'framed',           label: 'Framed (vapor-open)', thicknessFt: 0.55, color: 0xd9d5c8, rValue: 23, finish: 'plaster / cladding' }
+};
+
+export function wallAssemblyKeyFromText(text) {
+  const t = String(text || '').toLowerCase();
+  if (/light straw|straw.?clay/.test(t)) return 'light-straw-clay';
+  if (/straw bale|strawbale|straw/.test(t)) return 'straw-bale';
+  if (/hemp/.test(t)) return 'hemp-lime';
+  if (/cob/.test(t)) return 'cob';
+  if (/rammed/.test(t)) return 'rammed-earth';
+  if (/cordwood/.test(t)) return 'cordwood';
+  return 'framed';
+}
+
+// Resolve the effective spec for one wall side, falling back from per-side
+// override -> global shell/envelope defaults. This is the single reader the
+// UI, the 3D build, the schedule, and the Blender bridge all go through.
+export function resolveWallSide(spec, side) {
+  const shell = spec.shell || {};
+  const w = (spec.walls || {})[side] || {};
+  const assemblyKey = w.assembly && WALL_ASSEMBLIES[w.assembly] ? w.assembly : wallAssemblyKeyFromText(shell && spec.systems ? spec.systems.envelope : '');
+  const assembly = WALL_ASSEMBLIES[assemblyKey] || WALL_ASSEMBLIES.framed;
+  const defaultHeight = side === 'south' ? Number(shell.southWallHeightFt || shell.wallHeightFt || 10)
+    : side === 'north' ? Number(shell.northWallHeightFt || shell.wallHeightFt || 10)
+      : Number(shell.wallHeightFt || 10);
+  const omittedSet = new Set(shell.omittedWalls || []);
+  return {
+    side,
+    heightFt: Number(w.heightFt ?? defaultHeight),
+    assemblyKey,
+    assembly,
+    thicknessFt: Number(w.thicknessFt ?? assembly.thicknessFt),
+    interiorFinish: w.interiorFinish || assembly.finish,
+    exteriorFinish: w.exteriorFinish || 'rainscreen / lime render',
+    omitted: Boolean(w.omitted) || omittedSet.has(side)
+  };
+}
+
 function objectBounds(spec, object) {
   const pad = padExtension(spec.shell);
   const gridSize = Number(spec.shell?.outdoorGridSizeFt || DEFAULT_OUTDOOR_GRID_SIZE_FT);
@@ -201,6 +249,7 @@ export function operationDescription(operation, spec) {
   if (op.type === 'set_roof' || op.type === 'set_roof_profile' || op.type === 'add_roof_plane') return `Set roof to ${op.roofType || spec.shell.roofType || 'roof'}${op.southWallHeightFt && op.northWallHeightFt ? ` with S ${op.southWallHeightFt}' / N ${op.northWallHeightFt}' wall heights` : ''}.`;
   if (op.type === 'set_assembly' || op.type === 'set_wall_assembly' || op.type === 'set_wall_segment_assembly') return `Updated ${op.field || op.wall || 'assembly'} to ${op.value}.`;
   if (op.type === 'set_wall_height') return `Set ${op.wall || 'wall'} height to ${op.h || op.value}'.`;
+  if (op.type === 'set_wall_side') return `Set ${op.wall || 'wall'} wall ${op.field || 'property'} to ${op.value}.`;
   if (op.type === 'set_shell' || op.type === 'add_pad_extension') return `Updated shell ${op.field || 'padExtensionFt'} to ${op.value || op.w}.`;
   if (op.type === 'add_opening') return `Added ${op.widthFt || 3}' ${op.openingType || 'opening'} on the ${op.wall} wall.`;
   if (op.type === 'add_opening_from_reference' || op.type === 'trace_image_request') return op.reason || 'Image tracing needs wall, type, width, and location before BIM openings can be placed.';
@@ -218,6 +267,7 @@ export function applyBimOperations(currentSpec, plan) {
   next.elements ||= [];
   next.openings ||= [];
   next.levels ||= [{ id: 'level-1', name: 'Level 01', elevationFt: 0, heightFt: next.shell.wallHeightFt || 10 }];
+  next.walls ||= {};
 
   const actions = [];
   const warnings = [...(plan?.warnings || [])];
@@ -288,6 +338,35 @@ export function applyBimOperations(currentSpec, plan) {
       const profile = roofProfile(next.shell);
       next.shell.wallHeightFt = profile.highWallHeightFt;
       next.shell.roofPitch = Math.round(profile.pitch * 1000) / 1000;
+      actions.push(operationDescription(operation, next));
+      continue;
+    }
+
+    if (operation.type === 'set_wall_side') {
+      const side = WALL_SIDES.includes(operation.wall) ? operation.wall : 'south';
+      const field = operation.field;
+      next.walls[side] ||= {};
+      if (field === 'heightFt') {
+        const h = clamp(Number(operation.value), 7, 40);
+        next.walls[side].heightFt = h;
+        if (side === 'south') next.shell.southWallHeightFt = h;
+        if (side === 'north') next.shell.northWallHeightFt = h;
+        const profile = roofProfile(next.shell);
+        next.shell.wallHeightFt = profile.highWallHeightFt;
+        next.shell.roofPitch = Math.round(profile.pitch * 1000) / 1000;
+      } else if (field === 'assembly') {
+        next.walls[side].assembly = WALL_ASSEMBLIES[operation.value] ? operation.value : 'framed';
+      } else if (field === 'thicknessFt') {
+        next.walls[side].thicknessFt = clamp(Number(operation.value), 0.2, 3.5);
+      } else if (field === 'interiorFinish' || field === 'exteriorFinish') {
+        next.walls[side][field] = String(operation.value || '');
+      } else if (field === 'omitted') {
+        const omit = operation.value === true || operation.value === 'true' || operation.value === 1 || operation.value === '1';
+        next.walls[side].omitted = omit;
+        const set = new Set(next.shell.omittedWalls || []);
+        if (omit) set.add(side); else set.delete(side);
+        next.shell.omittedWalls = [...set];
+      }
       actions.push(operationDescription(operation, next));
       continue;
     }
