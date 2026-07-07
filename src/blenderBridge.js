@@ -9,7 +9,7 @@
 // north, origin at SW corner). The Dashboard uses site coords centered on the
 // house (x east, y north). Translate by centering.
 
-import { WALL_SIDES, resolveWallSide } from '../backend/bim-core.mjs';
+import { OPENING_TYPES, WALL_SIDES, resolveWallSide } from '../backend/bim-core.mjs';
 
 const BLENDER_URL = 'http://localhost:8000';
 
@@ -47,16 +47,21 @@ export function specToDashboardState(spec) {
   // (Its south wall is the passive-solar greenhouse assembly.)
   const customOpenings = (spec.openings || [])
     .filter((o) => ['north', 'east', 'west'].includes(o.wall))
-    .map((o, i) => ({
-      id: Date.now() + i,
-      wall: o.wall,
-      type: o.type === 'door' ? 'door' : 'window',
-      w: Number(o.widthFt) || 3,
-      h: o.type === 'door' ? 7 : 4,
-      sill: o.type === 'door' ? 0 : 3,
-      // Dashboard offset = distance along the wall from its west/south end.
-      offset: o.wall === 'north' ? (Number(o.x) || 0) : (Number(o.y) || 0),
-    }));
+    .map((o, i) => {
+      const profile = OPENING_TYPES[o.type] || OPENING_TYPES.window;
+      return {
+        id: Date.now() + i,
+        wall: o.wall,
+        // Dashboard cuts by door/window; entry types (french, slider, dutch,
+        // barn) are doors there, everything glazed-and-raised is a window.
+        type: profile.entry ? 'door' : 'window',
+        w: Number(o.widthFt) || 3,
+        h: profile.h,
+        sill: profile.sill,
+        // Dashboard offset = distance along the wall from its west/south end.
+        offset: o.wall === 'north' ? (Number(o.x) || 0) : (Number(o.y) || 0),
+      };
+    });
 
   // Rooms: Dashboard partition rooms are name + footprint.
   const rooms = (spec.rooms || []).map((r) => ({

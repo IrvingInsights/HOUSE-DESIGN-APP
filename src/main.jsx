@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { pushToBlender, exportIfcViaBlender } from './blenderBridge.js';
+import { OPENING_TYPES } from '../backend/bim-core.mjs';
 import {
   AlertTriangle,
   Box,
@@ -1683,7 +1684,7 @@ function applyStructuredDesignPlan(currentSpec, plan) {
       const widthFt = clamp(Number(operation.widthFt || 3), 1, 24);
       const maxAlong = wall === 'north' || wall === 'south' ? next.shell.widthFt : next.shell.depthFt;
       const along = clamp(Number(operation.positionFt || 0), 0, Math.max(0, maxAlong - widthFt));
-      const openingType = operation.openingType === 'slider' ? 'door' : operation.openingType || 'window';
+      const openingType = OPENING_TYPES[operation.openingType] ? operation.openingType : 'window';
       const label = operation.name || `${titleCase(wall)} ${titleCase(operation.openingType || openingType)} ${next.openings.length + 1}`;
       next.openings.push(wall === 'north' || wall === 'south'
         ? { type: openingType, wall, x: along, widthFt, label }
@@ -2027,10 +2028,10 @@ function detectIssues(spec) {
   if (!spec.rooms.some((room) => room.type === 'wet')) {
     issues.push({ severity: 'critical', title: 'No wet core defined', owner: 'Engineer', system: 'rooms', fix: 'Add a bathroom/mechanical wet core and align plumbing walls.' });
   }
-  if (!spec.openings.some((item) => item.type === 'door' && item.wall === 'south')) {
-    issues.push({ severity: 'warning', title: 'Primary entry lacks clear solar-side approach', owner: 'Designer', system: 'windows', fix: 'Add or move the main entry to a legible approach with weather protection.' });
+  if (!spec.openings.some((item) => (OPENING_TYPES[item.type]?.entry) && item.wall === 'south')) {
+    issues.push({ severity: 'warning', title: 'Primary entry lacks clear solar-side approach', owner: 'Designer', system: 'windows', fix: 'Add or move the main entry (a door, french doors, or a slider) to a legible south approach with weather protection.' });
   }
-  if (!spec.openings.some((item) => item.type === 'window' && item.wall === 'south')) {
+  if (!spec.openings.some((item) => (OPENING_TYPES[item.type] || OPENING_TYPES.window).glazed && item.wall === 'south')) {
     issues.push({ severity: 'warning', title: 'Insufficient south-facing daylight strategy', owner: 'Permaculture', system: 'windows', fix: 'Add balanced south glazing with summer shading and winter solar gain.' });
   }
   if (spec.shell.wallHeightFt > 12) {
@@ -2131,8 +2132,10 @@ function deriveDesign(spec, wallSections) {
   const wallR = wallArea
     ? wallSections.reduce((sum, wall) => sum + wall.lengthFt * (wall.heightFt + storeyExtraFt) * (WALL_ASSEMBLIES[wall.assemblyKey]?.rValue ?? 20), 0) / wallArea
     : 20;
-  const southGlass = (spec.openings || []).filter((opening) => opening.wall === 'south' && opening.type !== 'door')
-    .reduce((sum, opening) => sum + (Number(opening.widthFt) || 3) * 4.5, 0);
+  // Glazed openings on the south wall — windows, picture, clerestory, and
+  // glazed doors (french, sliders) all count toward passive-solar glass.
+  const southGlass = (spec.openings || []).filter((opening) => opening.wall === 'south' && (OPENING_TYPES[opening.type] || OPENING_TYPES.window).glazed)
+    .reduce((sum, opening) => sum + (Number(opening.widthFt) || 3) * (OPENING_TYPES[opening.type] || OPENING_TYPES.window).h, 0);
   const glassPct = floor ? (southGlass / floor) * 100 : 0;
   const roofR = 38;
   const heatUA = Math.max(0, wallArea - southGlass) / Math.max(wallR, 1) + roofArea / roofR + southGlass * 0.5;
@@ -3013,13 +3016,18 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
         group.add(label);
       });
 
+      const doorMat = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.75 });
       spec.openings.forEach((opening, index) => {
         const size = opening.widthFt;
+        const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
+        const openH = profile.h;
+        const centerY = profile.sill + openH / 2;
+        const mat = profile.glazed ? glassMat : doorMat;
         let mesh;
-        if (opening.wall === 'north') mesh = box(size, 3, 0.18, opening.x + size / 2, 3.1, -0.08, glassMat);
-        if (opening.wall === 'south') mesh = box(size, 3, 0.18, opening.x + size / 2, 3.1, depth + 0.08, glassMat);
-        if (opening.wall === 'east') mesh = box(0.18, 3, size, width + 0.08, 3.1, opening.y + size / 2, glassMat);
-        if (opening.wall === 'west') mesh = box(0.18, 3, size, -0.08, 3.1, opening.y + size / 2, glassMat);
+        if (opening.wall === 'north') mesh = box(size, openH, 0.18, opening.x + size / 2, centerY, -0.08, mat);
+        if (opening.wall === 'south') mesh = box(size, openH, 0.18, opening.x + size / 2, centerY, depth + 0.08, mat);
+        if (opening.wall === 'east') mesh = box(0.18, openH, size, width + 0.08, centerY, opening.y + size / 2, mat);
+        if (opening.wall === 'west') mesh = box(0.18, openH, size, -0.08, centerY, opening.y + size / 2, mat);
         if (mesh) {
           mesh.name = opening.label || `${opening.wall} ${opening.type}`;
           mesh.userData.roomId = `opening-${index}`;
@@ -4104,7 +4112,7 @@ function App() {
     void applyBackendOperations({
       operations: [
         { type: 'remove_object', targetId: `opening-${index}`, name: opening.label },
-        { type: 'add_opening', wall: updated.wall, openingType: updated.type === 'door' ? 'door' : 'window', widthFt: updated.widthFt, positionFt: updated.wall === 'north' || updated.wall === 'south' ? updated.x : updated.y, name: updated.label }
+        { type: 'add_opening', wall: updated.wall, openingType: OPENING_TYPES[updated.type] ? updated.type : 'window', widthFt: updated.widthFt, positionFt: updated.wall === 'north' || updated.wall === 'south' ? updated.x : updated.y, name: updated.label }
       ],
       promptText: `Update opening ${opening.label}`,
       logPrefix: 'Windows'
@@ -4122,13 +4130,14 @@ function App() {
   }
 
   function addOpeningOnWall(wall, type) {
-    const widthFt = type === 'door' ? 3 : 5;
+    const profile = OPENING_TYPES[type] || OPENING_TYPES.window;
+    const widthFt = profile.defaultW;
     const maxAlong = wall === 'north' || wall === 'south' ? spec.shell.widthFt : spec.shell.depthFt;
     const existing = spec.openings.filter((opening) => opening.wall === wall).length;
     const along = clamp(4 + existing * 6, 0, Math.max(0, maxAlong - widthFt));
     void applyBackendOperations({
-      operations: [{ type: 'add_opening', wall, openingType: type, widthFt, positionFt: along, name: `${titleCase(wall)} ${titleCase(type)} ${existing + 1}` }],
-      promptText: `Add ${type} to ${wall} wall`,
+      operations: [{ type: 'add_opening', wall, openingType: type, widthFt, positionFt: along, name: `${titleCase(wall)} ${profile.label} ${existing + 1}` }],
+      promptText: `Add ${profile.label} to ${wall} wall`,
       logPrefix: 'Windows'
     });
   }
@@ -4199,7 +4208,7 @@ function App() {
         else updated.y = along;
       }
       if (field === 'type') updated.type = value;
-      const operations = [{ type: 'remove_object', targetId: selectedRoom, name: opening.label }, { type: 'add_opening', wall: updated.wall, openingType: updated.type === 'door' ? 'door' : 'window', widthFt: updated.widthFt, positionFt: updated.wall === 'north' || updated.wall === 'south' ? updated.x : updated.y, name: updated.label }];
+      const operations = [{ type: 'remove_object', targetId: selectedRoom, name: opening.label }, { type: 'add_opening', wall: updated.wall, openingType: OPENING_TYPES[updated.type] ? updated.type : 'window', widthFt: updated.widthFt, positionFt: updated.wall === 'north' || updated.wall === 'south' ? updated.x : updated.y, name: updated.label }];
       void applyBackendOperations({ operations, promptText: `Update opening ${opening.label}`, logPrefix: 'Opening edit', nextSelectedId: selectedRoom });
       return;
     }
@@ -4781,9 +4790,10 @@ function App() {
                         </select>
                       </label>
                       <label>Type
-                        <select value={opening.type === 'door' ? 'door' : 'window'} onChange={(event) => updateOpening(index, 'type', event.target.value)}>
-                          <option value="window">Window</option>
-                          <option value="door">Door</option>
+                        <select value={OPENING_TYPES[opening.type] ? opening.type : 'window'} onChange={(event) => updateOpening(index, 'type', event.target.value)}>
+                          {Object.entries(OPENING_TYPES).map(([key, profile]) => (
+                            <option key={key} value={key}>{profile.label}</option>
+                          ))}
                         </select>
                       </label>
                       <label>Width (ft)<input type="number" min="1" max="24" value={opening.widthFt} onChange={(event) => updateOpening(index, 'w', event.target.value)} /></label>
@@ -4795,9 +4805,11 @@ function App() {
               </div>
               <div className="buttonRow">
                 <button className="secondary" onClick={() => addOpeningOnWall('south', 'window')}><Plus size={15} /> South window</button>
+                <button className="secondary" onClick={() => addOpeningOnWall('south', 'french')}><Plus size={15} /> South french doors</button>
                 <button className="secondary" onClick={() => addOpeningOnWall('south', 'door')}><Plus size={15} /> South door</button>
                 <button className="secondary" onClick={() => addOpeningOnWall('north', 'window')}><Plus size={15} /> North window</button>
               </div>
+              <p className="systemNote">Glazed doors (french, sliders) count toward your south solar glass; clerestories sit high for daylight and summer venting; dutch and barn doors are the homestead workhorses.</p>
             </div>
           )}
 
@@ -5188,10 +5200,12 @@ function App() {
                   {!selectedIsWall && !selectedIsSpecial && !selectedIsElement && storeyInfo(spec.shell).storeys > 1 && <label>Level<input type="number" min="1" max={Math.ceil(storeyInfo(spec.shell).storeys)} value={Number(selected?.level || 1)} onChange={(event) => updateSelectedRoom('level', event.target.value)} /></label>}
                   {(selectedIsElement || selectedIsWall || selectedIsRoof) && <label>Height<input type="number" value={selected?.h || 1.2} disabled={selectedIsOpening || selectedIsPad || selectedIsGrid} onChange={(event) => updateSelectedRoom('h', event.target.value)} /></label>}
                   {selectedIsSpecial && !selectedIsPad && <label>{selectedIsRoof ? 'Roof Type' : 'Opening Type'}
-                    <select value={selected?.type || 'window'} onChange={(event) => updateSelectedRoom('type', event.target.value)}>
-                      {selectedIsRoof ? <option value="gable">gable</option> : <option value="window">window</option>}
-                      {selectedIsRoof ? <option value="shed">shed / lean-to</option> : <option value="door">door</option>}
-                      {!selectedIsRoof && <option value="slider">slider</option>}
+                    <select value={selectedIsRoof ? (selected?.type || 'gable') : (OPENING_TYPES[selected?.type] ? selected.type : 'window')} onChange={(event) => updateSelectedRoom('type', event.target.value)}>
+                      {selectedIsRoof && <option value="gable">gable</option>}
+                      {selectedIsRoof && <option value="shed">shed / lean-to</option>}
+                      {!selectedIsRoof && Object.entries(OPENING_TYPES).map(([key, profile]) => (
+                        <option key={key} value={key}>{profile.label}</option>
+                      ))}
                     </select>
                   </label>}
                   {!selectedIsWall && !selectedIsSpecial && <label>{selectedIsElement ? 'Category' : 'Type'}

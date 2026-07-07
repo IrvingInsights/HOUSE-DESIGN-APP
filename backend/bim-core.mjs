@@ -261,6 +261,21 @@ export function operationDescription(operation, spec) {
   return op.reason || 'No model change.';
 }
 
+// The full opening vocabulary. h/sill in feet drive the 3D render, the IFC/
+// Blender bridge, and the passive-solar math (glazed openings count toward
+// south glass); entry marks types that satisfy the main-entry check.
+export const OPENING_TYPES = {
+  window: { label: 'Window', h: 4, sill: 3, glazed: true, defaultW: 5 },
+  picture: { label: 'Picture window (fixed)', h: 5, sill: 2, glazed: true, defaultW: 6 },
+  awning: { label: 'Awning / vent window', h: 1.8, sill: 6, glazed: true, defaultW: 3 },
+  clerestory: { label: 'Clerestory window', h: 2, sill: 8, glazed: true, defaultW: 6 },
+  door: { label: 'Door', h: 6.8, sill: 0, glazed: false, defaultW: 3, entry: true },
+  french: { label: 'French doors', h: 6.8, sill: 0, glazed: true, defaultW: 5, entry: true },
+  slider: { label: 'Sliding glass door', h: 6.8, sill: 0, glazed: true, defaultW: 6, entry: true },
+  dutch: { label: 'Dutch door', h: 6.8, sill: 0, glazed: false, defaultW: 3, entry: true },
+  barn: { label: 'Barn / equipment door', h: 8, sill: 0, glazed: false, defaultW: 8, entry: true }
+};
+
 export const UTILITY_DEFAULTS = {
   waterSource: 'well',
   tankGal: 0,
@@ -465,8 +480,8 @@ export function applyBimOperations(currentSpec, plan) {
       const widthFt = clamp(Number(operation.widthFt || 3), 1, 24);
       const maxAlong = wall === 'north' || wall === 'south' ? next.shell.widthFt : next.shell.depthFt;
       const along = clamp(Number(operation.positionFt || 0), 0, Math.max(0, maxAlong - widthFt));
-      const openingType = operation.openingType === 'slider' ? 'door' : operation.openingType || 'window';
-      const label = operation.name || `${titleCase(wall)} ${titleCase(operation.openingType || openingType)} ${next.openings.length + 1}`;
+      const openingType = OPENING_TYPES[operation.openingType] ? operation.openingType : 'window';
+      const label = operation.name || `${titleCase(wall)} ${OPENING_TYPES[openingType].label} ${next.openings.length + 1}`;
       next.openings.push(wall === 'north' || wall === 'south'
         ? { type: openingType, wall, x: along, widthFt, label }
         : { type: openingType, wall, y: along, widthFt, label });
