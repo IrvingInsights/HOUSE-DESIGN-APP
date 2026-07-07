@@ -2392,3 +2392,66 @@ textarea,
 .wallOmitToggle input { width: auto; }
 .wallSideMeta { font-size: 11px; opacity: .7; margin: 6px 0 0; }
 .pitchHint { font-style: normal; font-size: 11px; color: var(--ink3, #868A7C); font-weight: 500; margin-left: 4px; }
+
+/* Grouped system nav + status dots (dependency web v1) */
+.systemNav { margin: 8px 0 12px; }
+.systemNavGroup { margin-bottom: 10px; }
+.systemNavEyebrow {
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink3, #868A7C);
+  font-weight: 600;
+  padding: 0 2px 5px;
+}
+.systemTabs button { display: inline-flex; align-items: center; gap: 6px; }
+.sysDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--line2, #CAC8BB);
+}
+.sysDot.flag { background: var(--bad, #AE452F); box-shadow: 0 0 0 2px rgba(174, 69, 47, 0.18); }
+.systemTabs button.active .sysDot { background: var(--plum, #26424C); }
+.systemTabs button.active .sysDot.flag { background: var(--bad, #AE452F); }
+
+/* Per-page feedback: why blurb, live readouts, feeds tags */
+.systemFeedback { margin-top: 14px; }
+.whyNote {
+  font-size: 13px;
+  color: var(--ink2, #565A4F);
+  background: var(--sage, #E2ECEE);
+  border-radius: 8px;
+  padding: 10px 13px;
+  line-height: 1.5;
+}
+.readsHead { margin-top: 12px; }
+.readsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.readCell {
+  background: var(--raise, #fff);
+  border: 1px solid var(--line, #DBD9CE);
+  border-radius: 8px;
+  padding: 9px 11px;
+  min-width: 0;
+}
+.readKey { display: block; font-size: 11px; color: var(--ink3, #868A7C); font-weight: 600; letter-spacing: 0.02em; }
+.readValue { display: block; font-size: 17px; letter-spacing: -0.02em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.readValue small { font-size: 11px; color: var(--ink3, #868A7C); font-weight: 500; }
+.readNote { display: block; font-size: 11px; color: var(--ink2, #565A4F); margin-top: 3px; line-height: 1.35; }
+.feedsRow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 12px; }
+.feedsRow .systemNavEyebrow { padding: 0 2px; }
+.feedTag {
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--raise, #fff);
+  border: 1px solid var(--line, #DBD9CE);
+  border-radius: 20px;
+  padding: 3px 10px;
+  color: var(--ink2, #565A4F);
+}

@@ -1364,15 +1364,12 @@ function parsePromptToSpec(prompt, currentSpec, attachedImages = []) {
 }
 
 function interpreterSummary(report) {
-  const plan = report.plan
-    ? `Planner:\n- Add to: ${report.plan.target || 'Auto'}\n- Intent: ${report.plan.intent.replace(/_/g, ' ')} (${Math.round(report.plan.confidence * 100)}% confidence)\n- Apply gate: ${report.actions.length ? 'passed' : report.plan.canApply ? 'no operation produced' : 'blocked'}${report.plan.missing.length ? `\n- Missing: ${report.plan.missing.join(', ')}` : ''}\n\n`
-    : '';
-  const actions = report.actions.length
-    ? report.actions.slice(0, 8).map((action) => `- ${action}`).join('\n')
-    : '- I did not detect a concrete model operation. Nothing was changed in the BIM. Try a direct command such as "make all exterior walls straw bale", "change structure to timber frame", or "add pantry 8 x 10 near kitchen".';
-  const assumptions = report.assumptions.length ? `\n\nAssumptions:\n${report.assumptions.map((item) => `- ${item}`).join('\n')}` : '';
-  const issues = report.issues.length ? `\n\nCouncil flags:\n${report.issues.slice(0, 4).map((issue) => `- ${issue.owner}: ${issue.title}`).join('\n')}` : '\n\nCouncil flags:\n- No blocking automated schematic issue found.';
-  return `${plan}I interpreted the design request as:\n${actions}${assumptions}${issues}`;
+  const opening = report.actions.length
+    ? `Done — here's what changed:\n${report.actions.slice(0, 8).map((action) => `- ${action}`).join('\n')}`
+    : `I couldn't turn that into a change to the house, so nothing was altered.${report.plan?.missing?.length ? ` To do it I still need: ${report.plan.missing.join(', ')}.` : ''} Try a direct instruction like "make all exterior walls straw bale" or "add pantry 8 x 10 near kitchen".`;
+  const assumptions = report.assumptions.length ? `\n\nI assumed: ${report.assumptions.join(' ')}` : '';
+  const issues = report.issues.length ? `\n\nThe council flagged:\n${report.issues.slice(0, 4).map((issue) => `- ${issue.owner}: ${issue.title}`).join('\n')}` : '';
+  return `${opening}${assumptions}${issues}`;
 }
 
 function isConsultativePrompt(prompt, attachedImages = []) {
@@ -1687,14 +1684,14 @@ function applyStructuredDesignPlan(currentSpec, plan) {
 }
 
 function structuredPlanSummary(report) {
-  const actions = report.actions.length
-    ? report.actions.slice(0, 10).map((action) => `- ${action}`).join('\n')
-    : '- No concrete BIM operation was applied.';
-  const warnings = report.warnings.length ? `\n\nWarnings:\n${report.warnings.map((item) => `- ${item}`).join('\n')}` : '';
-  const assumptions = report.assumptions.length ? `\n\nAssumptions:\n${report.assumptions.map((item) => `- ${item}`).join('\n')}` : '';
-  const questions = report.questions.length ? `\n\nQuestions:\n${report.questions.map((item) => `- ${item}`).join('\n')}` : '';
-  const issues = report.issues.length ? `\n\nCouncil flags:\n${report.issues.slice(0, 4).map((issue) => `- ${issue.owner}: ${issue.title}`).join('\n')}` : '\n\nCouncil flags:\n- No blocking automated schematic issue found.';
-  return `Planner: ${report.source}\n${report.summary}\n\nBIM operations:\n${actions}${warnings}${assumptions}${questions}${issues}`;
+  const opening = report.actions.length
+    ? `${report.summary}\n\nWhat changed:\n${report.actions.slice(0, 10).map((action) => `- ${action}`).join('\n')}`
+    : `${report.summary}\n\nNothing was changed in the model.`;
+  const warnings = report.warnings.length ? `\n\nWatch out: ${report.warnings.join(' ')}` : '';
+  const assumptions = report.assumptions.length ? `\n\nI assumed: ${report.assumptions.join(' ')}` : '';
+  const questions = report.questions.length ? `\n\nTo do this better, tell me:\n${report.questions.map((item) => `- ${item}`).join('\n')}` : '';
+  const issues = report.issues.length ? `\n\nThe council flagged:\n${report.issues.slice(0, 4).map((issue) => `- ${issue.owner}: ${issue.title}`).join('\n')}` : '';
+  return `${opening}${warnings}${assumptions}${questions}${issues}`;
 }
 
 async function requestCurrentProjectState() {
@@ -1892,25 +1889,25 @@ function detectIssues(spec) {
   const shellArea = spec.shell.widthFt * spec.shell.depthFt;
 
   if (conditionedArea > shellArea * 1.08) {
-    issues.push({ severity: 'critical', title: 'Room program exceeds shell area', owner: 'Architect', fix: 'Reduce room footprints or enlarge the shell before issuing drawings.' });
+    issues.push({ severity: 'critical', title: 'Room program exceeds shell area', owner: 'Architect', system: 'rooms', fix: 'Reduce room footprints or enlarge the shell before issuing drawings.' });
   }
   if (!spec.rooms.some((room) => room.type === 'wet')) {
-    issues.push({ severity: 'critical', title: 'No wet core defined', owner: 'Engineer', fix: 'Add a bathroom/mechanical wet core and align plumbing walls.' });
+    issues.push({ severity: 'critical', title: 'No wet core defined', owner: 'Engineer', system: 'rooms', fix: 'Add a bathroom/mechanical wet core and align plumbing walls.' });
   }
   if (!spec.openings.some((item) => item.type === 'door' && item.wall === 'south')) {
-    issues.push({ severity: 'warning', title: 'Primary entry lacks clear solar-side approach', owner: 'Designer', fix: 'Add or move the main entry to a legible approach with weather protection.' });
+    issues.push({ severity: 'warning', title: 'Primary entry lacks clear solar-side approach', owner: 'Designer', system: 'windows', fix: 'Add or move the main entry to a legible approach with weather protection.' });
   }
   if (!spec.openings.some((item) => item.type === 'window' && item.wall === 'south')) {
-    issues.push({ severity: 'warning', title: 'Insufficient south-facing daylight strategy', owner: 'Permaculture', fix: 'Add balanced south glazing with summer shading and winter solar gain.' });
+    issues.push({ severity: 'warning', title: 'Insufficient south-facing daylight strategy', owner: 'Permaculture', system: 'windows', fix: 'Add balanced south glazing with summer shading and winter solar gain.' });
   }
   if (spec.shell.wallHeightFt > 12) {
-    issues.push({ severity: 'warning', title: 'Tall walls need explicit lateral strategy', owner: 'Engineer', fix: 'Add shear wall schedule, hold-downs, and diaphragm notes.' });
+    issues.push({ severity: 'warning', title: 'Tall walls need explicit lateral strategy', owner: 'Engineer', system: 'walls', fix: 'Add shear wall schedule, hold-downs, and diaphragm notes.' });
   }
   if (spec.systems.envelope.toLowerCase().includes('natural') && !spec.systems.envelope.toLowerCase().includes('rainscreen')) {
-    issues.push({ severity: 'warning', title: 'Natural wall lacks drying layer', owner: 'Natural Builder', fix: 'Include rainscreen, generous roof overhangs, and capillary breaks.' });
+    issues.push({ severity: 'warning', title: 'Natural wall lacks drying layer', owner: 'Natural Builder', system: 'walls', fix: 'Include rainscreen, generous roof overhangs, and capillary breaks.' });
   }
   if (!spec.rooms.some((room) => /mud|laundry|service/i.test(room.name))) {
-    issues.push({ severity: 'warning', title: 'Farm workflow has no dirty entry', owner: 'Homestead/Farm', fix: 'Add a mud/laundry buffer between exterior work and clean living space.' });
+    issues.push({ severity: 'warning', title: 'Farm workflow has no dirty entry', owner: 'Homestead/Farm', system: 'rooms', fix: 'Add a mud/laundry buffer between exterior work and clean living space.' });
   }
   if (issues.length === 0) {
     issues.push({ severity: 'pass', title: 'Schematic passes current council checks', owner: 'Project Manager', fix: 'Ready for PE/architect review, structural sizing, jurisdictional code check, and stamped drawing development.' });
@@ -1929,6 +1926,161 @@ function runCouncil(spec) {
     };
   });
 }
+
+// The dependency engine (v1): derive live quantities every system page reads.
+// Formulas and constants come from the control-face prototype's engine —
+// directional early-design numbers, not stamped calculations.
+function deriveDesign(spec, wallSections) {
+  const w = Number(spec.shell.widthFt) || 0;
+  const d = Number(spec.shell.depthFt) || 0;
+  const floor = w * d;
+  const pitch = Number(spec.shell.roofPitch || 0.32);
+  const roofArea = floor / Math.cos(Math.atan(pitch));
+  const wallArea = wallSections.reduce((sum, wall) => sum + wall.lengthFt * wall.heightFt, 0);
+  const wallCostPsf = { 'straw-bale': 12, 'hemp-lime': 20, cob: 20, 'rammed-earth': 22, cordwood: 16, 'light-straw-clay': 15, framed: 18 };
+  const wallsCost = wallSections.reduce((sum, wall) => sum + wall.lengthFt * wall.heightFt * (wallCostPsf[wall.assemblyKey] ?? 16), 0);
+  const wallR = wallArea
+    ? wallSections.reduce((sum, wall) => sum + wall.lengthFt * wall.heightFt * (WALL_ASSEMBLIES[wall.assemblyKey]?.rValue ?? 20), 0) / wallArea
+    : 20;
+  const southGlass = (spec.openings || []).filter((opening) => opening.wall === 'south' && opening.type !== 'door')
+    .reduce((sum, opening) => sum + (Number(opening.widthFt) || 3) * 4.5, 0);
+  const glassPct = floor ? (southGlass / floor) * 100 : 0;
+  const roofR = 38;
+  const heatUA = Math.max(0, wallArea - southGlass) / Math.max(wallR, 1) + roofArea / roofR + southGlass * 0.5;
+  const heatLoadKbtu = (heatUA * 70) / 1000;
+  const bedrooms = Math.max(1, spec.rooms.filter((room) => room.type === 'sleeping').length);
+  const people = bedrooms + 1;
+  const waterGpd = people * 50;
+  const septicGpd = bedrooms * 110;
+  const loadKwhDay = 2 + people * 2.2 + 2;
+  const panels = Math.ceil(loadKwhDay / (4.2 * 0.78) / 0.4);
+  const panelRoom = Math.floor(roofArea / 22);
+  const cost = {
+    foundation: floor * 10,
+    walls: wallsCost,
+    roof: roofArea * 10,
+    heat: 2500,
+    water: 7500,
+    waste: 8500,
+    power: panels * 900 + 3000
+  };
+  const total = Object.values(cost).reduce((sum, part) => sum + part, 0);
+  return { floor, roofArea, wallArea, wallR, southGlass, glassPct, heatLoadKbtu, bedrooms, people, waterGpd, septicGpd, loadKwhDay, panels, panelRoom, cost, total, pitch };
+}
+
+const fmtMoney = (value) => `$${Math.round(value).toLocaleString()}`;
+const fmtNum = (value) => Math.round(value).toLocaleString();
+
+const SYSTEM_GROUPS = [
+  { label: 'Land & program', keys: ['site', 'rooms'] },
+  { label: 'The building', keys: ['shell', 'foundation', 'walls', 'roof', 'windows'] },
+  { label: 'Systems', keys: ['heat', 'water', 'waste', 'power', 'outdoors'] }
+];
+
+const SYSTEM_META = {
+  site: {
+    label: 'Site',
+    why: 'Where the house sits and how it faces the sun — every other system leans on this. Sun angles drive passive solar and panel output; rainfall decides whether a roof can supply your water.',
+    feeds: ['Windows', 'Water', 'Power'],
+    reads: () => []
+  },
+  rooms: {
+    label: 'Rooms',
+    why: 'People and rooms seed water use, power draw, and waste sizing. Bedrooms size the septic field.',
+    feeds: ['Water', 'Waste', 'Power'],
+    reads: (dd) => [
+      ['Bedrooms', String(dd.bedrooms), '', 'sizes the septic field'],
+      ['Everyday water', fmtNum(dd.waterGpd), 'gal/day', `for about ${dd.people} people`]
+    ]
+  },
+  shell: {
+    label: 'Shell',
+    why: 'The footprint sets floor, roof, and wall areas — which flow into cost, heat load, panels, and catchment.',
+    feeds: ['Walls', 'Roof', 'Heat', 'Power'],
+    reads: (dd) => [
+      ['Floor', fmtNum(dd.floor), 'sf', ''],
+      ['Roof surface', fmtNum(dd.roofArea), 'sf', 'shared by panels + catchment'],
+      ['Wall area', fmtNum(dd.wallArea), 'sf', '']
+    ]
+  },
+  foundation: {
+    label: 'Foundation',
+    why: 'What the house sits on sets cost per square foot and a big share of the embodied carbon.',
+    feeds: ['Cost'],
+    reads: (dd) => [['This system', fmtMoney(dd.cost.foundation), '', 'directional estimate']]
+  },
+  walls: {
+    label: 'Walls',
+    why: 'The single biggest lever on insulation, cost, carbon, and how much you can build yourself. Wall R-value sets your heat load; thickness sets how tall an earthen wall may be.',
+    feeds: ['Heat', 'Cost'],
+    reads: (dd) => [
+      ['Insulation', `R-${Math.round(dd.wallR)}`, '', 'area-weighted across sides'],
+      ['This system', fmtMoney(dd.cost.walls), '', '']
+    ]
+  },
+  roof: {
+    label: 'Roof',
+    why: 'Roof area caps your solar panels and feeds rain catchment; the overhang shades summer sun and shields earthen walls.',
+    feeds: ['Power', 'Water', 'Heat'],
+    reads: (dd) => [
+      ['Roof surface', fmtNum(dd.roofArea), 'sf', 'grows with pitch'],
+      ['Panel room', `~${dd.panelRoom}`, 'panels', ''],
+      ['This system', fmtMoney(dd.cost.roof), '', '']
+    ]
+  },
+  windows: {
+    label: 'Windows',
+    why: 'South glass against floor area decides free winter heat — too little wastes the sun, too much overheats. 7–12% of the floor is the sweet spot.',
+    feeds: ['Heat'],
+    reads: (dd) => [
+      ['South glass', fmtNum(dd.southGlass), 'sf', ''],
+      ['Of floor area', `${dd.glassPct.toFixed(1)}%`, '', dd.glassPct >= 7 && dd.glassPct <= 12 ? 'in the passive-solar range' : 'target 7–12%']
+    ]
+  },
+  heat: {
+    label: 'Heat',
+    why: 'Your walls, roof, and windows set the heat load below; whatever heater you pick has to cover it.',
+    feeds: ['Power', 'Cost'],
+    reads: (dd) => [
+      ['Design heat load', dd.heatLoadKbtu.toFixed(1), 'kBTU/hr', 'from your walls + windows'],
+      ['This system', fmtMoney(dd.cost.heat), '', '']
+    ]
+  },
+  water: {
+    label: 'Water',
+    why: 'A well needs power for its pump; catchment leans on your roof area and rainfall. What you can get has to cover what you use.',
+    feeds: ['Power', 'Waste'],
+    reads: (dd) => [
+      ['You will use', fmtNum(dd.waterGpd), 'gal/day', `about ${dd.people} people`],
+      ['This system', fmtMoney(dd.cost.water), '', '']
+    ]
+  },
+  waste: {
+    label: 'Waste',
+    why: 'A septic field must sit at least 100 ft from a well, and bedrooms size the field. Composting sidesteps most of it.',
+    feeds: ['Water', 'Site'],
+    reads: (dd) => [
+      ['Design flow', fmtNum(dd.septicGpd), 'gal/day', `${dd.bedrooms} bedroom${dd.bedrooms === 1 ? '' : 's'} × 110`],
+      ['This system', fmtMoney(dd.cost.waste), '', '']
+    ]
+  },
+  power: {
+    label: 'Power',
+    why: 'Everything in the house that draws electricity collects here, then panels are sized against your roof and sun.',
+    feeds: ['Roof', 'Cost'],
+    reads: (dd) => [
+      ['You use', dd.loadKwhDay.toFixed(1), 'kWh/day', ''],
+      ['Panels needed', String(dd.panels), '', dd.panels <= dd.panelRoom ? 'fits the roof' : 'more than the roof holds'],
+      ['This system', fmtMoney(dd.cost.power), '', '']
+    ]
+  },
+  outdoors: {
+    label: 'Outdoors',
+    why: 'The rest of the homestead — gardens, coop, root cellar, workshop. Each lands on the site with its own separation rules and cost.',
+    feeds: ['Site', 'Cost'],
+    reads: () => []
+  }
+};
 
 function buildingSnapshot(spec, issues) {
   const enclosedRooms = spec.rooms.filter((room) => room.x >= 0 && room.y >= 0 && room.x + room.w <= spec.shell.widthFt && room.y + room.d <= spec.shell.depthFt);
@@ -2636,10 +2788,12 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
       groundPlane.userData.generated = true;
       group.add(groundPlane);
 
-      const grid = new THREE.GridHelper(fixedGridSize, Math.max(48, Math.round(fixedGridSize / 4)), 0xb2ac97, 0xbdb8a6);
+      const grid = new THREE.GridHelper(fixedGridSize, Math.max(48, Math.round(fixedGridSize / 4)), 0xa39d88, 0xb5b09c);
       grid.material.transparent = true;
-      grid.material.opacity = 0.55;
-      grid.position.set(width / 2, -0.46, depth / 2);
+      grid.material.opacity = 0.6;
+      // Just above the pad's top surface (y=0) so the scale grid peeks through
+      // the site pad instead of being buried under it.
+      grid.position.set(width / 2, 0.03, depth / 2);
       grid.name = `Fixed outdoor reference grid (${fixedGridSize}' x ${fixedGridSize}')`;
       grid.userData.generated = true;
       group.add(grid);
@@ -3161,15 +3315,9 @@ function App() {
   const area = Math.round(spec.shell.widthFt * spec.shell.depthFt);
   const qualityScore = Math.max(42, 100 - issues.filter((item) => item.severity !== 'pass').length * 16);
   const openFlagCount = issues.filter((item) => item.severity !== 'pass').length;
-  // Directional early-design cost (prototype engine constants): foundation+floor,
-  // per-side wall assemblies, roof surface, and a base systems allowance.
-  const estimatedCost = useMemo(() => {
-    const floor = spec.shell.widthFt * spec.shell.depthFt;
-    const wallCostPsf = { 'straw-bale': 12, 'hemp-lime': 20, 'cob': 20, 'rammed-earth': 22, 'cordwood': 16, 'light-straw-clay': 15, 'framed': 18 };
-    const wallsCost = wallSections.reduce((sum, wall) => sum + wall.lengthFt * wall.heightFt * (wallCostPsf[wall.assemblyKey] ?? 16), 0);
-    const roofArea = floor / Math.cos(Math.atan(Number(spec.shell.roofPitch || 0.32)));
-    return Math.round(floor * 10 + wallsCost + roofArea * 10 + 22000);
-  }, [spec, wallSections]);
+  const flaggedSystems = useMemo(() => new Set(issues.filter((item) => item.severity !== 'pass' && item.system).map((item) => item.system)), [issues]);
+  const derived = useMemo(() => deriveDesign(spec, wallSections), [spec, wallSections]);
+  const estimatedCost = Math.round(derived.total);
   const contextPacket = useMemo(() => buildContextPacket(spec, projectBrain, selected, prompt || expertQuestion), [spec, projectBrain, selected, prompt, expertQuestion]);
 
   function restoreDashboardState(snapshot) {
@@ -4070,9 +4218,18 @@ function App() {
         {consoleView === 'systems' && <section className="panelBlock consolePanel systemsPanel">
           <div className="blockTitle"><Grid3X3 size={16} /> Systems</div>
           <p className="studioHint">Design the house one system at a time. Each page shows what that system controls.</p>
-          <nav className="systemTabs" aria-label="Building systems">
-            {[['site', 'Site'], ['rooms', 'Rooms'], ['shell', 'Shell'], ['foundation', 'Foundation'], ['walls', 'Walls'], ['roof', 'Roof'], ['windows', 'Windows'], ['heat', 'Heat'], ['water', 'Water'], ['waste', 'Waste'], ['power', 'Power'], ['outdoors', 'Outdoors']].map(([key, label]) => (
-              <button key={key} className={systemView === key ? 'active' : ''} onClick={() => { setSystemView(key); setInspectorView('schedule'); }}>{label}</button>
+          <nav className="systemNav" aria-label="Building systems">
+            {SYSTEM_GROUPS.map((group) => (
+              <div className="systemNavGroup" key={group.label}>
+                <div className="systemNavEyebrow">{group.label}</div>
+                <div className="systemTabs">
+                  {group.keys.map((key) => (
+                    <button key={key} className={systemView === key ? 'active' : ''} onClick={() => { setSystemView(key); setInspectorView('schedule'); }} title={flaggedSystems.has(key) ? 'A council check is failing in this system' : undefined}>
+                      <span className={flaggedSystems.has(key) ? 'sysDot flag' : 'sysDot'} />{SYSTEM_META[key].label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </nav>
 
@@ -4083,17 +4240,8 @@ function App() {
                 <label>Width (ft)<input type="number" value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
                 <label>Length (ft)<input type="number" value={spec.shell.depthFt} onChange={(event) => updateShell('depthFt', event.target.value)} /></label>
                 <label>Wall height (ft)<input type="number" value={spec.shell.wallHeightFt} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
-                <label>Roof pitch <em className="pitchHint">≈ {Math.round(Number(spec.shell.roofPitch || 0.32) * 12)}:12</em><input type="number" step="0.01" value={spec.shell.roofPitch} onChange={(event) => updateShell('roofPitch', event.target.value)} /></label>
-                <label>Roof style
-                  <select value={spec.shell.roofType || 'gable'} onChange={(event) => updateShell('roofType', event.target.value)}>
-                    <option value="gable">Gable</option>
-                    <option value="shed">Shed</option>
-                    <option value="flat">Flat</option>
-                    <option value="hip">Hip</option>
-                  </select>
-                </label>
               </div>
-              <p className="systemNote">Footprint: {spec.shell.widthFt} × {spec.shell.depthFt} ft = {Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt))} sf. Changes here update the 3D model live.</p>
+              <p className="systemNote">Footprint: {spec.shell.widthFt} × {spec.shell.depthFt} ft = {Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt))} sf. Changes here update the 3D model live. Roof shape moved to the Roof page.</p>
 
               <div className="breakOpenRow">
                 <div className="sectionHead">Wall height by side</div>
@@ -4201,12 +4349,60 @@ function App() {
             );
           })()}
 
-          {!['shell', 'rooms', 'walls'].includes(systemView) && (
+          {systemView === 'roof' && (
             <div className="systemPage">
-              <div className="sectionHead">{systemView.charAt(0).toUpperCase() + systemView.slice(1)}</div>
+              <div className="sectionHead">Roof shape</div>
+              <div className="controlGrid">
+                <label>Style
+                  <select value={spec.shell.roofType || 'gable'} onChange={(event) => updateShell('roofType', event.target.value)}>
+                    <option value="gable">Gable</option>
+                    <option value="shed">Shed</option>
+                    <option value="flat">Flat</option>
+                    <option value="hip">Hip</option>
+                  </select>
+                </label>
+                <label>Pitch <em className="pitchHint">≈ {Math.round(Number(spec.shell.roofPitch || 0.32) * 12)}:12</em><input type="number" step="0.01" value={spec.shell.roofPitch} onChange={(event) => updateShell('roofPitch', event.target.value)} /></label>
+              </div>
+              <p className="systemNote">A different north vs south wall height on the Shell page also makes a shed roof. Overhangs and covering are coming next — ask the assistant meanwhile.</p>
+            </div>
+          )}
+
+          {!['shell', 'rooms', 'walls', 'roof'].includes(systemView) && (
+            <div className="systemPage">
+              <div className="sectionHead">{SYSTEM_META[systemView]?.label || systemView}</div>
               <p className="systemNote">This system's own controls are coming next. For now, tell the assistant what you want — for example "add a well and a 500 gallon tank" — and it will set it up in the model.</p>
             </div>
           )}
+
+          {SYSTEM_META[systemView] && (() => {
+            const meta = SYSTEM_META[systemView];
+            const reads = meta.reads ? meta.reads(derived, spec) : [];
+            return (
+              <div className="systemFeedback">
+                <div className="whyNote">{meta.why}</div>
+                {reads.length > 0 && (
+                  <>
+                    <div className="sectionHead readsHead">What this comes to</div>
+                    <div className="readsGrid">
+                      {reads.map(([key, value, unit, note]) => (
+                        <div className="readCell" key={key}>
+                          <span className="readKey">{key}</span>
+                          <strong className="readValue">{value} {unit && <small>{unit}</small>}</strong>
+                          {note && <span className="readNote">{note}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {meta.feeds && meta.feeds.length > 0 && (
+                  <div className="feedsRow">
+                    <span className="systemNavEyebrow">Feeds</span>
+                    {meta.feeds.map((tag) => <span className="feedTag" key={tag}>{tag}</span>)}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </section>}
 
         {consoleView === 'os' && <section className="panelBlock consolePanel projectOS">
