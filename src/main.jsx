@@ -2373,7 +2373,7 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
   useEffect(() => {
     const mount = mountRef.current;
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111716);
+    scene.background = new THREE.Color(0xe8e6dd);
 
     const camera = new THREE.PerspectiveCamera(45, mount.clientWidth / mount.clientHeight, 0.1, 2000);
     if (cameraStateRef.current?.position) {

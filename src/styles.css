@@ -228,7 +228,7 @@ button.danger:hover {
 .consoleTabs button.active,
 .inspectorTabs button.active {
   border-color: var(--evergreen);
-  background: #e6f0e8;
+  background: var(--sage);
   color: var(--evergreen);
 }
 
@@ -413,7 +413,7 @@ textarea {
 
 .chatTarget:hover,
 .chatTarget.active {
-  background: #e6f0e8;
+  background: var(--sage);
   border-color: var(--evergreen);
 }
 
@@ -853,7 +853,7 @@ textarea {
 .roomRow:hover,
 .roomRow.active {
   border-color: var(--evergreen);
-  background: #e6f0e8;
+  background: var(--sage);
 }
 
 .roomRow.element {
@@ -1258,7 +1258,7 @@ textarea {
 
 .libraryMode button.active {
   border-color: var(--evergreen);
-  background: #e6f0e8;
+  background: var(--sage);
   color: var(--evergreen);
 }
 
@@ -1313,7 +1313,7 @@ textarea {
 }
 
 .elementCard:hover {
-  background: #e6f0e8;
+  background: var(--sage);
   border-color: var(--evergreen);
 }
 
@@ -1518,13 +1518,13 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--muted);
-  background: #111715;
+  background: var(--ivory);
   font-size: 11px;
   font-weight: 750;
 }
 
 .osStage span.active {
-  color: #dff4e9;
+  color: var(--plum);
   border-color: var(--active-line);
   background: var(--active);
 }
@@ -1539,25 +1539,25 @@ textarea {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #111715;
+  background: var(--raise);
 }
 
 .osBlock b {
   display: block;
   margin-bottom: 6px;
-  color: #9fd3ba;
+  color: var(--plum);
   font-size: 12px;
 }
 
 .osBlock p {
-  color: #cdd8d1;
+  color: var(--ink2);
   font-size: 12px;
   line-height: 1.35;
   margin-bottom: 5px;
 }
 
 .osBlock span {
-  color: #f1b28f;
+  color: var(--warn);
   font-weight: 800;
   text-transform: uppercase;
   font-size: 10px;
@@ -1566,14 +1566,14 @@ textarea {
 .contextPacket {
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #0f1413;
+  background: var(--panel-3);
   overflow: hidden;
 }
 
 .contextPacket summary {
   cursor: pointer;
   padding: 8px;
-  color: #9fd3ba;
+  color: var(--plum);
   font-weight: 800;
   font-size: 12px;
 }
@@ -1584,7 +1584,7 @@ textarea {
   margin: 0;
   padding: 8px;
   border-top: 1px solid var(--line);
-  color: #cdd8d1;
+  color: var(--ink2);
   font-size: 11px;
   line-height: 1.35;
   white-space: pre-wrap;
@@ -1940,75 +1940,83 @@ textarea {
   }
 }
 
-/* Professional dark CAD/BIM theme */
+/* Paper & slate theme — ported from the control-face prototype (artifact 2fe2dcc7) */
 :root {
-  color-scheme: dark;
-  background: #0d1110;
-  color: #e5ece7;
-  --ink: #e5ece7;
-  --evergreen: #6fb596;
-  --moss: #8fa57d;
-  --reed: #a9a08b;
-  --ivory: #151a18;
-  --vellum: #1b211f;
-  --brass: #c59a5b;
-  --plum: #9c7865;
-  --clay: #d0694e;
-  --terracotta: #d5825f;
-  --earth: #b9aa91;
-  --sage: #26342f;
-  --line: #303a36;
-  --panel: #151a18;
-  --panel-2: #1a211e;
-  --panel-3: #202822;
-  --canvas: #101615;
-  --muted: #9ba6a0;
-  --field: #0f1413;
-  --field-border: #35413d;
-  --active: #203b31;
-  --active-line: #6fb596;
+  color-scheme: light;
+  background: #ECEBE4;
+  color: #22251F;
+  --ink: #22251F;
+  --ink2: #565A4F;
+  --ink3: #868A7C;
+  --evergreen: #3C6472;   /* slate = primary accent */
+  --moss: #868A7C;
+  --reed: #DBD9CE;
+  --ivory: #FBFAF6;       /* surface */
+  --vellum: #ECEBE4;      /* ground */
+  --raise: #FFFFFF;
+  --brass: #C9A24B;       /* straw */
+  --plum: #26424C;        /* slate-ink */
+  --clay: #AE452F;        /* bad */
+  --terracotta: #A9781F;  /* warn amber */
+  --earth: #565A4F;
+  --sage: #E2ECEE;        /* slate-bg */
+  --good: #3E7B53;
+  --good-bg: #E3EEE5;
+  --warn: #A9781F;
+  --warn-bg: #F3EAD3;
+  --bad: #AE452F;
+  --bad-bg: #F4E1DA;
+  --line: #DBD9CE;
+  --line2: #CAC8BB;
+  --panel: #FBFAF6;
+  --panel-2: #F6F5EF;
+  --panel-3: #F1F0E9;
+  --canvas: #F4F3EC;
+  --muted: #868A7C;
+  --field: #FFFFFF;
+  --field-border: #CAC8BB;
+  --active: #E2ECEE;
+  --active-line: #3C6472;
 }
 
 body {
-  background:
-    linear-gradient(90deg, rgba(111, 181, 150, 0.055) 0 1px, transparent 1px 48px),
-    linear-gradient(180deg, rgba(213, 130, 95, 0.045) 0 1px, transparent 1px 48px),
-    linear-gradient(135deg, #0b0f0e 0%, #101615 44%, #171411 100%);
+  background: #ECEBE4;
 }
 
 body::before {
-  background:
-    linear-gradient(180deg, rgba(255,255,255,0.025), transparent 34%),
-    linear-gradient(90deg, rgba(111, 181, 150, 0.06), transparent 38%, rgba(213, 130, 95, 0.045));
-  opacity: 1;
+  background: none;
+  opacity: 0;
 }
 
 button {
-  background: #2f6d58;
-  color: #f4fbf6;
+  background: #3C6472;
+  color: #fff;
   box-shadow: none;
-  border: 1px solid rgba(111, 181, 150, 0.26);
+  border: 1px solid #3C6472;
 }
 
 button:hover {
-  background: #3a7d65;
+  background: #26424C;
 }
 
 button.secondary {
-  background: #9b563f;
-  border-color: rgba(213, 130, 95, 0.4);
+  background: var(--raise);
+  color: var(--ink2);
+  border-color: var(--line2);
 }
 
 button.secondary:hover {
-  background: #b26247;
+  background: var(--sage);
+  border-color: #3C6472;
+  color: var(--plum);
 }
 
 button.ghost,
 .consoleTabs button,
 .inspectorTabs button,
 .libraryMode button {
-  background: #141a18;
-  color: #d9e3dd;
+  background: var(--ivory);
+  color: var(--ink2);
   border-color: var(--line);
 }
 
@@ -2016,50 +2024,51 @@ button.ghost:hover,
 .consoleTabs button:hover,
 .inspectorTabs button:hover,
 .libraryMode button:hover {
-  background: #1d2723;
-  border-color: #4b5b55;
+  background: var(--raise);
+  border-color: #3C6472;
+  color: var(--plum);
 }
 
 button.ghost.backButton:not(:disabled) {
-  border-color: #6fb596;
-  color: #bfe6d5;
+  border-color: #3C6472;
+  color: #26424C;
 }
 
 button.ghost.saveButton {
-  border-color: #a96a4d;
-  color: #f1c0a9;
-  background: #221815;
+  border-color: #C9A24B;
+  color: #7a6120;
+  background: #F8F3E6;
 }
 
 button.danger {
-  background: #853b30;
-  border-color: #b95b4a;
+  background: #AE452F;
+  border-color: #AE452F;
+  color: #fff;
 }
 
 .app {
   grid-template-columns: minmax(360px, 420px) minmax(520px, 1fr) minmax(300px, 360px);
-  background: #0d1110;
+  background: #ECEBE4;
 }
 
 .leftPanel {
-  background:
-    linear-gradient(180deg, rgba(21, 26, 24, 0.98), rgba(13, 17, 16, 0.98));
-  border-right: 1px solid #28322f;
+  background: #ECEBE4;
+  border-right: 1px solid var(--line);
 }
 
 .rightPanel {
-  background:
-    linear-gradient(180deg, rgba(21, 26, 24, 0.98), rgba(13, 17, 16, 0.98));
-  border-left: 1px solid #28322f;
+  background: #ECEBE4;
+  border-left: 1px solid var(--line);
 }
 
 .workspace {
-  background: #0f1413;
+  background: #ECEBE4;
 }
 
 .topBar {
-  background: linear-gradient(90deg, #151a18, #111715 58%, #171310);
-  border-bottom-color: #2d3733;
+  background: color-mix(in srgb, #ECEBE4 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom-color: var(--line);
 }
 
 .brand,
@@ -2069,23 +2078,23 @@ button.danger {
 .elementLibrary details,
 .statGrid div,
 .auditItem {
-  background: linear-gradient(180deg, rgba(26, 33, 30, 0.98), rgba(17, 22, 20, 0.98));
+  background: var(--ivory);
   border-color: var(--line);
   box-shadow: none;
 }
 
 .brand {
   min-height: 58px;
-  border-color: #32413b;
+  border-color: var(--line);
 }
 
 .brand::after,
 .panelBlock::before {
-  opacity: 0.28;
+  opacity: 0;
 }
 
 .brandMark {
-  background: linear-gradient(135deg, #2f6d58, #1e4338);
+  background: linear-gradient(135deg, #3C6472, #26424C);
 }
 
 h1,
@@ -2095,7 +2104,7 @@ h1,
 .assembly em,
 .systemsDrawer > summary,
 .elementLibrary summary {
-  color: #9fd3ba;
+  color: #26424C;
 }
 
 .brand p,
@@ -2117,13 +2126,13 @@ h1,
 
 .projectIdentity input {
   background: transparent;
-  color: #f0f6f1;
-  border-bottom-color: #3b4944;
+  color: var(--ink);
+  border-bottom-color: var(--line2);
 }
 
 .projectIdentity input:focus {
-  background: #111715;
-  outline: 1px solid rgba(111, 181, 150, 0.42);
+  background: var(--raise);
+  outline: 1px solid rgba(60, 100, 114, 0.42);
 }
 
 input,
@@ -2135,13 +2144,21 @@ select,
 .planNameEdit input,
 .addToSelector select {
   background: var(--field);
-  color: #e7eee8;
+  color: var(--ink);
   border-color: var(--field-border);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: #3C6472;
+  box-shadow: 0 0 0 2px var(--sage);
 }
 
 textarea::placeholder,
 input::placeholder {
-  color: #6f7d77;
+  color: var(--ink3);
 }
 
 textarea,
@@ -2152,42 +2169,41 @@ textarea,
 .selectedSummary,
 .modelEditHint,
 .fixedNote {
-  background: #111715;
+  background: var(--ivory);
   border-color: var(--line);
-  color: #dce6df;
+  color: var(--ink2);
 }
 
 .chatStream {
-  background:
-    linear-gradient(180deg, rgba(10, 14, 13, 0.85), rgba(17, 23, 21, 0.95));
+  background: var(--panel-3);
 }
 
 .chatBubble {
-  color: #e5ece7;
+  color: var(--ink);
 }
 
 .chatBubble.user {
-  background: #203a31;
-  border-color: rgba(111, 181, 150, 0.36);
+  background: var(--sage);
+  border-color: rgba(60, 100, 114, 0.36);
 }
 
 .chatBubble.studio,
 .chatBubble.expertMsg {
-  background: #171e1b;
-  border-color: #303a36;
+  background: var(--raise);
+  border-color: var(--line);
 }
 
 .chatBubble img,
 .uploadBox img,
 .attachmentChip img {
-  background: #0b100f;
+  background: var(--panel-3);
 }
 
 .chatTarget,
 .roomRow,
 .elementCard {
-  background: #151b19;
-  color: #e3ebe5;
+  background: var(--raise);
+  color: var(--ink);
   border-color: var(--line);
 }
 
@@ -2201,110 +2217,110 @@ textarea,
 .elementCard:hover {
   background: var(--active);
   border-color: var(--active-line);
-  color: #eaf6ef;
+  color: var(--plum);
 }
 
 .roomRow.element {
-  background: #1c1a15;
+  background: #FAF7EE;
 }
 
 .roomRow.element.active {
-  background: #2a241a;
-  border-color: #d5825f;
+  background: #F3EAD3;
+  border-color: #C9A24B;
 }
 
 .roomRow.wall {
-  background: #17201d;
-  border-left-color: #6fb596;
+  background: #F2F6F6;
+  border-left-color: #3C6472;
 }
 
 .roomRow.wall.active {
-  background: #20372f;
+  background: var(--sage);
 }
 
 .roomRow.special {
-  background: #211a16;
-  border-left-color: #d5825f;
+  background: #F8F2E8;
+  border-left-color: #C9A24B;
 }
 
 .roomRow.special.active {
-  background: #312218;
+  background: #F3EAD3;
 }
 
 .modelShell {
   background: var(--canvas);
-  border-bottom-color: #2d3733;
-  box-shadow: inset 0 0 0 1px #26302d;
+  border-bottom-color: var(--line);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 .viewBadge,
 .changeBadge,
 .dimensionBadge,
 .northBadge {
-  background: rgba(18, 24, 22, 0.92);
-  border-color: #3a4541;
-  color: #dcefe4;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  background: rgba(255, 255, 255, 0.92);
+  border-color: var(--line2);
+  color: var(--plum);
+  box-shadow: 0 8px 20px rgba(34, 37, 31, 0.12);
 }
 
 .dimensionBadge {
-  color: #f1b28f;
+  color: #A9781F;
 }
 
 @keyframes changePulse {
   0% {
     transform: translateY(-4px);
-    background: #223d33;
+    background: var(--sage);
   }
   100% {
     transform: translateY(0);
-    background: rgba(18, 24, 22, 0.92);
+    background: rgba(255, 255, 255, 0.92);
   }
 }
 
 .lowerDeck {
-  background: #0d1110;
+  background: #ECEBE4;
 }
 
 .selectedSummary {
-  color: #bfe6d5;
+  color: var(--plum);
 }
 
 .elementNote {
-  color: #cdd8d1 !important;
+  color: var(--ink2) !important;
 }
 
 .qualityRing::before {
-  background: #151a18;
+  background: var(--ivory);
 }
 
 .qualityRing {
-  color: #e5ece7;
+  color: var(--ink);
 }
 
 .issue,
 .expert {
-  border-top-color: #303a36;
+  border-top-color: var(--line);
 }
 
 .expert {
-  color: #e5ece7;
+  color: var(--ink);
 }
 
 .expert:hover {
-  background: #1d2723;
+  background: var(--panel-3);
 }
 
 .log p {
-  color: #cdd8d1;
+  color: var(--ink2);
 }
 
 .assembly b {
-  color: #e5ece7;
+  color: var(--ink);
 }
 
 .outputCards small {
-  color: #b7c3bc;
+  color: var(--ink3);
 }
 
 /* System tabs (added 2026-07-07 — first increment of the by-system control face) */
