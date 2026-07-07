@@ -126,12 +126,34 @@ button.danger:hover {
   background: #843727;
 }
 
+/* The three columns scroll internally; the page itself never scrolls, so a
+   body scrollbar can't eat viewport width and clip the chat rail. */
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
 .app {
-  min-height: 100vh;
+  height: 100vh;
   display: grid;
   grid-template-columns: minmax(360px, 420px) minmax(520px, 1fr) minmax(300px, 360px);
   position: relative;
   z-index: 1;
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+/* Grid children must not set the track's min-content width (the 3D canvas
+   otherwise forces the middle column wide and pushes the chat off-screen). */
+.leftPanel,
+.workspace,
+.rightPanel {
+  min-width: 0;
+}
+
+.modelShell {
+  min-width: 0;
+  overflow: hidden;
 }
 
 .leftPanel {
@@ -570,24 +592,52 @@ textarea {
   gap: 8px;
 }
 
+.statGrid.four {
+  grid-template-columns: repeat(2, 1fr);
+}
+
 .statGrid div {
   border-radius: 7px;
   background:
     linear-gradient(180deg, rgba(251, 248, 238, 0.94), rgba(223, 231, 214, 0.82));
   border: 1px solid rgba(207, 198, 173, 0.82);
   padding: 10px;
+  min-width: 0;
 }
 
 .statGrid strong {
   display: block;
-  font-size: 22px;
-  color: var(--terracotta);
+  font-size: 19px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .statGrid span {
   display: block;
   font-size: 11px;
   color: #6d726d;
+}
+
+.statGrid .stateStat.ok {
+  background: var(--good-bg, #E3EEE5);
+  border-color: #BEDCC5;
+}
+
+.statGrid .stateStat.ok strong {
+  color: var(--good, #3E7B53);
+}
+
+.statGrid .stateStat.bad {
+  background: var(--bad-bg, #F4E1DA);
+  border-color: #E7C3B8;
+}
+
+.statGrid .stateStat.bad strong {
+  color: var(--bad, #AE452F);
 }
 
 .workspace {
@@ -1353,50 +1403,54 @@ textarea {
   color: #7b3f2e;
 }
 
-.qualityRing {
-  min-height: 116px;
+/* Plain-language checks summary (replaces the old score ring) */
+.checksSummary {
   border-radius: 8px;
-  display: grid;
-  place-items: center;
-  text-align: center;
+  border: 1.5px solid var(--line2);
+  background: var(--raise);
+  padding: 12px 14px;
   margin-bottom: 12px;
-  background: conic-gradient(var(--evergreen) 0 82%, #d9d2bb 82% 100%);
-  color: var(--ink);
-  position: relative;
 }
 
-.qualityRing::before {
-  content: "";
-  position: absolute;
-  inset: 12px;
-  border-radius: 7px;
-  background: var(--ivory);
-}
-
-.qualityRing strong,
-.qualityRing span {
-  position: relative;
-  z-index: 1;
-}
-
-.qualityRing strong {
-  font-size: 34px;
-  font-family: var(--font-display);
-}
-
-.qualityRing span {
+.checksSummary strong {
   display: block;
-  font-size: 12px;
-  color: #686158;
-  margin-top: -18px;
+  font-size: 17px;
+  letter-spacing: -0.01em;
 }
 
-.qualityRing.low {
-  background: conic-gradient(var(--clay) 0 52%, #d9d2bb 52% 100%);
+.checksSummary span {
+  display: block;
+  font-size: 12.5px;
+  color: var(--ink2);
+  margin-top: 2px;
+  line-height: 1.4;
 }
 
-.qualityRing.mid {
-  background: conic-gradient(var(--terracotta) 0 72%, #d9d2bb 72% 100%);
+.checksSummary.ok {
+  background: var(--good-bg, #E3EEE5);
+  border-color: #BEDCC5;
+}
+
+.checksSummary.ok strong {
+  color: var(--good, #3E7B53);
+}
+
+.checksSummary.warn {
+  background: var(--warn-bg, #F3EAD3);
+  border-color: #E2D1A5;
+}
+
+.checksSummary.warn strong {
+  color: var(--warn, #A9781F);
+}
+
+.checksSummary.bad {
+  background: var(--bad-bg, #F4E1DA);
+  border-color: #E7C3B8;
+}
+
+.checksSummary.bad strong {
+  color: var(--bad, #AE452F);
 }
 
 .issue,
@@ -1877,14 +1931,6 @@ textarea {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .qualityRing {
-    min-height: 88px;
-  }
-
-  .qualityRing strong {
-    font-size: 26px;
-  }
-
   .council {
     max-height: 118px;
   }
@@ -2290,14 +2336,6 @@ textarea,
   color: var(--ink2) !important;
 }
 
-.qualityRing::before {
-  background: var(--ivory);
-}
-
-.qualityRing {
-  color: var(--ink);
-}
-
 .issue,
 .expert {
   border-top-color: var(--line);
@@ -2353,3 +2391,4 @@ textarea,
 .wallOmitToggle { flex-direction: row !important; align-items: center; gap: 5px; font-size: 11px; opacity: .8; }
 .wallOmitToggle input { width: auto; }
 .wallSideMeta { font-size: 11px; opacity: .7; margin: 6px 0 0; }
+.pitchHint { font-style: normal; font-size: 11px; color: var(--ink3, #868A7C); font-weight: 500; margin-left: 4px; }

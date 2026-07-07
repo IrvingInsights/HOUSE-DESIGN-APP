@@ -2432,9 +2432,9 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
       const wallProfile = wallAssemblyProfile(spec.systems.envelope);
       const wallT = wallProfile.thicknessFt;
 
-      const slabMat = new THREE.MeshStandardMaterial({ color: 0x5d625c, roughness: 0.78 });
+      const slabMat = new THREE.MeshStandardMaterial({ color: 0xc0b49b, roughness: 0.92 });
       const wallMat = new THREE.MeshStandardMaterial({ color: wallProfile.color, roughness: 0.88 });
-      const roofMat = new THREE.MeshStandardMaterial({ color: 0x485157, roughness: 0.65, metalness: 0.05 });
+      const roofMat = new THREE.MeshStandardMaterial({ color: 0x8a938f, roughness: 0.55, metalness: 0.15 });
       const glassMat = new THREE.MeshStandardMaterial({ color: 0x6ca4c4, transparent: true, opacity: 0.62, roughness: 0.25 });
       const zonePalette = {
         living: 0x79a7a8,
@@ -2624,7 +2624,21 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
       group.add(roof);
 
       const fixedGridSize = Number(spec.shell.outdoorGridSizeFt || DEFAULT_OUTDOOR_GRID_SIZE_FT);
-      const grid = new THREE.GridHelper(fixedGridSize, Math.max(48, Math.round(fixedGridSize / 4)), 0x60706b, 0x27322f);
+      // The land itself: a soft green ground plane under everything, so the
+      // model reads as a house on a site rather than a box in a void.
+      const groundPlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(fixedGridSize * 2.5, fixedGridSize * 2.5),
+        new THREE.MeshStandardMaterial({ color: 0xa8b18d, roughness: 1 })
+      );
+      groundPlane.rotation.x = -Math.PI / 2;
+      groundPlane.position.set(width / 2, -0.52, depth / 2);
+      groundPlane.receiveShadow = true;
+      groundPlane.userData.generated = true;
+      group.add(groundPlane);
+
+      const grid = new THREE.GridHelper(fixedGridSize, Math.max(48, Math.round(fixedGridSize / 4)), 0xb2ac97, 0xbdb8a6);
+      grid.material.transparent = true;
+      grid.material.opacity = 0.55;
       grid.position.set(width / 2, -0.46, depth / 2);
       grid.name = `Fixed outdoor reference grid (${fixedGridSize}' x ${fixedGridSize}')`;
       grid.userData.generated = true;
@@ -2730,19 +2744,20 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
       canvas.width = 512;
       canvas.height = 128;
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = 'rgba(23,28,27,0.88)';
+      ctx.fillStyle = 'rgba(251, 250, 246, 0.94)';
       ctx.fillRect(0, 0, 512, 128);
-      ctx.strokeStyle = 'rgba(142, 168, 156, 0.52)';
+      ctx.strokeStyle = 'rgba(60, 100, 114, 0.55)';
+      ctx.lineWidth = 3;
       ctx.strokeRect(2, 2, 508, 124);
-      ctx.fillStyle = '#e7eee8';
-      ctx.font = '600 36px "Source Sans 3", Aptos, Arial';
+      ctx.fillStyle = '#26424C';
+      ctx.font = '600 44px "Source Sans 3", Aptos, Arial';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(text, 256, 64, 460);
+      ctx.fillText(text, 256, 64, 470);
       const texture = new THREE.CanvasTexture(canvas);
       const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
       const sprite = new THREE.Sprite(material);
-      sprite.scale.set(Math.min(roomWidth, 9), 2.2, 1);
+      sprite.scale.set(Math.min(Math.max(roomWidth, 7), 11), 2.6, 1);
       sprite.userData.generated = true;
       return sprite;
     }
@@ -3145,6 +3160,16 @@ function App() {
   const modeledRoofProfile = roofProfile(spec.shell);
   const area = Math.round(spec.shell.widthFt * spec.shell.depthFt);
   const qualityScore = Math.max(42, 100 - issues.filter((item) => item.severity !== 'pass').length * 16);
+  const openFlagCount = issues.filter((item) => item.severity !== 'pass').length;
+  // Directional early-design cost (prototype engine constants): foundation+floor,
+  // per-side wall assemblies, roof surface, and a base systems allowance.
+  const estimatedCost = useMemo(() => {
+    const floor = spec.shell.widthFt * spec.shell.depthFt;
+    const wallCostPsf = { 'straw-bale': 12, 'hemp-lime': 20, 'cob': 20, 'rammed-earth': 22, 'cordwood': 16, 'light-straw-clay': 15, 'framed': 18 };
+    const wallsCost = wallSections.reduce((sum, wall) => sum + wall.lengthFt * wall.heightFt * (wallCostPsf[wall.assemblyKey] ?? 16), 0);
+    const roofArea = floor / Math.cos(Math.atan(Number(spec.shell.roofPitch || 0.32)));
+    return Math.round(floor * 10 + wallsCost + roofArea * 10 + 22000);
+  }, [spec, wallSections]);
   const contextPacket = useMemo(() => buildContextPacket(spec, projectBrain, selected, prompt || expertQuestion), [spec, projectBrain, selected, prompt, expertQuestion]);
 
   function restoreDashboardState(snapshot) {
@@ -4025,19 +4050,20 @@ function App() {
         </div>
 
         <section className="panelBlock compact consoleSummary">
-          <div className="statGrid">
-            <div><strong>{area}</strong><span>shell sf</span></div>
-            <div><strong>{spec.rooms.length}</strong><span>BIM spaces</span></div>
-            <div><strong>{qualityScore}</strong><span>QA score</span></div>
+          <div className="statGrid four">
+            <div><strong>${estimatedCost.toLocaleString()}</strong><span>est. cost</span></div>
+            <div><strong>{spec.rooms.length}</strong><span>room{spec.rooms.length === 1 ? '' : 's'} · {area} sf</span></div>
+            <div><strong>{openFlagCount}</strong><span>code flag{openFlagCount === 1 ? '' : 's'}</span></div>
+            <div className={openFlagCount === 0 ? 'stateStat ok' : 'stateStat bad'}><strong>{openFlagCount === 0 ? 'Yes' : 'Not yet'}</strong><span>adds up</span></div>
           </div>
         </section>
 
         <nav className="consoleTabs" aria-label="Project console">
           <button className={consoleView === 'systems' ? 'active' : ''} onClick={() => setConsoleView('systems')}><Grid3X3 size={14} /> Systems</button>
-          <button className={consoleView === 'os' ? 'active' : ''} onClick={() => setConsoleView('os')}><ClipboardCheck size={14} /> OS</button>
+          <button className={consoleView === 'os' ? 'active' : ''} onClick={() => setConsoleView('os')}><ClipboardCheck size={14} /> Plan</button>
           <button className={consoleView === 'review' ? 'active' : ''} onClick={() => setConsoleView('review')}><ShieldCheck size={14} /> Review</button>
           <button className={consoleView === 'experts' ? 'active' : ''} onClick={() => setConsoleView('experts')}><Users size={14} /> Experts</button>
-          <button className={consoleView === 'audit' ? 'active' : ''} onClick={() => setConsoleView('audit')}><FileJson size={14} /> Audit</button>
+          <button className={consoleView === 'audit' ? 'active' : ''} onClick={() => setConsoleView('audit')}><FileJson size={14} /> History</button>
           <button className={consoleView === 'log' ? 'active' : ''} onClick={() => setConsoleView('log')}><Layers size={14} /> Log</button>
         </nav>
 
@@ -4057,7 +4083,7 @@ function App() {
                 <label>Width (ft)<input type="number" value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
                 <label>Length (ft)<input type="number" value={spec.shell.depthFt} onChange={(event) => updateShell('depthFt', event.target.value)} /></label>
                 <label>Wall height (ft)<input type="number" value={spec.shell.wallHeightFt} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
-                <label>Roof pitch<input type="number" step="0.01" value={spec.shell.roofPitch} onChange={(event) => updateShell('roofPitch', event.target.value)} /></label>
+                <label>Roof pitch <em className="pitchHint">≈ {Math.round(Number(spec.shell.roofPitch || 0.32) * 12)}:12</em><input type="number" step="0.01" value={spec.shell.roofPitch} onChange={(event) => updateShell('roofPitch', event.target.value)} /></label>
                 <label>Roof style
                   <select value={spec.shell.roofType || 'gable'} onChange={(event) => updateShell('roofType', event.target.value)}>
                     <option value="gable">Gable</option>
@@ -4184,7 +4210,7 @@ function App() {
         </section>}
 
         {consoleView === 'os' && <section className="panelBlock consolePanel projectOS">
-            <div className="blockTitle"><ClipboardCheck size={16} /> Project OS</div>
+            <div className="blockTitle"><ClipboardCheck size={16} /> Project Plan</div>
             <div className="osStage">
               {workflowStages.map((stage) => (
                 <span key={stage} className={stage === projectBrain.stage ? 'active' : ''}>{stage}</span>
@@ -4219,11 +4245,18 @@ function App() {
         </section>}
 
         {consoleView === 'review' && <section className="panelBlock consolePanel reviewHub">
-            <div className="blockTitle"><ShieldCheck size={16} /> PE Stamp Track</div>
-            <div className={`qualityRing score${qualityScore >= 85 ? ' high' : qualityScore >= 70 ? ' mid' : ' low'}`}>
-              <strong>{qualityScore}</strong>
-              <span>permit readiness</span>
-            </div>
+            <div className="blockTitle"><ShieldCheck size={16} /> Does it add up</div>
+            {(() => {
+              const openFlags = issues.filter((item) => item.severity !== 'pass');
+              const critical = openFlags.filter((item) => item.severity === 'critical').length;
+              const state = openFlags.length === 0 ? 'ok' : critical > 0 ? 'bad' : 'warn';
+              return (
+                <div className={`checksSummary ${state}`}>
+                  <strong>{openFlags.length === 0 ? 'Everything checks out' : `${openFlags.length} thing${openFlags.length === 1 ? '' : 's'} to fix`}</strong>
+                  <span>{openFlags.length === 0 ? 'The design passes every check the council runs.' : critical > 0 ? 'At least one check must be fixed before drawings.' : 'Worth fixing, but nothing is blocking yet.'}</span>
+                </div>
+              );
+            })()}
             <div className="issues">
               {issues.map((issue, index) => (
                 <div key={`${issue.title}-${index}`} className={`issue ${issue.severity}`}>
@@ -4251,7 +4284,7 @@ function App() {
         </section>}
 
         {consoleView === 'audit' && <section className="panelBlock consolePanel">
-            <div className="blockTitle"><FileJson size={16} /> Operation Audit</div>
+            <div className="blockTitle"><FileJson size={16} /> Change History</div>
             <div className="auditList">
               {operationAudit.length === 0 && <p className="studioHint">No structured operations recorded yet.</p>}
               {operationAudit.map((item) => (
@@ -4464,7 +4497,7 @@ function App() {
                 <label>Shell W<input type="number" value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
                 <label>Shell D<input type="number" value={spec.shell.depthFt} onChange={(event) => updateShell('depthFt', event.target.value)} /></label>
                 <label>Wall H<input type="number" value={spec.shell.wallHeightFt} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
-                <label>Roof<input type="number" step="0.01" value={spec.shell.roofPitch} onChange={(event) => updateShell('roofPitch', event.target.value)} /></label>
+                <label>Roof <em className="pitchHint">≈ {Math.round(Number(spec.shell.roofPitch || 0.32) * 12)}:12</em><input type="number" step="0.01" value={spec.shell.roofPitch} onChange={(event) => updateShell('roofPitch', event.target.value)} /></label>
                 <label>Roof Type
                   <select value={spec.shell.roofType || 'gable'} onChange={(event) => updateShell('roofType', event.target.value)}>
                     <option value="gable">gable</option>
