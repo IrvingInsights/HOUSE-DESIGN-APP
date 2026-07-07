@@ -14,7 +14,9 @@ export function geminiParts(content) {
     if (item.type === 'input_text' && item.text) {
       parts.push({ text: item.text });
     } else if (item.type === 'input_image' && typeof item.image_url === 'string') {
-      const match = item.image_url.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/);
+      // Not just images: PDFs and plain-text documents ride the same rail —
+      // Gemini accepts application/pdf and text/* as inlineData.
+      const match = item.image_url.match(/^data:([a-zA-Z0-9.+/-]+);base64,(.*)$/);
       if (match) parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
     }
   }

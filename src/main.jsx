@@ -4186,25 +4186,56 @@ function App() {
     const studioSays = (text) => setChatMessages((items) => [...items, { role: 'studio', speaker: 'Studio', text }]);
     // Windows often reports an empty MIME type — fall back to the extension.
     const looksLikeImage = file.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|svg|avif|heic|heif|tiff?)$/i.test(file.name);
-    if (!looksLikeImage) {
-      studioSays(`"${file.name}" doesn't look like an image. Add a photo, drawing, screenshot, or handwriting image (JPG or PNG work best).`);
-      return;
-    }
-    const attach = (src) => {
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    const isTextDoc = /\.(txt|md|csv)$/i.test(file.name) || ['text/plain', 'text/markdown', 'text/csv'].includes(file.type);
+    const attach = (src, kind = 'image') => {
       const image = {
         id: `${Date.now()}-${file.name}`,
         name: file.name,
         src,
-        size: file.size
+        size: file.size,
+        kind
       };
-      setImagePreview(image.src);
+      if (kind === 'image') setImagePreview(image.src);
       setAttachedImages((items) => [image, ...items].slice(0, 6));
       setChatMessages((items) => [
         ...items,
-        { role: 'user', speaker: 'You', text: `Attached reference image: ${file.name}`, image: image.src },
-        { role: 'studio', speaker: 'Studio', text: 'Image attached to chat. Tell me what to use from it, such as "trace the handwritten room labels", "match this roof shape", or "turn this sketch into a 32 x 24 plan".' }
+        kind === 'image'
+          ? { role: 'user', speaker: 'You', text: `Attached reference image: ${file.name}`, image: image.src }
+          : { role: 'user', speaker: 'You', text: `Attached document: ${file.name}` },
+        { role: 'studio', speaker: 'Studio', text: kind === 'image'
+          ? 'Image attached to chat. Tell me what to use from it, such as "trace the handwritten room labels", "match this roof shape", or "turn this sketch into a 32 x 24 plan".'
+          : 'Document attached — the planner will read it with your next message. Ask things like "use the setbacks from this survey", "size the house to fit this parcel", or "what does this spec sheet mean for my walls".' }
       ]);
     };
+    // Documents: PDFs and plain text go to the planner as themselves.
+    if (isPdf || isTextDoc) {
+      if (file.size > 15 * 1024 * 1024) {
+        studioSays(`"${file.name}" is ${(file.size / 1048576).toFixed(0)} MB — too big to send to the planner. Keep documents under 15 MB (export just the relevant pages).`);
+        return;
+      }
+      const docReader = new FileReader();
+      docReader.onerror = docReader.onabort = () => {
+        studioSays(`I couldn't read "${file.name}" from disk. If it lives in cloud storage (Google Drive, OneDrive), it may be online-only — open it once or copy it somewhere local, then try again.`);
+      };
+      docReader.onload = () => {
+        let src = String(docReader.result || '');
+        if (!src.startsWith('data:')) {
+          studioSays(`I couldn't read "${file.name}" — the file came back empty. Try copying it somewhere local first.`);
+          return;
+        }
+        // Empty/odd MIME from Windows: rewrite the data URL to the real type.
+        const wantedMime = isPdf ? 'application/pdf' : 'text/plain';
+        if (!src.startsWith(`data:${wantedMime}`)) src = src.replace(/^data:[^;,]*/, `data:${wantedMime}`);
+        attach(src, isPdf ? 'pdf' : 'text');
+      };
+      docReader.readAsDataURL(file);
+      return;
+    }
+    if (!looksLikeImage) {
+      studioSays(`"${file.name}" isn't a file type I can read. Photos (JPG or PNG), PDFs, and plain text (.txt, .md, .csv) all work.`);
+      return;
+    }
     const reader = new FileReader();
     reader.onerror = reader.onabort = () => {
       studioSays(`I couldn't read "${file.name}" from disk. If it lives in cloud storage (Google Drive, OneDrive), it may be online-only — open it once or copy it somewhere local, then try again.`);
@@ -5843,21 +5874,25 @@ function App() {
             {imagePreview ? (
               <span className="uploadPreview">
                 <img src={imagePreview} alt="Uploaded drawing reference" />
-                <span>Add another image or drop a sketch here</span>
+                <span>Add another image or document, or drop one here</span>
               </span>
             ) : (
               <>
                 <Upload size={20} />
-                <span>Add photo, drawing, or handwriting</span>
+                <span>Add photo, drawing, PDF, or text</span>
               </>
             )}
-            <input type="file" accept="image/*" onChange={handleImageInput} />
+            <input type="file" accept="image/*,application/pdf,.pdf,.txt,.md,.csv" onChange={handleImageInput} />
           </label>
           {attachedImages.length > 0 && (
             <div className="attachmentTray" aria-label="Chat image attachments">
               {attachedImages.map((image) => (
                 <div className="attachmentChip" key={image.id}>
-                  <img src={image.src} alt={image.name} />
+                  {image.kind === 'pdf' || image.kind === 'text' ? (
+                    <span className="docChipIcon"><FileText size={15} /></span>
+                  ) : (
+                    <img src={image.src} alt={image.name} />
+                  )}
                   <span>{image.name}</span>
                   <button className="ghost iconButton" onClick={() => removeAttachedImage(image.id)} aria-label={`Remove ${image.name}`}>
                     <Trash2 size={13} />

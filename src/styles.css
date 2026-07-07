@@ -3198,3 +3198,14 @@ button.ghost.saveButton {
 .geoResults button:hover { border-color: var(--active-line, #7FA8B5); background: var(--active, #33434B); color: var(--plum, #A9C6D0); }
 .geoResults button b { display: block; font-size: 13.5px; font-weight: 600; }
 .geoResults button small { display: block; font-size: 11.5px; color: var(--ink3); margin-top: 1px; }
+
+.docChipIcon {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  background: var(--sage, #33434B);
+  color: var(--plum, #A9C6D0);
+}

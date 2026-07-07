@@ -75,7 +75,7 @@ ${payload.prompt}`
   ];
 
   for (const image of (payload.attachedImages || []).slice(0, OPENAI_IMAGE_MAX)) {
-    if (image.src?.startsWith('data:image/')) {
+    if (/^data:(image\/|application\/pdf|text\/)/.test(image.src || '')) {
       content.push({ type: 'input_image', image_url: image.src });
     }
   }
