@@ -3708,6 +3708,13 @@ function App() {
   const flaggedSystems = useMemo(() => new Set(issues.filter((item) => item.severity !== 'pass' && item.system).map((item) => item.system)), [issues]);
   const derived = useMemo(() => deriveDesign(spec, wallSections), [spec, wallSections]);
   const estimatedCost = Math.round(derived.total);
+  // How filtered is the model view? (Hidden groups never change the design or
+  // the numbers — this powers the "partial view" cue so that stays obvious.)
+  const hiddenLayerCount = useMemo(() => {
+    const visibilityKeys = ['wallNorth', 'wallSouth', 'wallEast', 'wallWest', 'roof', 'rooms', 'openings', 'elements', 'pad', 'ground', 'labels'];
+    if (storeyInfo(spec.shell).storeys > 1) visibilityKeys.push('upperFloors');
+    return visibilityKeys.filter((key) => modelLayers[key] === false).length + (modelLayers.hiddenCats || []).length;
+  }, [modelLayers, spec]);
   const contextPacket = useMemo(() => buildContextPacket(spec, projectBrain, selected, prompt || expertQuestion), [spec, projectBrain, selected, prompt, expertQuestion]);
 
   function restoreDashboardState(snapshot) {
@@ -5259,9 +5266,18 @@ function App() {
             onResizeEnd={finishPlanResize}
             onDimensionPreview={setDimensionPreview}
           />
-          <button className={layersOpen ? 'layersToggle open' : 'layersToggle'} onClick={() => setLayersOpen((open) => !open)} title="Show / hide model layers">
-            <Layers size={14} /> Layers
+          <button className={`layersToggle${layersOpen ? ' open' : ''}${hiddenLayerCount > 0 || modelLayers.xray ? ' filtered' : ''}`} onClick={() => setLayersOpen((open) => !open)} title="Show / hide model layers">
+            <Layers size={14} /> Layers{hiddenLayerCount > 0 ? ` · ${hiddenLayerCount} off` : modelLayers.xray ? ' · x-ray' : ''}
           </button>
+          {(hiddenLayerCount > 0 || modelLayers.xray) && (
+            <div className="viewFilterBadge">
+              <span>
+                {hiddenLayerCount > 0 ? `Partial view — ${hiddenLayerCount} group${hiddenLayerCount === 1 ? '' : 's'} hidden` : 'X-ray view'}
+                {hiddenLayerCount > 0 && modelLayers.xray ? ' · x-ray' : ''}. Costs and checks still cover the whole design.
+              </span>
+              <button onClick={() => setModelLayers({ ...LAYER_PRESETS.all })}>Show all</button>
+            </div>
+          )}
           {layersOpen && (() => {
             const set = (patch) => setModelLayers((current) => ({ ...current, ...patch }));
             const check = (key, label) => (
