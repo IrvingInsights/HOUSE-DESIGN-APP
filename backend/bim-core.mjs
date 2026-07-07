@@ -293,7 +293,7 @@ export const UTILITY_DEFAULTS = {
   diyFoundation: false
 };
 
-export const SITE_DEFAULTS = { zip: '', latitudeDeg: 43, rainInYr: 38 };
+export const SITE_DEFAULTS = { zip: '', placeName: '', latitudeDeg: 43, rainInYr: 38 };
 
 export function applyBimOperations(currentSpec, plan) {
   const next = structuredClone(currentSpec);
@@ -439,6 +439,7 @@ export function applyBimOperations(currentSpec, plan) {
     if (operation.type === 'set_site') {
       const field = operation.field;
       if (field === 'zip') next.site.zip = String(operation.value || '').replace(/\D/g, '').slice(0, 5);
+      else if (field === 'placeName') next.site.placeName = String(operation.value || '').slice(0, 80);
       else if (field === 'latitudeDeg') next.site.latitudeDeg = clamp(Number(operation.value), 0, 70);
       else if (field === 'rainInYr') next.site.rainInYr = clamp(Number(operation.value), 0, 200);
       actions.push(`Set site ${field} to ${operation.value}.`);

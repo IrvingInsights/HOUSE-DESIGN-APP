@@ -666,7 +666,7 @@ const LAYER_PRESETS = {
   site: { ...DEFAULT_MODEL_LAYERS, roof: true, rooms: false, openings: false, labels: false }
 };
 
-const SITE_DEFAULTS = { zip: '', latitudeDeg: 43, rainInYr: 38 };
+const SITE_DEFAULTS = { zip: '', placeName: '', latitudeDeg: 43, rainInYr: 38 };
 
 function siteOf(spec) {
   return { ...SITE_DEFAULTS, ...(spec.site || {}) };
@@ -1646,6 +1646,7 @@ function applyStructuredDesignPlan(currentSpec, plan) {
     if (operation.type === 'set_site') {
       const field = operation.field;
       if (field === 'zip') next.site.zip = String(operation.value || '').replace(/\D/g, '').slice(0, 5);
+      else if (field === 'placeName') next.site.placeName = String(operation.value || '').slice(0, 80);
       else if (field === 'latitudeDeg') next.site.latitudeDeg = clamp(Number(operation.value), 0, 70);
       else if (field === 'rainInYr') next.site.rainInYr = clamp(Number(operation.value), 0, 200);
       actions.push(`Set site ${field} to ${operation.value}.`);
@@ -3713,6 +3714,9 @@ function App() {
   const [welcomeOpen, setWelcomeOpen] = useState(() => !initialSaved);
   const [welcomeIsFirstRun, setWelcomeIsFirstRun] = useState(() => !initialSaved);
   const [welcomeName, setWelcomeName] = useState('');
+  const [geoQuery, setGeoQuery] = useState('');
+  const [geoResults, setGeoResults] = useState([]);
+  const [geoStatus, setGeoStatus] = useState('');
   const [isPlanning, setIsPlanning] = useState(false);
   const planDragRevisionRef = useRef(false);
   const chatStreamRef = useRef(null);
@@ -4321,6 +4325,54 @@ function App() {
       promptText: `Set ${field} to ${value}`,
       logPrefix: 'Systems'
     });
+  }
+
+  async function runGeoSearch() {
+    const query = geoQuery.trim();
+    if (!query) return;
+    setGeoResults([]);
+    // 5-digit ZIP: apply the offline regional estimate right away, then still
+    // try the online geocoder for an exact match.
+    if (/^\d{5}$/.test(query)) applyZip(query);
+    setGeoStatus('Searching…');
+    try {
+      const response = await fetch(`/api/geo/search?q=${encodeURIComponent(query)}`);
+      const data = await response.json();
+      if (!data.results?.length) {
+        setGeoStatus(/^\d{5}$/.test(query)
+          ? 'Regional estimate set from the ZIP. For an exact spot, search the town name.'
+          : `No places found for "${query}" — try the nearest town, or set latitude and rain by hand below.`);
+        return;
+      }
+      setGeoResults(data.results);
+      setGeoStatus('Pick your place:');
+    } catch {
+      setGeoStatus('Place search needs internet. Use a 5-digit ZIP for an offline estimate, or set latitude and rain by hand below.');
+    }
+  }
+
+  async function pickGeoResult(result) {
+    setGeoResults([]);
+    setGeoStatus(`Looking up rainfall for ${result.name}…`);
+    let rain = null;
+    try {
+      const response = await fetch(`/api/geo/rain?lat=${result.latitude}&lon=${result.longitude}`);
+      if (response.ok) rain = (await response.json()).rainInYr;
+    } catch { /* rainfall is optional — latitude still applies */ }
+    const place = `${result.name}${result.admin1 ? ', ' + result.admin1 : ''}${result.country && result.country !== 'United States' ? ', ' + result.country : ''}`;
+    const operations = [
+      { type: 'set_site', field: 'placeName', value: place },
+      { type: 'set_site', field: 'latitudeDeg', value: String(Math.round(Math.abs(result.latitude) * 10) / 10) },
+      ...(rain !== null ? [{ type: 'set_site', field: 'rainInYr', value: String(rain) }] : [])
+    ];
+    await applyBackendOperations({
+      operations,
+      promptText: `Set location to ${place}`,
+      logPrefix: 'Site',
+      chatText: `Site set to ${place} — ${Math.round(Math.abs(result.latitude) * 10) / 10}° latitude${rain !== null ? `, about ${rain}" of rain last year (real weather-station data)` : ' (rainfall lookup failed — set it by hand on the Site page)'}. Sun angles, solar sizing, and catchment all follow.`
+    });
+    setGeoStatus('');
+    setGeoQuery('');
   }
 
   function updateOverhang(side, value) {
@@ -4992,12 +5044,35 @@ function App() {
           {systemView === 'site' && (
             <div className="systemPage">
               <div className="sectionHead">Where the house sits</div>
+              <label className="geoSearchLabel">Find your place
+                <div className="geoRow">
+                  <input
+                    type="text"
+                    placeholder="Town, county, or ZIP — e.g. Corning NY"
+                    value={geoQuery}
+                    onChange={(event) => setGeoQuery(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === 'Enter') runGeoSearch(); }}
+                  />
+                  <button className="secondary" onClick={runGeoSearch}>Search</button>
+                </div>
+              </label>
+              {geoStatus && <p className="systemNote geoStatus">{geoStatus}</p>}
+              {geoResults.length > 0 && (
+                <div className="geoResults">
+                  {geoResults.map((result, index) => (
+                    <button key={`${result.name}-${index}`} onClick={() => pickGeoResult(result)}>
+                      <b>{result.name}{result.admin1 ? `, ${result.admin1}` : ''}</b>
+                      <small>{result.country} · {result.latitude.toFixed(1)}°, {result.longitude.toFixed(1)}°</small>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {siteOf(spec).placeName && <p className="systemNote">Current place: <b>{siteOf(spec).placeName}</b> — {siteOf(spec).latitudeDeg}° latitude, {siteOf(spec).rainInYr}" of rain a year.</p>}
               <div className="controlGrid">
-                <label>ZIP code<input type="text" inputMode="numeric" maxLength="5" placeholder="e.g. 14801" defaultValue={siteOf(spec).zip} onBlur={(event) => { if (event.target.value !== siteOf(spec).zip) applyZip(event.target.value); }} onKeyDown={(event) => { if (event.key === 'Enter') applyZip(event.target.value); }} /></label>
-                <label>Latitude (°N)<input type="number" step="0.5" min="0" max="70" value={siteOf(spec).latitudeDeg} onChange={(event) => updateSite('latitudeDeg', event.target.value)} /></label>
+                <label>Latitude (°)<input type="number" step="0.5" min="0" max="70" value={siteOf(spec).latitudeDeg} onChange={(event) => updateSite('latitudeDeg', event.target.value)} /></label>
                 <label>Yearly rain (in)<input type="number" min="0" max="200" value={siteOf(spec).rainInYr} onChange={(event) => updateSite('rainInYr', event.target.value)} /></label>
               </div>
-              <p className="systemNote">Type a ZIP and press Enter for an offline regional estimate of latitude and rainfall — fine-tune the numbers if you know your land better. Latitude sets sun angles and solar output; rain decides whether the roof can be your water source.</p>
+              <p className="systemNote">Search by name for real coordinates and last year's actual rainfall, or fine-tune the numbers by hand if you know your land better. Latitude sets sun angles and solar output; rain decides whether the roof can be your water source.</p>
             </div>
           )}
 

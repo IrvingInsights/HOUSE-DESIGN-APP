@@ -1,5 +1,6 @@
 import { aiPlan } from './planner.mjs';
 import { ensureBlenderRunning } from './blender-launcher.mjs';
+import { annualRainInches, geoSearch } from './geo.mjs';
 import { readJson, sendJson } from './http.mjs';
 import { DEFAULT_PROJECT_ID } from './config.mjs';
 import { listProjects, loadProjectRevisions, loadProjectState, saveProjectState } from './project-store.mjs';
@@ -36,6 +37,36 @@ export async function handleApiRoute(req, res, pathname) {
       projectId: result.projectId,
       summary: result.summary
     });
+    return true;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/geo/search') {
+    try {
+      const query = new URL(req.url, 'http://localhost').searchParams.get('q') || '';
+      if (query.trim().length < 2) {
+        sendJson(res, 400, { results: [], error: 'Give me at least two characters to search.' });
+        return true;
+      }
+      sendJson(res, 200, { results: await geoSearch(query) });
+    } catch (error) {
+      sendJson(res, 502, { results: [], error: error?.message || 'Geocoder unreachable.' });
+    }
+    return true;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/geo/rain') {
+    try {
+      const params = new URL(req.url, 'http://localhost').searchParams;
+      const lat = Number(params.get('lat'));
+      const lon = Number(params.get('lon'));
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        sendJson(res, 400, { error: 'lat and lon are required.' });
+        return true;
+      }
+      sendJson(res, 200, { rainInYr: await annualRainInches(lat, lon) });
+    } catch (error) {
+      sendJson(res, 502, { error: error?.message || 'Climate archive unreachable.' });
+    }
     return true;
   }
 
