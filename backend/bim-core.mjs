@@ -299,6 +299,7 @@ export function applyBimOperations(currentSpec, plan) {
         }
       }
       else if (field === 'padExtensionFt') next.shell.padExtensionFt = clamp(numeric, 0, 240);
+      else if (field === 'storeys') next.shell.storeys = clamp(numeric, 1, 3);
       else if (field === 'roofType') next.shell.roofType = String(operation.value || next.shell.roofType || 'gable');
       else if (field === 'projectName') next.projectName = String(operation.value || next.projectName || 'Untitled Natural Building Study');
       else if (field === 'sitePad') {

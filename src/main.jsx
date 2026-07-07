@@ -581,6 +581,15 @@ function roofProfile(shell = {}) {
   return { roofType, southWallHeightFt, northWallHeightFt, highWallHeightFt, lowWallHeightFt, riseFt, pitch, highSide };
 }
 
+// Storeys: 1 = single storey, 1.5 = loft with knee walls, 2 = full two storey.
+// Per-side wall heights describe the ground storey; extraFt is added on top of
+// every side so the shed/loft trick (tall north, short south) still works upstairs.
+function storeyInfo(shell = {}) {
+  const storeys = Math.min(3, Math.max(1, Number(shell.storeys || 1)));
+  const baseWallFt = Number(shell.wallHeightFt || 10);
+  return { storeys, baseWallFt, extraFt: (storeys - 1) * baseWallFt };
+}
+
 function directionalHeightFromText(text, directionWords) {
   const directionPattern = directionWords.join('|');
   const afterDirection = new RegExp(`\\b(?:${directionPattern})\\b[^.;\\n]{0,70}?(\\d+(?:\\.\\d+)?)\\s*(?:ft|feet|foot|')`, 'i');
@@ -1505,6 +1514,7 @@ function applyStructuredDesignPlan(currentSpec, plan) {
       else if (field === 'depthFt') next.shell.depthFt = clamp(numeric, 18, 120);
       else if (field === 'wallHeightFt') next.shell.wallHeightFt = clamp(numeric, 7, 32);
       else if (field === 'padExtensionFt') next.shell.padExtensionFt = clamp(numeric, 0, 240);
+      else if (field === 'storeys') next.shell.storeys = clamp(numeric, 1, 3);
       else if (field) next.shell[field] = operation.value;
       actions.push(operationDescription(operation, next));
       continue;
@@ -1909,6 +1919,11 @@ function detectIssues(spec) {
   if (!spec.rooms.some((room) => /mud|laundry|service/i.test(room.name))) {
     issues.push({ severity: 'warning', title: 'Farm workflow has no dirty entry', owner: 'Homestead/Farm', system: 'rooms', fix: 'Add a mud/laundry buffer between exterior work and clean living space.' });
   }
+  if (Number(spec.shell.storeys || 1) > 1
+    && !spec.rooms.some((room) => /stair|ladder/i.test(room.name))
+    && !(spec.elements || []).some((element) => /stair|ladder/i.test(element.name))) {
+    issues.push({ severity: 'warning', title: 'Upper storey has no stair', owner: 'Architect', system: 'rooms', fix: 'Add a stair (about 3 × 10 ft plus a landing) — or a ladder for a loft — so the upper floor is reachable.' });
+  }
   if (issues.length === 0) {
     issues.push({ severity: 'pass', title: 'Schematic passes current council checks', owner: 'Project Manager', fix: 'Ready for PE/architect review, structural sizing, jurisdictional code check, and stamped drawing development.' });
   }
@@ -1934,13 +1949,15 @@ function deriveDesign(spec, wallSections) {
   const w = Number(spec.shell.widthFt) || 0;
   const d = Number(spec.shell.depthFt) || 0;
   const floor = w * d;
+  const { storeys, extraFt: storeyExtraFt } = storeyInfo(spec.shell);
+  const heatedFloor = floor * storeys;
   const pitch = Number(spec.shell.roofPitch || 0.32);
   const roofArea = floor / Math.cos(Math.atan(pitch));
-  const wallArea = wallSections.reduce((sum, wall) => sum + wall.lengthFt * wall.heightFt, 0);
+  const wallArea = wallSections.reduce((sum, wall) => sum + wall.lengthFt * (wall.heightFt + storeyExtraFt), 0);
   const wallCostPsf = { 'straw-bale': 12, 'hemp-lime': 20, cob: 20, 'rammed-earth': 22, cordwood: 16, 'light-straw-clay': 15, framed: 18 };
-  const wallsCost = wallSections.reduce((sum, wall) => sum + wall.lengthFt * wall.heightFt * (wallCostPsf[wall.assemblyKey] ?? 16), 0);
+  const wallsCost = wallSections.reduce((sum, wall) => sum + wall.lengthFt * (wall.heightFt + storeyExtraFt) * (wallCostPsf[wall.assemblyKey] ?? 16), 0);
   const wallR = wallArea
-    ? wallSections.reduce((sum, wall) => sum + wall.lengthFt * wall.heightFt * (WALL_ASSEMBLIES[wall.assemblyKey]?.rValue ?? 20), 0) / wallArea
+    ? wallSections.reduce((sum, wall) => sum + wall.lengthFt * (wall.heightFt + storeyExtraFt) * (WALL_ASSEMBLIES[wall.assemblyKey]?.rValue ?? 20), 0) / wallArea
     : 20;
   const southGlass = (spec.openings || []).filter((opening) => opening.wall === 'south' && opening.type !== 'door')
     .reduce((sum, opening) => sum + (Number(opening.widthFt) || 3) * 4.5, 0);
@@ -1957,6 +1974,7 @@ function deriveDesign(spec, wallSections) {
   const panelRoom = Math.floor(roofArea / 22);
   const cost = {
     foundation: floor * 10,
+    upperFloors: (storeys - 1) * floor * 12,
     walls: wallsCost,
     roof: roofArea * 10,
     heat: 2500,
@@ -1965,7 +1983,7 @@ function deriveDesign(spec, wallSections) {
     power: panels * 900 + 3000
   };
   const total = Object.values(cost).reduce((sum, part) => sum + part, 0);
-  return { floor, roofArea, wallArea, wallR, southGlass, glassPct, heatLoadKbtu, bedrooms, people, waterGpd, septicGpd, loadKwhDay, panels, panelRoom, cost, total, pitch };
+  return { floor, heatedFloor, storeys, roofArea, wallArea, wallR, southGlass, glassPct, heatLoadKbtu, bedrooms, people, waterGpd, septicGpd, loadKwhDay, panels, panelRoom, cost, total, pitch };
 }
 
 const fmtMoney = (value) => `$${Math.round(value).toLocaleString()}`;
@@ -1995,10 +2013,11 @@ const SYSTEM_META = {
   },
   shell: {
     label: 'Shell',
-    why: 'The footprint sets floor, roof, and wall areas — which flow into cost, heat load, panels, and catchment.',
+    why: 'The footprint and storeys set floor, roof, and wall areas — which flow into cost, heat load, panels, and catchment.',
     feeds: ['Walls', 'Roof', 'Heat', 'Power'],
     reads: (dd) => [
-      ['Floor', fmtNum(dd.floor), 'sf', ''],
+      ['Footprint', fmtNum(dd.floor), 'sf', ''],
+      ...(dd.storeys > 1 ? [['Heated floor', fmtNum(dd.heatedFloor), 'sf', `${dd.storeys} storeys`]] : []),
       ['Roof surface', fmtNum(dd.roofArea), 'sf', 'shared by panels + catchment'],
       ['Wall area', fmtNum(dd.wallArea), 'sf', '']
     ]
@@ -2578,9 +2597,10 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
       const pad = padExtension(spec.shell);
       const padRect = sitePadRect(spec);
       const roofSpec = roofProfile(spec.shell);
-      const wallHeight = roofSpec.highWallHeightFt;
-      const southWallHeight = roofSpec.roofType === 'shed' ? roofSpec.southWallHeightFt : wallHeight;
-      const northWallHeight = roofSpec.roofType === 'shed' ? roofSpec.northWallHeightFt : wallHeight;
+      const { extraFt: storeyLift, baseWallFt: baseStoreyFt, storeys } = storeyInfo(spec.shell);
+      const wallHeight = roofSpec.highWallHeightFt + storeyLift;
+      const southWallHeight = (roofSpec.roofType === 'shed' ? roofSpec.southWallHeightFt : roofSpec.highWallHeightFt) + storeyLift;
+      const northWallHeight = (roofSpec.roofType === 'shed' ? roofSpec.northWallHeightFt : roofSpec.highWallHeightFt) + storeyLift;
       const wallProfile = wallAssemblyProfile(spec.systems.envelope);
       const wallT = wallProfile.thicknessFt;
 
@@ -2665,10 +2685,10 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
       const tS = wallResolved.south.thicknessFt;
       const tE = wallResolved.east.thicknessFt;
       const tW = wallResolved.west.thicknessFt;
-      const hN = roofSpec.roofType === 'shed' ? northWallHeight : wallResolved.north.heightFt;
-      const hS = roofSpec.roofType === 'shed' ? southWallHeight : wallResolved.south.heightFt;
-      const hE = wallResolved.east.heightFt;
-      const hW = wallResolved.west.heightFt;
+      const hN = roofSpec.roofType === 'shed' ? northWallHeight : wallResolved.north.heightFt + storeyLift;
+      const hS = roofSpec.roofType === 'shed' ? southWallHeight : wallResolved.south.heightFt + storeyLift;
+      const hE = wallResolved.east.heightFt + storeyLift;
+      const hW = wallResolved.west.heightFt + storeyLift;
       const wallMeshSpecs = roofSpec.roofType === 'shed'
         ? [
           { side: 'north', mesh: box(width, hN, tN, width / 2, hN / 2, tN / 2, wallMatFor('north')) },
@@ -2695,14 +2715,27 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
       assemblyLabel.position.set(width / 2, wallHeight + 1.4, depth / 2);
       group.add(assemblyLabel);
 
+      // Upper floor plate(s): one deck per full-or-partial storey above the first,
+      // seated on the ground-storey wall tops, inset by the wall thicknesses.
+      if (storeys > 1) {
+        const plateMat = new THREE.MeshStandardMaterial({ color: 0xb3a284, roughness: 0.85, transparent: true, opacity: 0.92 });
+        const plate = box(
+          Math.max(1, width - tE - tW), 0.4, Math.max(1, depth - tN - tS),
+          width / 2, baseStoreyFt + 0.2, depth / 2, plateMat
+        );
+        plate.name = `Upper floor plate (level 2, ${storeys === 1.5 ? 'loft' : 'full storey'})`;
+        group.add(plate);
+      }
+
       spec.rooms.forEach((room) => {
+        const roomLift = (Math.max(1, Number(room.level || 1)) - 1) * baseStoreyFt + (Number(room.level || 1) > 1 ? 0.42 : 0);
         const material = new THREE.MeshStandardMaterial({
           color: zonePalette[room.type] || 0x86a0a8,
           transparent: true,
           opacity: room.id === selectedRoom ? 0.88 : 0.58,
           roughness: 0.7
         });
-        const mesh = box(room.w, 0.22, room.d, room.x + room.w / 2, 0.05, room.y + room.d / 2, material);
+        const mesh = box(room.w, 0.22, room.d, room.x + room.w / 2, 0.05 + roomLift, room.y + room.d / 2, material);
         mesh.name = room.name;
         mesh.userData.roomId = room.id;
         mesh.userData.footprint = { w: room.w, d: room.d };
@@ -2712,14 +2745,14 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
         draggableParts.set(room.id, parts);
         group.add(mesh);
         if (room.id === selectedRoom) {
-          const halo = selectionHalo(room.w, room.d, room.x + room.w / 2, 0.26, room.y + room.d / 2);
+          const halo = selectionHalo(room.w, room.d, room.x + room.w / 2, 0.26 + roomLift, room.y + room.d / 2);
           parts.halo = halo;
           group.add(halo);
-          addResizeHandles(group, parts, room.id, room.x, room.y, room.w, room.d, 0.72);
+          addResizeHandles(group, parts, room.id, room.x, room.y, room.w, room.d, 0.72 + roomLift);
         }
 
         const label = makeLabel(room.name, room.w);
-        label.position.set(room.x + room.w / 2, 0.42, room.y + room.d / 2);
+        label.position.set(room.x + room.w / 2, 0.42 + roomLift, room.y + room.d / 2);
         parts.label = label;
         group.add(label);
       });
@@ -3764,7 +3797,7 @@ function App() {
     } else if (field === 'southWallHeightFt' || field === 'northWallHeightFt') {
       operations.push({ type: 'set_wall_height', wall: field === 'southWallHeightFt' ? 'south' : 'north', h: clamp(numeric, 7, 24) });
     } else {
-      operations.push({ type: 'set_shell', field, value: String(field === 'roofPitch' ? clamp(numeric, 0.08, 0.75) : field === 'wallHeightFt' ? clamp(numeric, 7, 40) : clamp(numeric, 18, field === 'depthFt' ? 80 : field === 'widthFt' ? 96 : field === 'padExtensionFt' ? 200 : 24)) });
+      operations.push({ type: 'set_shell', field, value: String(field === 'roofPitch' ? clamp(numeric, 0.08, 0.75) : field === 'wallHeightFt' ? clamp(numeric, 7, 40) : field === 'storeys' ? clamp(numeric, 1, 3) : clamp(numeric, 18, field === 'depthFt' ? 80 : field === 'widthFt' ? 96 : field === 'padExtensionFt' ? 200 : 24)) });
     }
     void applyBackendOperations({ operations, promptText: `Update shell ${field}`, logPrefix: 'Shell edit' });
   }
@@ -3847,6 +3880,8 @@ function App() {
     const operations = [];
     if (field === 'x' || field === 'y') {
       operations.push({ type: 'move_object', targetId: selectedRoom, name: object.name, x: field === 'x' ? Number(value) : Number(object.x || 0), y: field === 'y' ? Number(value) : Number(object.y || 0) });
+    } else if (field === 'level') {
+      operations.push({ type: 'update_object', targetId: selectedRoom, name: object.name, field: 'level', value: String(clamp(Math.round(Number(value) || 1), 1, 3)) });
     } else if (field === 'w' || field === 'd' || field === 'h') {
       operations.push({ type: 'resize_object', targetId: selectedRoom, name: object.name, w: field === 'w' ? Number(value) : Number(object.w || 1), d: field === 'd' ? Number(value) : Number(object.d || 1), h: field === 'h' ? Number(value) : Number(object.h || 1.2) });
     } else {
@@ -4240,8 +4275,15 @@ function App() {
                 <label>Width (ft)<input type="number" value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
                 <label>Length (ft)<input type="number" value={spec.shell.depthFt} onChange={(event) => updateShell('depthFt', event.target.value)} /></label>
                 <label>Wall height (ft)<input type="number" value={spec.shell.wallHeightFt} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
+                <label>Storeys
+                  <select value={String(storeyInfo(spec.shell).storeys)} onChange={(event) => updateShell('storeys', event.target.value)}>
+                    <option value="1">1 — single storey</option>
+                    <option value="1.5">1½ — loft with knee walls</option>
+                    <option value="2">2 — full two storeys</option>
+                  </select>
+                </label>
               </div>
-              <p className="systemNote">Footprint: {spec.shell.widthFt} × {spec.shell.depthFt} ft = {Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt))} sf. Changes here update the 3D model live. Roof shape moved to the Roof page.</p>
+              <p className="systemNote">Footprint: {spec.shell.widthFt} × {spec.shell.depthFt} ft = {Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt))} sf{storeyInfo(spec.shell).storeys > 1 ? ` · ${Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt) * storeyInfo(spec.shell).storeys)} sf heated across ${storeyInfo(spec.shell).storeys} storeys` : ''}. Walls extend to carry the upper storey and the roof rides on top; per-side heights below shape the top storey. Put a room upstairs by setting its Level in the inspector. Roof shape moved to the Roof page.</p>
 
               <div className="breakOpenRow">
                 <div className="sectionHead">Wall height by side</div>
@@ -4274,7 +4316,7 @@ function App() {
               <p className="systemNote">{spec.rooms.length} room{spec.rooms.length === 1 ? '' : 's'} placed. Move or resize them in the BIM Inspector on the right, or tell the assistant: "add a pantry 8 x 10".</p>
               <ul className="systemList">
                 {spec.rooms.map((room, index) => (
-                  <li key={room.id || index}>{room.name}{room.w && room.d ? ` — ${room.w} × ${room.d} ft` : ''}</li>
+                  <li key={room.id || index}>{room.name}{room.w && room.d ? ` — ${room.w} × ${room.d} ft` : ''}{Number(room.level || 1) > 1 ? ' · upstairs' : ''}</li>
                 ))}
               </ul>
             </div>
@@ -4622,6 +4664,7 @@ function App() {
                   </label>}
                   {!selectedIsWall && <label>{selectedIsOpening ? 'Along Wall' : 'X'}<input type="number" value={selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? selected.x : selected.y) || 0 : selected?.x || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom(selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? 'x' : 'y') : 'x', event.target.value)} /></label>}
                   {!selectedIsWall && !selectedIsOpening && <label>Y<input type="number" value={selected?.y || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom('y', event.target.value)} /></label>}
+                  {!selectedIsWall && !selectedIsSpecial && !selectedIsElement && storeyInfo(spec.shell).storeys > 1 && <label>Level<input type="number" min="1" max={Math.ceil(storeyInfo(spec.shell).storeys)} value={Number(selected?.level || 1)} onChange={(event) => updateSelectedRoom('level', event.target.value)} /></label>}
                   {(selectedIsElement || selectedIsWall || selectedIsRoof) && <label>Height<input type="number" value={selected?.h || 1.2} disabled={selectedIsOpening || selectedIsPad || selectedIsGrid} onChange={(event) => updateSelectedRoom('h', event.target.value)} /></label>}
                   {selectedIsSpecial && !selectedIsPad && <label>{selectedIsRoof ? 'Roof Type' : 'Opening Type'}
                     <select value={selected?.type || 'window'} onChange={(event) => updateSelectedRoom('type', event.target.value)}>
