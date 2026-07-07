@@ -3591,7 +3591,7 @@ function App() {
     } else if (field === 'southWallHeightFt' || field === 'northWallHeightFt') {
       operations.push({ type: 'set_wall_height', wall: field === 'southWallHeightFt' ? 'south' : 'north', h: clamp(numeric, 7, 24) });
     } else {
-      operations.push({ type: 'set_shell', field, value: String(field === 'roofPitch' ? clamp(numeric, 0.08, 0.75) : clamp(numeric, field === 'wallHeightFt' ? 7 : 18, field === 'depthFt' ? 80 : field === 'widthFt' ? 96 : field === 'padExtensionFt' ? 200 : 24)) });
+      operations.push({ type: 'set_shell', field, value: String(field === 'roofPitch' ? clamp(numeric, 0.08, 0.75) : field === 'wallHeightFt' ? clamp(numeric, 7, 40) : clamp(numeric, 18, field === 'depthFt' ? 80 : field === 'widthFt' ? 96 : field === 'padExtensionFt' ? 200 : 24)) });
     }
     void applyBackendOperations({ operations, promptText: `Update shell ${field}`, logPrefix: 'Shell edit' });
   }
@@ -3663,14 +3663,10 @@ function App() {
     }
     const wall = wallSections.find((item) => item.id === selectedRoom);
     if (wall) {
-      if (field === 'h') {
-        void applyBackendOperations({
-          operations: [{ type: 'set_wall_height', wall: wall.side, h: clamp(Number(value), 7, 24) }],
-          promptText: `Update ${wall.name} height`,
-          logPrefix: 'Wall edit',
-          nextSelectedId: selectedRoom
-        });
-      }
+      if (field === 'h') updateWallSide(wall.side, 'heightFt', value);
+      else if (field === 'w') updateShell(wall.side === 'north' || wall.side === 'south' ? 'widthFt' : 'depthFt', value);
+      else if (field === 'thickness') updateWallSide(wall.side, 'thicknessFt', value);
+      else if (field === 'assembly') updateWallSide(wall.side, 'assembly', value);
       return;
     }
     const object = spec.rooms.find((item) => item.id === selectedRoom) || (spec.elements || []).find((item) => item.id === selectedRoom);
@@ -4127,8 +4123,11 @@ function App() {
                       ))}
                     </select>
                   </label>
+                  <label>Height (ft)<input type="number" min="7" max="40" value={spec.shell.wallHeightFt} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
+                  <label>Width (ft)<input type="number" value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
+                  <label>Length (ft)<input type="number" value={spec.shell.depthFt} onChange={(event) => updateShell('depthFt', event.target.value)} /></label>
                 </div>
-                <p className="systemNote">Set one wall system for the whole house, or break open to mix systems per side — bale on the cold north, timber-and-glass on the south.</p>
+                <p className="systemNote">Height here sets <b>all four walls to one height</b> (it clears any per-side heights below). Width is the north/south wall length; Length is the east/west wall length. Break open below to mix systems and heights per side — bale on the cold north, timber-and-glass on the south.</p>
 
                 <div className="breakOpenRow">
                   <div className="sectionHead">Per side (N / S / E / W)</div>
@@ -4161,11 +4160,12 @@ function App() {
                                 </select>
                               </label>
                               <label>Height (ft)<input type="number" min="7" max="40" value={r.heightFt} onChange={(event) => updateWallSide(side, 'heightFt', event.target.value)} /></label>
+                              <label>Length (ft)<input type="number" value={side === 'north' || side === 'south' ? spec.shell.widthFt : spec.shell.depthFt} onChange={(event) => updateShell(side === 'north' || side === 'south' ? 'widthFt' : 'depthFt', event.target.value)} /></label>
                               <label>Thickness (ft)<input type="number" step="0.05" min="0.2" max="3.5" value={r.thicknessFt} onChange={(event) => updateWallSide(side, 'thicknessFt', event.target.value)} /></label>
                               <label>Interior finish<input type="text" value={r.interiorFinish} onChange={(event) => updateWallSide(side, 'interiorFinish', event.target.value)} /></label>
                               <label>Exterior finish<input type="text" value={r.exteriorFinish} onChange={(event) => updateWallSide(side, 'exteriorFinish', event.target.value)} /></label>
                             </div>
-                            <p className="wallSideMeta">R≈{r.assembly.rValue} · {r.thicknessFt.toFixed(2)}' thick · {spec.openings.filter((opening) => opening.wall === side).length} opening(s)</p>
+                            <p className="wallSideMeta">R≈{r.assembly.rValue} · {r.thicknessFt.toFixed(2)}' thick · {spec.openings.filter((opening) => opening.wall === side).length} opening(s) · length is shared with the {side === 'north' ? 'south' : side === 'south' ? 'north' : side === 'east' ? 'west' : 'east'} wall</p>
                           </>
                         )}
                       </div>
@@ -4463,8 +4463,15 @@ function App() {
                 {!selectedIsElement && !selectedIsWall && !selectedIsSpecial && <div className="modelEditHint"><Camera size={15} /> Drag the room body to move it. Drag green corner cubes in the model to resize; dimensions appear live.</div>}
                 <div className={selectedIsWall ? 'liveEdit wallEdit' : 'liveEdit'}>
                   <label>Name<input value={selected?.name || ''} onChange={(event) => updateSelectedRoom('name', event.target.value)} /></label>
-                  <label>{selectedIsWall ? 'Length' : 'Width'}<input type="number" value={selectedIsWall ? selected?.lengthFt || 0 : selected?.w || 0} disabled={selectedIsWall || selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom('w', event.target.value)} /></label>
-                  <label>{selectedIsWall ? 'Thickness' : 'Depth'}<input type="number" value={selectedIsWall ? modeledWallProfile.thicknessFt : selected?.d || 0} disabled={selectedIsWall || selectedIsOpening || selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom('d', event.target.value)} /></label>
+                  <label>{selectedIsWall ? 'Length' : 'Width'}<input type="number" value={selectedIsWall ? selected?.lengthFt || 0 : selected?.w || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom('w', event.target.value)} /></label>
+                  <label>{selectedIsWall ? 'Thickness' : 'Depth'}<input type="number" step={selectedIsWall ? 0.05 : undefined} value={selectedIsWall ? selected?.thicknessFt ?? modeledWallProfile.thicknessFt : selected?.d || 0} disabled={selectedIsOpening || selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom(selectedIsWall ? 'thickness' : 'd', event.target.value)} /></label>
+                  {selectedIsWall && <label>System
+                    <select value={selected?.assemblyKey || 'framed'} onChange={(event) => updateSelectedRoom('assembly', event.target.value)}>
+                      {Object.values(WALL_ASSEMBLIES).map((assembly) => (
+                        <option key={assembly.key} value={assembly.key}>{assembly.label}</option>
+                      ))}
+                    </select>
+                  </label>}
                   {!selectedIsWall && <label>{selectedIsOpening ? 'Along Wall' : 'X'}<input type="number" value={selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? selected.x : selected.y) || 0 : selected?.x || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom(selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? 'x' : 'y') : 'x', event.target.value)} /></label>}
                   {!selectedIsWall && !selectedIsOpening && <label>Y<input type="number" value={selected?.y || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom('y', event.target.value)} /></label>}
                   {(selectedIsElement || selectedIsWall || selectedIsRoof) && <label>Height<input type="number" value={selected?.h || 1.2} disabled={selectedIsOpening || selectedIsPad || selectedIsGrid} onChange={(event) => updateSelectedRoom('h', event.target.value)} /></label>}

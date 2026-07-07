@@ -287,7 +287,17 @@ export function applyBimOperations(currentSpec, plan) {
       const numeric = Number(operation.value || operation.w);
       if (field === 'widthFt') next.shell.widthFt = clamp(numeric, 18, 120);
       else if (field === 'depthFt') next.shell.depthFt = clamp(numeric, 18, 120);
-      else if (field === 'wallHeightFt') next.shell.wallHeightFt = clamp(numeric, 7, 32);
+      else if (field === 'wallHeightFt') {
+        // Global wall height = "one height for all": reset the S/N mirrors and
+        // clear any per-side height overrides so every wall follows it again.
+        const h = clamp(numeric, 7, 40);
+        next.shell.wallHeightFt = h;
+        next.shell.southWallHeightFt = h;
+        next.shell.northWallHeightFt = h;
+        for (const side of WALL_SIDES) {
+          if (next.walls[side]) delete next.walls[side].heightFt;
+        }
+      }
       else if (field === 'padExtensionFt') next.shell.padExtensionFt = clamp(numeric, 0, 240);
       else if (field === 'roofType') next.shell.roofType = String(operation.value || next.shell.roofType || 'gable');
       else if (field === 'projectName') next.projectName = String(operation.value || next.projectName || 'Untitled Natural Building Study');
