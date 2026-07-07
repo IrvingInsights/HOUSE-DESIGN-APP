@@ -40,8 +40,8 @@ const operationSchema = {
           d: { type: 'number' },
           h: { type: 'number' },
           level: { type: 'number' },
-          wall: { type: 'string', enum: ['', 'north', 'south', 'east', 'west'] },
-          openingType: { type: 'string', enum: ['', 'window', 'picture', 'awning', 'clerestory', 'door', 'french', 'slider', 'dutch', 'barn', 'opening'] },
+          wall: { type: 'string', enum: ['', 'north', 'south', 'east', 'west', 'roof', 'all'] },
+          openingType: { type: 'string', enum: ['', 'window', 'picture', 'awning', 'clerestory', 'door', 'french', 'slider', 'dutch', 'barn', 'bay', 'skylight', 'opening'] },
           widthFt: { type: 'number' },
           heightFt: { type: 'number' },
           positionFt: { type: 'number' },
@@ -361,7 +361,7 @@ export async function aiPlan(payload) {
       text: `You are the BIM planning brain for a natural building 3D design dashboard.
 Return only structured operations. Do not invent dimensions from drawings unless visible and reasonably inferable.
 Prefer real model changes over prose. If the user asks for floors, lofts, towers, site objects, unusual natural-building forms, or arbitrary elements, create add_level or add_element operations.
-For wall system changes, use set_assembly. For roofs, use set_roof. For openings, use add_opening with wall/type/width/position; openingType may be window, picture, awning, clerestory, door, french (french doors), slider, dutch, or barn.
+For wall system changes, use set_assembly. For roofs, use set_roof. For openings, use add_opening with wall/type/width/position; openingType may be window, picture, awning, clerestory, door, french (french doors), slider, dutch, barn, bay (bay window), or skylight (wall "roof", place with x and y plan coordinates).
 For water/waste/power/heat choices use set_utility with field one of waterSource (well|spring|catchment|town), wasteMethod (septic|composting|reedbed), powerMode (offgrid|hybrid|gridtie), heatSource (rocket_mass|masonry|wood_stove|minisplit), foundationType (rubble|stemwall|slab), tankGal, wellSepticFt, diyWalls/diyRoof/diyHeat/diyFoundation. For location use set_site with field zip, latitudeDeg, or rainInYr.
 For roof overhangs use set_overhang with wall (north|south|east|west|all) and value in feet.
 Validate basic constructability and put concerns in warnings, not as refusal.

@@ -1684,11 +1684,24 @@ function applyStructuredDesignPlan(currentSpec, plan) {
       const widthFt = clamp(Number(operation.widthFt || 3), 1, 24);
       const maxAlong = wall === 'north' || wall === 'south' ? next.shell.widthFt : next.shell.depthFt;
       const along = clamp(Number(operation.positionFt || 0), 0, Math.max(0, maxAlong - widthFt));
-      const openingType = OPENING_TYPES[operation.openingType] ? operation.openingType : 'window';
-      const label = operation.name || `${titleCase(wall)} ${titleCase(operation.openingType || openingType)} ${next.openings.length + 1}`;
-      next.openings.push(wall === 'north' || wall === 'south'
-        ? { type: openingType, wall, x: along, widthFt, label }
-        : { type: openingType, wall, y: along, widthFt, label });
+      const requestedType = OPENING_TYPES[operation.openingType] ? operation.openingType : 'window';
+      const isRoofOpening = wall === 'roof' || OPENING_TYPES[requestedType].roof;
+      const openingType = isRoofOpening ? 'skylight' : requestedType;
+      const label = operation.name || `${titleCase(isRoofOpening ? 'roof' : wall)} ${OPENING_TYPES[openingType].label} ${next.openings.length + 1}`;
+      if (isRoofOpening) {
+        next.openings.push({
+          type: 'skylight',
+          wall: 'roof',
+          x: clamp(Number(operation.x ?? operation.positionFt ?? 4), 0, Math.max(0, next.shell.widthFt - widthFt)),
+          y: clamp(Number(operation.y ?? 4), 0, Math.max(0, next.shell.depthFt - widthFt)),
+          widthFt,
+          label
+        });
+      } else {
+        next.openings.push(wall === 'north' || wall === 'south'
+          ? { type: openingType, wall, x: along, widthFt, label }
+          : { type: openingType, wall, y: along, widthFt, label });
+      }
       actions.push(operationDescription(operation, next));
       continue;
     }
@@ -2134,11 +2147,27 @@ function deriveDesign(spec, wallSections) {
     : 20;
   // Glazed openings on the south wall — windows, picture, clerestory, and
   // glazed doors (french, sliders) all count toward passive-solar glass.
+  // A bay window's wrapped faces gather ~25% more glass than its plan width.
   const southGlass = (spec.openings || []).filter((opening) => opening.wall === 'south' && (OPENING_TYPES[opening.type] || OPENING_TYPES.window).glazed)
-    .reduce((sum, opening) => sum + (Number(opening.widthFt) || 3) * (OPENING_TYPES[opening.type] || OPENING_TYPES.window).h, 0);
+    .reduce((sum, opening) => {
+      const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
+      return sum + (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1);
+    }, 0);
   const glassPct = floor ? (southGlass / floor) * 100 : 0;
+  // All glazing (every wall + skylights) for cost and heat loss.
+  const skylightArea = (spec.openings || []).filter((opening) => opening.wall === 'roof')
+    .reduce((sum, opening) => sum + (Number(opening.widthFt) || 2.5) ** 2, 0);
+  const totalGlass = (spec.openings || []).reduce((sum, opening) => {
+    const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
+    if (!profile.glazed) return sum;
+    if (profile.roof) return sum + (Number(opening.widthFt) || 2.5) ** 2;
+    return sum + (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1);
+  }, 0);
+  const glazingU = utilities.windowQuality === 'triple' ? 0.28 : 0.5;
   const roofR = 38;
-  const heatUA = Math.max(0, wallArea - southGlass) / Math.max(wallR, 1) + roofArea / roofR + southGlass * 0.5;
+  const heatUA = Math.max(0, wallArea - southGlass) / Math.max(wallR, 1)
+    + Math.max(0, roofArea - skylightArea) / roofR
+    + (southGlass + skylightArea) * glazingU;
   const heatLoadKbtu = (heatUA * 70) / 1000;
 
   const bedrooms = Math.max(1, spec.rooms.filter((room) => room.type === 'sleeping').length);
@@ -2173,6 +2202,7 @@ function deriveDesign(spec, wallSections) {
     upperFloors: (storeys - 1) * floor * 12,
     outdoors: outdoorCost,
     walls: wallsCost,
+    windows: totalGlass * (utilities.windowQuality === 'triple' ? 70 : 45),
     roof: roofArea * 10,
     heat: heatCostBySource[utilities.heatSource] ?? 3000,
     water: (waterCostBySource[utilities.waterSource] ?? 5000) + (Number(utilities.tankGal) || 0) * 1.5,
@@ -2197,6 +2227,7 @@ function deriveDesign(spec, wallSections) {
 
   return {
     site, utilities, floor, heatedFloor, storeys, roofArea, roofFootprint, overhangs, wallArea, wallR, southGlass, glassPct,
+    skylightArea, totalGlass, glazingU,
     heatLoadKbtu, bedrooms, people, waterGpd, catchmentGpd, supplyGpd, septicGpd,
     peakSunHrs, loadKwhDay, panels, panelRoom, batteryKwh,
     cost, totalBeforeSweat, sweat, total, carbonKg, pitch
@@ -2275,11 +2306,13 @@ const SYSTEM_META = {
   },
   windows: {
     label: 'Windows',
-    why: 'South glass against floor area decides free winter heat — too little wastes the sun, too much overheats. 7–12% of the floor is the sweet spot.',
+    why: 'South glass against floor area decides free winter heat — too little wastes the sun, too much overheats. 7–12% of the floor is the sweet spot. Triple glazing halves what the glass leaks back out.',
     feeds: ['Heat'],
     reads: (dd) => [
       ['South glass', fmtNum(dd.southGlass), 'sf', ''],
-      ['Of floor area', `${dd.glassPct.toFixed(1)}%`, '', dd.glassPct >= 7 && dd.glassPct <= 12 ? 'in the passive-solar range' : 'target 7–12%']
+      ['Of floor area', `${dd.glassPct.toFixed(1)}%`, '', dd.glassPct >= 7 && dd.glassPct <= 12 ? 'in the passive-solar range' : 'target 7–12%'],
+      ...(dd.skylightArea > 0 ? [['Skylights', fmtNum(dd.skylightArea), 'sf', 'roof glass leaks heat both ways']] : []),
+      ['This system', fmtMoney(dd.cost.windows), '', dd.utilities.windowQuality === 'triple' ? 'triple pane' : 'double pane']
     ]
   },
   heat: {
@@ -3017,6 +3050,9 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
       });
 
       const doorMat = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.75 });
+      const bayFrameMat = new THREE.MeshStandardMaterial({ color: 0xa08258, roughness: 0.8 });
+      const overhangsNow = resolveOverhangs(spec.shell);
+      const gableRise = depth * Number(spec.shell.roofPitch || 0.32);
       spec.openings.forEach((opening, index) => {
         const size = opening.widthFt;
         const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
@@ -3024,10 +3060,48 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
         const centerY = profile.sill + openH / 2;
         const mat = profile.glazed ? glassMat : doorMat;
         let mesh;
-        if (opening.wall === 'north') mesh = box(size, openH, 0.18, opening.x + size / 2, centerY, -0.08, mat);
-        if (opening.wall === 'south') mesh = box(size, openH, 0.18, opening.x + size / 2, centerY, depth + 0.08, mat);
-        if (opening.wall === 'east') mesh = box(0.18, openH, size, width + 0.08, centerY, opening.y + size / 2, mat);
-        if (opening.wall === 'west') mesh = box(0.18, openH, size, -0.08, centerY, opening.y + size / 2, mat);
+        if (opening.wall === 'roof') {
+          // Skylight: a glass panel lying on the roof plane, tilted to the slope.
+          const cx = (Number(opening.x) || 0) + size / 2;
+          const cz = (Number(opening.y) || 0) + size / 2;
+          mesh = box(size, 0.16, size, cx, 0, cz, glassMat);
+          if (roofSpec.roofType === 'shed') {
+            const totalD = depth + overhangsNow.north + overhangsNow.south;
+            const t = (cz + overhangsNow.north) / totalD;
+            mesh.position.y = northWallHeight + 0.28 + (southWallHeight - northWallHeight) * t + 0.22;
+            mesh.rotation.x = Math.atan2(southWallHeight - northWallHeight, totalD);
+          } else {
+            const halfRun = width / 2 + overhangsNow.west;
+            const onWest = cx < width / 2;
+            const t = onWest ? (cx + overhangsNow.west) / halfRun : (width + overhangsNow.east - cx) / (width / 2 + overhangsNow.east);
+            mesh.position.y = wallHeight + 0.25 + Math.max(0, gableRise - 0.25) * Math.min(1, Math.max(0, t)) + 0.22;
+            const slopeAngle = Math.atan2(Math.max(0, gableRise - 0.25), width / 2);
+            mesh.rotation.z = onWest ? slopeAngle : -slopeAngle;
+          }
+        } else if (profile.bay) {
+          // Bay window: a wood-framed box pushed out from the wall, glass on its face.
+          const bayD = 1.4;
+          let glassFace = null;
+          if (opening.wall === 'south') {
+            mesh = box(size, openH, bayD, opening.x + size / 2, centerY, depth + bayD / 2, bayFrameMat);
+            glassFace = box(Math.max(1, size - 0.5), Math.max(1, openH - 0.5), 0.14, opening.x + size / 2, centerY, depth + bayD + 0.06, glassMat);
+          } else if (opening.wall === 'north') {
+            mesh = box(size, openH, bayD, opening.x + size / 2, centerY, -bayD / 2, bayFrameMat);
+            glassFace = box(Math.max(1, size - 0.5), Math.max(1, openH - 0.5), 0.14, opening.x + size / 2, centerY, -bayD - 0.06, glassMat);
+          } else if (opening.wall === 'east') {
+            mesh = box(bayD, openH, size, width + bayD / 2, centerY, opening.y + size / 2, bayFrameMat);
+            glassFace = box(0.14, Math.max(1, openH - 0.5), Math.max(1, size - 0.5), width + bayD + 0.06, centerY, opening.y + size / 2, glassMat);
+          } else {
+            mesh = box(bayD, openH, size, -bayD / 2, centerY, opening.y + size / 2, bayFrameMat);
+            glassFace = box(0.14, Math.max(1, openH - 0.5), Math.max(1, size - 0.5), -bayD - 0.06, centerY, opening.y + size / 2, glassMat);
+          }
+          if (glassFace) group.add(glassFace);
+        } else {
+          if (opening.wall === 'north') mesh = box(size, openH, 0.18, opening.x + size / 2, centerY, -0.08, mat);
+          if (opening.wall === 'south') mesh = box(size, openH, 0.18, opening.x + size / 2, centerY, depth + 0.08, mat);
+          if (opening.wall === 'east') mesh = box(0.18, openH, size, width + 0.08, centerY, opening.y + size / 2, mat);
+          if (opening.wall === 'west') mesh = box(0.18, openH, size, -0.08, centerY, opening.y + size / 2, mat);
+        }
         if (mesh) {
           mesh.name = opening.label || `${opening.wall} ${opening.type}`;
           mesh.userData.roomId = `opening-${index}`;
@@ -4096,7 +4170,8 @@ function App() {
     const updated = structuredClone(opening);
     if (field === 'w') updated.widthFt = clamp(Number(value), 1, 24);
     if (field === 'type') updated.type = value;
-    if (field === 'wall') updated.wall = value;
+    if (field === 'roofX') updated.x = clamp(Number(value), 0, Math.max(0, spec.shell.widthFt - Number(updated.widthFt || 3)));
+    if (field === 'roofY') updated.y = clamp(Number(value), 0, Math.max(0, spec.shell.depthFt - Number(updated.widthFt || 3)));
     if (field === 'along') {
       const maxAlong = updated.wall === 'north' || updated.wall === 'south' ? spec.shell.widthFt : spec.shell.depthFt;
       const along = clamp(Number(value), 0, Math.max(0, maxAlong - Number(updated.widthFt || 3)));
@@ -4104,15 +4179,21 @@ function App() {
       else { updated.y = along; delete updated.x; }
     }
     if (field === 'wall') {
-      // Keep the along-wall position when the opening moves to another wall.
+      // Keep a sensible position when the opening moves to another wall (or the roof).
       const along = Number(opening.wall === 'north' || opening.wall === 'south' ? opening.x : opening.y) || 0;
-      if (updated.wall === 'north' || updated.wall === 'south') { updated.x = along; delete updated.y; }
+      updated.wall = value;
+      if (value === 'roof') { updated.x = Math.min(along, spec.shell.widthFt - 4); updated.y = 4; }
+      else if (value === 'north' || value === 'south') { updated.x = along; delete updated.y; }
       else { updated.y = along; delete updated.x; }
     }
+    const toRoof = updated.wall === 'roof' || Boolean(OPENING_TYPES[updated.type]?.roof);
+    const addOp = toRoof
+      ? { type: 'add_opening', wall: 'roof', openingType: 'skylight', widthFt: updated.widthFt, x: Number(updated.x) || 4, y: Number(updated.y) || 4, name: updated.label }
+      : { type: 'add_opening', wall: updated.wall === 'roof' ? 'south' : updated.wall, openingType: OPENING_TYPES[updated.type] && updated.type !== 'skylight' ? updated.type : 'window', widthFt: updated.widthFt, positionFt: Number(updated.wall === 'north' || updated.wall === 'south' ? updated.x : updated.y) || 0, name: updated.label };
     void applyBackendOperations({
       operations: [
         { type: 'remove_object', targetId: `opening-${index}`, name: opening.label },
-        { type: 'add_opening', wall: updated.wall, openingType: OPENING_TYPES[updated.type] ? updated.type : 'window', widthFt: updated.widthFt, positionFt: updated.wall === 'north' || updated.wall === 'south' ? updated.x : updated.y, name: updated.label }
+        addOp
       ],
       promptText: `Update opening ${opening.label}`,
       logPrefix: 'Windows'
@@ -4774,6 +4855,15 @@ function App() {
 
           {systemView === 'windows' && (
             <div className="systemPage">
+              <div className="sectionHead">All windows</div>
+              <div className="controlGrid">
+                <label>Glazing quality
+                  <select value={utilitiesOf(spec).windowQuality} onChange={(event) => updateUtility('windowQuality', event.target.value)}>
+                    <option value="double">Standard double pane — good value</option>
+                    <option value="triple">Triple pane / low-e — half the heat loss, pricier</option>
+                  </select>
+                </label>
+              </div>
               <div className="sectionHead">Every opening, one by one</div>
               {spec.openings.length === 0 && <p className="systemNote">No windows or doors yet — add one below, or tell the assistant "add a south window 5 ft wide near the kitchen".</p>}
               <div className="openingList">
@@ -4787,6 +4877,7 @@ function App() {
                           <option value="south">South</option>
                           <option value="east">East</option>
                           <option value="west">West</option>
+                          <option value="roof">Roof</option>
                         </select>
                       </label>
                       <label>Type
@@ -4797,7 +4888,14 @@ function App() {
                         </select>
                       </label>
                       <label>Width (ft)<input type="number" min="1" max="24" value={opening.widthFt} onChange={(event) => updateOpening(index, 'w', event.target.value)} /></label>
-                      <label>Along wall (ft)<input type="number" min="0" value={Number(opening.wall === 'north' || opening.wall === 'south' ? opening.x : opening.y) || 0} onChange={(event) => updateOpening(index, 'along', event.target.value)} /></label>
+                      {opening.wall === 'roof' ? (
+                        <>
+                          <label>Across, W→E (ft)<input type="number" min="0" value={Number(opening.x) || 0} onChange={(event) => updateOpening(index, 'roofX', event.target.value)} /></label>
+                          <label>Down, N→S (ft)<input type="number" min="0" value={Number(opening.y) || 0} onChange={(event) => updateOpening(index, 'roofY', event.target.value)} /></label>
+                        </>
+                      ) : (
+                        <label>Along wall (ft)<input type="number" min="0" value={Number(opening.wall === 'north' || opening.wall === 'south' ? opening.x : opening.y) || 0} onChange={(event) => updateOpening(index, 'along', event.target.value)} /></label>
+                      )}
                     </div>
                     <button className="ghost openingRemove" onClick={() => removeOpening(index)}><Trash2 size={13} /> Remove</button>
                   </div>
@@ -4805,11 +4903,11 @@ function App() {
               </div>
               <div className="buttonRow">
                 <button className="secondary" onClick={() => addOpeningOnWall('south', 'window')}><Plus size={15} /> South window</button>
-                <button className="secondary" onClick={() => addOpeningOnWall('south', 'french')}><Plus size={15} /> South french doors</button>
-                <button className="secondary" onClick={() => addOpeningOnWall('south', 'door')}><Plus size={15} /> South door</button>
-                <button className="secondary" onClick={() => addOpeningOnWall('north', 'window')}><Plus size={15} /> North window</button>
+                <button className="secondary" onClick={() => addOpeningOnWall('south', 'french')}><Plus size={15} /> French doors</button>
+                <button className="secondary" onClick={() => addOpeningOnWall('south', 'bay')}><Plus size={15} /> Bay window</button>
+                <button className="secondary" onClick={() => addOpeningOnWall('roof', 'skylight')}><Plus size={15} /> Skylight</button>
               </div>
-              <p className="systemNote">Glazed doors (french, sliders) count toward your south solar glass; clerestories sit high for daylight and summer venting; dutch and barn doors are the homestead workhorses.</p>
+              <p className="systemNote">Glazed doors (french, sliders) and bay windows count toward your south solar glass; skylights live on the roof (place them with the two plan coordinates); clerestories sit high for daylight and summer venting.</p>
             </div>
           )}
 

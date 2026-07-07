@@ -273,7 +273,9 @@ export const OPENING_TYPES = {
   french: { label: 'French doors', h: 6.8, sill: 0, glazed: true, defaultW: 5, entry: true },
   slider: { label: 'Sliding glass door', h: 6.8, sill: 0, glazed: true, defaultW: 6, entry: true },
   dutch: { label: 'Dutch door', h: 6.8, sill: 0, glazed: false, defaultW: 3, entry: true },
-  barn: { label: 'Barn / equipment door', h: 8, sill: 0, glazed: false, defaultW: 8, entry: true }
+  barn: { label: 'Barn / equipment door', h: 8, sill: 0, glazed: false, defaultW: 8, entry: true },
+  bay: { label: 'Bay window / window seat', h: 4.5, sill: 1.5, glazed: true, defaultW: 6, bay: true },
+  skylight: { label: 'Skylight / roof window', h: 0, sill: 0, glazed: true, defaultW: 2.5, roof: true }
 };
 
 export const UTILITY_DEFAULTS = {
@@ -284,6 +286,7 @@ export const UTILITY_DEFAULTS = {
   powerMode: 'offgrid',
   heatSource: 'wood_stove',
   foundationType: 'rubble',
+  windowQuality: 'double',
   diyWalls: false,
   diyRoof: false,
   diyHeat: false,
@@ -450,7 +453,8 @@ export function applyBimOperations(currentSpec, plan) {
         wasteMethod: ['septic', 'composting', 'reedbed'],
         powerMode: ['offgrid', 'hybrid', 'gridtie'],
         heatSource: ['rocket_mass', 'masonry', 'wood_stove', 'minisplit'],
-        foundationType: ['rubble', 'stemwall', 'slab']
+        foundationType: ['rubble', 'stemwall', 'slab'],
+        windowQuality: ['double', 'triple']
       };
       if (field === 'tankGal') next.utilities.tankGal = clamp(Number(operation.value) || 0, 0, 50000);
       else if (field === 'wellSepticFt') next.utilities.wellSepticFt = clamp(Number(operation.value) || 0, 0, 2000);
@@ -476,15 +480,23 @@ export function applyBimOperations(currentSpec, plan) {
     }
 
     if (operation.type === 'add_opening') {
-      const wall = operation.wall || 'south';
+      const requestedType = OPENING_TYPES[operation.openingType] ? operation.openingType : 'window';
+      const wall = operation.wall === 'roof' || OPENING_TYPES[requestedType].roof ? 'roof' : operation.wall || 'south';
+      const openingType = wall === 'roof' ? 'skylight' : requestedType === 'skylight' ? 'window' : requestedType;
       const widthFt = clamp(Number(operation.widthFt || 3), 1, 24);
-      const maxAlong = wall === 'north' || wall === 'south' ? next.shell.widthFt : next.shell.depthFt;
-      const along = clamp(Number(operation.positionFt || 0), 0, Math.max(0, maxAlong - widthFt));
-      const openingType = OPENING_TYPES[operation.openingType] ? operation.openingType : 'window';
       const label = operation.name || `${titleCase(wall)} ${OPENING_TYPES[openingType].label} ${next.openings.length + 1}`;
-      next.openings.push(wall === 'north' || wall === 'south'
-        ? { type: openingType, wall, x: along, widthFt, label }
-        : { type: openingType, wall, y: along, widthFt, label });
+      if (wall === 'roof') {
+        // Skylights sit on the roof plane and need both plan coordinates.
+        const x = clamp(Number(operation.x ?? operation.positionFt ?? 4), 0, Math.max(0, next.shell.widthFt - widthFt));
+        const y = clamp(Number(operation.y ?? 4), 0, Math.max(0, next.shell.depthFt - widthFt));
+        next.openings.push({ type: 'skylight', wall: 'roof', x, y, widthFt, label });
+      } else {
+        const maxAlong = wall === 'north' || wall === 'south' ? next.shell.widthFt : next.shell.depthFt;
+        const along = clamp(Number(operation.positionFt || 0), 0, Math.max(0, maxAlong - widthFt));
+        next.openings.push(wall === 'north' || wall === 'south'
+          ? { type: openingType, wall, x: along, widthFt, label }
+          : { type: openingType, wall, y: along, widthFt, label });
+      }
       actions.push(operationDescription(operation, next));
       continue;
     }
