@@ -2121,7 +2121,13 @@ button.danger {
 .panelBlock,
 .bimEditor,
 .planMove,
-.elementLibrary details,
+.elementLibrary details {
+  background: #F3F1E9;
+  border-color: var(--line);
+  box-shadow: none;
+}
+
+/* Cards inside panels stay lighter so they lift off the darker panel. */
 .statGrid div,
 .auditItem {
   background: var(--ivory);
