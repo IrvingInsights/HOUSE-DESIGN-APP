@@ -1,5 +1,4 @@
 import { aiPlan } from './planner.mjs';
-import { exportFreeCadModel } from './freecad.mjs';
 import { readJson, sendJson } from './http.mjs';
 import { DEFAULT_PROJECT_ID } from './config.mjs';
 import { listProjects, loadProjectRevisions, loadProjectState, saveProjectState } from './project-store.mjs';
@@ -116,22 +115,6 @@ export async function handleApiRoute(req, res, pathname) {
       sendJson(res, 500, {
         ok: false,
         error: error?.message || String(error)
-      });
-    }
-    return true;
-  }
-
-  if (req.method === 'POST' && pathname === '/api/freecad/export') {
-    try {
-      const payload = await readJson(req);
-      const spec = payload.bim || payload.spec || payload;
-      const result = await exportFreeCadModel(spec);
-      sendJson(res, result.ok ? 200 : 202, result);
-    } catch (error) {
-      sendJson(res, 500, {
-        ok: false,
-        ran: false,
-        warnings: [error?.message || String(error)]
       });
     }
     return true;
