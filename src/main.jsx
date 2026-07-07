@@ -2836,6 +2836,8 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
     const mount = mountRef.current;
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xe8e6dd);
+    // Faint atmospheric falloff so the site melts into the paper backdrop.
+    scene.fog = new THREE.Fog(0xe8e6dd, 220, 520);
 
     const camera = new THREE.PerspectiveCamera(45, mount.clientWidth / mount.clientHeight, 0.1, 2000);
     if (cameraStateRef.current?.position) {
@@ -2848,6 +2850,9 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(mount.clientWidth, mount.clientHeight);
     renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 0.92;
     mount.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -2859,11 +2864,20 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
     }
     controls.update();
 
-    const hemi = new THREE.HemisphereLight(0xffffff, 0xb2aa9c, 1.8);
+    // Warm late-morning light: sky slightly cool, bounce warm like dry grass,
+    // sun a touch golden with soft-edged shadows sized to the site.
+    const hemi = new THREE.HemisphereLight(0xf3f6f9, 0xc4b596, 1.2);
     scene.add(hemi);
-    const sun = new THREE.DirectionalLight(0xffffff, 2.1);
-    sun.position.set(20, 45, 22);
+    const sun = new THREE.DirectionalLight(0xfff1dc, 1.9);
+    sun.position.set(26, 48, 30);
     sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -90;
+    sun.shadow.camera.right = 90;
+    sun.shadow.camera.top = 90;
+    sun.shadow.camera.bottom = -90;
+    sun.shadow.bias = -0.0004;
+    sun.shadow.radius = 4;
     scene.add(sun);
 
     const raycaster = new THREE.Raycaster();
@@ -2898,7 +2912,7 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       const slabMat = new THREE.MeshStandardMaterial({ color: 0xc0b49b, roughness: 0.92 });
       const wallMat = new THREE.MeshStandardMaterial({ color: wallProfile.color, roughness: 0.88 });
       const roofMat = new THREE.MeshStandardMaterial({ color: 0x8a938f, roughness: 0.55, metalness: 0.15 });
-      const glassMat = new THREE.MeshStandardMaterial({ color: 0x6ca4c4, transparent: true, opacity: 0.62, roughness: 0.25 });
+      const glassMat = new THREE.MeshStandardMaterial({ color: 0x7fb2cc, transparent: true, opacity: 0.55, roughness: 0.12, metalness: 0.1 });
       const zonePalette = {
         living: 0x79a7a8,
         service: 0xbe9b6f,
@@ -3164,9 +3178,22 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       // The land itself: a soft green ground plane under everything, so the
       // model reads as a house on a site rather than a box in a void.
       if (layers.ground) {
+      // The land fades out at its edges instead of ending in a hard square —
+      // a radial meadow-green wash painted onto a canvas texture.
+      const groundCanvas = document.createElement('canvas');
+      groundCanvas.width = 256;
+      groundCanvas.height = 256;
+      const groundCtx = groundCanvas.getContext('2d');
+      const fade = groundCtx.createRadialGradient(128, 128, 30, 128, 128, 128);
+      fade.addColorStop(0, 'rgba(168, 177, 141, 1)');
+      fade.addColorStop(0.62, 'rgba(168, 177, 141, 0.95)');
+      fade.addColorStop(0.85, 'rgba(180, 184, 155, 0.45)');
+      fade.addColorStop(1, 'rgba(190, 190, 168, 0)');
+      groundCtx.fillStyle = fade;
+      groundCtx.fillRect(0, 0, 256, 256);
       const groundPlane = new THREE.Mesh(
         new THREE.PlaneGeometry(fixedGridSize * 2.5, fixedGridSize * 2.5),
-        new THREE.MeshStandardMaterial({ color: 0xa8b18d, roughness: 1 })
+        new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(groundCanvas), transparent: true, roughness: 1 })
       );
       groundPlane.rotation.x = -Math.PI / 2;
       groundPlane.position.set(width / 2, -0.52, depth / 2);
@@ -3313,7 +3340,7 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       shape.lineTo(-width / 2 - pad, -depth / 2 - pad);
       const points = shape.getPoints();
       const geometry = new THREE.BufferGeometry().setFromPoints(points.map((point) => new THREE.Vector3(point.x, 0, point.y)));
-      const material = new THREE.LineBasicMaterial({ color: 0x174f45, linewidth: 3 });
+      const material = new THREE.LineBasicMaterial({ color: 0x3c6472, linewidth: 3 });
       const line = new THREE.Line(geometry, material);
       line.position.set(x, y, z);
       line.userData.generated = true;
@@ -4710,7 +4737,7 @@ function App() {
     <main className="app">
       <aside className="leftPanel">
         <div className="brand">
-          <div className="brandMark"><Building2 size={24} /></div>
+          <div className="brandMark" aria-hidden="true"><span className="brandGable" /></div>
           <div>
             <h1>Natural Building Design Dashboard</h1>
             <p>Living BIM studio for ancient and regenerative design</p>
