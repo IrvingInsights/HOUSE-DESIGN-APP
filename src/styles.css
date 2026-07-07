@@ -2488,3 +2488,53 @@ textarea,
   border-color: #3C6472;
   color: var(--plum, #26424C);
 }
+
+/* Windows page: one row per opening */
+.openingList { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.openingRow {
+  background: var(--raise, #fff);
+  border: 1px solid var(--line, #DBD9CE);
+  border-radius: 8px;
+  padding: 9px 11px;
+  position: relative;
+}
+.openingRow > strong { display: block; font-size: 13px; margin-bottom: 6px; }
+.openingRemove {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  min-height: 26px;
+  padding: 0 9px;
+  font-size: 11.5px;
+}
+
+/* Outdoors page: toggleable homestead items */
+.outdoorGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.outdoorItem {
+  display: block;
+  text-align: left;
+  background: var(--raise, #fff);
+  border: 1px solid var(--line, #DBD9CE);
+  border-radius: 8px;
+  padding: 9px 11px;
+  min-height: 0;
+  height: auto;
+  color: var(--ink, #22251F);
+  box-shadow: none;
+  cursor: pointer;
+}
+.outdoorItem:hover { border-color: var(--line2, #CAC8BB); background: var(--raise, #fff); }
+.outdoorItem.on {
+  border-color: #3C6472;
+  background: var(--sage, #E2ECEE);
+  box-shadow: inset 0 0 0 1px #3C6472;
+}
+.outdoorItem b { display: block; font-size: 13px; font-weight: 600; }
+.outdoorItem small { display: block; color: var(--ink2, #565A4F); font-size: 11.5px; line-height: 1.35; margin-top: 2px; font-weight: 400; }
+.outdoorItem .outdoorCost { display: block; margin-top: 4px; font-size: 11.5px; font-weight: 600; color: var(--ink3, #868A7C); }
+.outdoorItem.on .outdoorCost { color: var(--plum, #26424C); }

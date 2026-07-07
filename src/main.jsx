@@ -597,10 +597,45 @@ const UTILITY_DEFAULTS = {
   wellSepticFt: 120,
   powerMode: 'offgrid',
   heatSource: 'wood_stove',
+  foundationType: 'rubble',
   diyWalls: false,
   diyRoof: false,
-  diyHeat: false
+  diyHeat: false,
+  diyFoundation: false
 };
+
+// Per-side roof overhang: shell.overhangFt is the global value, optional
+// shell.overhangs.{north,south,east,west} break it open per side.
+function resolveOverhangs(shell = {}) {
+  const all = Math.min(12, Math.max(0, Number(shell.overhangFt ?? 2)));
+  const per = shell.overhangs || {};
+  const sides = {
+    north: per.north !== undefined ? Number(per.north) : all,
+    south: per.south !== undefined ? Number(per.south) : all,
+    east: per.east !== undefined ? Number(per.east) : all,
+    west: per.west !== undefined ? Number(per.west) : all
+  };
+  return { ...sides, all, min: Math.min(sides.north, sides.south, sides.east, sides.west), split: Boolean(shell.overhangs) };
+}
+
+// Homestead elements the Outdoors page can toggle on and off (costs from the
+// prototype's site engine; sizes are sensible plan-view defaults).
+const OUTDOOR_ITEMS = [
+  { key: 'garden', name: 'Kitchen Garden', cost: 1200, w: 16, d: 10, h: 0.8, category: 'garden', note: 'Raised beds by the kitchen door.' },
+  { key: 'greenhouse', name: 'Greenhouse', cost: 6000, w: 12, d: 8, h: 8, category: 'plant', note: 'Attach to the south wall to share heat.' },
+  { key: 'root_cellar', name: 'Root Cellar', cost: 4000, w: 8, d: 10, h: 3, category: 'earthwork', note: 'Buried or north bank; cool and dark.' },
+  { key: 'cistern', name: 'Cistern', cost: 3500, w: 6, d: 6, h: 4, category: 'water', note: 'Buried or shaded; size for the dry spell.' },
+  { key: 'coop', name: 'Chicken Coop', cost: 1800, w: 8, d: 6, h: 6, category: 'animal', note: 'Away from the well, downwind of the house.' },
+  { key: 'shed', name: 'Tool Shed', cost: 3500, w: 10, d: 8, h: 8, category: 'storage', note: 'Simple pole structure.' },
+  { key: 'workshop', name: 'Workshop', cost: 9000, w: 16, d: 12, h: 9, category: 'structure', note: 'Power and light; separate for noise and dust.' },
+  { key: 'sauna', name: 'Sauna', cost: 5500, w: 8, d: 8, h: 8, category: 'structure', note: 'Fire safety and a cool-down; near water is nice.' },
+  { key: 'orchard', name: 'Orchard', cost: 1800, w: 30, d: 20, h: 1, category: 'landscape', note: 'Rows on contour; mind frost pockets.' },
+  { key: 'pond', name: 'Pond', cost: 6000, w: 20, d: 16, h: 0.5, category: 'water', note: 'Fire reserve and habitat; watch setbacks.' }
+];
+
+function outdoorItemPresent(spec, item) {
+  return (spec.elements || []).some((element) => element.name === item.name);
+}
 
 const SITE_DEFAULTS = { zip: '', latitudeDeg: 43, rainInYr: 38 };
 
@@ -1557,8 +1592,25 @@ function applyStructuredDesignPlan(currentSpec, plan) {
       else if (field === 'wallHeightFt') next.shell.wallHeightFt = clamp(numeric, 7, 32);
       else if (field === 'padExtensionFt') next.shell.padExtensionFt = clamp(numeric, 0, 240);
       else if (field === 'storeys') next.shell.storeys = clamp(numeric, 1, 3);
+      else if (field === 'overhangFt') {
+        next.shell.overhangFt = clamp(numeric, 0, 12);
+        delete next.shell.overhangs;
+      }
       else if (field) next.shell[field] = operation.value;
       actions.push(operationDescription(operation, next));
+      continue;
+    }
+
+    if (operation.type === 'set_overhang') {
+      const value = clamp(Number(operation.value), 0, 12);
+      if (operation.wall === 'all' || !operation.wall) {
+        next.shell.overhangFt = value;
+        delete next.shell.overhangs;
+      } else if (WALL_SIDES.includes(operation.wall)) {
+        next.shell.overhangs ||= {};
+        next.shell.overhangs[operation.wall] = value;
+      }
+      actions.push(`Set ${operation.wall || 'all'} roof overhang to ${value} ft.`);
       continue;
     }
 
@@ -2026,6 +2078,19 @@ function detectIssues(spec) {
   if (derivedForChecks.total > 324700) {
     issues.push({ severity: 'warning', title: 'Cost is over the owner-builder loan ceiling', owner: 'Project Manager', system: 'shell', fix: `Estimated ${'$' + Math.round(derivedForChecks.total).toLocaleString()} exceeds a typical USDA direct-loan limit ($324,700). Shrink the footprint, simplify systems, or take on more sweat equity.` });
   }
+  // Overhang rules (aiCritic R325.5.4-style protection + passive-solar shading).
+  const overhangCheck = resolveOverhangs(spec.shell);
+  const hasEarthenWall = WALL_SIDES.some((side) => {
+    const resolved = resolveWallSide(spec, side);
+    return !resolved.omitted && resolved.assemblyKey !== 'framed';
+  });
+  if (hasEarthenWall && overhangCheck.min < 2) {
+    issues.push({ severity: 'critical', title: `Roof overhang is only ${(overhangCheck.min * 12).toFixed(0)}" on the shortest side`, owner: 'Natural Builder', system: 'roof', fix: 'Plastered natural walls need at least 24" of overhang to stay dry (Appendix S R325.5.4-style). Deepen the overhang or switch the exposed side to a framed rainscreen wall.' });
+  }
+  const hasSouthGlass = spec.openings.some((opening) => opening.wall === 'south' && opening.type !== 'door');
+  if (hasSouthGlass && overhangCheck.south > 3.5) {
+    issues.push({ severity: 'warning', title: `South overhang (${overhangCheck.south.toFixed(1)} ft) will block winter sun`, owner: 'Designer', system: 'roof', fix: 'A deep south overhang casts winter shadow on your solar glass, starving the house of free heat. 2 to 3 ft is the usual sweet spot.' });
+  }
   if (issues.length === 0) {
     issues.push({ severity: 'pass', title: 'Schematic passes current council checks', owner: 'Project Manager', fix: 'Ready for PE/architect review, structural sizing, jurisdictional code check, and stamped drawing development.' });
   }
@@ -2057,7 +2122,9 @@ function deriveDesign(spec, wallSections) {
   const { storeys, extraFt: storeyExtraFt } = storeyInfo(spec.shell);
   const heatedFloor = floor * storeys;
   const pitch = Number(spec.shell.roofPitch || 0.32);
-  const roofArea = floor / Math.cos(Math.atan(pitch));
+  const overhangs = resolveOverhangs(spec.shell);
+  const roofFootprint = (w + overhangs.east + overhangs.west) * (d + overhangs.north + overhangs.south);
+  const roofArea = roofFootprint / Math.cos(Math.atan(pitch));
   const wallArea = wallSections.reduce((sum, wall) => sum + wall.lengthFt * (wall.heightFt + storeyExtraFt), 0);
   const wallCostPsf = { 'straw-bale': 12, 'hemp-lime': 20, cob: 20, 'rammed-earth': 22, cordwood: 16, 'light-straw-clay': 15, framed: 18 };
   const wallsCost = wallSections.reduce((sum, wall) => sum + wall.lengthFt * (wall.heightFt + storeyExtraFt) * (wallCostPsf[wall.assemblyKey] ?? 16), 0);
@@ -2096,9 +2163,12 @@ function deriveDesign(spec, wallSections) {
   const heatCostBySource = { rocket_mass: 2500, masonry: 6000, wood_stove: 3000, minisplit: 4500 };
   const waterCostBySource = { well: 7500, spring: 2500, catchment: 3500, town: 1500 };
   const wasteCostByMethod = { septic: 8500, composting: 1500, reedbed: 1200 };
+  const foundationCostPsf = { rubble: 8, stemwall: 12, slab: 15 };
+  const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => sum + (outdoorItemPresent(spec, item) ? item.cost : 0), 0);
   const cost = {
-    foundation: floor * 10,
+    foundation: floor * (foundationCostPsf[utilities.foundationType] ?? 10),
     upperFloors: (storeys - 1) * floor * 12,
+    outdoors: outdoorCost,
     walls: wallsCost,
     roof: roofArea * 10,
     heat: heatCostBySource[utilities.heatSource] ?? 3000,
@@ -2112,16 +2182,18 @@ function deriveDesign(spec, wallSections) {
   // (add-on laborFractionByCategory: walls .8, roof .55, utilities .45).
   const sweat = (utilities.diyWalls ? cost.walls * 0.8 : 0)
     + (utilities.diyRoof ? cost.roof * 0.55 : 0)
-    + (utilities.diyHeat ? cost.heat * 0.45 : 0);
+    + (utilities.diyHeat ? cost.heat * 0.45 : 0)
+    + (utilities.diyFoundation ? cost.foundation * 0.5 : 0);
   const total = totalBeforeSweat - sweat;
 
   // Embodied carbon (kg CO2e, directional/comparative — add-on coefficients).
+  const foundationCarbonPsf = { rubble: 10, stemwall: 18, slab: 25 };
   const wallCarbonPsf = { 'straw-bale': 6, 'rammed-earth': 20, cob: 8, 'hemp-lime': 4, cordwood: 8, 'light-straw-clay': 7, framed: 8 };
   const wallCarbon = wallSections.reduce((sum, wall) => sum + wall.lengthFt * (wall.heightFt + storeyExtraFt) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0);
-  const carbonKg = floor * 10 + wallCarbon + roofArea * 12 + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
+  const carbonKg = floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + wallCarbon + roofArea * 12 + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
   return {
-    site, utilities, floor, heatedFloor, storeys, roofArea, wallArea, wallR, southGlass, glassPct,
+    site, utilities, floor, heatedFloor, storeys, roofArea, roofFootprint, overhangs, wallArea, wallR, southGlass, glassPct,
     heatLoadKbtu, bedrooms, people, waterGpd, catchmentGpd, supplyGpd, septicGpd,
     peakSunHrs, loadKwhDay, panels, panelRoom, batteryKwh,
     cost, totalBeforeSweat, sweat, total, carbonKg, pitch
@@ -2169,9 +2241,12 @@ const SYSTEM_META = {
   },
   foundation: {
     label: 'Foundation',
-    why: 'What the house sits on sets cost per square foot and a big share of the embodied carbon.',
+    why: 'What the house sits on sets cost per square foot and a big share of the embodied carbon — a slab carries 2.5× the carbon of a rubble trench.',
     feeds: ['Cost'],
-    reads: (dd) => [['This system', fmtMoney(dd.cost.foundation), '', 'directional estimate']]
+    reads: (dd) => [
+      ['This system', fmtMoney(dd.cost.foundation), '', ''],
+      ...(dd.utilities.diyFoundation ? [['You save', fmtMoney(dd.cost.foundation * 0.5), '', 'doing it yourself']] : [])
+    ]
   },
   walls: {
     label: 'Walls',
@@ -2189,7 +2264,8 @@ const SYSTEM_META = {
     why: 'Roof area caps your solar panels and feeds rain catchment; the overhang shades summer sun and shields earthen walls.',
     feeds: ['Power', 'Water', 'Heat'],
     reads: (dd) => [
-      ['Roof surface', fmtNum(dd.roofArea), 'sf', 'grows with pitch'],
+      ['Roof surface', fmtNum(dd.roofArea), 'sf', 'grows with pitch + overhang'],
+      ['Smallest overhang', dd.overhangs.min.toFixed(1), 'ft', dd.overhangs.min >= 2 ? 'protects the walls' : 'too shallow for plastered walls'],
       ['Panel room', `~${dd.panelRoom}`, 'panels', ''],
       ['This system', fmtMoney(dd.cost.roof), '', '']
     ]
@@ -2246,7 +2322,7 @@ const SYSTEM_META = {
     label: 'Outdoors',
     why: 'The rest of the homestead — gardens, coop, root cellar, workshop. Each lands on the site with its own separation rules and cost.',
     feeds: ['Site', 'Cost'],
-    reads: () => []
+    reads: (dd) => [['These items', fmtMoney(dd.cost.outdoors), '', '']]
   }
 };
 
@@ -2952,7 +3028,7 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
         }
       });
 
-      const roof = makeRoof(width, depth, wallHeight, spec.shell.roofPitch, roofMat, roofSpec);
+      const roof = makeRoof(width, depth, wallHeight, spec.shell.roofPitch, roofMat, roofSpec, resolveOverhangs(spec.shell));
       roof.userData.roomId = 'roof-main';
       roomMeshes.push(roof);
       group.add(roof);
@@ -3039,18 +3115,18 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
       });
     }
 
-    function makeRoof(width, depth, wallHeight, pitch, material, roofSpec) {
+    function makeRoof(width, depth, wallHeight, pitch, material, roofSpec, overhangs) {
       const rise = depth * pitch;
-      const overhang = 1.6;
+      const o = overhangs || { north: 1.6, south: 1.6, east: 1.6, west: 1.6 };
       if (roofSpec.roofType === 'shed') {
         const geometry = new THREE.BufferGeometry();
         const southHeight = roofSpec.southWallHeightFt + 0.28;
         const northHeight = roofSpec.northWallHeightFt + 0.28;
         const vertices = new Float32Array([
-          -overhang, northHeight, -overhang,
-          width + overhang, northHeight, -overhang,
-          width + overhang, southHeight, depth + overhang,
-          -overhang, southHeight, depth + overhang
+          -o.west, northHeight, -o.north,
+          width + o.east, northHeight, -o.north,
+          width + o.east, southHeight, depth + o.south,
+          -o.west, southHeight, depth + o.south
         ]);
         geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
         geometry.setIndex([0, 1, 2, 0, 2, 3]);
@@ -3061,16 +3137,16 @@ function ThreeScene({ spec, selectedRoom, onSelectRoom, onMoveStart, onMoveEnd, 
         return mesh;
       }
       const shape = new THREE.Shape();
-      shape.moveTo(-overhang, wallHeight);
-      shape.lineTo(width + overhang, wallHeight);
-      shape.lineTo(width + overhang, wallHeight + 0.25);
+      shape.moveTo(-o.west, wallHeight);
+      shape.lineTo(width + o.east, wallHeight);
+      shape.lineTo(width + o.east, wallHeight + 0.25);
       shape.lineTo(width / 2, wallHeight + rise);
-      shape.lineTo(-overhang, wallHeight + 0.25);
-      shape.lineTo(-overhang, wallHeight);
-      const geometry = new THREE.ExtrudeGeometry(shape, { depth: depth + overhang * 2, bevelEnabled: false });
+      shape.lineTo(-o.west, wallHeight + 0.25);
+      shape.lineTo(-o.west, wallHeight);
+      const geometry = new THREE.ExtrudeGeometry(shape, { depth: depth + o.north + o.south, bevelEnabled: false });
       const mesh = new THREE.Mesh(geometry, material);
       mesh.rotation.x = -Math.PI / 2;
-      mesh.position.set(0, 0, -overhang);
+      mesh.position.set(0, 0, -o.north);
       mesh.userData.generated = true;
       return mesh;
     }
@@ -3453,6 +3529,7 @@ function App() {
   const [systemView, setSystemView] = useState('shell');
   const [wallBreakOpen, setWallBreakOpen] = useState(false);
   const [shellWallBreakOpen, setShellWallBreakOpen] = useState(false);
+  const [overhangBreakOpen, setOverhangBreakOpen] = useState(false);
   const [prompt, setPrompt] = useState(() => initialSaved?.prompt || DEFAULT_PROMPT);
   const [selectedRoom, setSelectedRoom] = useState(() => initialSaved?.selectedRoom || 'great');
   const [imagePreview, setImagePreview] = useState('');
@@ -3995,6 +4072,84 @@ function App() {
       promptText: `Set ${field} to ${value}`,
       logPrefix: 'Systems'
     });
+  }
+
+  function updateOverhang(side, value) {
+    void applyBackendOperations({
+      operations: [{ type: 'set_overhang', wall: side, value: String(clamp(Number(value) || 0, 0, 12)) }],
+      promptText: `Set ${side} overhang`,
+      logPrefix: 'Roof'
+    });
+  }
+
+  function updateOpening(index, field, value) {
+    const opening = spec.openings?.[index];
+    if (!opening) return;
+    const updated = structuredClone(opening);
+    if (field === 'w') updated.widthFt = clamp(Number(value), 1, 24);
+    if (field === 'type') updated.type = value;
+    if (field === 'wall') updated.wall = value;
+    if (field === 'along') {
+      const maxAlong = updated.wall === 'north' || updated.wall === 'south' ? spec.shell.widthFt : spec.shell.depthFt;
+      const along = clamp(Number(value), 0, Math.max(0, maxAlong - Number(updated.widthFt || 3)));
+      if (updated.wall === 'north' || updated.wall === 'south') { updated.x = along; delete updated.y; }
+      else { updated.y = along; delete updated.x; }
+    }
+    if (field === 'wall') {
+      // Keep the along-wall position when the opening moves to another wall.
+      const along = Number(opening.wall === 'north' || opening.wall === 'south' ? opening.x : opening.y) || 0;
+      if (updated.wall === 'north' || updated.wall === 'south') { updated.x = along; delete updated.y; }
+      else { updated.y = along; delete updated.x; }
+    }
+    void applyBackendOperations({
+      operations: [
+        { type: 'remove_object', targetId: `opening-${index}`, name: opening.label },
+        { type: 'add_opening', wall: updated.wall, openingType: updated.type === 'door' ? 'door' : 'window', widthFt: updated.widthFt, positionFt: updated.wall === 'north' || updated.wall === 'south' ? updated.x : updated.y, name: updated.label }
+      ],
+      promptText: `Update opening ${opening.label}`,
+      logPrefix: 'Windows'
+    });
+  }
+
+  function removeOpening(index) {
+    const opening = spec.openings?.[index];
+    if (!opening) return;
+    void applyBackendOperations({
+      operations: [{ type: 'remove_object', targetId: `opening-${index}`, name: opening.label }],
+      promptText: `Remove ${opening.label}`,
+      logPrefix: 'Windows'
+    });
+  }
+
+  function addOpeningOnWall(wall, type) {
+    const widthFt = type === 'door' ? 3 : 5;
+    const maxAlong = wall === 'north' || wall === 'south' ? spec.shell.widthFt : spec.shell.depthFt;
+    const existing = spec.openings.filter((opening) => opening.wall === wall).length;
+    const along = clamp(4 + existing * 6, 0, Math.max(0, maxAlong - widthFt));
+    void applyBackendOperations({
+      operations: [{ type: 'add_opening', wall, openingType: type, widthFt, positionFt: along, name: `${titleCase(wall)} ${titleCase(type)} ${existing + 1}` }],
+      promptText: `Add ${type} to ${wall} wall`,
+      logPrefix: 'Windows'
+    });
+  }
+
+  function toggleOutdoorItem(item) {
+    if (outdoorItemPresent(spec, item)) {
+      const element = (spec.elements || []).find((el) => el.name === item.name);
+      if (!element) return;
+      void applyBackendOperations({
+        operations: [{ type: 'remove_object', targetId: element.id, name: element.name }],
+        promptText: `Remove ${item.name}`,
+        logPrefix: 'Outdoors'
+      });
+    } else {
+      const placed = (spec.elements || []).length;
+      void applyBackendOperations({
+        operations: [{ type: 'add_element', name: item.name, category: item.category, x: spec.shell.widthFt + 6 + (placed % 3) * 14, y: 2 + Math.floor(placed / 3) * 14, z: 0, w: item.w, d: item.d, h: item.h, reason: item.note }],
+        promptText: `Add ${item.name}`,
+        logPrefix: 'Outdoors'
+      });
+    }
   }
 
   function updateProjectName(value) {
@@ -4588,6 +4743,83 @@ function App() {
             </div>
           )}
 
+          {systemView === 'foundation' && (
+            <div className="systemPage">
+              <div className="sectionHead">What the house sits on</div>
+              <div className="controlGrid">
+                <label>Type
+                  <select value={utilitiesOf(spec).foundationType} onChange={(event) => updateUtility('foundationType', event.target.value)}>
+                    <option value="rubble">Rubble trench — drained gravel, low cost, low carbon</option>
+                    <option value="stemwall">Stem wall — perimeter wall on footing</option>
+                    <option value="slab">Insulated slab — simple, the most concrete</option>
+                  </select>
+                </label>
+              </div>
+              <label className="diyToggle">
+                <input type="checkbox" checked={utilitiesOf(spec).diyFoundation} onChange={(event) => updateUtility('diyFoundation', event.target.checked)} />
+                <span>I'll dig and place it myself (sweat equity)</span>
+              </label>
+              <p className="systemNote">Rubble trench is the natural-building favorite: half the concrete of a slab, and the biggest single carbon saving on the whole build.</p>
+            </div>
+          )}
+
+          {systemView === 'windows' && (
+            <div className="systemPage">
+              <div className="sectionHead">Every opening, one by one</div>
+              {spec.openings.length === 0 && <p className="systemNote">No windows or doors yet — add one below, or tell the assistant "add a south window 5 ft wide near the kitchen".</p>}
+              <div className="openingList">
+                {spec.openings.map((opening, index) => (
+                  <div className="openingRow" key={`${opening.label || opening.type}-${index}`}>
+                    <strong>{opening.label || `${titleCase(opening.wall)} ${titleCase(opening.type)}`}</strong>
+                    <div className="controlGrid tight">
+                      <label>Wall
+                        <select value={opening.wall} onChange={(event) => updateOpening(index, 'wall', event.target.value)}>
+                          <option value="north">North</option>
+                          <option value="south">South</option>
+                          <option value="east">East</option>
+                          <option value="west">West</option>
+                        </select>
+                      </label>
+                      <label>Type
+                        <select value={opening.type === 'door' ? 'door' : 'window'} onChange={(event) => updateOpening(index, 'type', event.target.value)}>
+                          <option value="window">Window</option>
+                          <option value="door">Door</option>
+                        </select>
+                      </label>
+                      <label>Width (ft)<input type="number" min="1" max="24" value={opening.widthFt} onChange={(event) => updateOpening(index, 'w', event.target.value)} /></label>
+                      <label>Along wall (ft)<input type="number" min="0" value={Number(opening.wall === 'north' || opening.wall === 'south' ? opening.x : opening.y) || 0} onChange={(event) => updateOpening(index, 'along', event.target.value)} /></label>
+                    </div>
+                    <button className="ghost openingRemove" onClick={() => removeOpening(index)}><Trash2 size={13} /> Remove</button>
+                  </div>
+                ))}
+              </div>
+              <div className="buttonRow">
+                <button className="secondary" onClick={() => addOpeningOnWall('south', 'window')}><Plus size={15} /> South window</button>
+                <button className="secondary" onClick={() => addOpeningOnWall('south', 'door')}><Plus size={15} /> South door</button>
+                <button className="secondary" onClick={() => addOpeningOnWall('north', 'window')}><Plus size={15} /> North window</button>
+              </div>
+            </div>
+          )}
+
+          {systemView === 'outdoors' && (
+            <div className="systemPage">
+              <div className="sectionHead">The rest of the homestead</div>
+              <div className="outdoorGrid">
+                {OUTDOOR_ITEMS.map((item) => {
+                  const on = outdoorItemPresent(spec, item);
+                  return (
+                    <button key={item.key} className={on ? 'outdoorItem on' : 'outdoorItem'} onClick={() => toggleOutdoorItem(item)}>
+                      <b>{item.name}</b>
+                      <small>{item.note}</small>
+                      <span className="outdoorCost">${item.cost.toLocaleString()}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="systemNote">Toggling an item places it on the site next to the house — drag it where it belongs in the model. Each adds its cost to the build.</p>
+            </div>
+          )}
+
           {systemView === 'water' && (
             <div className="systemPage">
               <div className="sectionHead">Where water comes from</div>
@@ -4676,18 +4908,32 @@ function App() {
                 </label>
                 <label>Pitch <em className="pitchHint">≈ {Math.round(Number(spec.shell.roofPitch || 0.32) * 12)}:12</em><input type="number" step="0.01" value={spec.shell.roofPitch} onChange={(event) => updateShell('roofPitch', event.target.value)} /></label>
               </div>
+              <div className="breakOpenRow">
+                <div className="sectionHead">Overhang</div>
+                <button className="breakOpen" onClick={() => setOverhangBreakOpen((open) => !open)}>
+                  {overhangBreakOpen ? '▾ one value all around' : '▸ break open per side (N/S/E/W)'}
+                </button>
+              </div>
+              {!overhangBreakOpen ? (
+                <div className="controlGrid">
+                  <label>Overhang (ft)<input type="number" step="0.5" min="0" max="12" value={resolveOverhangs(spec.shell).split ? '' : resolveOverhangs(spec.shell).all} placeholder={resolveOverhangs(spec.shell).split ? 'mixed — break open' : undefined} onChange={(event) => updateOverhang('all', event.target.value)} /></label>
+                </div>
+              ) : (
+                <div className="wallSideGrid">
+                  {WALL_SIDES.map((side) => (
+                    <label key={side} className="wallSideCell">
+                      <span className="wallSideLabel">{WALL_SIDE_LABELS[side]}</span>
+                      <input type="number" step="0.5" min="0" max="12" value={resolveOverhangs(spec.shell)[side]} onChange={(event) => updateOverhang(side, event.target.value)} />
+                      <span className="wallSideUnit">ft</span>
+                    </label>
+                  ))}
+                </div>
+              )}
               <label className="diyToggle">
                 <input type="checkbox" checked={utilitiesOf(spec).diyRoof} onChange={(event) => updateUtility('diyRoof', event.target.checked)} />
                 <span>I'll frame the roof myself (sweat equity)</span>
               </label>
-              <p className="systemNote">A different north vs south wall height on the Shell page also makes a shed roof. Overhangs and covering are coming next — ask the assistant meanwhile.</p>
-            </div>
-          )}
-
-          {!['shell', 'rooms', 'walls', 'roof', 'site', 'water', 'waste', 'power', 'heat'].includes(systemView) && (
-            <div className="systemPage">
-              <div className="sectionHead">{SYSTEM_META[systemView]?.label || systemView}</div>
-              <p className="systemNote">This system's own controls are coming next. For now, tell the assistant what you want — for example "add a well and a 500 gallon tank" — and it will set it up in the model.</p>
+              <p className="systemNote">The overhang shields plastered natural walls (24" minimum) and shades summer sun without blocking winter rays — 2 to 3 ft is the sweet spot on the south. A different north vs south wall height on the Shell page makes a shed roof.</p>
             </div>
           )}
 

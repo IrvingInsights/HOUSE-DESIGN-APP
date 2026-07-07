@@ -268,9 +268,11 @@ export const UTILITY_DEFAULTS = {
   wellSepticFt: 120,
   powerMode: 'offgrid',
   heatSource: 'wood_stove',
+  foundationType: 'rubble',
   diyWalls: false,
   diyRoof: false,
-  diyHeat: false
+  diyHeat: false,
+  diyFoundation: false
 };
 
 export const SITE_DEFAULTS = { zip: '', latitudeDeg: 43, rainInYr: 38 };
@@ -316,6 +318,11 @@ export function applyBimOperations(currentSpec, plan) {
       }
       else if (field === 'padExtensionFt') next.shell.padExtensionFt = clamp(numeric, 0, 240);
       else if (field === 'storeys') next.shell.storeys = clamp(numeric, 1, 3);
+      else if (field === 'overhangFt') {
+        // Global overhang = one value all around: clear per-side overrides.
+        next.shell.overhangFt = clamp(numeric, 0, 12);
+        delete next.shell.overhangs;
+      }
       else if (field === 'roofType') next.shell.roofType = String(operation.value || next.shell.roofType || 'gable');
       else if (field === 'projectName') next.projectName = String(operation.value || next.projectName || 'Untitled Natural Building Study');
       else if (field === 'sitePad') {
@@ -398,6 +405,19 @@ export function applyBimOperations(currentSpec, plan) {
       continue;
     }
 
+    if (operation.type === 'set_overhang') {
+      const value = clamp(Number(operation.value), 0, 12);
+      if (operation.wall === 'all' || !operation.wall) {
+        next.shell.overhangFt = value;
+        delete next.shell.overhangs;
+      } else if (WALL_SIDES.includes(operation.wall)) {
+        next.shell.overhangs ||= {};
+        next.shell.overhangs[operation.wall] = value;
+      }
+      actions.push(`Set ${operation.wall || 'all'} roof overhang to ${value} ft.`);
+      continue;
+    }
+
     if (operation.type === 'set_site') {
       const field = operation.field;
       if (field === 'zip') next.site.zip = String(operation.value || '').replace(/\D/g, '').slice(0, 5);
@@ -414,11 +434,12 @@ export function applyBimOperations(currentSpec, plan) {
         waterSource: ['well', 'spring', 'catchment', 'town'],
         wasteMethod: ['septic', 'composting', 'reedbed'],
         powerMode: ['offgrid', 'hybrid', 'gridtie'],
-        heatSource: ['rocket_mass', 'masonry', 'wood_stove', 'minisplit']
+        heatSource: ['rocket_mass', 'masonry', 'wood_stove', 'minisplit'],
+        foundationType: ['rubble', 'stemwall', 'slab']
       };
       if (field === 'tankGal') next.utilities.tankGal = clamp(Number(operation.value) || 0, 0, 50000);
       else if (field === 'wellSepticFt') next.utilities.wellSepticFt = clamp(Number(operation.value) || 0, 0, 2000);
-      else if (field === 'diyWalls' || field === 'diyRoof' || field === 'diyHeat') {
+      else if (field === 'diyWalls' || field === 'diyRoof' || field === 'diyHeat' || field === 'diyFoundation') {
         next.utilities[field] = value === 'true' || operation.value === true || value === '1';
       } else if (allowed[field]) {
         next.utilities[field] = allowed[field].includes(value) ? value : next.utilities[field];

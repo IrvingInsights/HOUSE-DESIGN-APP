@@ -24,7 +24,7 @@ const operationSchema = {
               'set_wall_height', 'set_wall_assembly', 'set_wall_segment_assembly', 'add_roof_plane',
               'set_roof_profile', 'add_opening_from_reference', 'add_site_element', 'add_pad_extension',
               'add_loft', 'add_tower', 'add_floor', 'edit_level', 'trace_image_request', 'request_clarification',
-              'set_site', 'set_utility'
+              'set_site', 'set_utility', 'set_overhang'
             ]
           },
           id: { type: 'string' },
@@ -362,7 +362,8 @@ export async function aiPlan(payload) {
 Return only structured operations. Do not invent dimensions from drawings unless visible and reasonably inferable.
 Prefer real model changes over prose. If the user asks for floors, lofts, towers, site objects, unusual natural-building forms, or arbitrary elements, create add_level or add_element operations.
 For wall system changes, use set_assembly. For roofs, use set_roof. For openings, use add_opening with wall/type/width/position.
-For water/waste/power/heat choices use set_utility with field one of waterSource (well|spring|catchment|town), wasteMethod (septic|composting|reedbed), powerMode (offgrid|hybrid|gridtie), heatSource (rocket_mass|masonry|wood_stove|minisplit), tankGal, wellSepticFt, diyWalls/diyRoof/diyHeat. For location use set_site with field zip, latitudeDeg, or rainInYr.
+For water/waste/power/heat choices use set_utility with field one of waterSource (well|spring|catchment|town), wasteMethod (septic|composting|reedbed), powerMode (offgrid|hybrid|gridtie), heatSource (rocket_mass|masonry|wood_stove|minisplit), foundationType (rubble|stemwall|slab), tankGal, wellSepticFt, diyWalls/diyRoof/diyHeat/diyFoundation. For location use set_site with field zip, latitudeDeg, or rainInYr.
+For roof overhangs use set_overhang with wall (north|south|east|west|all) and value in feet.
 Validate basic constructability and put concerns in warnings, not as refusal.
 
 Current BIM state:
