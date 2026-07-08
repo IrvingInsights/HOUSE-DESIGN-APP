@@ -72,4 +72,16 @@ upload). Blender/IFC round-trip (one-click headless launch). Build mode. Welcome
   start, but a real polish pass wants: refined spacing/rhythm, a considered type scale,
   softer/consistent control styling, better empty states, iconography consistency, and a
   more crafted 3D material/lighting look. Do this AFTER functional gaps, per Daniel.
+**Explicit Daniel requests still open (asked near context limit 2026-07-08):**
+- **Interactive Project Plan** (the OS/Plan console tab): it's read-only now — make
+  its requirements / open-questions / task-queue / decisions editable and actionable.
+- **More systems + "blow-ups":** flooring as its own system; foundation insulation
+  and roof insulation as real controls; each system deserves a fuller detail view
+  ("blow up") with facile controls (the per-page why/reads/feeds is a start).
+- **Metric tiles clickable — DONE** (cost→Build, rooms→Rooms, flags/adds-up→Review).
+  Next level he'll likely want: cost tile → a real cost *breakdown* interface (per
+  system, from `derived.cost`), and flags → inline "fix it" actions (each flag already
+  carries a `fix` string; wire one-click fixes where possible, e.g. add wet core,
+  add south door).
+
 **Housekeeping:** rotate the Gemini key (pasted in-session, in `.env.local`).
