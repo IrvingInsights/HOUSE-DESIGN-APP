@@ -3526,3 +3526,206 @@ button.ghost.saveButton {
 }
 .openingTypeRow { display: flex; flex-wrap: wrap; gap: 6px; }
 .openingTypeRow button { font-size: 12px; }
+
+/* ============================================================================
+   WARM EARTHEN STUDIO — visual refresh (2026-07-08, Daniel-directed Job 3)
+   One cohesive layer appended LAST so it wins the cascade. Re-tints the matte
+   chrome from cool moss toward hand-built warmth (umber charcoal + clay / straw
+   / lime-sage drawn from the materials themselves), sets an editorial type
+   rhythm (Fraunces heads, calmer body), and gives controls + cards real
+   tactility. The light chips floating on the bright 3D scene keep their own
+   scope (defined earlier) — this only warms the surrounding chrome.
+   ============================================================================ */
+
+:root { --font-display: 'Fraunces', Georgia, 'Times New Roman', serif; }
+
+/* -- Warm earthen tokens for the three matte columns -- */
+.leftPanel,
+.workspace,
+.rightPanel {
+  background: #211C18;
+  color: #ECE4D6;
+  --ink: #ECE4D6;
+  --ink2: #C6BBA7;
+  --ink3: #978C79;
+  --ivory: #2A231E;        /* card surface */
+  --raise: #332A23;        /* raised surface */
+  --vellum: #211C18;
+  --line: #423931;         /* warm hairline */
+  --line2: #564A3F;
+  --sage: #3A2C22;         /* warm active bg */
+  --plum: #EBD6B0;         /* heads — soft warm parchment-gold */
+  --evergreen: #C67A50;    /* primary accent — clay */
+  --canvas: #1B1713;
+  --muted: #978C79;
+  --field: #241E19;
+  --field-border: #4C4137;
+  --active: #3A2C22;
+  --active-line: #C88A5B;  /* clay-straw active / focus border */
+  --panel-2: #281F1A;
+  --panel-3: #221C17;
+  --good: #93AE79;
+  --good-bg: #2C3324;
+  --warn: #D9B36A;
+  --warn-bg: #38301F;
+  --bad: #E0977B;
+  --bad-bg: #3B2A22;
+  --clay: #B4623F;
+  --straw: #C9A24B;
+  --limesage: #7E8A6A;
+}
+
+/* Base + hardcoded surfaces warm to match */
+body,
+.app { background: #1B1713; }
+.leftPanel { border-right-color: #120F0C; }
+.brand,
+.panelBlock,
+.elementLibrary details,
+.workspace .bimEditor,
+.workspace .planMove { background: var(--ivory); border-color: var(--line); }
+.workspace .lowerDeck,
+.lowerDeck { background: #211C18; }
+.workspace .topBar { background: color-mix(in srgb, #211C18 92%, transparent); }
+.workspace .modelShell {
+  border-bottom-color: #120F0C;
+  box-shadow: inset 0 0 0 1px #120F0C, inset 0 -14px 30px -18px rgba(0, 0, 0, 0.6);
+}
+.roomRow.element { background: #2E251D; }
+.roomRow.element.active { background: #3C2E1E; border-color: var(--straw); }
+.roomRow.wall { background: #2A2620; border-left-color: var(--active-line); }
+.roomRow.wall.active { background: var(--sage); }
+.roomRow.special { background: #302518; }
+.roomRow.special.active { background: #3C2E1E; }
+
+/* ---- Editorial type ---- */
+body { line-height: 1.5; }
+.brand h1,
+h1 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.08;
+}
+.brand h1 { color: #EAC98A; }
+.blockTitle,
+.sectionHead,
+.miniHead {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.004em;
+}
+.blockTitle { font-size: 15px; }
+.sectionHead { font-size: 13.5px; }
+.systemNavEyebrow,
+.readKey,
+.maintInterval {
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.studioHint { line-height: 1.55; }
+
+/* ---- Controls: tactile, warm, real focus rings ---- */
+.leftPanel input, .leftPanel select, .leftPanel textarea,
+.workspace input, .workspace select, .workspace textarea,
+.rightPanel input, .rightPanel select, .rightPanel textarea {
+  background: var(--field);
+  color: var(--ink);
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  transition: border-color .14s ease, box-shadow .14s ease, background .14s ease;
+}
+.leftPanel input:focus, .leftPanel select:focus, .leftPanel textarea:focus,
+.workspace input:focus, .workspace select:focus, .workspace textarea:focus,
+.rightPanel input:focus, .rightPanel select:focus, .rightPanel textarea:focus,
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: none;
+  border-color: var(--active-line);
+  box-shadow: 0 0 0 3px rgba(200, 138, 91, 0.22);
+}
+:focus-visible { outline-color: var(--active-line); }
+
+/* ---- Buttons: clay primary, warm secondaries, honest danger ---- */
+button {
+  border-radius: 8px;
+  transition: background .14s ease, border-color .14s ease, transform .12s ease, box-shadow .14s ease;
+}
+button {
+  background: var(--clay);
+  border: 1px solid var(--clay);
+  color: #FBF3EA;
+}
+button:hover { background: #9E5334; border-color: #9E5334; }
+button:active { transform: translateY(1px); }
+button.secondary,
+.leftPanel button.secondary,
+.workspace button.secondary,
+.rightPanel button.secondary {
+  background: var(--raise);
+  color: var(--ink2);
+  border-color: var(--line2);
+}
+button.secondary:hover,
+.leftPanel button.secondary:hover,
+.workspace button.secondary:hover,
+.rightPanel button.secondary:hover {
+  background: var(--active);
+  border-color: var(--active-line);
+  color: var(--plum);
+}
+button.danger,
+.danger {
+  background: transparent;
+  color: var(--bad);
+  border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
+}
+button.danger:hover,
+.danger:hover { background: var(--bad-bg); border-color: var(--bad); }
+
+/* ---- Cards: soft elevation + warm inner highlight ---- */
+.panelBlock,
+.consolePanel {
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 240, 220, 0.035), 0 10px 24px -20px rgba(0, 0, 0, 0.75);
+}
+.statGrid button,
+.statGrid div { border-radius: 10px; background: var(--ivory); border-color: var(--line); }
+.statGrid button:hover { border-color: var(--active-line); }
+
+/* ---- Warm accents on the new components ---- */
+.costBarFill { background: linear-gradient(90deg, var(--straw), var(--clay)); }
+.issueFix { background: var(--clay); border-color: var(--clay); color: #FBF3EA; }
+.issueFix:hover { background: #9E5334; border-color: #9E5334; }
+.brandGable { border-bottom-color: var(--straw); }
+
+/* Warm scrollbars across the matte chrome */
+.leftPanel *::-webkit-scrollbar-thumb,
+.workspace *::-webkit-scrollbar-thumb,
+.rightPanel *::-webkit-scrollbar-thumb {
+  background: var(--line2);
+  border-color: var(--vellum);
+}
+
+/* ---- Retire the leftover cool-slate spots ---- */
+.modeTabs button.active {
+  background: var(--clay);
+  border-color: var(--clay);
+  color: #FBF3EA;
+}
+.viewModeToggle button.active { background: var(--clay); color: #FBF3EA; }
+.brandMark { background: linear-gradient(140deg, var(--clay), #7C4128); }
+.consoleTabs button.active,
+.systemTabs button.active,
+.inspectorTabs button.active,
+.reviewTabs button.active {
+  color: var(--plum);
+  border-color: var(--active-line);
+}
+/* Selection controls tint warm, not slate */
+.leftPanel input[type="checkbox"], .leftPanel input[type="radio"],
+.workspace input[type="checkbox"], .workspace input[type="radio"],
+.rightPanel input[type="checkbox"], .rightPanel input[type="radio"],
+.layerCheck input,
+.phaseCard summary input,
+.diyToggle input { accent-color: var(--clay); }
+::selection { background: color-mix(in srgb, var(--straw) 40%, transparent); }

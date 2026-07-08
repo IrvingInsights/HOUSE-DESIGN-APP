@@ -3437,9 +3437,9 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
   useEffect(() => {
     const mount = mountRef.current;
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xe8e6dd);
+    scene.background = new THREE.Color(0xe9e1cf);
     // Faint atmospheric falloff so the site melts into the paper backdrop.
-    scene.fog = new THREE.Fog(0xe8e6dd, 220, 520);
+    scene.fog = new THREE.Fog(0xe9e1cf, 220, 520);
 
     const camera = new THREE.PerspectiveCamera(45, mount.clientWidth / mount.clientHeight, 0.1, 2000);
     if (cameraStateRef.current?.position) {
