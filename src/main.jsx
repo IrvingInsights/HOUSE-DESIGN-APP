@@ -4300,6 +4300,8 @@ function App() {
   const [spec, setSpec] = useState(() => initialSaved?.spec || seedSpec);
   const [systemView, setSystemView] = useState('shell');
   const [wallBreakOpen, setWallBreakOpen] = useState(false);
+  const [wallOpeningType, setWallOpeningType] = useState('window');
+  const [windowAddWall, setWindowAddWall] = useState('south');
   const [overhangBreakOpen, setOverhangBreakOpen] = useState(false);
   const [prompt, setPrompt] = useState(() => initialSaved?.prompt || DEFAULT_PROMPT);
   const [selectedRoom, setSelectedRoom] = useState(() => initialSaved?.selectedRoom || 'great');
@@ -4964,6 +4966,18 @@ function App() {
     });
   }
 
+  // "Assembly (all sides)" on the Walls page. This MUST be a single dispatch —
+  // four separate updateWallSide calls each apply to the same stale spec, so
+  // only the last (west) would survive (the "goes to West no matter what" bug).
+  // One plan with four ops applies them in sequence on the backend.
+  function setAllWallsAssembly(value) {
+    void applyBackendOperations({
+      operations: WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, field: 'assembly', value })),
+      promptText: `Set all walls to ${WALL_ASSEMBLIES[value]?.label || value}`,
+      logPrefix: 'Wall edit'
+    });
+  }
+
   function updateSite(field, value) {
     void applyBackendOperations({
       operations: [{ type: 'set_site', field, value: String(value) }],
@@ -5207,13 +5221,14 @@ function App() {
   function addOpeningToSelectedWall(type = 'window') {
     const wall = wallSections.find((item) => item.id === selectedRoom);
     if (!wall) return;
-    const widthFt = type === 'door' ? 3 : 5;
+    const profile = OPENING_TYPES[type] || OPENING_TYPES.window;
+    const widthFt = profile.defaultW || 4;
     const maxAlong = wall.side === 'north' || wall.side === 'south' ? spec.shell.widthFt : spec.shell.depthFt;
     const existingOnWall = spec.openings.filter((opening) => opening.wall === wall.side).length;
     const along = clamp(4 + existingOnWall * 6, 0, Math.max(0, maxAlong - widthFt));
     void applyBackendOperations({
-      operations: [{ type: 'add_opening', wall: wall.side, openingType: type, widthFt, positionFt: along, name: `${titleCase(wall.side)} ${titleCase(type)} ${existingOnWall + 1}` }],
-      promptText: `Add ${type} to ${wall.name}`,
+      operations: [{ type: 'add_opening', wall: wall.side, openingType: type, widthFt, positionFt: along, name: `${titleCase(wall.side)} ${profile.label} ${existingOnWall + 1}` }],
+      promptText: `Add ${profile.label.toLowerCase()} to ${wall.name}`,
       logPrefix: 'Wall edit'
     });
   }
@@ -5884,7 +5899,7 @@ function App() {
                 <div className="sectionHead">Wall system (all sides)</div>
                 <div className="controlGrid">
                   <label>Assembly
-                    <select value={mixed ? '' : globalKey} onChange={(event) => WALL_SIDES.forEach((side) => updateWallSide(side, 'assembly', event.target.value))}>
+                    <select value={mixed ? '' : globalKey} onChange={(event) => setAllWallsAssembly(event.target.value)}>
                       {mixed && <option value="" disabled>Mixed — see per-side</option>}
                       {Object.values(WALL_ASSEMBLIES).map((assembly) => (
                         <option key={assembly.key} value={assembly.key}>{assembly.label} (R≈{assembly.rValue})</option>
@@ -6071,15 +6086,32 @@ function App() {
                   </div>
                 ))}
               </div>
-              <div className="buttonRow">
-                <button className="secondary" onClick={() => addOpeningOnWall('south', 'window')}><Plus size={15} /> Window</button>
-                <button className="secondary" onClick={() => addOpeningOnWall('south', 'door')}><Plus size={15} /> Door</button>
-                <button className="secondary" onClick={() => addOpeningOnWall('south', 'french')}><Plus size={15} /> French doors</button>
-                <button className="secondary" onClick={() => addOpeningOnWall('south', 'slider')}><Plus size={15} /> Sliding door</button>
-                <button className="secondary" onClick={() => addOpeningOnWall('south', 'bay')}><Plus size={15} /> Bay window</button>
-                <button className="secondary" onClick={() => addOpeningOnWall('roof', 'skylight')}><Plus size={15} /> Skylight</button>
+              <div className="addOpeningBar">
+                <label>Add to wall
+                  <select value={windowAddWall} onChange={(event) => setWindowAddWall(event.target.value)}>
+                    <option value="north">North</option>
+                    <option value="south">South</option>
+                    <option value="east">East</option>
+                    <option value="west">West</option>
+                    <option value="roof">Roof (skylight)</option>
+                  </select>
+                </label>
+                <div className="buttonRow openingTypeRow">
+                  {Object.entries(OPENING_TYPES).map(([key, profile]) => {
+                    const roofOnly = Boolean(profile.roof);
+                    const wall = windowAddWall === 'roof' ? 'roof' : (roofOnly ? 'roof' : windowAddWall);
+                    return (
+                      <button
+                        key={key}
+                        className="secondary"
+                        title={roofOnly ? 'Skylights sit on the roof plane' : `Add a ${profile.label.toLowerCase()} to the ${windowAddWall} wall`}
+                        onClick={() => addOpeningOnWall(wall, key)}
+                      ><Plus size={15} /> {profile.label}</button>
+                    );
+                  })}
+                </div>
               </div>
-              <p className="systemNote">Glazed doors (french, sliders) and bay windows count toward your south solar glass; skylights live on the roof (place them with the two plan coordinates); clerestories sit high for daylight and summer venting.</p>
+              <p className="systemNote">Pick a wall, then a type. Glazed doors (french, sliders) and bay windows count toward your south solar glass; clerestories sit high for daylight and summer venting; skylights always land on the roof (place them with the two plan coordinates).</p>
             </div>
           )}
 
@@ -6712,8 +6744,14 @@ function App() {
                       </>
                     ) : selectedIsWall ? (
                       <>
-                        <button onClick={() => addOpeningToSelectedWall('window')}><Plus size={15} /> Add Window</button>
-                        <button className="secondary" onClick={() => addOpeningToSelectedWall('door')}><Plus size={15} /> Add Door</button>
+                        <label className="addOpeningPick">Add opening
+                          <select value={wallOpeningType} onChange={(event) => setWallOpeningType(event.target.value)}>
+                            {Object.entries(OPENING_TYPES).filter(([, profile]) => !profile.roof).map(([key, profile]) => (
+                              <option key={key} value={key}>{profile.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <button onClick={() => addOpeningToSelectedWall(wallOpeningType)}><Plus size={15} /> Add to this wall</button>
                         <button className="danger" onClick={removeSelectedRoom}><Trash2 size={15} /> Remove Wall</button>
                       </>
                     ) : (

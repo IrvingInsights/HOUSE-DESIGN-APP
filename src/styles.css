@@ -3499,3 +3499,30 @@ button.ghost.saveButton {
 }
 .costCeiling.under { background: var(--good-bg, #2C3A31); color: var(--good, #86C79A); }
 .costCeiling.over { background: var(--bad-bg, #402E27); color: var(--bad, #E09880); }
+
+/* Opening-type pickers — inspector (per-wall) + Windows page (2026-07-08) */
+.addOpeningPick {
+  display: flex; flex-direction: column; gap: 3px;
+  font-size: 11px; color: var(--ink3, #939A90); font-weight: 600;
+}
+.addOpeningPick select {
+  font-size: 12px; padding: 5px 7px; border-radius: 6px;
+  border: 1px solid var(--field-border, #4B554F);
+  background: var(--field, #262C29); color: var(--ink, #EAE8DD);
+}
+.addOpeningBar {
+  margin-top: 10px; padding: 10px;
+  border: 1px solid var(--line, #3D4642); border-radius: 8px;
+  background: var(--panel-2, #2A302D);
+}
+.addOpeningBar > label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--ink2, #BCC1B5); margin-bottom: 8px;
+}
+.addOpeningBar > label select {
+  font-size: 12px; padding: 5px 8px; border-radius: 6px;
+  border: 1px solid var(--field-border, #4B554F);
+  background: var(--field, #262C29); color: var(--ink, #EAE8DD);
+}
+.openingTypeRow { display: flex; flex-wrap: wrap; gap: 6px; }
+.openingTypeRow button { font-size: 12px; }
