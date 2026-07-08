@@ -373,8 +373,23 @@ textarea {
 .buttonRow,
 .exportActions {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 6px;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+/* One tidy row of small buttons above the model. */
+.exportActions button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  gap: 5px;
+  white-space: nowrap;
+}
+.exportActions button svg { width: 14px; height: 14px; }
+
+@media (max-width: 1180px) {
+  .exportActions { flex-wrap: wrap; }
 }
 
 .buttonRow {
@@ -654,8 +669,8 @@ textarea {
 
 .topBar {
   grid-column: 1 / -1;
-  min-height: 76px;
-  padding: 12px 18px;
+  min-height: 58px;
+  padding: 8px 18px;
   display: flex;
   align-items: center;
   justify-content: space-between;
