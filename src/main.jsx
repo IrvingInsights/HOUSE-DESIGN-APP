@@ -2185,11 +2185,30 @@ function deriveDesign(spec, wallSections) {
   const overhangs = resolveOverhangs(spec.shell);
   const roofFootprint = (w + overhangs.east + overhangs.west) * (d + overhangs.north + overhangs.south);
   const roofArea = roofFootprint / Math.cos(Math.atan(pitch));
-  const wallArea = wallSections.reduce((sum, wall) => sum + wall.lengthFt * (wall.heightFt + storeyExtraFt), 0);
+  // True face area per wall, roof-shape aware:
+  // - shed: east/west walls are RAKED — a trapezoid from the north eave to
+  //   the south eave, so their area uses the average of the two, and their
+  //   own "height" setting doesn't apply.
+  // - gable: north/south walls carry a triangular gable peak above the eave.
+  const roofTypeNow = spec.shell.roofType || 'gable';
+  const northEaveFt = resolveWallSide(spec, 'north').heightFt;
+  const southEaveFt = resolveWallSide(spec, 'south').heightFt;
+  const gableRiseFt = roofTypeNow === 'gable' ? Math.max(0, d * pitch - 0.25) : 0;
+  const wallFaceArea = (wall) => {
+    if (roofTypeNow === 'shed' && (wall.side === 'east' || wall.side === 'west')) {
+      return wall.lengthFt * ((northEaveFt + southEaveFt) / 2 + storeyExtraFt);
+    }
+    let area = wall.lengthFt * (wall.heightFt + storeyExtraFt);
+    if (roofTypeNow === 'gable' && (wall.side === 'north' || wall.side === 'south')) {
+      area += (wall.lengthFt * gableRiseFt) / 2;
+    }
+    return area;
+  };
+  const wallArea = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall), 0);
   const wallCostPsf = { 'straw-bale': 12, 'hemp-lime': 20, cob: 20, 'rammed-earth': 22, cordwood: 16, 'light-straw-clay': 15, framed: 18 };
-  const wallsCost = wallSections.reduce((sum, wall) => sum + wall.lengthFt * (wall.heightFt + storeyExtraFt) * (wallCostPsf[wall.assemblyKey] ?? 16), 0);
+  const wallsCost = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCostPsf[wall.assemblyKey] ?? 16), 0);
   const wallR = wallArea
-    ? wallSections.reduce((sum, wall) => sum + wall.lengthFt * (wall.heightFt + storeyExtraFt) * (WALL_ASSEMBLIES[wall.assemblyKey]?.rValue ?? 20), 0) / wallArea
+    ? wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (WALL_ASSEMBLIES[wall.assemblyKey]?.rValue ?? 20), 0) / wallArea
     : 20;
   // Glazed openings on the south wall — windows, picture, clerestory, and
   // glazed doors (french, sliders) all count toward passive-solar glass.
@@ -2276,7 +2295,7 @@ function deriveDesign(spec, wallSections) {
   // Embodied carbon (kg CO2e, directional/comparative — add-on coefficients).
   const foundationCarbonPsf = { rubble: 10, stemwall: 18, slab: 25 };
   const wallCarbonPsf = { 'straw-bale': 6, 'rammed-earth': 20, cob: 8, 'hemp-lime': 4, cordwood: 8, 'light-straw-clay': 7, framed: 8 };
-  const wallCarbon = wallSections.reduce((sum, wall) => sum + wall.lengthFt * (wall.heightFt + storeyExtraFt) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0);
+  const wallCarbon = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0);
   const stemCarbonExtra = utilities.foundationType === 'stemwall' ? perimeterFt * Math.max(0, stemwallHeightFt - 1.5) * 40 : 0;
   const carbonKg = floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra + wallCarbon + roofArea * 12 + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
@@ -5093,7 +5112,15 @@ function App() {
                                   ))}
                                 </select>
                               </label>
-                              <label>Height (ft)<input type="number" min="7" max="40" value={r.heightFt} onChange={(event) => updateWallSide(side, 'heightFt', event.target.value)} /></label>
+                              {(spec.shell.roofType === 'shed' && (side === 'east' || side === 'west')) ? (
+                                <label>Height
+                                  <div className="mixedField">
+                                    <span>Raked — follows the roof, {resolveWallSide(spec, 'north').heightFt}' (N) → {resolveWallSide(spec, 'south').heightFt}' (S)</span>
+                                  </div>
+                                </label>
+                              ) : (
+                                <label>Height (ft){spec.shell.roofType === 'gable' && (side === 'north' || side === 'south') && <em className="pitchHint">eave · gable peaks +{Math.round(Number(spec.shell.depthFt || 28) * Number(spec.shell.roofPitch || 0.32))}'</em>}<input type="number" min="7" max="40" value={r.heightFt} onChange={(event) => updateWallSide(side, 'heightFt', event.target.value)} /></label>
+                              )}
                               <label>Length (ft)<input type="number" value={side === 'north' || side === 'south' ? spec.shell.widthFt : spec.shell.depthFt} onChange={(event) => updateShell(side === 'north' || side === 'south' ? 'widthFt' : 'depthFt', event.target.value)} /></label>
                               <label>Thickness (ft)<input type="number" step="0.05" min="0.2" max="3.5" value={r.thicknessFt} onChange={(event) => updateWallSide(side, 'thicknessFt', event.target.value)} /></label>
                               <label>Interior finish<input type="text" value={r.interiorFinish} onChange={(event) => updateWallSide(side, 'interiorFinish', event.target.value)} /></label>
@@ -5703,7 +5730,7 @@ function App() {
                   {!selectedIsWall && <label>{selectedIsOpening ? 'Along Wall' : 'X'}<input type="number" value={selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? selected.x : selected.y) || 0 : selected?.x || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom(selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? 'x' : 'y') : 'x', event.target.value)} /></label>}
                   {!selectedIsWall && !selectedIsOpening && <label>Y<input type="number" value={selected?.y || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom('y', event.target.value)} /></label>}
                   {!selectedIsWall && !selectedIsSpecial && !selectedIsElement && storeyInfo(spec.shell).storeys > 1 && <label>Level<input type="number" min="1" max={Math.ceil(storeyInfo(spec.shell).storeys)} value={Number(selected?.level || 1)} onChange={(event) => updateSelectedRoom('level', event.target.value)} /></label>}
-                  {(selectedIsElement || selectedIsWall || selectedIsRoof) && <label>Height<input type="number" value={selected?.h || 1.2} disabled={selectedIsOpening || selectedIsPad || selectedIsGrid} onChange={(event) => updateSelectedRoom('h', event.target.value)} /></label>}
+                  {(selectedIsElement || selectedIsWall || selectedIsRoof) && <label>Height<input type="number" value={selected?.h || 1.2} disabled={selectedIsOpening || selectedIsPad || selectedIsGrid || (selectedIsWall && spec.shell.roofType === 'shed' && (selected?.side === 'east' || selected?.side === 'west'))} title={selectedIsWall && spec.shell.roofType === 'shed' && (selected?.side === 'east' || selected?.side === 'west') ? 'Raked wall — its ends follow the north and south walls' : undefined} onChange={(event) => updateSelectedRoom('h', event.target.value)} /></label>}
                   {selectedIsSpecial && !selectedIsPad && <label>{selectedIsRoof ? 'Roof Type' : 'Opening Type'}
                     <select value={selectedIsRoof ? (selected?.type || 'gable') : (OPENING_TYPES[selected?.type] ? selected.type : 'window')} onChange={(event) => updateSelectedRoom('type', event.target.value)}>
                       {selectedIsRoof && <option value="gable">gable</option>}
