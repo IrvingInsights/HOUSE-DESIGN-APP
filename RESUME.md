@@ -1,6 +1,7 @@
 # Resume / Handoff — Natural Building GC app (house-bim-app)
 
-Updated 2026-07-08. Working tree clean, ~38 commits since baseline `e9c99c1`.
+Updated 2026-07-08. Working tree clean, ~39 commits since baseline `e9c99c1`
+(latest: `8de8db8` actionable metric tiles — Costs tab + one-click flag fixes).
 Live backend design: **FL-001 rev 52** (Daniel's real work: shell/walls, 0 rooms).
 Deep provenance + every decision: Claude memory `natural-building-gc-dashboard-inventory.md`.
 
@@ -84,10 +85,17 @@ upload). Blender/IFC round-trip (one-click headless launch). Build mode. Welcome
 - **More systems + "blow-ups":** flooring as its own system; foundation insulation
   and roof insulation as real controls; each system deserves a fuller detail view
   ("blow up") with facile controls (the per-page why/reads/feeds is a start).
-- **Metric tiles clickable — DONE** (cost→Build, rooms→Rooms, flags/adds-up→Review).
-  Next level he'll likely want: cost tile → a real cost *breakdown* interface (per
-  system, from `derived.cost`), and flags → inline "fix it" actions (each flag already
-  carries a `fix` string; wire one-click fixes where possible, e.g. add wet core,
-  add south door).
+- **Metric tiles fully actionable — DONE** (commit 8de8db8). Cost tile → a real
+  **Costs** console tab: per-system breakdown of `derived.cost` (biggest first,
+  proportional bars + %), $/sf, embodied carbon, subtotal→sweat→net, inline DIY
+  toggles that re-price, loan-ceiling verdict; each row taps into that system.
+  Flags in Review → a "Go to <system>" jump + a one-click **Fix** where a clean
+  single-intent remedy exists (`fixId` on the issue → `fixIssue()`): add
+  bathroom/mudroom, add south door/window, add stair, raise stem wall, 100 ft
+  well↔septic, deepen/trim overhang, thicken a bale wall to 12:1. Fixes reuse the
+  non-destructive room placement + standard dispatch. Judgment-call flags (cost
+  ceiling, undersized water source) stay prose-only by design.
+  Next level: cost rows could split further (materials vs labor per system);
+  more flags could earn autofixes as their remedies become unambiguous.
 
 **Housekeeping:** rotate the Gemini key (pasted in-session, in `.env.local`).
