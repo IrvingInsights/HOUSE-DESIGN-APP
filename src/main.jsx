@@ -695,6 +695,66 @@ function packRooms(rooms, shellW) {
   };
 }
 
+// Room-noun -> preset for the local chat fast-path. Superset of ROOM_PRESETS.
+// Trailing s? on each so plurals match ("two bedrooms"). Most specific first;
+// the generic room/space entry is last so "dining room" resolves to Dining.
+const ROOM_SYNONYMS = [
+  { re: /\b(great rooms?|living rooms?|family rooms?|lounges?|parlors?)\b/, name: 'Living Room', type: 'living', w: 18, d: 16 },
+  { re: /\b(primary bedrooms?|master bedrooms?|main bedrooms?)\b/, name: 'Primary Bedroom', type: 'sleeping', w: 14, d: 12 },
+  { re: /\b(bedrooms?|bed rooms?|bedrms?|guest rooms?)\b/, name: 'Bedroom', type: 'sleeping', w: 12, d: 12 },
+  { re: /\b(kitchens?|kitchenettes?)\b/, name: 'Kitchen', type: 'service', w: 14, d: 12 },
+  { re: /\b(dining rooms?|dinings?|breakfast nooks?)\b/, name: 'Dining', type: 'living', w: 12, d: 12 },
+  { re: /\b(bathrooms?|bath rooms?|baths?|powder rooms?|powders?|toilets?|washrooms?|ensuites?|en-suites?)\b/, name: 'Bathroom', type: 'wet', w: 8, d: 8 },
+  { re: /\b(mudrooms?|mud rooms?|boot rooms?)\b/, name: 'Mudroom', type: 'service', w: 8, d: 8 },
+  { re: /\b(laundry|laundries|utility rooms?|utilities|utility)\b/, name: 'Laundry', type: 'service', w: 8, d: 8 },
+  { re: /\b(offices?|study|studies|studios?|dens?|workrooms?|work rooms?)\b/, name: 'Office', type: 'work', w: 10, d: 10 },
+  { re: /\b(pantry|pantries|larders?)\b/, name: 'Pantry', type: 'storage', w: 8, d: 6 },
+  { re: /\b(closets?|storages?|store rooms?|storerooms?)\b/, name: 'Closet', type: 'storage', w: 6, d: 5 },
+  { re: /\b(mechanicals?|mech rooms?|plant rooms?|equipment rooms?)\b/, name: 'Mechanical', type: 'wet', w: 8, d: 8 },
+  { re: /\b(greenhouses?|sunrooms?|sun rooms?|solariums?|conservatories|conservatory)\b/, name: 'Sunroom', type: 'plant', w: 12, d: 10 },
+  { re: /\b(porches|porch|verandas?|decks?)\b/, name: 'Porch', type: 'living', w: 16, d: 8 },
+  { re: /\b(nurseries|nursery|kids rooms?|childrens rooms?)\b/, name: 'Nursery', type: 'sleeping', w: 10, d: 10 },
+  { re: /\b(rooms?|spaces?)\b/, name: 'Room', type: 'living', w: 12, d: 12 }
+];
+
+const WORD_COUNTS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, another: 1 };
+
+// Parse a plain "add a bedroom" / "add two bedrooms 12x14 and a kitchen" chat
+// line into room specs — the instant local path that skips the slow planner.
+// Returns null if the text isn't a simple add-room request (so it falls
+// through to the full planner / Gemini).
+function parseLocalRoomAdds(text) {
+  const t = String(text || '').toLowerCase().trim();
+  // Must be an additive request, and must NOT ask for anything the layout
+  // engine can't do (walls, roof, systems, moves, stacking, per-room placement).
+  if (!/\b(add|put in|include|give me|need|want|create|place)\b/.test(t)) return null;
+  if (/\b(wall|roof|window|door|foundation|solar|water|septic|move|resize|remove|delete|rotate|loft|tower|storey|story|upstairs|level|above|below|next to|beside|between|north|south|east|west|corner)\b/.test(t)) return null;
+
+  const rooms = [];
+  const nameCount = {};
+  // Split on "and"/commas so "a kitchen and two bedrooms" yields both.
+  const clauses = t.replace(/\badd\b|\bplease\b|\bi\b|\bwould like\b|\bto the (house|plan|design)\b/g, ' ').split(/\s*(?:,|;|\band\b|\bplus\b|\balso\b)\s*/);
+  for (const clause of clauses) {
+    const match = ROOM_SYNONYMS.find((syn) => syn.re.test(clause));
+    if (!match) continue;
+    // count: number word or digit before the noun
+    let count = 1;
+    const numMatch = clause.match(/\b(\d+)\b/);
+    const wordMatch = clause.match(/\b(a|an|one|two|three|four|five|six|another)\b/);
+    // A dimension like 12x14 also has digits — don't read those as counts.
+    const dimMatch = clause.match(/(\d+(?:\.\d+)?)\s*(?:x|by|×)\s*(\d+(?:\.\d+)?)/);
+    if (numMatch && !(dimMatch && dimMatch[0].includes(numMatch[1]))) count = clamp(Number(numMatch[1]), 1, 8);
+    else if (wordMatch) count = WORD_COUNTS[wordMatch[1]] || 1;
+    const w = dimMatch ? clamp(Number(dimMatch[1]), 4, 60) : match.w;
+    const d = dimMatch ? clamp(Number(dimMatch[2]), 4, 60) : match.d;
+    for (let i = 0; i < count; i += 1) {
+      nameCount[match.name] = (nameCount[match.name] || 0) + 1;
+      rooms.push({ name: match.name, type: match.type, w, d });
+    }
+  }
+  return rooms.length ? rooms : null;
+}
+
 // Build the operation list that tidies the current rooms into a plan and grows
 // the shell to hold them if needed.
 function arrangeRoomsPlan(spec) {
@@ -3055,6 +3115,149 @@ function createDrawingSetHtml(spec, qualityScore, issues) {
 </html>`;
 }
 
+// Zone fill colors as hex strings for the 2D plan (mirrors the 3D zonePalette).
+const PLAN_ZONE_HEX = {
+  living: '#79a7a8', service: '#be9b6f', sleeping: '#8f9cc2', wet: '#78a9c8',
+  work: '#9ca66a', plant: '#7fbf78', storage: '#9a8575', outdoor: '#9a8f70',
+  site: '#9a8f70', garden: '#5f8d49', animal: '#b0895b', paddock: '#b0895b',
+  run: '#b0895b', landscape: '#6d8c55', homestead: '#8e7049'
+};
+
+// Top-down 2D floor-plan editor: drag rooms to move, drag corners to resize,
+// snapped to 0.5 ft. Commits on drop via onMove / onResize. This is the
+// natural surface for laying out a first floor.
+function PlanView({ spec, selectedRoom, onSelect, onMove, onResize }) {
+  const svgRef = useRef(null);
+  const [drag, setDrag] = useState(null);
+  const W = Number(spec.shell.widthFt) || 36;
+  const D = Number(spec.shell.depthFt) || 28;
+  const pad = Math.max(6, Math.round(Math.max(W, D) * 0.14));
+  const snap = (v) => Math.round(v * 2) / 2;
+
+  function clientToFeet(event) {
+    const svg = svgRef.current;
+    if (!svg) return { fx: 0, fy: 0 };
+    const point = svg.createSVGPoint();
+    point.x = event.clientX;
+    point.y = event.clientY;
+    const user = point.matrixTransform(svg.getScreenCTM().inverse());
+    return { fx: user.x, fy: user.y };
+  }
+
+  function startDrag(event, room, mode) {
+    event.stopPropagation();
+    event.preventDefault();
+    // Capture the pointer to the SVG so move/up keep firing even if the cursor
+    // outruns the small handle or leaves a room rect mid-drag.
+    try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
+    const { fx, fy } = clientToFeet(event);
+    setDrag({ id: room.id, mode, startFx: fx, startFy: fy, orig: { x: Number(room.x), y: Number(room.y), w: Number(room.w), d: Number(room.d) }, ghost: { x: Number(room.x), y: Number(room.y), w: Number(room.w), d: Number(room.d) } });
+    onSelect(room.id);
+  }
+
+  function onPointerMove(event) {
+    if (!drag) return;
+    const { fx, fy } = clientToFeet(event);
+    const dx = fx - drag.startFx;
+    const dy = fy - drag.startFy;
+    const o = drag.orig;
+    let ghost;
+    if (drag.mode === 'move') {
+      ghost = { x: clamp(snap(o.x + dx), -pad, W + pad - o.w), y: clamp(snap(o.y + dy), -pad, D + pad - o.d), w: o.w, d: o.d };
+    } else {
+      // corner resize keeps the opposite corner fixed
+      let { x, y, w, d } = o;
+      const right = o.x + o.w;
+      const bottom = o.y + o.d;
+      if (drag.mode.includes('w')) { x = clamp(snap(o.x + dx), right - 60, right - 3); w = right - x; } else if (drag.mode.includes('e')) { w = clamp(snap(o.w + dx), 3, 60); }
+      if (drag.mode.includes('n')) { y = clamp(snap(o.y + dy), bottom - 60, bottom - 3); d = bottom - y; } else if (drag.mode.includes('s')) { d = clamp(snap(o.d + dy), 3, 60); }
+      ghost = { x, y, w, d };
+    }
+    setDrag((current) => current && { ...current, ghost });
+  }
+
+  function endDrag() {
+    if (!drag) return;
+    const g = drag.ghost;
+    const o = drag.orig;
+    if (drag.mode === 'move') {
+      if (g.x !== o.x || g.y !== o.y) onMove(drag.id, g.x, g.y);
+    } else if (g.w !== o.w || g.d !== o.d || g.x !== o.x || g.y !== o.y) {
+      onResize(drag.id, g.x, g.y, g.w, g.d);
+    }
+    setDrag(null);
+  }
+
+  const roomAt = (room) => (drag && drag.id === room.id ? { ...room, ...drag.ghost } : room);
+  const gridStep = W > 60 ? 10 : 5;
+  const gridLines = [];
+  for (let gx = 0; gx <= W + 0.01; gx += gridStep) gridLines.push(<line key={`gx${gx}`} x1={gx} y1={0} x2={gx} y2={D} stroke="var(--line)" strokeWidth={0.06} opacity={0.5} />);
+  for (let gy = 0; gy <= D + 0.01; gy += gridStep) gridLines.push(<line key={`gy${gy}`} x1={0} y1={gy} x2={W} y2={gy} stroke="var(--line)" strokeWidth={0.06} opacity={0.5} />);
+
+  const openings = (spec.openings || []).filter((o) => o.wall !== 'roof');
+
+  return (
+    <div className="planWrap">
+      <svg
+        ref={svgRef}
+        className="planSvg"
+        viewBox={`${-pad} ${-pad} ${W + pad * 2} ${D + pad * 2}`}
+        preserveAspectRatio="xMidYMid meet"
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerLeave={endDrag}
+        onClick={() => {}}
+      >
+        {/* site around the house */}
+        <rect x={-pad} y={-pad} width={W + pad * 2} height={D + pad * 2} fill="var(--canvas)" />
+        {gridLines}
+        {/* shell / exterior wall */}
+        <rect x={0} y={0} width={W} height={D} fill="none" stroke="var(--ink3)" strokeWidth={1} />
+        <rect x={0.7} y={0.7} width={Math.max(0, W - 1.4)} height={Math.max(0, D - 1.4)} fill="none" stroke="var(--line2)" strokeWidth={0.12} />
+        {/* rooms */}
+        {(spec.rooms || []).map((raw) => {
+          const room = roomAt(raw);
+          const isSel = raw.id === selectedRoom;
+          const upstairs = Number(raw.level || 1) > 1;
+          return (
+            <g key={raw.id} opacity={upstairs ? 0.4 : 1} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
+              <rect
+                x={room.x} y={room.y} width={room.w} height={room.d}
+                fill={PLAN_ZONE_HEX[raw.type] || '#86a0a8'}
+                fillOpacity={isSel ? 0.9 : 0.66}
+                stroke={isSel ? 'var(--active-line)' : 'var(--line)'}
+                strokeWidth={isSel ? 0.4 : 0.18}
+                onPointerDown={(event) => startDrag(event, raw, 'move')}
+              />
+              <text x={room.x + room.w / 2} y={room.y + room.d / 2 - 0.3} textAnchor="middle" fontSize={Math.min(2, room.w / 5)} fill="#1a1f1d" fontWeight="600" pointerEvents="none">{raw.name}{upstairs ? ' ↑' : ''}</text>
+              <text x={room.x + room.w / 2} y={room.y + room.d / 2 + 1.5} textAnchor="middle" fontSize={Math.min(1.6, room.w / 6)} fill="#2a302d" opacity={0.75} pointerEvents="none">{raw.w}×{raw.d}′</text>
+              {isSel && !upstairs && ['nw', 'ne', 'sw', 'se'].map((corner) => {
+                const cx = room.x + (corner.includes('e') ? room.w : 0);
+                const cy = room.y + (corner.includes('s') ? room.d : 0);
+                return <circle key={corner} cx={cx} cy={cy} r={0.9} fill="var(--active-line)" stroke="#fff" strokeWidth={0.15} style={{ cursor: `${corner}-resize` }} onPointerDown={(event) => startDrag(event, raw, corner)} />;
+              })}
+            </g>
+          );
+        })}
+        {/* openings as white gaps on the walls */}
+        {openings.map((o, i) => {
+          const wide = Number(o.widthFt) || 3;
+          if (o.wall === 'north') return <line key={i} x1={o.x} y1={0} x2={o.x + wide} y2={0} stroke="#e8e6dd" strokeWidth={1.1} />;
+          if (o.wall === 'south') return <line key={i} x1={o.x} y1={D} x2={o.x + wide} y2={D} stroke="#e8e6dd" strokeWidth={1.1} />;
+          if (o.wall === 'east') return <line key={i} x1={W} y1={o.y} x2={W} y2={o.y + wide} stroke="#e8e6dd" strokeWidth={1.1} />;
+          if (o.wall === 'west') return <line key={i} x1={0} y1={o.y} x2={0} y2={o.y + wide} stroke="#e8e6dd" strokeWidth={1.1} />;
+          return null;
+        })}
+        {/* dimensions */}
+        <text x={W / 2} y={-pad + 1.6} textAnchor="middle" fontSize={2} fill="var(--ink2)">{W}′</text>
+        <text x={-pad + 1.6} y={D / 2} textAnchor="middle" fontSize={2} fill="var(--ink2)" transform={`rotate(-90 ${-pad + 1.6} ${D / 2})`}>{D}′</text>
+      </svg>
+      <div className="planNorth">▲ N</div>
+      <div className="planHint">Top-down plan · drag a room to move it, drag its corners to resize (snaps to ½ ft)</div>
+    </div>
+  );
+}
+
 function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview }) {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
@@ -3954,6 +4157,7 @@ function App() {
   const [clipboardObject, setClipboardObject] = useState(null);
   const [consoleView, setConsoleView] = useState('systems');
   const [appMode, setAppMode] = useState('design');
+  const [viewMode, setViewMode] = useState('3d');
   const [buildProgress, setBuildProgress] = useState(() => initialSaved?.buildProgress || {});
   const [inspectorView, setInspectorView] = useState('inspect');
   const [dimensionPreview, setDimensionPreview] = useState(null);
@@ -4346,6 +4550,14 @@ function App() {
 
     if (isConsultativePrompt(submittedPrompt, attachedImages)) {
       await answerConsultativePrompt(submittedPrompt);
+      return;
+    }
+
+    // Fast local path: simple "add a bedroom / a kitchen 14x12" requests skip
+    // the slow planner entirely and go straight through the layout engine.
+    const localRooms = attachedImages.length ? null : parseLocalRoomAdds(submittedPrompt);
+    if (localRooms) {
+      await applyLocalRoomAdds(localRooms, submittedPrompt);
       return;
     }
 
@@ -5015,6 +5227,64 @@ function App() {
           : undefined
       });
     }
+  }
+
+  // Instant local path for simple "add a bedroom" chat lines — one add call
+  // (all rooms) + one arrange, no slow planner round-trip.
+  async function applyLocalRoomAdds(parsed, submittedPrompt) {
+    const taken = new Set((spec.rooms || []).map((room) => room.name));
+    const addOps = parsed.map((room) => {
+      let name = room.name;
+      let n = 2;
+      while (taken.has(name)) { name = `${room.name} ${n}`; n += 1; }
+      taken.add(name);
+      return { type: 'add_room', name, category: room.type, w: room.w, d: room.d, x: 2, y: 2 };
+    });
+    setChatMessages((items) => [...items, { role: 'user', speaker: 'You', text: submittedPrompt }]);
+    const report = await applyBackendOperations({
+      operations: addOps,
+      promptText: addOps.length === 1 ? `Add ${addOps[0].name}` : `Add ${addOps.length} rooms`,
+      logPrefix: 'Add rooms'
+    });
+    if (!report?.spec) return;
+    const arrange = arrangeRoomsPlan(report.spec);
+    const added = addOps.map((op) => op.name).join(', ');
+    await applyBackendOperations({
+      operations: arrange.ops.length ? arrange.ops : [{ type: 'no_change', reason: 'placed' }],
+      baseSpec: report.spec,
+      nextSelectedId: report.changedIds[0],
+      promptText: 'Arrange floor plan',
+      logPrefix: 'Layout',
+      chatText: arrange.grew
+        ? `Added ${added} and tidied the floor plan — grew the house to ${arrange.newW}′ × ${arrange.newD}′ so every room fits without overlapping. (Instant — no planner needed.)`
+        : `Added ${added} and laid the rooms out edge to edge, no overlaps. (Instant — no planner needed.)`
+    });
+  }
+
+  // 2D plan editor commit handlers.
+  function planMoveObject(id, x, y) {
+    const object = spec.rooms.find((r) => r.id === id) || (spec.elements || []).find((e) => e.id === id);
+    if (!object) return;
+    void applyBackendOperations({
+      operations: [{ type: 'move_object', targetId: id, name: object.name, x, y }],
+      promptText: `Move ${object.name}`,
+      logPrefix: 'Plan edit',
+      nextSelectedId: id
+    });
+  }
+
+  function planResizeObject(id, x, y, w, d) {
+    const object = spec.rooms.find((r) => r.id === id) || (spec.elements || []).find((e) => e.id === id);
+    if (!object) return;
+    void applyBackendOperations({
+      operations: [
+        { type: 'resize_object', targetId: id, name: object.name, w, d, h: Number(object.h) || 0.22 },
+        { type: 'move_object', targetId: id, name: object.name, x, y }
+      ],
+      promptText: `Resize ${object.name}`,
+      logPrefix: 'Plan edit',
+      nextSelectedId: id
+    });
   }
 
   async function arrangeRooms() {
@@ -5869,19 +6139,33 @@ function App() {
         </header>
 
         <div className="modelShell">
-          <ThreeScene
-            spec={spec}
-            selectedRoom={selectedRoom}
-            layers={modelLayers}
-            onSelectRoom={setSelectedRoom}
-            onMoveStart={beginPlanMove}
-            onMoveEnd={finishPlanMove}
-            onResizeEnd={finishPlanResize}
-            onDimensionPreview={setDimensionPreview}
-          />
-          <button className={`layersToggle${layersOpen ? ' open' : ''}${hiddenLayerCount > 0 || modelLayers.xray ? ' filtered' : ''}`} onClick={() => setLayersOpen((open) => !open)} title="Show / hide model layers">
+          {viewMode === 'plan' ? (
+            <PlanView
+              spec={spec}
+              selectedRoom={selectedRoom}
+              onSelect={setSelectedRoom}
+              onMove={planMoveObject}
+              onResize={planResizeObject}
+            />
+          ) : (
+            <ThreeScene
+              spec={spec}
+              selectedRoom={selectedRoom}
+              layers={modelLayers}
+              onSelectRoom={setSelectedRoom}
+              onMoveStart={beginPlanMove}
+              onMoveEnd={finishPlanMove}
+              onResizeEnd={finishPlanResize}
+              onDimensionPreview={setDimensionPreview}
+            />
+          )}
+          <div className="viewModeToggle">
+            <button className={viewMode === '3d' ? 'active' : ''} onClick={() => setViewMode('3d')}>3D</button>
+            <button className={viewMode === 'plan' ? 'active' : ''} onClick={() => setViewMode('plan')}>Plan</button>
+          </div>
+          {viewMode === '3d' && <button className={`layersToggle${layersOpen ? ' open' : ''}${hiddenLayerCount > 0 || modelLayers.xray ? ' filtered' : ''}`} onClick={() => setLayersOpen((open) => !open)} title="Show / hide model layers">
             <Layers size={14} /> Layers{hiddenLayerCount > 0 ? ` · ${hiddenLayerCount} off` : modelLayers.xray ? ' · x-ray' : ''}
-          </button>
+          </button>}
           {(hiddenLayerCount > 0 || modelLayers.xray) && (
             <div className="viewFilterBadge">
               <span>
@@ -5936,15 +6220,15 @@ function App() {
               </div>
             );
           })()}
-          <div className="viewBadge"><Camera size={15} /> drag rooms, drag corner handles to resize</div>
+          {viewMode === '3d' && <div className="viewBadge"><Camera size={15} /> drag rooms, drag corner handles to resize</div>}
           <div className="changeBadge" key={`${spec.revision}-${selectedRoom}`}><Sparkles size={14} /> Rev {spec.revision}: {lastModelChange}</div>
-          {dimensionPreview && (
+          {viewMode === '3d' && dimensionPreview && (
             <div className="dimensionBadge">
               <Ruler size={15} />
               <span>{dimensionPreview.mode === 'resize' ? 'Resizing' : 'Moving'} · {dimensionPreview.w}' x {dimensionPreview.d}' · X {dimensionPreview.x}' Y {dimensionPreview.y}'</span>
             </div>
           )}
-          <div className="northBadge">N</div>
+          {viewMode === '3d' && <div className="northBadge">N</div>}
         </div>
 
         <div className="lowerDeck">
