@@ -611,6 +611,20 @@ textarea {
   grid-template-columns: repeat(2, 1fr);
 }
 
+/* Metric tiles are clickable → open the matching interface */
+.statGrid button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: none;
+  min-height: 0;
+  transition: border-color 0.14s ease, transform 0.14s ease;
+}
+.statGrid button:hover { border-color: var(--active-line, #7FA8B5); transform: translateY(-1px); }
+.statGrid button:active { transform: translateY(0); }
+
 .statGrid div {
   border-radius: 7px;
   background:

@@ -5611,10 +5611,10 @@ function App() {
 
         <section className="panelBlock compact consoleSummary">
           <div className="statGrid four">
-            <div><strong>${estimatedCost.toLocaleString()}</strong><span>{derived.sweat > 0 ? `est. cost · sweat saves $${Math.round(derived.sweat / 1000)}k` : 'est. cost'}</span></div>
-            <div><strong>{spec.rooms.length}</strong><span>room{spec.rooms.length === 1 ? '' : 's'} · {area} sf</span></div>
-            <div><strong>{openFlagCount}</strong><span>code flag{openFlagCount === 1 ? '' : 's'}</span></div>
-            <div className={openFlagCount === 0 ? 'stateStat ok' : 'stateStat bad'}><strong>{openFlagCount === 0 ? 'Yes' : 'Not yet'}</strong><span>adds up</span></div>
+            <button type="button" title="See the cost breakdown in Build" onClick={() => setAppMode('build')}><strong>${estimatedCost.toLocaleString()}</strong><span>{derived.sweat > 0 ? `est. cost · sweat saves $${Math.round(derived.sweat / 1000)}k` : 'est. cost'}</span></button>
+            <button type="button" title="Open the Rooms plan" onClick={() => { setConsoleView('systems'); setSystemView('rooms'); }}><strong>{spec.rooms.length}</strong><span>room{spec.rooms.length === 1 ? '' : 's'} · {area} sf</span></button>
+            <button type="button" title="See the code flags in Review" onClick={() => setConsoleView('review')}><strong>{openFlagCount}</strong><span>code flag{openFlagCount === 1 ? '' : 's'}</span></button>
+            <button type="button" className={openFlagCount === 0 ? 'stateStat ok' : 'stateStat bad'} title="See what does and doesn't add up in Review" onClick={() => setConsoleView('review')}><strong>{openFlagCount === 0 ? 'Yes' : 'Not yet'}</strong><span>adds up</span></button>
           </div>
         </section>
 
