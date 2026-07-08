@@ -639,6 +639,24 @@ function outdoorItemPresent(spec, item) {
   return (spec.elements || []).some((element) => element.name === item.name);
 }
 
+// Interior fixtures & equipment that live inside the house as placed objects —
+// draggable in the 2D plan and rendered in 3D. The heater name follows the
+// chosen heat source so "the heater" is a real object you can position.
+const HEATER_NAMES = { rocket_mass: 'Rocket Mass Heater', masonry: 'Masonry Heater', wood_stove: 'Wood Stove', minisplit: 'Mini-Split Unit' };
+const HEATER_SIZES = { rocket_mass: [6, 3], masonry: [4, 4], wood_stove: [3, 2.5], minisplit: [3, 1] };
+function interiorFixtures(spec) {
+  const heat = (spec.utilities || {}).heatSource || 'wood_stove';
+  const [hw, hd] = HEATER_SIZES[heat] || [3, 2.5];
+  return [
+    { key: 'heater', name: HEATER_NAMES[heat] || 'Heater', category: 'thermal', w: hw, d: hd, h: heat === 'masonry' ? 7 : 4 },
+    { key: 'tank', name: 'Water Tank', category: 'water', w: 4, d: 4, h: 5 },
+    { key: 'stairs', name: 'Stairs', category: 'structure', w: 3.5, d: 10, h: 8 },
+    { key: 'counter', name: 'Kitchen Counter', category: 'structure', w: 8, d: 2, h: 3 },
+    { key: 'bath', name: 'Bath Fixtures', category: 'water', w: 5, d: 3, h: 2.5 },
+    { key: 'closet', name: 'Built-in Storage', category: 'storage', w: 6, d: 2, h: 7 }
+  ];
+}
+
 // Common first-floor rooms with sensible default footprints — the quick-add
 // palette on the Rooms page.
 const ROOM_PRESETS = [
@@ -3169,6 +3187,15 @@ function createDrawingSetHtml(spec, qualityScore, issues) {
 </html>`;
 }
 
+// Element fill colors for the 2D plan (mirrors the 3D elementPalette).
+const PLAN_ELEMENT_HEX = {
+  wall: '#9f7d54', earthwork: '#7d684f', structure: '#74553d', roof: '#55766f',
+  passive: '#b08b4f', thermal: '#9a5944', water: '#4c88a0', plant: '#6f9b61',
+  homestead: '#8e7049', landscape: '#6d8c55', storage: '#8a7768', site: '#9a8f70',
+  garden: '#5f8d49', animal: '#b0895b', floor: '#8d8473', loft: '#6f7f6a',
+  tower: '#7a5f49', custom: '#8b786d'
+};
+
 // Zone fill colors as hex strings for the 2D plan (mirrors the 3D zonePalette).
 const PLAN_ZONE_HEX = {
   living: '#79a7a8', service: '#be9b6f', sleeping: '#8f9cc2', wet: '#78a9c8',
@@ -3293,6 +3320,33 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize }) {
             </g>
           );
         })}
+        {/* placed elements (heater, tank, garden, coop, stairs…) — dashed to
+            read as objects/fixtures rather than rooms; drag + resize like rooms */}
+        {(spec.elements || []).filter((el) => el.category !== 'floor').map((raw) => {
+          const el = roomAt(raw);
+          const isSel = raw.id === selectedRoom;
+          const w = Number(el.w) || 4;
+          const d = Number(el.d) || 4;
+          return (
+            <g key={raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
+              <rect
+                x={el.x} y={el.y} width={w} height={d}
+                fill={PLAN_ELEMENT_HEX[raw.category] || '#8a7768'}
+                fillOpacity={isSel ? 0.92 : 0.7}
+                stroke={isSel ? 'var(--active-line)' : '#5a5348'}
+                strokeWidth={isSel ? 0.4 : 0.22}
+                strokeDasharray="0.8 0.5"
+                onPointerDown={(event) => startDrag(event, raw, 'move')}
+              />
+              <text x={el.x + w / 2} y={el.y + d / 2 + 0.5} textAnchor="middle" fontSize={Math.min(1.5, w / 5)} fill="#1a1f1d" fontWeight="600" pointerEvents="none">{raw.name}</text>
+              {isSel && ['nw', 'ne', 'sw', 'se'].map((corner) => {
+                const cx = el.x + (corner.includes('e') ? w : 0);
+                const cy = el.y + (corner.includes('s') ? d : 0);
+                return <circle key={corner} cx={cx} cy={cy} r={0.8} fill="var(--active-line)" stroke="#fff" strokeWidth={0.15} style={{ cursor: `${corner}-resize` }} onPointerDown={(event) => startDrag(event, raw, corner)} />;
+              })}
+            </g>
+          );
+        })}
         {/* openings as white gaps on the walls */}
         {openings.map((o, i) => {
           const wide = Number(o.widthFt) || 3;
@@ -3307,7 +3361,7 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize }) {
         <text x={-pad + 1.6} y={D / 2} textAnchor="middle" fontSize={2} fill="var(--ink2)" transform={`rotate(-90 ${-pad + 1.6} ${D / 2})`}>{D}′</text>
       </svg>
       <div className="planNorth">▲ N</div>
-      <div className="planHint">Top-down plan · drag a room to move it, drag its corners to resize (snaps to ½ ft)</div>
+      <div className="planHint">Top-down plan · drag any room or element (dashed) to move it, drag corners to resize (snaps to ½ ft)</div>
     </div>
   );
 }
@@ -5262,6 +5316,24 @@ function App() {
   // house grows to fit — the GUI path that makes building a first floor work.
   // Drop a room into the first free gap without disturbing the rooms already
   // placed (a manual layout survives an add). Only 'auto-arrange' re-packs.
+  // Place an interior fixture (heater, tank, stairs…) as an element in a free
+  // spot inside the house — then it's draggable in 2D and shows in 3D.
+  function placeFixture(fixture) {
+    const taken = new Set((spec.elements || []).map((e) => e.name));
+    let name = fixture.name;
+    let n = 2;
+    while (taken.has(name)) { name = `${fixture.name} ${n}`; n += 1; }
+    const existing = (spec.rooms || []).concat((spec.elements || []).filter((e) => e.category !== 'floor'))
+      .map((o) => ({ x: Number(o.x), y: Number(o.y), w: Number(o.w), d: Number(o.d) }));
+    const spot = findFreeSpot(Number(spec.shell.widthFt), Number(spec.shell.depthFt), existing, fixture.w, fixture.d)
+      || { x: 2, y: 2 };
+    void applyBackendOperations({
+      operations: [{ type: 'add_element', name, category: fixture.category, x: spot.x, y: spot.y, z: 0, w: fixture.w, d: fixture.d, h: fixture.h, reason: 'Interior fixture placed from the plan.' }],
+      promptText: `Place ${name}`,
+      logPrefix: 'Fixture'
+    });
+  }
+
   async function addRoomPreset(preset) {
     const plan = planNewRoomPlacements(spec, [preset]);
     await applyBackendOperations({
@@ -5645,7 +5717,18 @@ function App() {
                   </button>
                 ))}
               </div>
-              <p className="systemNote">Click to drop a room in — the floor plan tidies itself and the house grows to fit. Rename or resize any room in the Inspector below (or drag it in the model). You can also tell the assistant "add a pantry 8 × 10".</p>
+              <p className="systemNote">Click to drop a room in — it slots into free space (nothing else moves). Rename or resize any room in the Inspector below, or drag it in the 2D plan. You can also tell the assistant "add a pantry 8 × 10".</p>
+
+              <div className="sectionHead">Add a fixture</div>
+              <div className="roomAddGrid">
+                {interiorFixtures(spec).map((fixture) => (
+                  <button key={fixture.key} className="roomAddChip fixture" onClick={() => placeFixture(fixture)}>
+                    <b>{fixture.name}</b>
+                    <small>{fixture.w} × {fixture.d}′</small>
+                  </button>
+                ))}
+              </div>
+              <p className="systemNote">Heaters, tanks, stairs, counters — placed as objects you can drag in the 2D plan and see in 3D. The heater matches your Heat page choice.</p>
 
               {spec.rooms.length > 0 && (
                 <>
@@ -5870,8 +5953,10 @@ function App() {
                 ))}
               </div>
               <div className="buttonRow">
-                <button className="secondary" onClick={() => addOpeningOnWall('south', 'window')}><Plus size={15} /> South window</button>
+                <button className="secondary" onClick={() => addOpeningOnWall('south', 'window')}><Plus size={15} /> Window</button>
+                <button className="secondary" onClick={() => addOpeningOnWall('south', 'door')}><Plus size={15} /> Door</button>
                 <button className="secondary" onClick={() => addOpeningOnWall('south', 'french')}><Plus size={15} /> French doors</button>
+                <button className="secondary" onClick={() => addOpeningOnWall('south', 'slider')}><Plus size={15} /> Sliding door</button>
                 <button className="secondary" onClick={() => addOpeningOnWall('south', 'bay')}><Plus size={15} /> Bay window</button>
                 <button className="secondary" onClick={() => addOpeningOnWall('roof', 'skylight')}><Plus size={15} /> Skylight</button>
               </div>

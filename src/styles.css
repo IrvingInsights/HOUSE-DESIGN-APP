@@ -3326,6 +3326,7 @@ button.ghost.saveButton {
   cursor: pointer;
 }
 .roomAddChip:hover { border-color: var(--active-line, #7FA8B5); background: var(--active, #33434B); }
+.roomAddChip.fixture { border-style: dashed; }
 .roomAddChip b { display: block; font-size: 13px; font-weight: 600; }
 .roomAddChip small { display: block; font-size: 11px; color: var(--ink3, #939A90); margin-top: 1px; }
 
