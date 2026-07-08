@@ -591,6 +591,21 @@ function storeyInfo(shell = {}) {
   return { storeys, baseWallFt, extraFt: (storeys - 1) * baseWallFt };
 }
 
+// How many floors the plan has = whichever is larger: the storeys setting, or
+// the highest floor any room actually lives on.
+function floorCount(spec) {
+  const byStoreys = Math.ceil(Number(spec.shell?.storeys || 1));
+  const byRooms = Math.max(1, ...(spec.rooms || []).map((r) => Number(r.level || 1)));
+  return Math.max(1, byStoreys, byRooms);
+}
+
+function floorLabel(spec, floor) {
+  if (floor === 1) return 'Ground';
+  if (floor === 2 && Number(spec.shell?.storeys) === 1.5) return 'Loft';
+  const ord = { 2: '2nd', 3: '3rd', 4: '4th' };
+  return `${ord[floor] || floor + 'th'} floor`;
+}
+
 const UTILITY_DEFAULTS = {
   waterSource: 'well',
   tankGal: 0,
@@ -795,8 +810,9 @@ function findFreeSpot(shellW, shellD, rooms, w, d) {
 // the first free gap; if none fits, the house grows (down, and wider if the
 // room itself is too wide) and the room lands in the new space. Returns add ops
 // + any shell-grow ops, plus whether it grew.
-function planNewRoomPlacements(spec, newRooms) {
-  const virtualRooms = (spec.rooms || []).map((r) => ({ x: Number(r.x), y: Number(r.y), w: Number(r.w), d: Number(r.d) }));
+function planNewRoomPlacements(spec, newRooms, level = 1) {
+  // Only rooms on the SAME floor collide — each storey packs independently.
+  const virtualRooms = (spec.rooms || []).filter((r) => Number(r.level || 1) === level).map((r) => ({ x: Number(r.x), y: Number(r.y), w: Number(r.w), d: Number(r.d) }));
   const taken = new Set((spec.rooms || []).map((r) => r.name));
   let shellW = Number(spec.shell.widthFt);
   let shellD = Number(spec.shell.depthFt);
@@ -819,7 +835,7 @@ function planNewRoomPlacements(spec, newRooms) {
       spot = { x: 1, y };
     }
     virtualRooms.push({ x: spot.x, y: spot.y, w: nr.w, d: nr.d });
-    addOps.push({ type: 'add_room', name, category: nr.type, w: nr.w, d: nr.d, x: spot.x, y: spot.y });
+    addOps.push({ type: 'add_room', name, category: nr.type, w: nr.w, d: nr.d, x: spot.x, y: spot.y, level });
   }
   const growOps = [];
   if (shellW !== startW) growOps.push({ type: 'set_shell', field: 'widthFt', value: String(shellW) });
@@ -3207,7 +3223,7 @@ const PLAN_ZONE_HEX = {
 // Top-down 2D floor-plan editor: drag rooms to move, drag corners to resize,
 // snapped to 0.5 ft. Commits on drop via onMove / onResize. This is the
 // natural surface for laying out a first floor.
-function PlanView({ spec, selectedRoom, onSelect, onMove, onResize }) {
+function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, activeFloor = 1 }) {
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
   const W = Number(spec.shell.widthFt) || 36;
@@ -3297,11 +3313,15 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize }) {
         <rect x={0.7} y={0.7} width={Math.max(0, W - 1.4)} height={Math.max(0, D - 1.4)} fill="none" stroke="var(--line2)" strokeWidth={0.12} />
         {/* rooms */}
         {(spec.rooms || []).map((raw) => {
+          const onFloor = Number(raw.level || 1) === activeFloor;
+          if (!onFloor) {
+            // other floors: faint ghost for context, not interactive
+            return <rect key={raw.id} x={raw.x} y={raw.y} width={raw.w} height={raw.d} fill="var(--ink3)" fillOpacity={0.1} stroke="var(--line)" strokeWidth={0.1} strokeDasharray="0.5 0.5" pointerEvents="none" />;
+          }
           const room = roomAt(raw);
           const isSel = raw.id === selectedRoom;
-          const upstairs = Number(raw.level || 1) > 1;
           return (
-            <g key={raw.id} opacity={upstairs ? 0.4 : 1} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
+            <g key={raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
               <rect
                 x={room.x} y={room.y} width={room.w} height={room.d}
                 fill={PLAN_ZONE_HEX[raw.type] || '#86a0a8'}
@@ -3310,9 +3330,9 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize }) {
                 strokeWidth={isSel ? 0.4 : 0.18}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
               />
-              <text x={room.x + room.w / 2} y={room.y + room.d / 2 - 0.3} textAnchor="middle" fontSize={Math.min(2, room.w / 5)} fill="#1a1f1d" fontWeight="600" pointerEvents="none">{raw.name}{upstairs ? ' ↑' : ''}</text>
+              <text x={room.x + room.w / 2} y={room.y + room.d / 2 - 0.3} textAnchor="middle" fontSize={Math.min(2, room.w / 5)} fill="#1a1f1d" fontWeight="600" pointerEvents="none">{raw.name}</text>
               <text x={room.x + room.w / 2} y={room.y + room.d / 2 + 1.5} textAnchor="middle" fontSize={Math.min(1.6, room.w / 6)} fill="#2a302d" opacity={0.75} pointerEvents="none">{raw.w}×{raw.d}′</text>
-              {isSel && !upstairs && ['nw', 'ne', 'sw', 'se'].map((corner) => {
+              {isSel && ['nw', 'ne', 'sw', 'se'].map((corner) => {
                 const cx = room.x + (corner.includes('e') ? room.w : 0);
                 const cy = room.y + (corner.includes('s') ? room.d : 0);
                 return <circle key={corner} cx={cx} cy={cy} r={0.9} fill="var(--active-line)" stroke="#fff" strokeWidth={0.15} style={{ cursor: `${corner}-resize` }} onPointerDown={(event) => startDrag(event, raw, corner)} />;
@@ -3322,7 +3342,7 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize }) {
         })}
         {/* placed elements (heater, tank, garden, coop, stairs…) — dashed to
             read as objects/fixtures rather than rooms; drag + resize like rooms */}
-        {(spec.elements || []).filter((el) => el.category !== 'floor').map((raw) => {
+        {(spec.elements || []).filter((el) => el.category !== 'floor' && Number(el.level || 1) === activeFloor).map((raw) => {
           const el = roomAt(raw);
           const isSel = raw.id === selectedRoom;
           const w = Number(el.w) || 4;
@@ -3361,7 +3381,7 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize }) {
         <text x={-pad + 1.6} y={D / 2} textAnchor="middle" fontSize={2} fill="var(--ink2)" transform={`rotate(-90 ${-pad + 1.6} ${D / 2})`}>{D}′</text>
       </svg>
       <div className="planNorth">▲ N</div>
-      <div className="planHint">Top-down plan · drag any room or element (dashed) to move it, drag corners to resize (snaps to ½ ft)</div>
+      <div className="planHint">{floorLabel(spec, activeFloor)} plan{floorCount(spec) > 1 ? ' · switch floors top-left' : ''} · drag to move, drag corners to resize (½ ft snap)</div>
     </div>
   );
 }
@@ -4266,6 +4286,7 @@ function App() {
   const [consoleView, setConsoleView] = useState('systems');
   const [appMode, setAppMode] = useState('design');
   const [viewMode, setViewMode] = useState('3d');
+  const [activeFloor, setActiveFloor] = useState(1);
   const [buildProgress, setBuildProgress] = useState(() => initialSaved?.buildProgress || {});
   const [inspectorView, setInspectorView] = useState('inspect');
   const [dimensionPreview, setDimensionPreview] = useState(null);
@@ -4479,6 +4500,10 @@ function App() {
     setRevisionLog((items) => [`Rev ${report.spec.revision}: ${logPrefix}${report.actions[0] ? ` - ${report.actions[0]}` : ''}`, ...items]);
     return report;
   }
+
+  useEffect(() => {
+    if (activeFloor > floorCount(spec)) setActiveFloor(1);
+  }, [spec, activeFloor]);
 
   useEffect(() => {
     let cancelled = false;
@@ -5335,12 +5360,13 @@ function App() {
   }
 
   async function addRoomPreset(preset) {
-    const plan = planNewRoomPlacements(spec, [preset]);
+    const plan = planNewRoomPlacements(spec, [preset], activeFloor);
+    const where = activeFloor > 1 ? ` on the ${floorLabel(spec, activeFloor).toLowerCase()}` : '';
     await applyBackendOperations({
       operations: plan.ops,
-      promptText: `Add ${plan.names[0]}`,
+      promptText: `Add ${plan.names[0]}${where}`,
       logPrefix: 'Add room',
-      chatText: plan.grew ? `Added the ${plan.names[0]} and grew the house to ${plan.newW}′ × ${plan.newD}′ to fit it — your other rooms stayed put. (Auto-arrange re-tidies the whole plan if you want it.)` : undefined
+      chatText: plan.grew ? `Added the ${plan.names[0]}${where} and grew the house to ${plan.newW}′ × ${plan.newD}′ to fit it — your other rooms stayed put.` : undefined
     });
   }
 
@@ -5348,7 +5374,7 @@ function App() {
   // slotted into free space, no re-pack of what's already there, no planner.
   async function applyLocalRoomAdds(parsed, submittedPrompt) {
     setChatMessages((items) => [...items, { role: 'user', speaker: 'You', text: submittedPrompt }]);
-    const plan = planNewRoomPlacements(spec, parsed);
+    const plan = planNewRoomPlacements(spec, parsed, activeFloor);
     const added = plan.names.join(', ');
     await applyBackendOperations({
       operations: plan.ops,
@@ -5384,6 +5410,16 @@ function App() {
       logPrefix: 'Plan edit',
       nextSelectedId: id
     });
+  }
+
+  function addStorey() {
+    const next = Math.min(3, floorCount(spec) + 1);
+    void applyBackendOperations({
+      operations: [{ type: 'set_shell', field: 'storeys', value: String(next) }],
+      promptText: `Add a storey (now ${next})`,
+      logPrefix: 'Storeys'
+    });
+    setActiveFloor(next);
   }
 
   async function arrangeRooms() {
@@ -5698,6 +5734,7 @@ function App() {
                     <option value="1">1 — single storey</option>
                     <option value="1.5">1½ — loft with knee walls</option>
                     <option value="2">2 — full two storeys</option>
+                    <option value="3">3 — three storeys</option>
                   </select>
                 </label>
               </div>
@@ -6258,6 +6295,7 @@ function App() {
               onSelect={setSelectedRoom}
               onMove={planMoveObject}
               onResize={planResizeObject}
+              activeFloor={activeFloor}
             />
           ) : (
             <ThreeScene
@@ -6275,6 +6313,12 @@ function App() {
             <button className={viewMode === '3d' ? 'active' : ''} onClick={() => setViewMode('3d')}>3D</button>
             <button className={viewMode === 'plan' ? 'active' : ''} onClick={() => setViewMode('plan')}>Plan</button>
           </div>
+          {(viewMode === 'plan' || floorCount(spec) > 1) && <div className="floorTabs">
+            {Array.from({ length: floorCount(spec) }, (_, i) => i + 1).map((floor) => (
+              <button key={floor} className={activeFloor === floor ? 'active' : ''} onClick={() => setActiveFloor(floor)} title={`${floorLabel(spec, floor)} — view & edit this floor`}>{floor === 1 ? 'Ground' : floorLabel(spec, floor).replace(' floor', '')}</button>
+            ))}
+            {floorCount(spec) < 3 && <button className="addFloor" onClick={addStorey} title="Add a storey">+ Floor</button>}
+          </div>}
           {viewMode === '3d' && <button className={`layersToggle${layersOpen ? ' open' : ''}${hiddenLayerCount > 0 || modelLayers.xray ? ' filtered' : ''}`} onClick={() => setLayersOpen((open) => !open)} title="Show / hide model layers">
             <Layers size={14} /> Layers{hiddenLayerCount > 0 ? ` · ${hiddenLayerCount} off` : modelLayers.xray ? ' · x-ray' : ''}
           </button>}
