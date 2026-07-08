@@ -3279,6 +3279,52 @@ button.ghost.saveButton {
 }
 .roomRow.systemFact span { color: var(--plum, #A9C6D0); font-weight: 600; }
 
+/* Rooms page: quick-add palette + clickable plan list */
+.roomAddGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+.roomAddChip {
+  display: block;
+  text-align: left;
+  background: var(--raise, #343C38);
+  border: 1px solid var(--line, #3D4642);
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-height: 0;
+  height: auto;
+  color: var(--ink, #EAE8DD);
+  box-shadow: none;
+  cursor: pointer;
+}
+.roomAddChip:hover { border-color: var(--active-line, #7FA8B5); background: var(--active, #33434B); }
+.roomAddChip b { display: block; font-size: 13px; font-weight: 600; }
+.roomAddChip small { display: block; font-size: 11px; color: var(--ink3, #939A90); margin-top: 1px; }
+
+.roomPickList { display: flex; flex-direction: column; gap: 5px; }
+.roomPickRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  background: var(--raise, #343C38);
+  border: 1px solid var(--line, #3D4642);
+  border-radius: 7px;
+  padding: 7px 11px;
+  min-height: 0;
+  height: auto;
+  color: var(--ink, #EAE8DD);
+  box-shadow: none;
+  cursor: pointer;
+}
+.roomPickRow:hover { border-color: var(--line2, #4B554F); }
+.roomPickRow.active { border-color: var(--active-line, #7FA8B5); background: var(--active, #33434B); color: var(--plum, #A9C6D0); }
+.roomPickRow span { font-size: 13px; font-weight: 600; }
+.roomPickRow small { font-size: 11px; color: var(--ink3, #939A90); white-space: nowrap; }
+
 .docChipIcon {
   width: 30px;
   height: 30px;

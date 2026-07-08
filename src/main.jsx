@@ -639,6 +639,86 @@ function outdoorItemPresent(spec, item) {
   return (spec.elements || []).some((element) => element.name === item.name);
 }
 
+// Common first-floor rooms with sensible default footprints — the quick-add
+// palette on the Rooms page.
+const ROOM_PRESETS = [
+  { name: 'Great Room', type: 'living', w: 18, d: 16 },
+  { name: 'Kitchen', type: 'service', w: 14, d: 12 },
+  { name: 'Dining', type: 'living', w: 12, d: 12 },
+  { name: 'Bedroom', type: 'sleeping', w: 12, d: 12 },
+  { name: 'Bathroom', type: 'wet', w: 8, d: 8 },
+  { name: 'Office', type: 'work', w: 10, d: 10 },
+  { name: 'Mudroom', type: 'service', w: 8, d: 8 },
+  { name: 'Pantry', type: 'storage', w: 8, d: 6 }
+];
+
+// Give a new room a non-colliding display name (Bedroom, Bedroom 2, ...).
+function uniqueRoomName(spec, base) {
+  const existing = new Set((spec.rooms || []).map((room) => room.name));
+  if (!existing.has(base)) return base;
+  let n = 2;
+  while (existing.has(`${base} ${n}`)) n += 1;
+  return `${base} ${n}`;
+}
+
+// Shelf-pack rooms into a non-overlapping floor plan and report the footprint
+// they need. Largest-first, left-to-right rows that wrap; a small gap stands
+// in for interior partitions, a margin for the exterior wall. Returns each
+// room's new x/y plus the width/depth the shell needs to hold them.
+function packRooms(rooms, shellW) {
+  const gap = 0.5;
+  const margin = 1;
+  const usableW = Math.max(4, shellW - margin * 2);
+  const order = [...rooms].sort((a, b) => (Number(b.w) * Number(b.d)) - (Number(a.w) * Number(a.d)));
+  const placed = [];
+  let cursorX = margin;
+  let cursorY = margin;
+  let rowDepth = 0;
+  let maxRowRight = margin;
+  for (const room of order) {
+    const w = Number(room.w) || 10;
+    const d = Number(room.d) || 10;
+    if (cursorX > margin && cursorX + w > margin + usableW) {
+      cursorX = margin;
+      cursorY += rowDepth + gap;
+      rowDepth = 0;
+    }
+    placed.push({ id: room.id, x: Math.round(cursorX * 10) / 10, y: Math.round(cursorY * 10) / 10 });
+    cursorX += w + gap;
+    rowDepth = Math.max(rowDepth, d);
+    maxRowRight = Math.max(maxRowRight, cursorX - gap);
+  }
+  return {
+    placed,
+    neededW: Math.ceil(maxRowRight + margin),
+    neededD: Math.ceil(cursorY + rowDepth + margin)
+  };
+}
+
+// Build the operation list that tidies the current rooms into a plan and grows
+// the shell to hold them if needed.
+function arrangeRoomsPlan(spec) {
+  const rooms = spec.rooms || [];
+  if (!rooms.length) return { ops: [], grew: false, newW: Number(spec.shell.widthFt), newD: Number(spec.shell.depthFt) };
+  const curW = Number(spec.shell.widthFt);
+  const curD = Number(spec.shell.depthFt);
+  // Pack against a target width so wide programs wrap sensibly: keep the
+  // current width unless the rooms genuinely need more.
+  const firstPass = packRooms(rooms, curW);
+  const targetW = Math.max(curW, firstPass.neededW);
+  const { placed, neededW, neededD } = packRooms(rooms, targetW);
+  const newW = clamp(Math.max(curW, neededW), 18, 120);
+  const newD = clamp(Math.max(curD, neededD), 18, 80);
+  const ops = [];
+  if (newW !== curW) ops.push({ type: 'set_shell', field: 'widthFt', value: String(newW) });
+  if (newD !== curD) ops.push({ type: 'set_shell', field: 'depthFt', value: String(newD) });
+  for (const p of placed) {
+    const room = rooms.find((r) => r.id === p.id);
+    if (room) ops.push({ type: 'move_object', targetId: p.id, name: room.name, x: p.x, y: p.y });
+  }
+  return { ops, grew: newW !== curW || newD !== curD, newW, newD };
+}
+
 // Model-view layers: every group in the scene can be shown/hidden in any
 // combination for inspection (walls per side, roof, floors, rooms, openings,
 // site, element categories), plus x-ray walls. Persisted with the design.
@@ -4036,8 +4116,13 @@ function App() {
     logPrefix = 'BIM edit',
     chatText = '',
     nextSelectedId = null,
-    persist = true
+    persist = true,
+    baseSpec = null
   }) {
+    // Chained UI actions (add-then-arrange) must apply to the spec returned by
+    // the prior step, not stale component state, or the second call clobbers
+    // the first. baseSpec lets a caller pass that fresh spec explicitly.
+    const source = baseSpec || spec;
     const plan = {
       source: 'manual-ui',
       summary: promptText,
@@ -4050,8 +4135,8 @@ function App() {
     try {
       result = await requestServerAppliedBim({
         prompt: promptText,
-        bim: spec,
-        spec,
+        bim: source,
+        spec: source,
         state: currentDashboardState(),
         selected,
         selectedObjectId: selected?.id || selectedRoom,
@@ -4059,7 +4144,7 @@ function App() {
         attachedImages: [],
         chatMessages: chatMessages.slice(-12),
         projectBrain,
-        contextPacket: buildContextPacket(spec, projectBrain, selected, promptText),
+        contextPacket: buildContextPacket(source, projectBrain, selected, promptText),
         plan,
         persist
       });
@@ -4904,10 +4989,44 @@ function App() {
   }
 
   function addRoom() {
-    void applyBackendOperations({
-      operations: [{ type: 'add_room', name: 'New BIM Space', category: 'living', x: 2, y: 2, w: 10, d: 10 }],
-      promptText: 'Add new BIM space',
-      logPrefix: 'Add space'
+    void addRoomPreset({ name: 'Room', type: 'living', w: 12, d: 12 });
+  }
+
+  // Add a room, then re-pack the whole floor plan so nothing overlaps and the
+  // house grows to fit — the GUI path that makes building a first floor work.
+  async function addRoomPreset(preset) {
+    const name = uniqueRoomName(spec, preset.name);
+    const report = await applyBackendOperations({
+      operations: [{ type: 'add_room', name, category: preset.type, w: preset.w, d: preset.d, x: 2, y: 2 }],
+      promptText: `Add ${name}`,
+      logPrefix: 'Add room'
+    });
+    if (!report?.spec) return;
+    const arrange = arrangeRoomsPlan(report.spec);
+    if (arrange.ops.length) {
+      await applyBackendOperations({
+        operations: arrange.ops,
+        baseSpec: report.spec,
+        nextSelectedId: report.changedIds[0],
+        promptText: arrange.grew ? `Arrange plan · grew house to ${arrange.newW} × ${arrange.newD}` : 'Arrange floor plan',
+        logPrefix: 'Layout',
+        chatText: arrange.grew
+          ? `Added the ${name} and tidied the floor plan — grew the house to ${arrange.newW}′ × ${arrange.newD}′ so every room fits without overlapping.`
+          : undefined
+      });
+    }
+  }
+
+  async function arrangeRooms() {
+    const arrange = arrangeRoomsPlan(spec);
+    if (!arrange.ops.length) return;
+    await applyBackendOperations({
+      operations: arrange.ops,
+      promptText: arrange.grew ? `Arrange plan · grew house to ${arrange.newW} × ${arrange.newD}` : 'Arrange floor plan',
+      logPrefix: 'Layout',
+      chatText: arrange.grew
+        ? `Tidied the floor plan and grew the house to ${arrange.newW}′ × ${arrange.newD}′ so every room fits without overlapping.`
+        : 'Tidied the floor plan — rooms laid out edge to edge without overlapping.'
     });
   }
 
@@ -5220,13 +5339,37 @@ function App() {
 
           {systemView === 'rooms' && (
             <div className="systemPage">
-              <div className="sectionHead">Rooms</div>
-              <p className="systemNote">{spec.rooms.length} room{spec.rooms.length === 1 ? '' : 's'} placed. Move or resize them in the BIM Inspector on the right, or tell the assistant: "add a pantry 8 x 10".</p>
-              <ul className="systemList">
-                {spec.rooms.map((room, index) => (
-                  <li key={room.id || index}>{room.name}{room.w && room.d ? ` — ${room.w} × ${room.d} ft` : ''}{Number(room.level || 1) > 1 ? ' · upstairs' : ''}</li>
+              <div className="sectionHead">Add a room</div>
+              <div className="roomAddGrid">
+                {ROOM_PRESETS.map((preset) => (
+                  <button key={preset.name} className="roomAddChip" onClick={() => addRoomPreset(preset)}>
+                    <b>{preset.name}</b>
+                    <small>{preset.w} × {preset.d}′</small>
+                  </button>
                 ))}
-              </ul>
+              </div>
+              <p className="systemNote">Click to drop a room in — the floor plan tidies itself and the house grows to fit. Rename or resize any room in the Inspector below (or drag it in the model). You can also tell the assistant "add a pantry 8 × 10".</p>
+
+              {spec.rooms.length > 0 && (
+                <>
+                  <div className="breakOpenRow">
+                    <div className="sectionHead">Floor plan · {spec.rooms.length} room{spec.rooms.length === 1 ? '' : 's'}</div>
+                    <button className="breakOpen" onClick={arrangeRooms}>↹ auto-arrange</button>
+                  </div>
+                  <div className="systemList roomPickList">
+                    {spec.rooms.map((room, index) => (
+                      <button
+                        key={room.id || index}
+                        className={room.id === selectedRoom ? 'roomPickRow active' : 'roomPickRow'}
+                        onClick={() => setSelectedRoom(room.id)}
+                      >
+                        <span>{room.name}</span>
+                        <small>{room.w} × {room.d}′ · {Math.round(room.w * room.d)} sf{Number(room.level || 1) > 1 ? ' · upstairs' : ''}</small>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
