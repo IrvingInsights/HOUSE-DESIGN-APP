@@ -3723,7 +3723,6 @@ function App() {
   const [spec, setSpec] = useState(() => initialSaved?.spec || seedSpec);
   const [systemView, setSystemView] = useState('shell');
   const [wallBreakOpen, setWallBreakOpen] = useState(false);
-  const [shellWallBreakOpen, setShellWallBreakOpen] = useState(false);
   const [overhangBreakOpen, setOverhangBreakOpen] = useState(false);
   const [prompt, setPrompt] = useState(() => initialSaved?.prompt || DEFAULT_PROMPT);
   const [selectedRoom, setSelectedRoom] = useState(() => initialSaved?.selectedRoom || 'great');
@@ -4983,13 +4982,24 @@ function App() {
             ))}
           </nav>
 
-          {systemView === 'shell' && (
+          {systemView === 'shell' && (() => {
+            const shellHeights = WALL_SIDES.map((side) => resolveWallSide(spec, side)).filter((r) => !r.omitted).map((r) => r.heightFt);
+            const shellHeightsMixed = new Set(shellHeights).size > 1;
+            return (
             <div className="systemPage">
               <div className="sectionHead">Overall shape</div>
               <div className="controlGrid">
                 <label>Width (ft)<input type="number" value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
                 <label>Length (ft)<input type="number" value={spec.shell.depthFt} onChange={(event) => updateShell('depthFt', event.target.value)} /></label>
-                <label>Wall height (ft)<input type="number" value={spec.shell.wallHeightFt} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
+                {shellHeightsMixed ? (
+                  <label>Wall height
+                    <div className="mixedField">
+                      <span>Mixed · {Math.min(...shellHeights)}–{Math.max(...shellHeights)}' — set per wall on the Walls page</span>
+                    </div>
+                  </label>
+                ) : (
+                  <label>Wall height (ft)<input type="number" value={shellHeights[0] ?? spec.shell.wallHeightFt} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
+                )}
                 <label>Storeys
                   <select value={String(storeyInfo(spec.shell).storeys)} onChange={(event) => updateShell('storeys', event.target.value)}>
                     <option value="1">1 — single storey</option>
@@ -4998,32 +5008,10 @@ function App() {
                   </select>
                 </label>
               </div>
-              <p className="systemNote">Footprint: {spec.shell.widthFt} × {spec.shell.depthFt} ft = {Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt))} sf{storeyInfo(spec.shell).storeys > 1 ? ` · ${Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt) * storeyInfo(spec.shell).storeys)} sf heated across ${storeyInfo(spec.shell).storeys} storeys` : ''}. Walls extend to carry the upper storey and the roof rides on top; per-side heights below shape the top storey. Put a room upstairs by setting its Level in the inspector. Roof shape moved to the Roof page.</p>
-
-              <div className="breakOpenRow">
-                <div className="sectionHead">Wall height by side</div>
-                <button className="breakOpen" onClick={() => setShellWallBreakOpen((open) => !open)}>
-                  {shellWallBreakOpen ? '▾ one height for all' : '▸ break open per side (N/S/E/W)'}
-                </button>
-              </div>
-              {!shellWallBreakOpen ? (
-                <p className="systemNote">All four walls follow {spec.shell.wallHeightFt} ft. Break open to set North / South / East / West heights independently (a different N vs S makes a shed roof).</p>
-              ) : (
-                <div className="wallSideGrid">
-                  {WALL_SIDES.map((side) => {
-                    const r = resolveWallSide(spec, side);
-                    return (
-                      <label key={side} className="wallSideCell">
-                        <span className="wallSideLabel">{WALL_SIDE_LABELS[side]}</span>
-                        <input type="number" min="7" max="40" value={r.heightFt} onChange={(event) => updateWallSide(side, 'heightFt', event.target.value)} />
-                        <span className="wallSideUnit">ft</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
+              <p className="systemNote">Footprint: {spec.shell.widthFt} × {spec.shell.depthFt} ft = {Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt))} sf{storeyInfo(spec.shell).storeys > 1 ? ` · ${Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt) * storeyInfo(spec.shell).storeys)} sf heated across ${storeyInfo(spec.shell).storeys} storeys` : ''}. Per-wall heights, systems, and thickness live on the <b>Walls</b> page (a taller south than north makes a shed roof). Put a room upstairs by setting its Level in the inspector. Roof shape lives on the Roof page.</p>
             </div>
-          )}
+            );
+          })()}
 
           {systemView === 'rooms' && (
             <div className="systemPage">
@@ -5041,6 +5029,9 @@ function App() {
             const resolvedSides = WALL_SIDES.map((side) => ({ side, r: resolveWallSide(spec, side) }));
             const globalKey = wallAssemblyKeyFromText(spec.systems?.envelope);
             const mixed = wallsAreMixed(spec);
+            const activeHeights = resolvedSides.filter(({ r }) => !r.omitted).map(({ r }) => r.heightFt);
+            const heightsMixed = new Set(activeHeights).size > 1;
+            const sharedHeight = activeHeights[0] ?? spec.shell.wallHeightFt;
             return (
               <div className="systemPage">
                 <div className="sectionHead">Wall system (all sides)</div>
@@ -5053,7 +5044,16 @@ function App() {
                       ))}
                     </select>
                   </label>
-                  <label>Height (ft)<input type="number" min="7" max="40" value={spec.shell.wallHeightFt} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
+                  {heightsMixed ? (
+                    <label>Height
+                      <div className="mixedField">
+                        <span>Mixed · {Math.min(...activeHeights)}–{Math.max(...activeHeights)}' — each side rules below</span>
+                        <button className="breakOpen" onClick={() => updateShell('wallHeightFt', Math.max(...activeHeights))}>unify at {Math.max(...activeHeights)}'</button>
+                      </div>
+                    </label>
+                  ) : (
+                    <label>Height (ft)<input type="number" min="7" max="40" value={sharedHeight} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
+                  )}
                   <label>Width (ft)<input type="number" value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
                   <label>Length (ft)<input type="number" value={spec.shell.depthFt} onChange={(event) => updateShell('depthFt', event.target.value)} /></label>
                 </div>
@@ -5061,7 +5061,7 @@ function App() {
                   <input type="checkbox" checked={utilitiesOf(spec).diyWalls} onChange={(event) => updateUtility('diyWalls', event.target.checked)} />
                   <span>I'll raise the walls myself (sweat equity — walls are the most DIY-able system)</span>
                 </label>
-                <p className="systemNote">Height here sets <b>all four walls to one height</b> (it clears any per-side heights below). Width is the north/south wall length; Length is the east/west wall length. Break open below to mix systems and heights per side — bale on the cold north, timber-and-glass on the south.</p>
+                <p className="systemNote">While all sides share one height you can set it here; the moment any side differs, <b>the per-side controls below are the only height controls</b>. Width is the north/south wall length; Length is the east/west wall length.</p>
 
                 <div className="breakOpenRow">
                   <div className="sectionHead">Per side (N / S / E / W)</div>
