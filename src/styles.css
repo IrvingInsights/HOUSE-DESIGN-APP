@@ -3199,6 +3199,61 @@ button.ghost.saveButton {
 .geoResults button b { display: block; font-size: 13.5px; font-weight: 600; }
 .geoResults button small { display: block; font-size: 11.5px; color: var(--ink3); margin-top: 1px; }
 
+/* Design | Build mode switch */
+.modeTabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.modeTabs button {
+  min-height: 38px;
+  font-size: 13.5px;
+  font-weight: 600;
+  background: var(--ivory, #2C3330);
+  color: var(--ink2, #BCC1B5);
+  border: 1px solid var(--line2, #4B554F);
+  box-shadow: none;
+}
+.modeTabs button.active {
+  background: #3C6472;
+  border-color: #3C6472;
+  color: #fff;
+}
+
+/* Build surface */
+.buildSummary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+.buildSummary div { background: var(--raise); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; min-width: 0; }
+.buildSummary strong { display: block; font-size: 17px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.buildSummary span { display: block; font-size: 10.5px; color: var(--ink3); }
+.buildBar { height: 6px; border-radius: 4px; background: var(--panel-3); border: 1px solid var(--line); overflow: hidden; margin-bottom: 12px; }
+.buildBarFill { height: 100%; background: var(--good, #86C79A); transition: width 0.3s ease; }
+
+.phaseList { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.phaseCard { background: var(--raise); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.phaseCard.done { opacity: 0.72; }
+.phaseCard.done .phaseTitle { text-decoration: line-through; }
+.phaseCard summary { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; list-style: none; }
+.phaseCard summary::-webkit-details-marker { display: none; }
+.phaseCard summary input { accent-color: #3C6472; width: 15px; height: 15px; flex: none; }
+.phaseTitle { font-size: 13px; font-weight: 600; flex: 1; min-width: 0; }
+.phaseMeta { font-size: 11px; color: var(--ink3); flex: none; white-space: nowrap; }
+.phaseBody { padding: 2px 12px 10px 33px; }
+.phaseBody p { font-size: 12px; line-height: 1.45; color: var(--ink2); margin-bottom: 4px; }
+.phaseBody b { color: var(--plum); font-weight: 600; }
+
+.takeoffTable { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
+.takeoffRow { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; background: var(--raise); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; }
+.takeoffRow span { font-size: 12.5px; font-weight: 600; }
+.takeoffRow b { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--plum); text-align: right; }
+.takeoffRow small { grid-column: 1 / -1; font-size: 11px; color: var(--ink3); }
+
+.maintList { display: flex; flex-direction: column; gap: 5px; }
+.maintRow { display: flex; gap: 9px; align-items: flex-start; background: var(--raise); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; }
+.maintInterval { flex: none; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--warn, #D9B36A); padding-top: 2px; min-width: 52px; }
+.maintRow b { display: block; font-size: 12.5px; }
+.maintRow small { display: block; font-size: 11.5px; color: var(--ink2); line-height: 1.4; }
+
 /* A numeric control that has gone per-side: shows the range, not an input */
 .mixedField {
   display: flex;

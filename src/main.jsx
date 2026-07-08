@@ -659,6 +659,118 @@ const DEFAULT_MODEL_LAYERS = {
   hiddenCats: []
 };
 
+// --- Build mode: construction phases + maintenance (salvaged from the
+// add-on's constructionTimeline.js, adapted to the current design) ---------
+const BUILD_PHASES_BASE = [
+  { id: 'site-prep', title: 'Site Prep & Excavation', weeks: 1.5, costPct: 0.08, inspector: false,
+    materials: 'Survey stakes, string lines, geotextile fabric, erosion fencing.',
+    tools: 'Transit level, shovel, tape, clearing saw, rental excavator.',
+    safety: 'Call 811 before digging. Watch trench edges; high-vis gear.',
+    weather: 'Best in dry season — wet clay means mud pits and cave-ins.' },
+  { id: 'foundation', title: 'Foundation', weeks: 2.0, costPct: 0.18, inspector: true,
+    materials: 'Gravel pack, concrete, rebar, anchor bolts, drain tile.',
+    tools: 'Mixer, wheelbarrow, screed boards, compactor.',
+    safety: 'Wet concrete burns skin — glasses and boots.',
+    weather: 'Above 40°F to cure; protect from heavy rain.' },
+  { id: 'framing', title: 'Frame & Raising', weeks: 3.0, costPct: 0.22, inspector: true,
+    materials: 'Timber posts and plates, joists, pegs / fasteners.',
+    tools: 'Chainsaw, mallet, chisel, come-along, scaffolding.',
+    safety: 'Fall hazard above 6 ft — harness up. Mind raising trajectories.',
+    weather: 'Avoid high winds; wet timber is slick.' },
+  { id: 'walls', title: 'Wall Raising', weeks: 2.5, costPct: 0.15, inspector: false,
+    materials: 'Dry bales, pins, mesh, clay slip.',
+    tools: 'Bale needle, tamper, chainsaw, plaster hawk.',
+    safety: 'Heavy repetitive lifting; N95 for straw dust.',
+    weather: 'CRITICAL: bales stay bone dry — tarps always ready.' },
+  { id: 'roofing', title: 'Roof Framing & Cladding', weeks: 2.0, costPct: 0.14, inspector: true,
+    materials: 'Rafters, sheathing, underlayment, metal cladding, flashing.',
+    tools: 'Circular saw, drill, tin snips, harness.',
+    safety: 'High fall risk — inspect lines daily.',
+    weather: 'Never on a wet or windy roof.' },
+  { id: 'utilities', title: 'Rough Plumbing & Electrical', weeks: 2.0, costPct: 0.11, inspector: true,
+    materials: 'PEX, PVC waste lines, conduit, wire, boxes.',
+    tools: 'Pipe cutter, crimper, strippers, multimeter.',
+    safety: 'Lock out the main. Never handle live circuits.',
+    weather: 'Sheltered work once the roof is on.' },
+  { id: 'plaster', title: 'Plaster & Finishes', weeks: 3.0, costPct: 0.12, inspector: false,
+    materials: 'Lime binder, sifted sand, clay, chopped straw.',
+    tools: 'Mortar mixer, hawk, trowels, spray bottles.',
+    safety: 'Lime is caustic — goggles and thick gloves.',
+    weather: 'Warm, draft-free curing; no freezing, no fast drying.' },
+  { id: 'occupancy', title: 'Final Inspection & Handover', weeks: 1.0, costPct: 0.0, inspector: true,
+    materials: 'CO/smoke detectors, water test kits, permit package.',
+    tools: 'Multimeter, flashlight, the paperwork.',
+    safety: 'Confirm egress routes are clear.',
+    weather: 'None.' }
+];
+
+const MAINTENANCE_TASKS = [
+  { interval: 'Annual', title: 'Rubble trench drain flushing', desc: 'Flush the perimeter drain with a hose to clear silt.', when: (spec, u) => u.foundationType === 'rubble' },
+  { interval: 'Annual', title: 'Roof flashing check', desc: 'Inspect cladding joints and flue flashing before winter.', when: () => true },
+  { interval: 'Annual', title: 'Plaster crack patching', desc: 'Patch hairline cracks in exterior lime plaster.', when: (spec) => WALL_SIDES.some((side) => resolveWallSide(spec, side).assemblyKey !== 'framed') },
+  { interval: '5-year', title: 'Lime-wash refresh', desc: 'Fresh breathable coating on exposed natural walls.', when: (spec) => WALL_SIDES.some((side) => resolveWallSide(spec, side).assemblyKey !== 'framed') },
+  { interval: '10-year', title: 'Battery health check', desc: 'Full load diagnostic on the solar bank; inspect terminals.', when: (spec, u) => u.powerMode === 'offgrid' }
+];
+
+// Adapt the base phases to what this design actually is.
+function buildTimeline(spec, derived) {
+  const phases = structuredClone(BUILD_PHASES_BASE);
+  const u = derived.utilities;
+  const foundation = phases.find((phase) => phase.id === 'foundation');
+  if (u.foundationType === 'slab') {
+    foundation.title = 'Insulated Slab Pour';
+    foundation.materials = 'Concrete, wire mesh, vapor barrier, gravel base, EPS boards.';
+    foundation.weeks = 1.8;
+  } else if (u.foundationType === 'stemwall') {
+    foundation.title = `Stem Wall (${derived.stemwallHeightFt}') & Footing`;
+    foundation.materials = 'Form plywood, concrete, rebar, footing drains, gravel.';
+    foundation.weeks = 2.2;
+  } else {
+    foundation.title = 'Rubble Trench & Grade Beam';
+    foundation.materials = 'Drain rock, drain tile, geotextile, shallow grade beam.';
+  }
+  const wallsPhase = phases.find((phase) => phase.id === 'walls');
+  const assemblies = [...new Set(WALL_SIDES.map((side) => resolveWallSide(spec, side)).filter((r) => !r.omitted).map((r) => r.assembly.label))];
+  wallsPhase.title = `Wall Raising — ${assemblies.join(' + ')}`;
+  if (assemblies.every((label) => label.includes('Framed'))) {
+    wallsPhase.materials = 'Studs/plates, sheathing, dense-pack insulation, membranes.';
+    wallsPhase.weather = 'Keep sheathing and insulation dry.';
+    wallsPhase.weeks = 2.0;
+  }
+  const heat = derived.utilities.heatSource;
+  if (heat === 'rocket_mass' || heat === 'masonry') {
+    phases.splice(phases.findIndex((phase) => phase.id === 'plaster'), 0, {
+      id: 'heater', title: heat === 'rocket_mass' ? 'Rocket Mass Heater Build' : 'Masonry Heater Build', weeks: heat === 'rocket_mass' ? 1.5 : 2.5, costPct: 0.0, inspector: true,
+      materials: 'Firebrick, cob/mass, barrel or core kit, flue pipe.',
+      tools: 'Trowels, level, angle grinder.',
+      safety: 'Respect clearances to combustibles; CO detector before first burn.',
+      weather: 'Indoor once the roof is on.'
+    });
+  }
+  return phases;
+}
+
+// Directional materials takeoff from the real quantities.
+function materialsTakeoff(spec, derived) {
+  const u = derived.utilities;
+  const rows = [];
+  const perimeter = 2 * ((Number(spec.shell.widthFt) || 0) + (Number(spec.shell.depthFt) || 0));
+  if (u.foundationType === 'rubble') rows.push(['Drain rock', `${Math.round(perimeter * 1.5 * 3 / 27)} yd³`, 'perimeter trench 18" × 36"']);
+  if (u.foundationType === 'stemwall') rows.push(['Concrete (stem + footing)', `${Math.round((perimeter * derived.stemwallHeightFt * 0.67 + perimeter * 1.33 * 0.83) / 27)} yd³`, `${derived.stemwallHeightFt}' stem on footing`]);
+  if (u.foundationType === 'slab') rows.push(['Concrete (slab)', `${Math.round(derived.floor * 0.33 / 27)} yd³`, '4" slab over insulation']);
+  const baleArea = WALL_SIDES.map((side) => resolveWallSide(spec, side)).filter((r) => !r.omitted && r.assemblyKey === 'straw-bale')
+    .reduce((sum, r) => sum + (r.side === 'north' || r.side === 'south' ? Number(spec.shell.widthFt) : Number(spec.shell.depthFt)) * r.heightFt, 0);
+  if (baleArea > 0) rows.push(['Straw bales', `~${Math.ceil(baleArea / 5.5)}`, 'two-string, laid flat — plus 15% spares']);
+  const naturalFaces = WALL_SIDES.map((side) => resolveWallSide(spec, side)).filter((r) => !r.omitted && r.assemblyKey !== 'framed')
+    .reduce((sum, r) => sum + (r.side === 'north' || r.side === 'south' ? Number(spec.shell.widthFt) : Number(spec.shell.depthFt)) * r.heightFt * 2, 0);
+  if (naturalFaces > 0) rows.push(['Plaster (3 coats)', `${Math.round(naturalFaces)} sf`, 'both faces of natural walls']);
+  rows.push(['Roof cladding + sheathing', `${Math.round(derived.roofArea)} sf`, 'includes overhangs and pitch']);
+  rows.push(['Glazing', `${Math.round(derived.totalGlass)} sf`, u.windowQuality === 'triple' ? 'triple pane' : 'double pane']);
+  if (derived.panels > 0) rows.push(['Solar panels', `${derived.panels} × 400 W`, `${derived.batteryKwh > 0 ? `+ ${derived.batteryKwh} kWh battery` : 'grid-tied'}`]);
+  if (spec.systems?.structure?.toLowerCase().includes('timber')) rows.push(['Timber posts', `~${Math.ceil(perimeter / 8)}`, 'one bent post per 8 lf of perimeter']);
+  return rows;
+}
+
 const LAYER_PRESETS = {
   all: { ...DEFAULT_MODEL_LAYERS },
   structure: { ...DEFAULT_MODEL_LAYERS, rooms: false, openings: false, elements: false, labels: false },
@@ -1947,7 +2059,8 @@ function buildDashboardStatePayload({
   operationAudit,
   projectBrain,
   chatMessages,
-  modelLayers
+  modelLayers,
+  buildProgress
 }) {
   return {
     version: 1,
@@ -1967,7 +2080,8 @@ function buildDashboardStatePayload({
     operationAudit: operationAudit.slice(0, 40),
     projectBrain,
     chatMessages: compactChatForStorage(chatMessages),
-    modelLayers
+    modelLayers,
+    buildProgress
   };
 }
 
@@ -3759,6 +3873,8 @@ function App() {
   const [projectBrain, setProjectBrain] = useState(() => ensureProjectBrain(initialSaved?.projectBrain, initialSaved?.spec || seedSpec));
   const [clipboardObject, setClipboardObject] = useState(null);
   const [consoleView, setConsoleView] = useState('systems');
+  const [appMode, setAppMode] = useState('design');
+  const [buildProgress, setBuildProgress] = useState(() => initialSaved?.buildProgress || {});
   const [inspectorView, setInspectorView] = useState('inspect');
   const [dimensionPreview, setDimensionPreview] = useState(null);
   const [savedAt, setSavedAt] = useState(() => initialSaved?.savedAt || '');
@@ -3828,6 +3944,7 @@ function App() {
     setSavedAt(snapshot.savedAt || '');
     setLibraryActionMode(snapshot.libraryActionMode || 'apply');
     setModelLayers({ ...DEFAULT_MODEL_LAYERS, ...(snapshot.modelLayers || {}) });
+    setBuildProgress(snapshot.buildProgress || {});
   }
 
   function currentDashboardState(custom = {}) {
@@ -3849,6 +3966,7 @@ function App() {
       projectBrain,
       chatMessages,
       modelLayers,
+      buildProgress,
       ...custom
     });
   }
@@ -4004,7 +4122,8 @@ function App() {
       operationAudit,
       projectBrain,
       chatMessages,
-      modelLayers
+      modelLayers,
+      buildProgress
     });
     window.clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = window.setTimeout(() => {
@@ -4017,7 +4136,7 @@ function App() {
     }, 250);
     if (!savedAt) setSavedAt(now);
     return () => window.clearTimeout(autosaveTimerRef.current);
-  }, [projectId, spec, selectedRoom, libraryActionMode, chatMessages, chatTarget, addToTarget, selectedExpertId, expertQuestion, prompt, operationAudit, projectBrain, modelLayers]);
+  }, [projectId, spec, selectedRoom, libraryActionMode, chatMessages, chatTarget, addToTarget, selectedExpertId, expertQuestion, prompt, operationAudit, projectBrain, modelLayers, buildProgress]);
 
   useEffect(() => {
     const stream = chatStreamRef.current;
@@ -4887,7 +5006,8 @@ function App() {
       operationAudit,
       projectBrain,
       chatMessages: chatWithNotice,
-      modelLayers
+      modelLayers,
+      buildProgress
     });
     window.localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(payload));
     setSavedAt(now);
@@ -4974,16 +5094,82 @@ function App() {
           </div>
         </section>
 
-        <nav className="consoleTabs" aria-label="Project console">
+        <nav className="modeTabs" aria-label="Design or build">
+          <button className={appMode === 'design' ? 'active' : ''} onClick={() => setAppMode('design')}><Hammer size={15} /> Design</button>
+          <button className={appMode === 'build' ? 'active' : ''} onClick={() => setAppMode('build')}><ClipboardCheck size={15} /> Build</button>
+        </nav>
+
+        {appMode === 'build' && (() => {
+          const phases = buildTimeline(spec, derived);
+          const doneCount = phases.filter((phase) => buildProgress[phase.id]).length;
+          const totalWeeks = phases.reduce((sum, phase) => sum + phase.weeks, 0);
+          const takeoff = materialsTakeoff(spec, derived);
+          const maintenance = MAINTENANCE_TASKS.filter((task) => task.when(spec, derived.utilities));
+          return (
+            <section className="panelBlock consolePanel buildPanel">
+              <div className="blockTitle"><ClipboardCheck size={16} /> Build It</div>
+              <p className="studioHint">The design, turned into a build: phases in order, what each takes, and the materials list. Check phases off as you go — progress saves with the design.</p>
+              <div className="buildSummary">
+                <div><strong>{doneCount}/{phases.length}</strong><span>phases done</span></div>
+                <div><strong>~{Math.round(totalWeeks)}</strong><span>weeks of work</span></div>
+                <div><strong>${Math.round(derived.total).toLocaleString()}</strong><span>after sweat equity</span></div>
+              </div>
+              <div className="buildBar"><div className="buildBarFill" style={{ width: `${(doneCount / phases.length) * 100}%` }} /></div>
+
+              <div className="sectionHead">Construction phases</div>
+              <div className="phaseList">
+                {phases.map((phase, index) => (
+                  <details key={phase.id} className={buildProgress[phase.id] ? 'phaseCard done' : 'phaseCard'}>
+                    <summary>
+                      <input type="checkbox" checked={Boolean(buildProgress[phase.id])} onClick={(event) => event.stopPropagation()} onChange={(event) => setBuildProgress((current) => ({ ...current, [phase.id]: event.target.checked }))} />
+                      <span className="phaseTitle">{index + 1}. {phase.title}</span>
+                      <span className="phaseMeta">{phase.weeks} wk{phase.costPct > 0 ? ` · $${Math.round(derived.total * phase.costPct / 1000)}k` : ''}{phase.inspector ? ' · 🔍 inspection' : ''}</span>
+                    </summary>
+                    <div className="phaseBody">
+                      <p><b>Materials:</b> {phase.materials}</p>
+                      <p><b>Tools:</b> {phase.tools}</p>
+                      <p><b>Safety:</b> {phase.safety}</p>
+                      <p><b>Weather:</b> {phase.weather}</p>
+                    </div>
+                  </details>
+                ))}
+              </div>
+
+              <div className="sectionHead">Materials takeoff</div>
+              <div className="takeoffTable">
+                {takeoff.map(([item, qty, note]) => (
+                  <div className="takeoffRow" key={item}>
+                    <span>{item}</span>
+                    <b>{qty}</b>
+                    <small>{note}</small>
+                  </div>
+                ))}
+              </div>
+              <p className="systemNote">Directional quantities from the current design — order from these only after your own count.</p>
+
+              <div className="sectionHead">Living with it</div>
+              <div className="maintList">
+                {maintenance.map((task) => (
+                  <div className="maintRow" key={task.title}>
+                    <span className="maintInterval">{task.interval}</span>
+                    <div><b>{task.title}</b><small>{task.desc}</small></div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        })()}
+
+        {appMode === 'design' && <nav className="consoleTabs" aria-label="Project console">
           <button className={consoleView === 'systems' ? 'active' : ''} onClick={() => setConsoleView('systems')}><Grid3X3 size={14} /> Systems</button>
           <button className={consoleView === 'os' ? 'active' : ''} onClick={() => setConsoleView('os')}><ClipboardCheck size={14} /> Plan</button>
           <button className={consoleView === 'review' ? 'active' : ''} onClick={() => setConsoleView('review')}><ShieldCheck size={14} /> Review</button>
           <button className={consoleView === 'experts' ? 'active' : ''} onClick={() => setConsoleView('experts')}><Users size={14} /> Experts</button>
           <button className={consoleView === 'audit' ? 'active' : ''} onClick={() => setConsoleView('audit')}><FileJson size={14} /> History</button>
           <button className={consoleView === 'log' ? 'active' : ''} onClick={() => setConsoleView('log')}><Layers size={14} /> Log</button>
-        </nav>
+        </nav>}
 
-        {consoleView === 'systems' && <section className="panelBlock consolePanel systemsPanel">
+        {appMode === 'design' && consoleView === 'systems' && <section className="panelBlock consolePanel systemsPanel">
           <div className="blockTitle"><Grid3X3 size={16} /> Systems</div>
           <p className="studioHint">Design the house one system at a time. Each page shows what that system controls.</p>
           <nav className="systemNav" aria-label="Building systems">
@@ -5420,7 +5606,7 @@ function App() {
           })()}
         </section>}
 
-        {consoleView === 'os' && <section className="panelBlock consolePanel projectOS">
+        {appMode === 'design' && consoleView === 'os' && <section className="panelBlock consolePanel projectOS">
             <div className="blockTitle"><ClipboardCheck size={16} /> Project Plan</div>
             <div className="osStage">
               {workflowStages.map((stage) => (
@@ -5455,7 +5641,7 @@ function App() {
             </details>
         </section>}
 
-        {consoleView === 'review' && <section className="panelBlock consolePanel reviewHub">
+        {appMode === 'design' && consoleView === 'review' && <section className="panelBlock consolePanel reviewHub">
             <div className="blockTitle"><ShieldCheck size={16} /> Does it add up</div>
             {(() => {
               const openFlags = issues.filter((item) => item.severity !== 'pass');
@@ -5478,7 +5664,7 @@ function App() {
             </div>
         </section>}
 
-        {consoleView === 'experts' && <section className="panelBlock consolePanel">
+        {appMode === 'design' && consoleView === 'experts' && <section className="panelBlock consolePanel">
             <div className="blockTitle"><Users size={16} /> Council of Professionals</div>
             <p className="studioHint">Select an expert here, then ask in Studio.</p>
             <div className="council">
@@ -5494,7 +5680,7 @@ function App() {
             </div>
         </section>}
 
-        {consoleView === 'audit' && <section className="panelBlock consolePanel">
+        {appMode === 'design' && consoleView === 'audit' && <section className="panelBlock consolePanel">
             <div className="blockTitle"><FileJson size={16} /> Change History</div>
             <div className="auditList">
               {operationAudit.length === 0 && <p className="studioHint">No structured operations recorded yet.</p>}
@@ -5510,7 +5696,7 @@ function App() {
             </div>
         </section>}
 
-        {consoleView === 'log' && <section className="panelBlock consolePanel">
+        {appMode === 'design' && consoleView === 'log' && <section className="panelBlock consolePanel">
             <div className="blockTitle"><Layers size={16} /> Revision Log</div>
             <div className="log">
               {revisionLog.map((item, index) => <p key={`${item}-${index}`}>{item}</p>)}
