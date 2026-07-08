@@ -599,6 +599,7 @@ const UTILITY_DEFAULTS = {
   powerMode: 'offgrid',
   heatSource: 'wood_stove',
   foundationType: 'rubble',
+  stemwallHeightFt: 1.5,
   diyWalls: false,
   diyRoof: false,
   diyHeat: false,
@@ -1663,6 +1664,7 @@ function applyStructuredDesignPlan(currentSpec, plan) {
         heatSource: ['rocket_mass', 'masonry', 'wood_stove', 'minisplit']
       };
       if (field === 'tankGal') next.utilities.tankGal = clamp(Number(operation.value) || 0, 0, 50000);
+      else if (field === 'stemwallHeightFt') next.utilities.stemwallHeightFt = clamp(Number(operation.value) || 1.5, 0.5, 6);
       else if (field === 'wellSepticFt') next.utilities.wellSepticFt = clamp(Number(operation.value) || 0, 0, 2000);
       else if (field === 'diyWalls' || field === 'diyRoof' || field === 'diyHeat') {
         next.utilities[field] = value === 'true' || operation.value === true || value === '1';
@@ -2112,6 +2114,13 @@ function detectIssues(spec) {
     }
   }
   const utilitiesForChecks = derivedForChecks.utilities;
+  const hasBaleWall = WALL_SIDES.some((side) => {
+    const resolved = resolveWallSide(spec, side);
+    return !resolved.omitted && resolved.assemblyKey === 'straw-bale';
+  });
+  if (hasBaleWall && utilitiesForChecks.foundationType === 'stemwall' && derivedForChecks.stemwallHeightFt < 1) {
+    issues.push({ severity: 'warning', title: `Stem wall is only ${Math.round(derivedForChecks.stemwallHeightFt * 12)}" under bale walls`, owner: 'Natural Builder', system: 'foundation', fix: 'Straw bale wants its base at least 12" above grade for splash protection — raise the stem wall to 1 ft or more.' });
+  }
   const usesWell = utilitiesForChecks.waterSource === 'well' || utilitiesForChecks.waterSource === 'spring';
   if (usesWell && utilitiesForChecks.wasteMethod === 'septic' && Number(utilitiesForChecks.wellSepticFt) < 100) {
     issues.push({ severity: 'critical', title: `Well is only ${Math.round(utilitiesForChecks.wellSepticFt)} ft from the septic field`, owner: 'Engineer', system: 'waste', fix: 'Health code (NYS 75-A-style) wants at least 100 ft between a well and a septic field. Move one of them — confirm the exact figure with your health department.' });
@@ -2233,9 +2242,17 @@ function deriveDesign(spec, wallSections) {
   const waterCostBySource = { well: 7500, spring: 2500, catchment: 3500, town: 1500 };
   const wasteCostByMethod = { septic: 8500, composting: 1500, reedbed: 1200 };
   const foundationCostPsf = { rubble: 8, stemwall: 12, slab: 15 };
+  const perimeterFt = 2 * (w + d);
+  const stemwallHeightFt = Math.min(6, Math.max(0.5, Number(utilities.stemwallHeightFt) || 1.5));
+  // Stem wall cost scales with the wall itself: base prep + footing by floor
+  // area, plus the perimeter wall by face area (calibrated so the default
+  // 18" stem matches the old flat $12/sf).
+  const foundationCost = utilities.foundationType === 'stemwall'
+    ? floor * 8 + perimeterFt * stemwallHeightFt * 18
+    : floor * (foundationCostPsf[utilities.foundationType] ?? 10);
   const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => sum + (outdoorItemPresent(spec, item) ? item.cost : 0), 0);
   const cost = {
-    foundation: floor * (foundationCostPsf[utilities.foundationType] ?? 10),
+    foundation: foundationCost,
     upperFloors: (storeys - 1) * floor * 12 + stackedArea * 12,
     outdoors: outdoorCost,
     walls: wallsCost,
@@ -2260,11 +2277,12 @@ function deriveDesign(spec, wallSections) {
   const foundationCarbonPsf = { rubble: 10, stemwall: 18, slab: 25 };
   const wallCarbonPsf = { 'straw-bale': 6, 'rammed-earth': 20, cob: 8, 'hemp-lime': 4, cordwood: 8, 'light-straw-clay': 7, framed: 8 };
   const wallCarbon = wallSections.reduce((sum, wall) => sum + wall.lengthFt * (wall.heightFt + storeyExtraFt) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0);
-  const carbonKg = floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + wallCarbon + roofArea * 12 + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
+  const stemCarbonExtra = utilities.foundationType === 'stemwall' ? perimeterFt * Math.max(0, stemwallHeightFt - 1.5) * 40 : 0;
+  const carbonKg = floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra + wallCarbon + roofArea * 12 + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
   return {
     site, utilities, floor, heatedFloor, storeys, roofArea, roofFootprint, overhangs, wallArea, wallR, southGlass, glassPct,
-    skylightArea, totalGlass, glazingU,
+    skylightArea, totalGlass, glazingU, stemwallHeightFt,
     heatLoadKbtu, bedrooms, people, waterGpd, catchmentGpd, supplyGpd, septicGpd,
     peakSunHrs, loadKwhDay, panels, panelRoom, batteryKwh,
     cost, totalBeforeSweat, sweat, total, carbonKg, pitch
@@ -3029,6 +3047,20 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
         const assemblyLabel = makeLabel(`${wallProfile.label} - ${wallT}' walls - ${roofLabel}`, 16);
         assemblyLabel.position.set(width / 2, wallHeight + 1.4, depth / 2);
         group.add(assemblyLabel);
+      }
+
+      // Stem wall foundation: a visible concrete plinth ring under the walls.
+      if (utilitiesOf(spec).foundationType === 'stemwall') {
+        const stemH = Math.min(6, Math.max(0.5, Number(utilitiesOf(spec).stemwallHeightFt) || 1.5));
+        const stemMat = new THREE.MeshStandardMaterial({ color: 0xaaa79b, roughness: 0.95 });
+        const lip = 0.25;
+        const ring = [
+          box(width + lip * 2, stemH, tN + lip, width / 2, stemH / 2, tN / 2, stemMat),
+          box(width + lip * 2, stemH, tS + lip, width / 2, stemH / 2, depth - tS / 2, stemMat),
+          box(tW + lip, stemH, depth + lip * 2, tW / 2, stemH / 2, depth / 2, stemMat),
+          box(tE + lip, stemH, depth + lip * 2, width - tE / 2, stemH / 2, depth / 2, stemMat)
+        ];
+        ring.forEach((segment) => { segment.name = 'Stem wall foundation'; group.add(segment); });
       }
 
       // Upper floor plate(s): one deck per full-or-partial storey above the first,
@@ -5124,6 +5156,9 @@ function App() {
                     <option value="slab">Insulated slab — simple, the most concrete</option>
                   </select>
                 </label>
+                {utilitiesOf(spec).foundationType === 'stemwall' && (
+                  <label>Stem wall height (ft)<input type="number" step="0.25" min="0.5" max="6" value={utilitiesOf(spec).stemwallHeightFt ?? 1.5} onChange={(event) => updateUtility('stemwallHeightFt', event.target.value)} /></label>
+                )}
               </div>
               <label className="diyToggle">
                 <input type="checkbox" checked={utilitiesOf(spec).diyFoundation} onChange={(event) => updateUtility('diyFoundation', event.target.checked)} />
@@ -5597,7 +5632,7 @@ function App() {
                       power: { offgrid: 'Off-Grid Solar + Battery', hybrid: 'Grid + Solar', gridtie: 'Grid Power' }
                     };
                     switch (systemFocus) {
-                      case 'foundation': return [{ key: 'f', name: names.foundation[u.foundationType] || 'Foundation', meta: `${spec.shell.widthFt}' × ${spec.shell.depthFt}' footprint · ${perimeter} lf perimeter · ${money(derived.cost.foundation)}` }];
+                      case 'foundation': return [{ key: 'f', name: names.foundation[u.foundationType] || 'Foundation', meta: `${spec.shell.widthFt}' × ${spec.shell.depthFt}' footprint · ${perimeter} lf perimeter${u.foundationType === 'stemwall' ? ` · ${derived.stemwallHeightFt}' stem` : ''} · ${money(derived.cost.foundation)}` }];
                       case 'heat': return [{ key: 'h', name: names.heat[u.heatSource] || 'Heat Source', meta: `covers a ${derived.heatLoadKbtu.toFixed(1)} kBTU/hr design load · ${money(derived.cost.heat)}` }];
                       case 'water': return [{ key: 'w', name: names.water[u.waterSource] || 'Water Source', meta: `${Number.isFinite(derived.supplyGpd) ? `${Math.round(derived.supplyGpd)} gal/day supply` : 'unlimited supply'} vs ${Math.round(derived.waterGpd)} used${u.tankGal ? ` · ${Number(u.tankGal).toLocaleString()} gal tank` : ''} · ${money(derived.cost.water)}` }];
                       case 'waste': return [{ key: 'x', name: names.waste[u.wasteMethod] || 'Waste System', meta: `${Math.round(derived.septicGpd)} gal/day design flow${u.wasteMethod === 'septic' ? ` · ${u.wellSepticFt}' from the well` : ''} · ${money(derived.cost.waste)}` }];

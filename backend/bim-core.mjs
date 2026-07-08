@@ -286,6 +286,7 @@ export const UTILITY_DEFAULTS = {
   powerMode: 'offgrid',
   heatSource: 'wood_stove',
   foundationType: 'rubble',
+  stemwallHeightFt: 1.5,
   windowQuality: 'double',
   diyWalls: false,
   diyRoof: false,
@@ -458,6 +459,7 @@ export function applyBimOperations(currentSpec, plan) {
         windowQuality: ['double', 'triple']
       };
       if (field === 'tankGal') next.utilities.tankGal = clamp(Number(operation.value) || 0, 0, 50000);
+      else if (field === 'stemwallHeightFt') next.utilities.stemwallHeightFt = clamp(Number(operation.value) || 1.5, 0.5, 6);
       else if (field === 'wellSepticFt') next.utilities.wellSepticFt = clamp(Number(operation.value) || 0, 0, 2000);
       else if (field === 'diyWalls' || field === 'diyRoof' || field === 'diyHeat' || field === 'diyFoundation') {
         next.utilities[field] = value === 'true' || operation.value === true || value === '1';
