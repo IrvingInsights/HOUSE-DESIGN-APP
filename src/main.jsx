@@ -3342,7 +3342,7 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, activeFloor 
         })}
         {/* placed elements (heater, tank, garden, coop, stairs…) — dashed to
             read as objects/fixtures rather than rooms; drag + resize like rooms */}
-        {(spec.elements || []).filter((el) => el.category !== 'floor' && Number(el.level || 1) === activeFloor).map((raw) => {
+        {(spec.elements || []).filter((el) => el.category !== 'floor' && (Number(el.level || 1) === activeFloor || (/stair|ladder/i.test(el.name || '') && Number(el.level || 1) === activeFloor - 1))).map((raw) => {
           const el = roomAt(raw);
           const isSel = raw.id === selectedRoom;
           const w = Number(el.w) || 4;
@@ -5414,10 +5414,22 @@ function App() {
 
   function addStorey() {
     const next = Math.min(3, floorCount(spec) + 1);
+    const ops = [{ type: 'set_shell', field: 'storeys', value: String(next) }];
+    // Auto-link floors with a stair (if there isn't one already) so an upper
+    // storey is reachable — clears the stair check and gives vertical circulation.
+    const hasStair = (spec.rooms || []).concat(spec.elements || []).some((o) => /stair|ladder/i.test(o.name || ''));
+    if (!hasStair) {
+      const groundObjs = (spec.rooms || []).filter((r) => Number(r.level || 1) === 1)
+        .concat((spec.elements || []).filter((e) => e.category !== 'floor' && Number(e.level || 1) === 1))
+        .map((o) => ({ x: Number(o.x), y: Number(o.y), w: Number(o.w), d: Number(o.d) }));
+      const spot = findFreeSpot(Number(spec.shell.widthFt), Number(spec.shell.depthFt), groundObjs, 3.5, 10) || { x: 2, y: 2 };
+      ops.push({ type: 'add_element', name: 'Stairs', category: 'structure', x: spot.x, y: spot.y, z: 0, w: 3.5, d: 10, h: 9, level: 1, reason: 'Stair linking the floors, added with the new storey.' });
+    }
     void applyBackendOperations({
-      operations: [{ type: 'set_shell', field: 'storeys', value: String(next) }],
+      operations: ops,
       promptText: `Add a storey (now ${next})`,
-      logPrefix: 'Storeys'
+      logPrefix: 'Storeys',
+      chatText: hasStair ? undefined : `Added a storey and dropped in a stair to reach it — drag the stair where you want it (it shows on both floors so you can line it up).`
     });
     setActiveFloor(next);
   }
