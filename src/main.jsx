@@ -9,6 +9,7 @@ import {
   Camera,
   CheckCircle2,
   ClipboardCheck,
+  Coins,
   Download,
   FileText,
   FileJson,
@@ -684,6 +685,21 @@ const ROOM_PRESETS = [
   { name: 'Mudroom', type: 'service', w: 8, d: 8 },
   { name: 'Pantry', type: 'storage', w: 8, d: 6 }
 ];
+
+// Button label for each one-click flag fix (keyed by issue.fixId). Absence of a
+// fixId means the flag needs human judgment and shows prose guidance only.
+const FIX_LABELS = {
+  'add-wet-core': 'Add a bathroom',
+  'add-mudroom': 'Add a mudroom',
+  'add-south-entry': 'Add a south door',
+  'add-south-glass': 'Add south glazing',
+  'add-stair': 'Add a stair',
+  'raise-stemwall': 'Raise stem wall to 18″',
+  'well-septic': 'Set 100 ft separation',
+  'deepen-overhang': 'Deepen overhangs to 2 ft',
+  'reduce-south-overhang': 'Trim south overhang to 2.5 ft',
+  'thicken-bale-wall': 'Thicken the wall'
+};
 
 // Give a new room a non-colliding display name (Bedroom, Bedroom 2, ...).
 function uniqueRoomName(spec, base) {
@@ -2414,13 +2430,13 @@ function detectIssues(spec) {
     issues.push({ severity: 'critical', title: 'Room program exceeds shell area', owner: 'Architect', system: 'rooms', fix: 'Reduce room footprints or enlarge the shell before issuing drawings.' });
   }
   if (!spec.rooms.some((room) => room.type === 'wet')) {
-    issues.push({ severity: 'critical', title: 'No wet core defined', owner: 'Engineer', system: 'rooms', fix: 'Add a bathroom/mechanical wet core and align plumbing walls.' });
+    issues.push({ severity: 'critical', title: 'No wet core defined', owner: 'Engineer', system: 'rooms', fixId: 'add-wet-core', fix: 'Add a bathroom/mechanical wet core and align plumbing walls.' });
   }
   if (!spec.openings.some((item) => (OPENING_TYPES[item.type]?.entry) && item.wall === 'south')) {
-    issues.push({ severity: 'warning', title: 'Primary entry lacks clear solar-side approach', owner: 'Designer', system: 'windows', fix: 'Add or move the main entry (a door, french doors, or a slider) to a legible south approach with weather protection.' });
+    issues.push({ severity: 'warning', title: 'Primary entry lacks clear solar-side approach', owner: 'Designer', system: 'windows', fixId: 'add-south-entry', fix: 'Add or move the main entry (a door, french doors, or a slider) to a legible south approach with weather protection.' });
   }
   if (!spec.openings.some((item) => (OPENING_TYPES[item.type] || OPENING_TYPES.window).glazed && item.wall === 'south')) {
-    issues.push({ severity: 'warning', title: 'Insufficient south-facing daylight strategy', owner: 'Permaculture', system: 'windows', fix: 'Add balanced south glazing with summer shading and winter solar gain.' });
+    issues.push({ severity: 'warning', title: 'Insufficient south-facing daylight strategy', owner: 'Permaculture', system: 'windows', fixId: 'add-south-glass', fix: 'Add balanced south glazing with summer shading and winter solar gain.' });
   }
   if (spec.shell.wallHeightFt > 12) {
     issues.push({ severity: 'warning', title: 'Tall walls need explicit lateral strategy', owner: 'Engineer', system: 'walls', fix: 'Add shear wall schedule, hold-downs, and diaphragm notes.' });
@@ -2429,14 +2445,14 @@ function detectIssues(spec) {
     issues.push({ severity: 'warning', title: 'Natural wall lacks drying layer', owner: 'Natural Builder', system: 'walls', fix: 'Include rainscreen, generous roof overhangs, and capillary breaks.' });
   }
   if (!spec.rooms.some((room) => /mud|laundry|service/i.test(room.name))) {
-    issues.push({ severity: 'warning', title: 'Farm workflow has no dirty entry', owner: 'Homestead/Farm', system: 'rooms', fix: 'Add a mud/laundry buffer between exterior work and clean living space.' });
+    issues.push({ severity: 'warning', title: 'Farm workflow has no dirty entry', owner: 'Homestead/Farm', system: 'rooms', fixId: 'add-mudroom', fix: 'Add a mud/laundry buffer between exterior work and clean living space.' });
   }
   const hasStackedSpace = Number(spec.shell.storeys || 1) > 1
     || (spec.elements || []).some((element) => ['loft', 'tower'].includes(element.category));
   if (hasStackedSpace
     && !spec.rooms.some((room) => /stair|ladder/i.test(room.name))
     && !(spec.elements || []).some((element) => /stair|ladder/i.test(element.name))) {
-    issues.push({ severity: 'warning', title: 'Upper space has no stair', owner: 'Architect', system: 'rooms', fix: 'Add a stair (about 3 × 10 ft plus a landing) — or a ladder for a loft — so the upper floor, loft, or tower is reachable.' });
+    issues.push({ severity: 'warning', title: 'Upper space has no stair', owner: 'Architect', system: 'rooms', fixId: 'add-stair', fix: 'Add a stair (about 3 × 10 ft plus a landing) — or a ladder for a loft — so the upper floor, loft, or tower is reachable.' });
   }
 
   // Ported from the add-on's aiCritic (Appendix S / 75-A style rules).
@@ -2446,12 +2462,14 @@ function detectIssues(spec) {
     const resolved = resolveWallSide(spec, side);
     if (resolved.omitted || resolved.assemblyKey !== 'straw-bale') continue;
     const slenderness = (resolved.heightFt + storeyLiftFt) / Math.max(resolved.thicknessFt, 0.1);
+    // Thickness that brings this side to a compliant 12:1, rounded up to the inch.
+    const fixThicknessFt = Math.ceil(((resolved.heightFt + storeyLiftFt) / 12) * 12) / 12;
     if (slenderness > 15) {
-      issues.push({ severity: 'critical', title: `${titleCase(side)} bale wall is too tall for its thickness (${slenderness.toFixed(1)}:1)`, owner: 'Engineer', system: 'walls', fix: 'Load-bearing straw bale is typically limited to 15:1 height-to-thickness (Appendix S R325.8-style). Thicken the wall, lower it, or switch that side to a framed/infill system.' });
+      issues.push({ severity: 'critical', title: `${titleCase(side)} bale wall is too tall for its thickness (${slenderness.toFixed(1)}:1)`, owner: 'Engineer', system: 'walls', fixId: 'thicken-bale-wall', side, fixThicknessFt, fix: 'Load-bearing straw bale is typically limited to 15:1 height-to-thickness (Appendix S R325.8-style). Thicken the wall, lower it, or switch that side to a framed/infill system.' });
       break;
     }
     if (slenderness > 12) {
-      issues.push({ severity: 'warning', title: `${titleCase(side)} bale wall slenderness is high (${slenderness.toFixed(1)}:1)`, owner: 'Engineer', system: 'walls', fix: 'Compliant, but consider intermediate posts or a timber frame with bale infill.' });
+      issues.push({ severity: 'warning', title: `${titleCase(side)} bale wall slenderness is high (${slenderness.toFixed(1)}:1)`, owner: 'Engineer', system: 'walls', fixId: 'thicken-bale-wall', side, fixThicknessFt, fix: 'Compliant, but consider intermediate posts or a timber frame with bale infill.' });
       break;
     }
   }
@@ -2461,11 +2479,11 @@ function detectIssues(spec) {
     return !resolved.omitted && resolved.assemblyKey === 'straw-bale';
   });
   if (hasBaleWall && utilitiesForChecks.foundationType === 'stemwall' && derivedForChecks.stemwallHeightFt < 1) {
-    issues.push({ severity: 'warning', title: `Stem wall is only ${Math.round(derivedForChecks.stemwallHeightFt * 12)}" under bale walls`, owner: 'Natural Builder', system: 'foundation', fix: 'Straw bale wants its base at least 12" above grade for splash protection — raise the stem wall to 1 ft or more.' });
+    issues.push({ severity: 'warning', title: `Stem wall is only ${Math.round(derivedForChecks.stemwallHeightFt * 12)}" under bale walls`, owner: 'Natural Builder', system: 'foundation', fixId: 'raise-stemwall', fix: 'Straw bale wants its base at least 12" above grade for splash protection — raise the stem wall to 1 ft or more.' });
   }
   const usesWell = utilitiesForChecks.waterSource === 'well' || utilitiesForChecks.waterSource === 'spring';
   if (usesWell && utilitiesForChecks.wasteMethod === 'septic' && Number(utilitiesForChecks.wellSepticFt) < 100) {
-    issues.push({ severity: 'critical', title: `Well is only ${Math.round(utilitiesForChecks.wellSepticFt)} ft from the septic field`, owner: 'Engineer', system: 'waste', fix: 'Health code (NYS 75-A-style) wants at least 100 ft between a well and a septic field. Move one of them — confirm the exact figure with your health department.' });
+    issues.push({ severity: 'critical', title: `Well is only ${Math.round(utilitiesForChecks.wellSepticFt)} ft from the septic field`, owner: 'Engineer', system: 'waste', fixId: 'well-septic', fix: 'Health code (NYS 75-A-style) wants at least 100 ft between a well and a septic field. Move one of them — confirm the exact figure with your health department.' });
   }
   if (Number.isFinite(derivedForChecks.supplyGpd) && derivedForChecks.supplyGpd < derivedForChecks.waterGpd) {
     issues.push({ severity: 'warning', title: `Water source gives ~${Math.round(derivedForChecks.supplyGpd)} gal/day but you'll use ~${Math.round(derivedForChecks.waterGpd)}`, owner: 'Engineer', system: 'water', fix: 'Add storage, add a second source, or cut demand — the source has to cover what the household uses.' });
@@ -2483,11 +2501,11 @@ function detectIssues(spec) {
     return !resolved.omitted && resolved.assemblyKey !== 'framed';
   });
   if (hasEarthenWall && overhangCheck.min < 2) {
-    issues.push({ severity: 'critical', title: `Roof overhang is only ${(overhangCheck.min * 12).toFixed(0)}" on the shortest side`, owner: 'Natural Builder', system: 'roof', fix: 'Plastered natural walls need at least 24" of overhang to stay dry (Appendix S R325.5.4-style). Deepen the overhang or switch the exposed side to a framed rainscreen wall.' });
+    issues.push({ severity: 'critical', title: `Roof overhang is only ${(overhangCheck.min * 12).toFixed(0)}" on the shortest side`, owner: 'Natural Builder', system: 'roof', fixId: 'deepen-overhang', fix: 'Plastered natural walls need at least 24" of overhang to stay dry (Appendix S R325.5.4-style). Deepen the overhang or switch the exposed side to a framed rainscreen wall.' });
   }
   const hasSouthGlass = spec.openings.some((opening) => opening.wall === 'south' && opening.type !== 'door');
   if (hasSouthGlass && overhangCheck.south > 3.5) {
-    issues.push({ severity: 'warning', title: `South overhang (${overhangCheck.south.toFixed(1)} ft) will block winter sun`, owner: 'Designer', system: 'roof', fix: 'A deep south overhang casts winter shadow on your solar glass, starving the house of free heat. 2 to 3 ft is the usual sweet spot.' });
+    issues.push({ severity: 'warning', title: `South overhang (${overhangCheck.south.toFixed(1)} ft) will block winter sun`, owner: 'Designer', system: 'roof', fixId: 'reduce-south-overhang', fix: 'A deep south overhang casts winter shadow on your solar glass, starving the house of free heat. 2 to 3 ft is the usual sweet spot.' });
   }
   if (issues.length === 0) {
     issues.push({ severity: 'pass', title: 'Schematic passes current council checks', owner: 'Project Manager', fix: 'Ready for PE/architect review, structural sizing, jurisdictional code check, and stamped drawing development.' });
@@ -2657,6 +2675,21 @@ const SYSTEM_GROUPS = [
   { label: 'Land & program', keys: ['site', 'rooms'] },
   { label: 'The building', keys: ['shell', 'foundation', 'walls', 'roof', 'windows'] },
   { label: 'Systems', keys: ['heat', 'water', 'waste', 'power', 'outdoors'] }
+];
+
+// The cost breakdown reads derived.cost — one row per system, each linked back
+// to the page that drives it, so a big number is one tap from the controls.
+const COST_ROWS = [
+  { key: 'foundation', label: 'Foundation', system: 'foundation' },
+  { key: 'walls', label: 'Walls', system: 'walls' },
+  { key: 'roof', label: 'Roof', system: 'roof' },
+  { key: 'windows', label: 'Windows & doors', system: 'windows' },
+  { key: 'upperFloors', label: 'Upper floors', system: 'shell' },
+  { key: 'heat', label: 'Heat', system: 'heat' },
+  { key: 'water', label: 'Water', system: 'water' },
+  { key: 'waste', label: 'Waste', system: 'waste' },
+  { key: 'power', label: 'Power', system: 'power' },
+  { key: 'outdoors', label: 'Outdoors', system: 'outdoors' }
 ];
 
 const SYSTEM_META = {
@@ -5370,6 +5403,42 @@ function App() {
     });
   }
 
+  // One-click fixes for council flags. Each maps a flagged issue to the SAME
+  // safe op path a manual control uses — the non-destructive room placement and
+  // the standard backend dispatch — so a fix never clobbers a layout or vanishes
+  // silently. Only issues with a clean single-intent remedy carry a fixId; the
+  // judgment calls (cost over ceiling, undersized water source) stay prose-only.
+  function fixIssue(issue) {
+    const preset = (name) => ROOM_PRESETS.find((item) => item.name === name);
+    switch (issue.fixId) {
+      case 'add-wet-core':
+        return void addRoomPreset(preset('Bathroom'));
+      case 'add-mudroom':
+        return void addRoomPreset(preset('Mudroom'));
+      case 'add-south-entry':
+        return void applyBackendOperations({ operations: [{ type: 'add_opening', wall: 'south', openingType: 'door', widthFt: 3 }], promptText: 'Add a south entry door', logPrefix: 'Fix', chatText: 'Added a south-facing door so the main entry has a clear solar-side approach — position it on the Windows page.' });
+      case 'add-south-glass':
+        return void applyBackendOperations({ operations: [{ type: 'add_opening', wall: 'south', openingType: 'window', widthFt: 5 }], promptText: 'Add south glazing', logPrefix: 'Fix', chatText: 'Added a south window for winter solar gain — tune the size and summer shading on the Windows page.' });
+      case 'add-stair':
+        return void placeFixture({ name: 'Stairs', category: 'structure', w: 3.5, d: 10, h: 8 });
+      case 'raise-stemwall':
+        return void applyBackendOperations({ operations: [{ type: 'set_utility', field: 'stemwallHeightFt', value: 1.5 }], promptText: 'Raise the stem wall', logPrefix: 'Fix', chatText: 'Raised the stem wall to 18″ so the bale base clears splash and grade.' });
+      case 'well-septic':
+        return void applyBackendOperations({ operations: [{ type: 'set_utility', field: 'wellSepticFt', value: 100 }], promptText: 'Separate well and septic', logPrefix: 'Fix', chatText: 'Set the well-to-septic separation to 100 ft. Confirm the exact figure with your local health department.' });
+      case 'deepen-overhang':
+        return void applyBackendOperations({ operations: [{ type: 'set_overhang', wall: 'all', value: 2 }], promptText: 'Deepen the roof overhangs', logPrefix: 'Fix', chatText: 'Set every roof overhang to 2 ft so the plastered walls shed rain.' });
+      case 'reduce-south-overhang':
+        return void applyBackendOperations({ operations: [{ type: 'set_overhang', wall: 'south', value: 2.5 }], promptText: 'Trim the south overhang', logPrefix: 'Fix', chatText: 'Trimmed the south overhang to 2.5 ft so winter sun reaches the solar glass.' });
+      case 'thicken-bale-wall': {
+        if (!issue.side) return;
+        const target = issue.fixThicknessFt || 1.5;
+        return void applyBackendOperations({ operations: [{ type: 'set_wall_side', wall: issue.side, field: 'thicknessFt', value: target }], promptText: `Thicken the ${issue.side} wall`, logPrefix: 'Fix', chatText: `Thickened the ${issue.side} bale wall to ${Math.round(target * 12)}″ to bring it within the 12:1 slenderness limit.` });
+      }
+      default:
+        return;
+    }
+  }
+
   // Instant local path for simple "add a bedroom" chat lines — one call, rooms
   // slotted into free space, no re-pack of what's already there, no planner.
   async function applyLocalRoomAdds(parsed, submittedPrompt) {
@@ -5623,7 +5692,7 @@ function App() {
 
         <section className="panelBlock compact consoleSummary">
           <div className="statGrid four">
-            <button type="button" title="See the cost breakdown in Build" onClick={() => setAppMode('build')}><strong>${estimatedCost.toLocaleString()}</strong><span>{derived.sweat > 0 ? `est. cost · sweat saves $${Math.round(derived.sweat / 1000)}k` : 'est. cost'}</span></button>
+            <button type="button" title="See the full cost breakdown" onClick={() => { setAppMode('design'); setConsoleView('costs'); }}><strong>${estimatedCost.toLocaleString()}</strong><span>{derived.sweat > 0 ? `est. cost · sweat saves $${Math.round(derived.sweat / 1000)}k` : 'est. cost'}</span></button>
             <button type="button" title="Open the Rooms plan" onClick={() => { setConsoleView('systems'); setSystemView('rooms'); }}><strong>{spec.rooms.length}</strong><span>room{spec.rooms.length === 1 ? '' : 's'} · {area} sf</span></button>
             <button type="button" title="See the code flags in Review" onClick={() => setConsoleView('review')}><strong>{openFlagCount}</strong><span>code flag{openFlagCount === 1 ? '' : 's'}</span></button>
             <button type="button" className={openFlagCount === 0 ? 'stateStat ok' : 'stateStat bad'} title="See what does and doesn't add up in Review" onClick={() => setConsoleView('review')}><strong>{openFlagCount === 0 ? 'Yes' : 'Not yet'}</strong><span>adds up</span></button>
@@ -5698,6 +5767,7 @@ function App() {
 
         {appMode === 'design' && <nav className="consoleTabs" aria-label="Project console">
           <button className={consoleView === 'systems' ? 'active' : ''} onClick={() => setConsoleView('systems')}><Grid3X3 size={14} /> Systems</button>
+          <button className={consoleView === 'costs' ? 'active' : ''} onClick={() => setConsoleView('costs')}><Coins size={14} /> Costs</button>
           <button className={consoleView === 'os' ? 'active' : ''} onClick={() => setConsoleView('os')}><ClipboardCheck size={14} /> Plan</button>
           <button className={consoleView === 'review' ? 'active' : ''} onClick={() => setConsoleView('review')}><ShieldCheck size={14} /> Review</button>
           <button className={consoleView === 'experts' ? 'active' : ''} onClick={() => setConsoleView('experts')}><Users size={14} /> Experts</button>
@@ -6215,6 +6285,74 @@ function App() {
             </details>
         </section>}
 
+        {appMode === 'design' && consoleView === 'costs' && (() => {
+          const rows = COST_ROWS
+            .map((row) => ({ ...row, amount: derived.cost[row.key] || 0 }))
+            .filter((row) => row.amount > 0)
+            .sort((a, b) => b.amount - a.amount);
+          const subtotal = derived.totalBeforeSweat;
+          const maxAmount = rows.length ? rows[0].amount : 1;
+          const perSf = derived.heatedFloor > 0 ? derived.total / derived.heatedFloor : 0;
+          const overBy = derived.total - 324700;
+          const diyTrades = [
+            { field: 'diyWalls', label: 'Walls', costKey: 'walls', frac: 0.8 },
+            { field: 'diyRoof', label: 'Roof', costKey: 'roof', frac: 0.55 },
+            { field: 'diyHeat', label: 'Heat', costKey: 'heat', frac: 0.45 },
+            { field: 'diyFoundation', label: 'Foundation', costKey: 'foundation', frac: 0.5 }
+          ];
+          const toggleDiy = (field) => void applyBackendOperations({
+            operations: [{ type: 'set_utility', field, value: !derived.utilities[field] }],
+            promptText: `${derived.utilities[field] ? 'Hire out' : 'Self-build'} the ${field.replace('diy', '').toLowerCase()}`,
+            logPrefix: 'Sweat equity'
+          });
+          return (
+            <section className="panelBlock consolePanel costPanel">
+              <div className="blockTitle"><Coins size={16} /> Cost breakdown</div>
+              <p className="studioHint">Every system's directional cost, biggest first. Tap a row to open that system's controls. Early-design estimates — order from your own counts.</p>
+              <div className="costHead">
+                <div><strong>{fmtMoney(derived.total)}</strong><span>after sweat equity</span></div>
+                <div><strong>{perSf > 0 ? fmtMoney(perSf) : '—'}</strong><span>per heated sf</span></div>
+                <div><strong>{(derived.carbonKg / 1000).toFixed(1)} t</strong><span>embodied CO₂e</span></div>
+              </div>
+              <div className="costRows">
+                {rows.map((row) => (
+                  <button type="button" className="costRow" key={row.key} onClick={() => { setConsoleView('systems'); setSystemView(row.system); setInspectorView('schedule'); }}>
+                    <span className="costRowLabel">{row.label}</span>
+                    <span className="costBar"><span className="costBarFill" style={{ width: `${Math.max(3, (row.amount / maxAmount) * 100)}%` }} /></span>
+                    <span className="costRowAmt">{fmtMoney(row.amount)}</span>
+                    <span className="costRowPct">{subtotal > 0 ? Math.round((row.amount / subtotal) * 100) : 0}%</span>
+                  </button>
+                ))}
+              </div>
+              <div className="costTotals">
+                <div className="costTotalRow"><span>Subtotal</span><b>{fmtMoney(subtotal)}</b></div>
+                {derived.sweat > 0 && <div className="costTotalRow save"><span>Sweat equity</span><b>−{fmtMoney(derived.sweat)}</b></div>}
+                <div className="costTotalRow net"><span>Estimated total</span><b>{fmtMoney(derived.total)}</b></div>
+              </div>
+              <div className="sectionHead">Do it yourself</div>
+              <p className="systemNote">Each trade you take on drops the cash cost by its labor share. Toggle what you'll build.</p>
+              <div className="diyGrid">
+                {diyTrades.map((trade) => {
+                  const on = Boolean(derived.utilities[trade.field]);
+                  const saves = (derived.cost[trade.costKey] || 0) * trade.frac;
+                  return (
+                    <label key={trade.field} className={on ? 'diyToggle on' : 'diyToggle'}>
+                      <input type="checkbox" checked={on} onChange={() => toggleDiy(trade.field)} />
+                      <span>{trade.label}</span>
+                      <small>{on ? `saving ${fmtMoney(saves)}` : `save ~${fmtMoney(saves)}`}</small>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className={overBy > 0 ? 'costCeiling over' : 'costCeiling under'}>
+                {overBy > 0
+                  ? `${fmtMoney(overBy)} over the $324,700 owner-builder loan ceiling — trim the footprint, simplify systems, or take on more sweat equity.`
+                  : `${fmtMoney(-overBy)} under the $324,700 owner-builder loan ceiling.`}
+              </div>
+            </section>
+          );
+        })()}
+
         {appMode === 'design' && consoleView === 'review' && <section className="panelBlock consolePanel reviewHub">
             <div className="blockTitle"><ShieldCheck size={16} /> Does it add up</div>
             {(() => {
@@ -6232,7 +6370,18 @@ function App() {
               {issues.map((issue, index) => (
                 <div key={`${issue.title}-${index}`} className={`issue ${issue.severity}`}>
                   {issue.severity === 'pass' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
-                  <div><b>{issue.title}</b><span>{issue.fix}</span></div>
+                  <div>
+                    <b>{issue.title}</b>
+                    <span>{issue.fix}</span>
+                    <div className="issueActions">
+                      {issue.system && issue.severity !== 'pass' && (
+                        <button type="button" className="issueJump" onClick={() => { setConsoleView('systems'); setSystemView(issue.system); setInspectorView('schedule'); }}>Go to {SYSTEM_META[issue.system]?.label || issue.system}</button>
+                      )}
+                      {issue.fixId && FIX_LABELS[issue.fixId] && (
+                        <button type="button" className="issueFix" onClick={() => fixIssue(issue)}><Wrench size={13} /> {FIX_LABELS[issue.fixId]}</button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
