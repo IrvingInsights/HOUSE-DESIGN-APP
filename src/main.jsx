@@ -755,6 +755,60 @@ function parseLocalRoomAdds(text) {
   return rooms.length ? rooms : null;
 }
 
+function rectsOverlap(a, b, gap = 0) {
+  return a.x < b.x + b.w + gap && a.x + a.w + gap > b.x && a.y < b.y + b.d + gap && a.y + a.d + gap > b.y;
+}
+
+// Find the first free spot for a w×d room inside the shell that doesn't collide
+// with existing rooms — so adding a room never has to disturb the others.
+function findFreeSpot(shellW, shellD, rooms, w, d) {
+  const margin = 1;
+  const gap = 0.5;
+  for (let y = margin; y + d <= shellD - margin + 0.01; y += 1) {
+    for (let x = margin; x + w <= shellW - margin + 0.01; x += 1) {
+      const cand = { x, y, w, d };
+      if (!rooms.some((r) => rectsOverlap(cand, r, gap))) return { x: Math.round(x * 2) / 2, y: Math.round(y * 2) / 2 };
+    }
+  }
+  return null;
+}
+
+// Place one or more NEW rooms without moving any existing room: each drops into
+// the first free gap; if none fits, the house grows (down, and wider if the
+// room itself is too wide) and the room lands in the new space. Returns add ops
+// + any shell-grow ops, plus whether it grew.
+function planNewRoomPlacements(spec, newRooms) {
+  const virtualRooms = (spec.rooms || []).map((r) => ({ x: Number(r.x), y: Number(r.y), w: Number(r.w), d: Number(r.d) }));
+  const taken = new Set((spec.rooms || []).map((r) => r.name));
+  let shellW = Number(spec.shell.widthFt);
+  let shellD = Number(spec.shell.depthFt);
+  const startW = shellW;
+  const startD = shellD;
+  const addOps = [];
+  const names = [];
+  for (const nr of newRooms) {
+    let name = nr.name;
+    let n = 2;
+    while (taken.has(name)) { name = `${nr.name} ${n}`; n += 1; }
+    taken.add(name);
+    names.push(name);
+    let spot = findFreeSpot(shellW, shellD, virtualRooms, nr.w, nr.d);
+    if (!spot) {
+      if (nr.w > shellW - 2) shellW = clamp(Math.ceil(nr.w + 2), 18, 120);
+      const bottom = virtualRooms.length ? Math.max(...virtualRooms.map((r) => r.y + r.d)) : 1;
+      const y = Math.round((bottom + 0.5) * 2) / 2;
+      shellD = clamp(Math.max(shellD, Math.ceil(y + nr.d + 1)), 18, 80);
+      spot = { x: 1, y };
+    }
+    virtualRooms.push({ x: spot.x, y: spot.y, w: nr.w, d: nr.d });
+    addOps.push({ type: 'add_room', name, category: nr.type, w: nr.w, d: nr.d, x: spot.x, y: spot.y });
+  }
+  const growOps = [];
+  if (shellW !== startW) growOps.push({ type: 'set_shell', field: 'widthFt', value: String(shellW) });
+  if (shellD !== startD) growOps.push({ type: 'set_shell', field: 'depthFt', value: String(shellD) });
+  return { ops: [...growOps, ...addOps], names, grew: growOps.length > 0, newW: shellW, newD: shellD };
+}
+
 // Build the operation list that tidies the current rooms into a plan and grows
 // the shell to hold them if needed.
 function arrangeRoomsPlan(spec) {
@@ -5206,58 +5260,31 @@ function App() {
 
   // Add a room, then re-pack the whole floor plan so nothing overlaps and the
   // house grows to fit — the GUI path that makes building a first floor work.
+  // Drop a room into the first free gap without disturbing the rooms already
+  // placed (a manual layout survives an add). Only 'auto-arrange' re-packs.
   async function addRoomPreset(preset) {
-    const name = uniqueRoomName(spec, preset.name);
-    const report = await applyBackendOperations({
-      operations: [{ type: 'add_room', name, category: preset.type, w: preset.w, d: preset.d, x: 2, y: 2 }],
-      promptText: `Add ${name}`,
-      logPrefix: 'Add room'
+    const plan = planNewRoomPlacements(spec, [preset]);
+    await applyBackendOperations({
+      operations: plan.ops,
+      promptText: `Add ${plan.names[0]}`,
+      logPrefix: 'Add room',
+      chatText: plan.grew ? `Added the ${plan.names[0]} and grew the house to ${plan.newW}′ × ${plan.newD}′ to fit it — your other rooms stayed put. (Auto-arrange re-tidies the whole plan if you want it.)` : undefined
     });
-    if (!report?.spec) return;
-    const arrange = arrangeRoomsPlan(report.spec);
-    if (arrange.ops.length) {
-      await applyBackendOperations({
-        operations: arrange.ops,
-        baseSpec: report.spec,
-        nextSelectedId: report.changedIds[0],
-        promptText: arrange.grew ? `Arrange plan · grew house to ${arrange.newW} × ${arrange.newD}` : 'Arrange floor plan',
-        logPrefix: 'Layout',
-        chatText: arrange.grew
-          ? `Added the ${name} and tidied the floor plan — grew the house to ${arrange.newW}′ × ${arrange.newD}′ so every room fits without overlapping.`
-          : undefined
-      });
-    }
   }
 
-  // Instant local path for simple "add a bedroom" chat lines — one add call
-  // (all rooms) + one arrange, no slow planner round-trip.
+  // Instant local path for simple "add a bedroom" chat lines — one call, rooms
+  // slotted into free space, no re-pack of what's already there, no planner.
   async function applyLocalRoomAdds(parsed, submittedPrompt) {
-    const taken = new Set((spec.rooms || []).map((room) => room.name));
-    const addOps = parsed.map((room) => {
-      let name = room.name;
-      let n = 2;
-      while (taken.has(name)) { name = `${room.name} ${n}`; n += 1; }
-      taken.add(name);
-      return { type: 'add_room', name, category: room.type, w: room.w, d: room.d, x: 2, y: 2 };
-    });
     setChatMessages((items) => [...items, { role: 'user', speaker: 'You', text: submittedPrompt }]);
-    const report = await applyBackendOperations({
-      operations: addOps,
-      promptText: addOps.length === 1 ? `Add ${addOps[0].name}` : `Add ${addOps.length} rooms`,
-      logPrefix: 'Add rooms'
-    });
-    if (!report?.spec) return;
-    const arrange = arrangeRoomsPlan(report.spec);
-    const added = addOps.map((op) => op.name).join(', ');
+    const plan = planNewRoomPlacements(spec, parsed);
+    const added = plan.names.join(', ');
     await applyBackendOperations({
-      operations: arrange.ops.length ? arrange.ops : [{ type: 'no_change', reason: 'placed' }],
-      baseSpec: report.spec,
-      nextSelectedId: report.changedIds[0],
-      promptText: 'Arrange floor plan',
-      logPrefix: 'Layout',
-      chatText: arrange.grew
-        ? `Added ${added} and tidied the floor plan — grew the house to ${arrange.newW}′ × ${arrange.newD}′ so every room fits without overlapping. (Instant — no planner needed.)`
-        : `Added ${added} and laid the rooms out edge to edge, no overlaps. (Instant — no planner needed.)`
+      operations: plan.ops,
+      promptText: parsed.length === 1 ? `Add ${plan.names[0]}` : `Add ${parsed.length} rooms`,
+      logPrefix: 'Add rooms',
+      chatText: plan.grew
+        ? `Added ${added} into free space and grew the house to ${plan.newW}′ × ${plan.newD}′ to fit — existing rooms didn't move. (Instant — no planner needed.)`
+        : `Added ${added} into the open floor space, no overlaps, nothing else moved. (Instant — no planner needed.)`
     });
   }
 
