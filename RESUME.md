@@ -1,7 +1,8 @@
 # Resume / Handoff — Natural Building GC app (house-bim-app)
 
-Updated 2026-07-08. Working tree clean, ~39 commits since baseline `e9c99c1`
-(latest: `8de8db8` actionable metric tiles — Costs tab + one-click flag fixes).
+Updated 2026-07-08. Working tree clean, ~42 commits since baseline `e9c99c1`
+(latest: `f487ad0` warm-earthen visual refresh; before it `aa9eabe` all-walls
+assembly fix + full opening-type picker, `8de8db8` actionable metric tiles).
 Live backend design: **FL-001 rev 52** (Daniel's real work: shell/walls, 0 rooms).
 Deep provenance + every decision: Claude memory `natural-building-gc-dashboard-inventory.md`.
 
@@ -75,10 +76,18 @@ upload). Blender/IFC round-trip (one-click headless launch). Build mode. Welcome
 - Permit drawing set: refactor `HOMESTEAD/6-28-26/FL0-House-BIM-Drawings/fl0_house_spec.py`
   to take a JSON spec + real elevation projection (currently hardcoded to one house).
 - L/U plan shapes.
-**Aesthetics (Job 3 — "crude and generic"):** the dark theme + Fraunces headings are a
-  start, but a real polish pass wants: refined spacing/rhythm, a considered type scale,
-  softer/consistent control styling, better empty states, iconography consistency, and a
-  more crafted 3D material/lighting look. Do this AFTER functional gaps, per Daniel.
+**Aesthetics (Job 3 — "crude and generic"):** FIRST REAL PASS DONE (commit f487ad0,
+  "warm earthen studio" — Daniel picked the direction: keep dark, make it feel
+  hand-built). One cohesive layer at the END of styles.css re-tints the token-driven
+  matte chrome from cool moss → warm umber charcoal + clay/straw/lime-sage accents;
+  Fraunces heads, wide-tracked eyebrows, tactile inputs w/ clay focus rings, clay
+  primary buttons, outlined danger, rounded soft-elevation cards, straw→clay cost
+  bars, warmed 3D backdrop. **Extending the theme:** re-tint the tokens in that final
+  `.leftPanel,.workspace,.rightPanel` block, not per-component; new hardcoded hexes
+  are the enemy (a few cool-slate `#3C6472/#26424C/#7FA8B5` spots were chased down —
+  grep for those if anything still looks cold). Still open for a deeper pass: spacing
+  rhythm/8pt scale, empty-state craft, iconography consistency, richer 3D materials
+  and lighting, motion polish.
 **Explicit Daniel requests still open (asked near context limit 2026-07-08):**
 - **Interactive Project Plan** (the OS/Plan console tab): it's read-only now — make
   its requirements / open-questions / task-queue / decisions editable and actionable.
