@@ -3199,6 +3199,15 @@ button.ghost.saveButton {
 .geoResults button b { display: block; font-size: 13.5px; font-weight: 600; }
 .geoResults button small { display: block; font-size: 11.5px; color: var(--ink3); margin-top: 1px; }
 
+/* Derived system facts in the schedule (the foundation/heat/water "item"
+   is design state, not a placed object — shown as a fact card). */
+.roomRow.systemFact {
+  cursor: default;
+  border-left: 3px solid var(--active-line, #7FA8B5);
+  background: var(--sage, #33434B);
+}
+.roomRow.systemFact span { color: var(--plum, #A9C6D0); font-weight: 600; }
+
 .docChipIcon {
   width: 30px;
   height: 30px;

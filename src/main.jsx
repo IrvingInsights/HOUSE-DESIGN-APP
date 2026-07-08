@@ -5580,11 +5580,44 @@ function App() {
                   const elements = (spec.elements || []).filter((element) => !systemFocus || systemOfElementCategory(element.category) === systemFocus);
                   const walls = (!systemFocus || systemFocus === 'walls' || systemFocus === 'shell') ? wallSections : [];
                   const specials = specialBimObjects.filter((object) => !systemFocus || systemOfSpecialCategory(object.category) === systemFocus);
-                  if (rooms.length + elements.length + walls.length + specials.length === 0) {
+                  // Systems whose reality is design state rather than placed
+                  // objects (foundation, heat, water...) still ARE in the
+                  // model — show them as derived fact cards, never a false
+                  // "nothing here yet".
+                  const factCards = (() => {
+                    if (!systemFocus) return [];
+                    const u = derived.utilities;
+                    const money = (n) => `$${Math.round(n).toLocaleString()}`;
+                    const perimeter = Math.round(2 * ((Number(spec.shell.widthFt) || 0) + (Number(spec.shell.depthFt) || 0)));
+                    const names = {
+                      foundation: { rubble: 'Rubble Trench Foundation', stemwall: 'Stem Wall Foundation', slab: 'Insulated Slab Foundation' },
+                      heat: { rocket_mass: 'Rocket Mass Heater', masonry: 'Masonry Heater', wood_stove: 'Wood Stove', minisplit: 'Electric Mini-Split' },
+                      water: { well: 'Drilled Well', spring: 'Spring Supply', catchment: 'Rain Catchment', town: 'Town Main' },
+                      waste: { septic: 'Septic Tank + Leach Field', composting: 'Composting Toilet + Greywater', reedbed: 'Reed Bed Wetland' },
+                      power: { offgrid: 'Off-Grid Solar + Battery', hybrid: 'Grid + Solar', gridtie: 'Grid Power' }
+                    };
+                    switch (systemFocus) {
+                      case 'foundation': return [{ key: 'f', name: names.foundation[u.foundationType] || 'Foundation', meta: `${spec.shell.widthFt}' × ${spec.shell.depthFt}' footprint · ${perimeter} lf perimeter · ${money(derived.cost.foundation)}` }];
+                      case 'heat': return [{ key: 'h', name: names.heat[u.heatSource] || 'Heat Source', meta: `covers a ${derived.heatLoadKbtu.toFixed(1)} kBTU/hr design load · ${money(derived.cost.heat)}` }];
+                      case 'water': return [{ key: 'w', name: names.water[u.waterSource] || 'Water Source', meta: `${Number.isFinite(derived.supplyGpd) ? `${Math.round(derived.supplyGpd)} gal/day supply` : 'unlimited supply'} vs ${Math.round(derived.waterGpd)} used${u.tankGal ? ` · ${Number(u.tankGal).toLocaleString()} gal tank` : ''} · ${money(derived.cost.water)}` }];
+                      case 'waste': return [{ key: 'x', name: names.waste[u.wasteMethod] || 'Waste System', meta: `${Math.round(derived.septicGpd)} gal/day design flow${u.wasteMethod === 'septic' ? ` · ${u.wellSepticFt}' from the well` : ''} · ${money(derived.cost.waste)}` }];
+                      case 'power': return [{ key: 'p', name: names.power[u.powerMode] || 'Power', meta: `${derived.loadKwhDay.toFixed(1)} kWh/day${derived.panels ? ` · ${derived.panels} panels` : ''}${derived.batteryKwh ? ` · ${derived.batteryKwh} kWh battery` : ''} · ${money(derived.cost.power)}` }];
+                      case 'site': return [{ key: 's', name: derived.site.placeName || 'Site (no place set yet)', meta: `${derived.site.latitudeDeg}° latitude · ${derived.site.rainInYr}" rain/yr · ${derived.peakSunHrs.toFixed(1)} peak sun hrs/day` }];
+                      case 'windows': return [{ key: 'g', name: derived.utilities.windowQuality === 'triple' ? 'Triple-Pane Glazing (whole house)' : 'Double-Pane Glazing (whole house)', meta: `${Math.round(derived.southGlass)} sf south glass · ${derived.glassPct.toFixed(1)}% of floor · ${money(derived.cost.windows)}` }];
+                      default: return [];
+                    }
+                  })();
+                  if (rooms.length + elements.length + walls.length + specials.length + factCards.length === 0) {
                     return <div className="scheduleEmpty">No {SYSTEM_LABELS[systemFocus] || 'matching'} items in the model yet. Tell the assistant what to add — it will appear here.</div>;
                   }
                   return (
                     <div className="roomTable">
+                      {factCards.map((fact) => (
+                        <div key={fact.key} className="roomRow systemFact">
+                          <span>{fact.name}</span>
+                          <small>{fact.meta}</small>
+                        </div>
+                      ))}
                       {rooms.map((room) => (
                         <button key={room.id} className={room.id === selectedRoom ? 'roomRow active' : 'roomRow'} onClick={() => setSelectedRoom(room.id)}>
                           <span>{room.name}</span>
