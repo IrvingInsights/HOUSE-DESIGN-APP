@@ -65,6 +65,12 @@ upload). Blender/IFC round-trip (one-click headless launch). Build mode. Welcome
 - Fixtures render as labeled boxes only (heater ≠ modeled stove) — richer symbols later.
 - Full stem-wall/storey LIFT: walls/floors/sills re-seat on new datums (today the stem
   is a plinth but walls don't rise by it; same class as roof-not-cutting-around-a-tower).
+- **Per-floor footprints (Daniel asked):** an upper storey currently shares the ground
+  footprint — it can't be smaller or cantilever. Needs per-level width/depth/offset in
+  the spec + the 3D wall/floor-plate/roof generator to honor it (real geometry refactor;
+  do in a fresh session, not near a context limit). Stair AUTO-LINKING is DONE (+Floor
+  drops a stair that shows on both floors; drag to place). True stairwell-void geometry
+  (a hole through the plate, connected runs) is still open.
 - Permit drawing set: refactor `HOMESTEAD/6-28-26/FL0-House-BIM-Drawings/fl0_house_spec.py`
   to take a JSON spec + real elevation projection (currently hardcoded to one house).
 - L/U plan shapes.
