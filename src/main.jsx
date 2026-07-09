@@ -5498,22 +5498,18 @@ function App() {
 
   function addStorey() {
     const next = Math.min(3, floorCount(spec) + 1);
-    const ops = [{ type: 'set_shell', field: 'storeys', value: String(next) }];
-    // Auto-link floors with a stair (if there isn't one already) so an upper
-    // storey is reachable — clears the stair check and gives vertical circulation.
+    // Just add the storey — do NOT auto-drop a stair. A stair depends on how the
+    // rest of the floor lays out, so it's added later, by hand: Rooms → Add a
+    // fixture → Stairs, or the one-click "Add a stair" fix in Review (the council
+    // check flags it as a reminder until then). Daniel's call: place first, stair after.
     const hasStair = (spec.rooms || []).concat(spec.elements || []).some((o) => /stair|ladder/i.test(o.name || ''));
-    if (!hasStair) {
-      const groundObjs = (spec.rooms || []).filter((r) => Number(r.level || 1) === 1)
-        .concat((spec.elements || []).filter((e) => e.category !== 'floor' && Number(e.level || 1) === 1))
-        .map((o) => ({ x: Number(o.x), y: Number(o.y), w: Number(o.w), d: Number(o.d) }));
-      const spot = findFreeSpot(Number(spec.shell.widthFt), Number(spec.shell.depthFt), groundObjs, 3.5, 10) || { x: 2, y: 2 };
-      ops.push({ type: 'add_element', name: 'Stairs', category: 'structure', x: spot.x, y: spot.y, z: 0, w: 3.5, d: 10, h: 9, level: 1, reason: 'Stair linking the floors, added with the new storey.' });
-    }
     void applyBackendOperations({
-      operations: ops,
+      operations: [{ type: 'set_shell', field: 'storeys', value: String(next) }],
       promptText: `Add a storey (now ${next})`,
       logPrefix: 'Storeys',
-      chatText: hasStair ? undefined : `Added a storey and dropped in a stair to reach it — drag the stair where you want it (it shows on both floors so you can line it up).`
+      chatText: hasStair
+        ? `Added a storey — floor ${next} is ready to lay out.`
+        : `Added a storey — floor ${next} is ready to lay out. Add a stair once the layout settles (Rooms → Add a fixture → Stairs, or the "Add a stair" fix in Review) so it lands where you want it.`
     });
     setActiveFloor(next);
   }
