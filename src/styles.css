@@ -4135,3 +4135,16 @@ button.danger:hover,
 .selChipWrap.inDock .selMenu button.active { background: rgba(180, 98, 63, 0.28); color: var(--ink, #ECE4D6); }
 .selChipWrap.inDock .selMenu button small { color: var(--ink3, #978C79); }
 .selChipWrap.inDock .selMenu .selMenuEyebrow { color: var(--ink3, #978C79); }
+
+/* --- "Built the other way" comparison (Costs tab) ---------------------------- */
+.compareGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 6px 0 4px; }
+.compareCell {
+  background: var(--card, #2A231E); border: 1px solid var(--line, #4A4038);
+  border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px;
+}
+.compareCell span { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink3, #978C79); }
+.compareCell b { font-size: 16px; color: var(--ink, #ECE4D6); }
+.compareCell small { font-size: 12px; font-weight: 700; }
+.compareCell small.better { color: var(--good, #7FA05B); }
+.compareCell small.worse { color: var(--bad, #C96A4A); }
+.compareFine { opacity: 0.85; }

@@ -1219,13 +1219,28 @@ export function applyBimOperations(currentSpec, plan) {
         next.openings.push({ type: 'skylight', wall: 'roof', x, y, widthFt, label });
       } else {
         const maxAlong = wall === 'north' || wall === 'south' ? next.shell.widthFt : next.shell.depthFt;
-        const along = clamp(Number(operation.positionFt || 0), 0, Math.max(0, maxAlong - widthFt));
+        const explicitPos = Number(operation.positionFt) > 0;
+        let along = clamp(Number(operation.positionFt || 0), 0, Math.max(0, maxAlong - widthFt));
+        const overlapsAt = (start) => next.openings.some((existing) => {
+          if (existing.wall !== wall) return false;
+          const e0 = Number(existing.x ?? existing.y ?? 0);
+          const e1 = e0 + (Number(existing.widthFt) || 3);
+          return start < e1 - 0.05 && start + widthFt > e0 + 0.05;
+        });
+        // No stated position (planners get lazy — everything lands at 0):
+        // slide along the wall to the first free stretch so distinct openings
+        // stay distinct instead of piling onto the corner.
+        if (!explicitPos && overlapsAt(along)) {
+          for (let candidate = 1; candidate <= maxAlong - widthFt; candidate += 1) {
+            if (!overlapsAt(candidate)) { along = candidate; break; }
+          }
+        }
         const incoming = wall === 'north' || wall === 'south'
           ? { type: openingType, wall, x: along, widthFt, label }
           : { type: openingType, wall, y: along, widthFt, label };
         // Openings have no ids, so a re-trace lands the same window again a
-        // foot to the left — forever. If the new opening OVERLAPS an existing
-        // one on the same wall, it REPLACES it instead of stacking (two doors
+        // foot to the left — forever. An EXPLICITLY placed opening that
+        // overlaps an existing one REPLACES it instead of stacking (two doors
         // can't share the same stretch of wall in the real world either).
         const a0 = along, a1 = along + widthFt;
         const clashIndex = next.openings.findIndex((existing) => {

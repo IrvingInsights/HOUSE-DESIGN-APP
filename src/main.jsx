@@ -2742,6 +2742,50 @@ function runCouncil(spec) {
 // sweat-equity, and carbon math lifted from the add-on's computeDerivedState
 // (natural_house_designer/web/app.js); water/sun/power sizing from the
 // control-face prototype. Directional early-design numbers, not stamped calcs.
+// "This design, built the other way": swap the CONSTRUCTION systems between
+// natural and standard while leaving the geometry AND the site services
+// (water/waste/power — those are site decisions, not construction ones)
+// untouched. Feed the result to deriveDesign for an honest apples-to-apples
+// cost / carbon / heat comparison of the same house.
+function convertSpecApproach(spec, target) {
+  const next = structuredClone(spec);
+  next.shell.designApproach = target;
+  next.utilities = { ...(next.utilities || {}) };
+  next.flooring = { ...(next.flooring || {}) };
+  next.frame = { ...(next.frame || {}), storeyTypes: {} };
+  const setAllWalls = (assembly) => {
+    for (const side of WALL_SIDES) {
+      next.walls = next.walls || {};
+      next.walls[side] = { ...(next.walls[side] || {}), assembly };
+      delete next.walls[side].thicknessFt; // let the assembly's own thickness rule
+      if (next.wallsUpper?.[side]) next.wallsUpper[side] = { ...next.wallsUpper[side], assembly };
+    }
+  };
+  if (target === 'standard') {
+    next.systems.envelope = 'framed vapor-open walls with rainscreen cladding';
+    setAllWalls('framed');
+    next.frame.type = 'stick';
+    next.utilities.foundationType = 'slab';
+    next.utilities.roofInsulation = 'mineralwool';
+    next.utilities.floorInsulation = 'mineralwool';
+    next.utilities.heatSource = 'minisplit';
+    next.flooring.type = 'wood';
+    delete next.flooring.subfloor; // follows the slab
+  } else {
+    next.systems.envelope = 'load-bearing straw bale walls with lime plaster and rainscreen';
+    setAllWalls('straw-bale');
+    next.frame.type = 'load-bearing';
+    next.utilities.foundationType = 'stemwall';
+    next.utilities.stemwallHeightFt = Math.max(1.5, Number(next.utilities.stemwallHeightFt) || 1.5);
+    next.utilities.roofInsulation = 'cellulose';
+    next.utilities.floorInsulation = 'cellulose';
+    next.utilities.heatSource = 'wood_stove';
+    next.flooring.type = 'earthen';
+    delete next.flooring.subfloor;
+  }
+  return next;
+}
+
 function deriveDesign(spec, wallSections) {
   const site = siteOf(spec);
   const utilities = utilitiesOf(spec);
@@ -7933,6 +7977,48 @@ function App() {
                 {derived.sweat > 0 && <div className="costTotalRow save"><span>Sweat equity</span><b>−{fmtMoney(derived.sweat)}</b></div>}
                 <div className="costTotalRow net"><span>Estimated total</span><b>{fmtMoney(derived.total)}</b></div>
               </div>
+              {(() => {
+                // THIS design, built the other way — same rooms, same footprint,
+                // same site services; only the construction systems swap.
+                const currentApproach = spec.shell.designApproach === 'standard' ? 'standard' : 'natural';
+                const otherApproach = currentApproach === 'standard' ? 'natural' : 'standard';
+                const altSpec = convertSpecApproach(spec, otherApproach);
+                const alt = deriveDesign(altSpec, getWallSections(altSpec));
+                const label = otherApproach === 'standard' ? 'standard construction' : 'natural building';
+                const dCost = alt.total - derived.total;
+                const dCarbon = (alt.carbonKg - derived.carbonKg) / 1000;
+                const dHeat = alt.heatLoadKbtu - derived.heatLoadKbtu;
+                const fmtDelta = (v, unit, digits = 0) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(digits)}${unit}`;
+                return (
+                  <>
+                    <div className="sectionHead">Built the other way</div>
+                    <p className="systemNote">The same house — rooms, footprint, site services untouched — built as <b>{label}</b> (walls, frame, foundation, floor, insulation, and heat swapped):</p>
+                    <div className="compareGrid">
+                      <div className="compareCell">
+                        <span>Cost</span>
+                        <b>{fmtMoney(alt.total)}</b>
+                        <small className={dCost > 0 ? 'worse' : 'better'}>{dCost >= 0 ? '+' : '−'}{fmtMoney(Math.abs(dCost))}</small>
+                      </div>
+                      <div className="compareCell">
+                        <span>Embodied CO₂e</span>
+                        <b>{(alt.carbonKg / 1000).toFixed(1)} t</b>
+                        <small className={dCarbon > 0 ? 'worse' : 'better'}>{fmtDelta(dCarbon, ' t', 1)}</small>
+                      </div>
+                      <div className="compareCell">
+                        <span>Heat load</span>
+                        <b>{Math.round(alt.heatLoadKbtu)} kBTU/h</b>
+                        <small className={dHeat > 0 ? 'worse' : 'better'}>{fmtDelta(dHeat, '', 0)}</small>
+                      </div>
+                      <div className="compareCell">
+                        <span>Avg wall R</span>
+                        <b>R-{Math.round(alt.wallR)}</b>
+                        <small className={alt.wallR < derived.wallR ? 'worse' : 'better'}>{fmtDelta(alt.wallR - derived.wallR, '', 0)}</small>
+                      </div>
+                    </div>
+                    <p className="systemNote compareFine">Directional early-design numbers, both ways. Deltas read {label} minus your current {currentApproach === 'standard' ? 'standard' : 'natural'} design. The Shell page switch changes the checks and the assistant's bias — it never rebuilds your walls; ask the assistant when you want the actual systems changed.</p>
+                  </>
+                );
+              })()}
               <div className="sectionHead">Do it yourself</div>
               <p className="systemNote">Each trade you take on drops the cash cost by its labor share. Toggle what you'll build.</p>
               <div className="diyGrid">
