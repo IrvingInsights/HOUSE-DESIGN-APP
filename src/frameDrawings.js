@@ -208,23 +208,27 @@ function elevationSvg(spec, facing) {
       leaderDone.post = true;
     }
     // Braces at timber posts (not studs, not load-bearing): a 45° knee strip
-    // from the post face up to the plate underside, 36" legs each way.
+    // from the post face up to the plate underside, 36" legs each way —
+    // omitted where an opening sits in the brace's path (glass wins).
     if (m.braceW > 0 && !m.studs) {
-      const braceStrip = (p1, p2) => {
-        const dx = p2[0] - p1[0], dy = p2[1] - p1[1];
-        const len = Math.hypot(dx, dy) || 1;
-        const nx = (-dy / len) * (m.braceW * s) / 2;
-        const ny = (dx / len) * (m.braceW * s) / 2;
-        poly([
-          [p1[0] + nx, p1[1] + ny], [p2[0] + nx, p2[1] + ny],
-          [p2[0] - nx, p2[1] - ny], [p1[0] - nx, p1[1] - ny]
-        ], 'fill-opacity="0.95"');
-      };
       const legs = 3;
+      const openingRanges = (spec.openings || [])
+        .filter((op) => op.wall === facing)
+        .map((op) => {
+          const along = Number(v.horizontalView ? op.x : op.y) || 0;
+          const wOp = Number(op.widthFt) || 3;
+          const a0 = v.mirror ? v.extent - along - wOp : along;
+          return [a0, a0 + wOp];
+        });
+      const clearOfOpenings = (b0, b1) => !openingRanges.some(([o0, o1]) => b0 < o1 && b1 > o0);
       run.posts.forEach((a, i) => {
         const topY = plateAt(a) - m.plateH;
-        if (i > 0) braceStrip([X(a - m.postW / 2), Y(topY - legs)], [X(a - legs), Y(topY)]);
-        if (i < run.posts.length - 1) braceStrip([X(a + m.postW / 2), Y(topY - legs)], [X(a + legs), Y(topY)]);
+        if (i > 0 && clearOfOpenings(a - legs, a)) {
+          braceStrip(parts, [X(a - m.postW / 2), Y(topY - legs)], [X(a - legs), Y(topY)], m.braceW * s);
+        }
+        if (i < run.posts.length - 1 && clearOfOpenings(a, a + legs)) {
+          braceStrip(parts, [X(a + m.postW / 2), Y(topY - legs)], [X(a + legs), Y(topY)], m.braceW * s);
+        }
       });
       if (!leaderDone.brace && run.posts.length > 1) {
         const a = run.posts[run.posts.length - 2];
@@ -339,6 +343,19 @@ function titleWord(facing) {
   return facing.charAt(0).toUpperCase() + facing.slice(1);
 }
 
+// A 45° knee-brace strip between two points, given the drawn width in px.
+function braceStrip(parts, p1, p2, widthPx) {
+  const dx = p2[0] - p1[0], dy = p2[1] - p1[1];
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = (-dy / len) * widthPx / 2;
+  const ny = (dx / len) * widthPx / 2;
+  const pts = [
+    [p1[0] + nx, p1[1] + ny], [p2[0] + nx, p2[1] + ny],
+    [p2[0] - nx, p2[1] - ny], [p1[0] - nx, p1[1] - ny]
+  ];
+  parts.push(`<polygon points="${pts.map(([px, py]) => `${px.toFixed(1)},${py.toFixed(1)}`).join(' ')}" fill="${WOOD}" stroke="${INK}" stroke-width="1.1" fill-opacity="0.95"/>`);
+}
+
 // Horizontal dimension string with extension ticks and centered text.
 function dimH(parts, x1, x2, y, label) {
   if (x2 - x1 < 8) return;
@@ -360,6 +377,143 @@ function dimV(parts, x, y1, y2, label, side = 'right') {
   const tx = side === 'right' ? x - 9 : x + 9;
   const anchor = side === 'right' ? 'end' : 'start';
   parts.push(`<text x="${tx}" y="${(top + bottom) / 2 + 4}" font-size="13" text-anchor="${anchor}" fill="${INK}">${esc(label)}</text>`);
+}
+
+// Typical bent / cross-section: a transverse cut through the frame showing
+// how the roof bears — posts both sides, plate blocks in section, the
+// rafter(s) with plumb cuts and overhangs, the tie/crossbeam with loft-joist
+// ends, and knee braces. The cut runs ACROSS the rafters: a shed frame cuts
+// north→south (the raked line), a gable cuts east→west through the ridge.
+function bentSectionSvg(spec) {
+  const shell = spec.shell || {};
+  const roof = roofProfile(shell);
+  const m = FRAME_MEMBERS[resolveFrameType(spec, 1)] || FRAME_MEMBERS['load-bearing'];
+  const { storeys, baseWallFt, extraFt } = storeyBits(shell);
+  const o = overhangsOf(shell);
+  const pitchNow = Number(shell.roofPitch || 0.32);
+  const width = Number(shell.widthFt) || 36;
+  const depth = Number(shell.depthFt) || 28;
+  const shed = roof.roofType === 'shed';
+  const gable = roof.roofType === 'gable';
+
+  // Span axis + end heights (top of plate) and rafter-end overhangs.
+  const span = shed ? depth : width;
+  const hLeft = (shed ? roof.northWallHeightFt : roof.highWallHeightFt) + extraFt;
+  const hRight = (shed ? roof.southWallHeightFt : roof.highWallHeightFt) + extraFt;
+  const oLead = shed ? o.north : o.west;
+  const oTail = shed ? o.south : o.east;
+  const gableRise = gable ? Math.max(0, depth * pitchNow - 0.25) : 0;
+  const peak = gable ? hLeft + gableRise : Math.max(hLeft, hRight);
+
+  const fieldW = 1120, fieldH = 700;
+  const scales = [48, 36, 24, 18, 12, 9, 6];
+  const scaleNames = { 48: '1/2″ = 1′-0″', 36: '3/8″ = 1′-0″', 24: '1/4″ = 1′-0″', 18: '3/16″ = 1′-0″', 12: '1/8″ = 1′-0″', 9: '3/32″ = 1′-0″', 6: '1/16″ = 1′-0″' };
+  const s = scales.find((k) => (span + oLead + oTail + 8) * k <= fieldW && (peak + m.rafterH + 6) * k <= fieldH) || 6;
+  const ox = 130 + oLead * s;
+  const groundPx = 790;
+  const X = (a) => ox + a * s;
+  const Y = (h) => groundPx - h * s;
+
+  const parts = [];
+  const leaders = [];
+  const rect = (x, y, w, h) => parts.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(0.5, w).toFixed(1)}" height="${Math.max(0.5, h).toFixed(1)}" fill="${WOOD}" stroke="${INK}" stroke-width="1.1"/>`);
+  const poly = (pts) => parts.push(`<polygon points="${pts.map(([px, py]) => `${px.toFixed(1)},${py.toFixed(1)}`).join(' ')}" fill="${WOOD}" stroke="${INK}" stroke-width="1.1"/>`);
+  const text = (x, y, t, size = 13, anchor = 'start', extra = '') => parts.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${size}" text-anchor="${anchor}" fill="${INK}" ${extra}>${esc(t)}</text>`);
+  const leader = (x, y, label) => leaders.push({ x, y, label });
+
+  // Ground + sills
+  parts.push(`<line x1="${X(-oLead) - 40}" y1="${groundPx}" x2="${X(span + oTail) + 40}" y2="${groundPx}" stroke="${INK}" stroke-width="1.6"/>`);
+  rect(X(-m.postW), Y(m.sillH), m.postW * 3 * s, m.sillH * s);
+  rect(X(span - m.postW * 2), Y(m.sillH), m.postW * 3 * s, m.sillH * s);
+  leader(X(span + m.postW / 2), Y(m.sillH / 2), m.sill);
+
+  const hasFrame = m.postW > 0 && !m.studs;
+  const postW = hasFrame ? m.postW : Math.max(0.3, m.postW);
+  // Posts (or stud-wall panels) at both ends, plate blocks in section on top.
+  const wallPanel = (a, h) => {
+    if (hasFrame) {
+      rect(X(a - postW / 2), Y(h - m.plateH), postW * s, (h - m.plateH - m.sillH) * s);
+      rect(X(a - postW / 2 - 0.08), Y(h), (postW + 0.16) * s, m.plateH * s); // plate end-grain block
+    } else if (m.studs) {
+      rect(X(a - 0.25), Y(h - m.plateH), 0.5 * s, (h - m.plateH - m.sillH) * s);
+      rect(X(a - 0.3), Y(h), 0.6 * s, m.plateH * s);
+    } else {
+      // load-bearing wall in section: a thick wall band
+      const t = resolveWallSide(spec, shed ? (a === 0 ? 'north' : 'south') : (a === 0 ? 'west' : 'east')).thicknessFt;
+      rect(X(a - t / 2), Y(h - m.plateH), t * s, (h - m.plateH - m.sillH) * s);
+      rect(X(a - t / 2), Y(h), t * s, m.plateH * s);
+    }
+  };
+  wallPanel(0, hLeft);
+  wallPanel(span, hRight);
+  if (hasFrame) leader(X(span), Y(hRight * 0.5), m.post);
+  leader(X(span + 0.2), Y(hRight - m.plateH / 2), `${m.plate} (section)`);
+
+  // Rafter(s)
+  if (gable) {
+    const apex = span / 2;
+    poly([[X(-oLead), Y(hLeft)], [X(apex), Y(peak)], [X(apex), Y(peak + m.rafterH)], [X(-oLead), Y(hLeft + m.rafterH)]]);
+    poly([[X(apex), Y(peak)], [X(span + oTail), Y(hRight)], [X(span + oTail), Y(hRight + m.rafterH)], [X(apex), Y(peak + m.rafterH)]]);
+    leader(X(span * 0.75), Y(hRight + gableRise * 0.5 + m.rafterH), m.rafter);
+    dimV(parts, X(span + oTail) + 30, groundPx, Y(peak), ftIn(peak), 'left');
+  } else {
+    const slope = (hRight - hLeft) / span;
+    const hAt = (a) => hLeft + slope * a;
+    poly([
+      [X(-oLead), Y(hAt(-oLead))], [X(span + oTail), Y(hAt(span + oTail))],
+      [X(span + oTail), Y(hAt(span + oTail) + m.rafterH)], [X(-oLead), Y(hAt(-oLead) + m.rafterH)]
+    ]);
+    leader(X(span - 2), Y(hAt(span - 2) + m.rafterH / 2), m.rafter);
+    if (shed) leader(X(span + oTail), Y(hAt(span + oTail) + m.rafterH), 'Plumb cut end(s)');
+    dimH(parts, X(-oLead), X(0), Y(hAt(-oLead) + m.rafterH) - 16, ftIn(oLead));
+    dimH(parts, X(span), X(span + oTail), Y(hAt(span + oTail) + m.rafterH) - 16, ftIn(oTail));
+  }
+
+  // Tie / crossbeam with loft-joist ends. At the loft line when there is an
+  // upper storey; otherwise (timber gable) a tie at the low plate line.
+  const tieH = storeys > 1 ? baseWallFt : (gable && hasFrame ? Math.min(hLeft, hRight) - m.plateH : 0);
+  if (tieH > m.sillH + 2) {
+    rect(X(hasFrame ? postW / 2 : 0.3), Y(tieH), (span - (hasFrame ? postW : 0.6)) * s, m.crossH * s);
+    leader(X(span * 0.62), Y(tieH - m.crossH / 2 + m.crossH), storeys > 1 ? `${m.cross} at loft line` : `${m.cross} — tie`);
+    if (storeys > 1) {
+      // joist ends sit ON the beam (the beam top is at tieH)
+      const count = Math.floor(span / 4);
+      for (let i = 1; i < count; i += 1) {
+        rect(X((span / count) * i - 0.17), Y(tieH + 0.55), 0.34 * s, 0.55 * s);
+      }
+      leader(X((span / Math.floor(span / 4)) * (Math.floor(span / 4) - 1)), Y(tieH + 0.3), `${m.joist} (ends)`);
+    }
+    // Knee braces post↔tie
+    if (hasFrame && m.braceW > 0) {
+      braceStrip(parts, [X(postW / 2), Y(tieH - 3)], [X(3), Y(tieH)], m.braceW * s);
+      braceStrip(parts, [X(span - postW / 2), Y(tieH - 3)], [X(span - 3), Y(tieH)], m.braceW * s);
+      leader(X(3.4), Y(tieH - 1.4), m.brace);
+    }
+  }
+
+  // Dimensions + notes
+  dimH(parts, X(0), X(span), groundPx + 46, ftIn(span));
+  dimV(parts, X(0) - 36, groundPx, Y(hLeft), ftIn(hLeft), 'right');
+  if (Math.abs(hRight - hLeft) > 0.05) dimV(parts, X(span) + 36, groundPx, Y(hRight), ftIn(hRight), 'left');
+  if (tieH > m.sillH + 2) dimV(parts, X(0) - 72, groundPx, Y(tieH), ftIn(tieH), 'right');
+
+  const stackX = 1170;
+  leaders.sort((a, b) => a.y - b.y).forEach((l, i) => {
+    const ly = 130 + i * 42;
+    parts.push(`<line x1="${l.x.toFixed(1)}" y1="${l.y.toFixed(1)}" x2="${stackX - 8}" y2="${ly}" stroke="${INK}" stroke-width="0.8"/>`);
+    parts.push(`<circle cx="${l.x.toFixed(1)}" cy="${l.y.toFixed(1)}" r="2.2" fill="${INK}"/>`);
+    parts.push(`<text x="${stackX}" y="${ly + 4}" font-size="13" fill="${INK}" text-decoration="underline">${esc(l.label).slice(0, 46)}</text>`);
+  });
+
+  text(120, 70, 'Typical Bent — Cross Section', 22, 'start', 'font-weight="700" text-decoration="underline"');
+  text(120, 96, shed ? 'Cut north → south, across the rafters (the raked line).' : gable ? 'Cut east → west, through the ridge.' : 'Cut across the roof structure.', 12, 'start', `fill="${FAINT}"`);
+  const notes = [];
+  if (!hasFrame && !m.studs) notes.push('Load-bearing walls shown in section — the wall itself is the bent.');
+  if (span > 16 && hasFrame && storeys <= 1 && !gable) notes.push(`A clear ${ftIn(span)} span wants a mid post, truss, or ridge beam — confirm with your engineer.`);
+  if (gable && hasFrame && span > 20) notes.push(`Rafter pair spans ${ftIn(span)} — size the tie and consider queen posts; confirm with your engineer.`);
+  notes.forEach((n, i) => text(120, 114 + i * 17, n, 11, 'start', `fill="${FAINT}"`));
+
+  return { svg: `<svg viewBox="0 0 1584 900" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe Print','Comic Sans MS','Segoe UI',sans-serif">${parts.join('')}</svg>`, scaleName: scaleNames[s] || 'fit' };
 }
 
 // Frame plan: footprint outline, post marks along every edge, bay dimensions.
@@ -456,6 +610,8 @@ export function createFrameDrawingSetHtml(spec) {
     const { svg, scaleName } = elevationSvg(spec, facing);
     sheets.push(`<section class="sheet"><main>${svg}</main>${titleBlock(`F10${i + 1}`, `${titleWord(facing)} Elevation`, scaleName)}</section>`);
   });
+  const bent = bentSectionSvg(spec);
+  sheets.push(`<section class="sheet"><main>${bent.svg}</main>${titleBlock('F110', 'Typical Bent — Section', bent.scaleName)}</section>`);
   const scheduleRows = memberSchedule(spec)
     .map(([member, qty, note]) => `<tr><th>${esc(member)}</th><td>${esc(qty)}</td><td>${esc(note)}</td></tr>`).join('');
   sheets.push(`<section class="sheet"><main class="pad">
