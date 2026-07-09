@@ -1,14 +1,41 @@
 # Resume / Handoff — Natural Building GC app (house-bim-app)
 
-**FEATURE FREEZE (2026-07-09, Daniel's call).** The path to MVP is fixed:
+## FRESH SESSION — START HERE (updated 2026-07-09, end of the fidelity session)
+
+**State:** feature freeze mostly holds; it was bent once, on Daniel's order, for
+the **drawing→model fidelity pass** (commit `7e77b1d` + Team-consult upgrade):
+Gemini model was dead (retired) → now `gemini-flash-latest`; PDF takeoff
+mandate added (verified on Daniel's real 11-page Columbia St PDF: shell
+40.5×23, 5 rooms, 10 openings, wall height read off elevation markers);
+Design chat is action-first; Team consults via the studio AI in the expert's
+voice and can never touch the model; planning bubble; opening card lists all
+previous designs (snapshot-grouped) + start-from-file. Daniel's active design:
+**"Tom's House"** — an EXISTING conventional home being modified (not natural
+build); he traces the PDF then adjusts verbally.
+
+**Path to MVP, in order:**
 1. **The geometry pass** — stepped roofs over partial storeys, L/U footprints,
-   move-a-wall. Fresh session, focused. **Read `GEOMETRY_PASS.md` first** —
-   it maps every rectangle assumption, the design direction, invariants, and
-   the test recipe.
-2. Re-run the op smoke suite over everything.
-3. Hand `TESTING.md` to 2–3 testers.
-4. MVP when their first hour doesn't produce a "wait, why can't I—."
-No new features until then.
+   move-a-wall. Own session. **Read `GEOMETRY_PASS.md` FIRST** — rectangle-
+   assumption map, design direction, invariants, test recipe.
+2. Re-run the op smoke suite over everything (scratchpad patterns in memory).
+3. Refresh the tester zip (`git archive --format=zip -o <Desktop>\natural-building-mvp.zip HEAD`)
+   — the .gitattributes LF rules are load-bearing for the Mac launcher.
+4. MVP when 2–3 testers' first hour produces no "wait, why can't I—."
+
+**Small known follow-ups (post-geometry, pre-MVP polish):**
+- Trace fidelity: layouts vary slightly run-to-run (schematic level) — fine;
+  consider a "re-trace page N" affordance later. Basements are warned, not
+  modeled. `storeys` from traces sometimes unset — harmless (defaults 1).
+- Rename-box autosaves once per keystroke → snapshot spam (the designs list
+  collapses the stubs; a debounce on projectName saves would fix the source).
+- Housekeeping: rotate the Gemini key in `.env.local`.
+
+**Discipline (hard-won):** backend .mjs edits need a server restart; read
+$TEMP/nbapp_server.log for REAL vite errors (200s can be stale); verify with
+persist:false against the live server; never clobber the current-project
+pointer; un-toggle any browser view state your tests flip (modelLayers,
+nbChatOpen persist in Daniel's browser); one dispatch per user action; the two
+resolveWallSide copies (main.jsx + bim-core.mjs) stay identical.
 
 Updated 2026-07-09. Working tree clean, ~50 commits since baseline `e9c99c1`.
 Recent arc: actionable metrics → Frame/Floor(+subfloor+insulation) systems →

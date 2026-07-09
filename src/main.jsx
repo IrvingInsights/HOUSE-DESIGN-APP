@@ -6269,18 +6269,43 @@ function App() {
     }
   }
 
-  function askExpert() {
+  // Team = consult-only, answered by the REAL studio AI in the expert's voice.
+  // It never touches the model — that hard line is what keeps Team and Design
+  // from muddling. Canned local answers remain only as the offline fallback.
+  async function askExpert() {
     if (!expertQuestion.trim()) return;
+    const submitted = expertQuestion.trim();
     const speaker = selectedExpert ? selectedExpert.name : 'Whole Team';
-    const answer = selectedExpert
-      ? expertResponse(selectedExpert, expertQuestion, spec, issues, selectedRoom)
-      : wholeTeamResponse(expertQuestion, spec, issues, selectedRoom);
-    setChatMessages((items) => [
-      ...items,
-      { role: 'user', speaker: 'You', text: expertQuestion },
-      { role: 'expertMsg', speaker, text: answer }
-    ]);
+    setChatMessages((items) => [...items, { role: 'user', speaker: 'You', text: submitted }]);
     setExpertQuestion('');
+    setIsPlanning(true);
+    try {
+      const persona = selectedExpert
+        ? `You are answering as the project's ${selectedExpert.name} (${selectedExpert.concern}). Consult only — do NOT propose model operations; give practical professional guidance grounded in the current design.`
+        : 'You are the whole professional council answering together. Consult only — do NOT propose model operations; give practical, multi-discipline guidance grounded in the current design.';
+      const result = await requestStudioResponse({
+        prompt: `${persona}\n\nQuestion: ${submitted}`,
+        bim: spec,
+        spec,
+        selected,
+        selectedObjectId: selected?.id || selectedRoom,
+        attachedImages,
+        chatMessages: chatMessages.slice(-12),
+        projectBrain,
+        contextPacket: buildContextPacket(spec, projectBrain, selected, submitted)
+      });
+      const reply = result.reply || (selectedExpert
+        ? expertResponse(selectedExpert, submitted, spec, issues, selectedRoom)
+        : wholeTeamResponse(submitted, spec, issues, selectedRoom));
+      setChatMessages((items) => [...items, { role: 'expertMsg', speaker, text: reply }]);
+    } catch (error) {
+      const answer = selectedExpert
+        ? expertResponse(selectedExpert, submitted, spec, issues, selectedRoom)
+        : wholeTeamResponse(submitted, spec, issues, selectedRoom);
+      setChatMessages((items) => [...items, { role: 'expertMsg', speaker, text: `${answer}\n\n(The AI consultant was unreachable — this is the local playbook answer.)` }]);
+    } finally {
+      setIsPlanning(false);
+    }
   }
 
   function submitChat() {
@@ -7868,7 +7893,7 @@ function App() {
             {isPlanning && (
               <div className="chatBubble studio planningBubble">
                 <b>Studio</b>
-                <span>{attachedImages.length ? 'Reading your drawing and building the model' : 'Planning the change'}<span className="planningDots"><i>.</i><i>.</i><i>.</i></span></span>
+                <span>{chatTarget !== 'design' ? 'Consulting the team' : attachedImages.length ? 'Reading your drawing and building the model' : 'Planning the change'}<span className="planningDots"><i>.</i><i>.</i><i>.</i></span></span>
                 <small>a full drawing takeoff can take up to a minute</small>
               </div>
             )}
