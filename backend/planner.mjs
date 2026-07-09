@@ -24,7 +24,8 @@ const operationSchema = {
               'set_wall_height', 'set_wall_assembly', 'set_wall_segment_assembly', 'add_roof_plane',
               'set_roof_profile', 'add_opening_from_reference', 'add_site_element', 'add_pad_extension',
               'add_loft', 'add_tower', 'add_floor', 'edit_level', 'trace_image_request', 'request_clarification',
-              'set_site', 'set_utility', 'set_overhang'
+              'set_site', 'set_utility', 'set_overhang',
+              'set_footprint', 'move_wall_edge', 'split_wall_edge'
             ]
           },
           id: { type: 'string' },
@@ -377,6 +378,7 @@ Stacking: for localized requests like "a loft above the kitchen" or "a tower abo
 For wall system changes, use set_assembly. For roofs, use set_roof. For openings, use add_opening with wall/type/width/position; openingType may be window, picture, awning, clerestory, door, french (french doors), slider, dutch, barn, bay (bay window), or skylight (wall "roof", place with x and y plan coordinates).
 For water/waste/power/heat choices use set_utility with field one of waterSource (well|spring|catchment|town), wasteMethod (septic|composting|reedbed), powerMode (offgrid|hybrid|gridtie), heatSource (rocket_mass|masonry|wood_stove|minisplit), foundationType (rubble|stemwall|slab), tankGal, wellSepticFt, stemwallHeightFt (feet, for stem wall foundations), diyWalls/diyRoof/diyHeat/diyFoundation. For location use set_site with field zip, latitudeDeg, or rainInYr.
 For roof overhangs use set_overhang with wall (north|south|east|west|all) and value in feet.
+FOOTPRINT SHAPE: the building outline may be a rectilinear polygon (shell.footprint = ordered [x,y] corners in feet, axis-aligned edges; absent = plain widthFt x depthFt rectangle). To move a whole wall in/out use move_wall_edge with wall (north|south|east|west) or field "e<index>" for a specific polygon edge, and value = offset in feet (positive = outward). To make an L-shape or notch, use split_wall_edge (wall or field "e<index>"; optional x/y = split points in feet along the wall; optional value = feet to push the middle segment, negative = inward notch). For a whole custom outline (L, T, U) emit set_footprint with value = JSON string of the corner list, e.g. "[[0,0],[40,0],[40,15],[24,15],[24,28],[0,28]]". If a traced drawing shows a non-rectangular plan, emit set_footprint from its outline INSTEAD of a plain set_shell (still list every room and opening).
 Validate basic constructability and put concerns in warnings, not as refusal.
 
 Current BIM state:

@@ -501,6 +501,21 @@ export function anchorFootprint(next, vertices) {
   else next.shell.footprint = shifted;
 }
 
+// With a custom footprint, widthFt/depthFt describe the bounding box — a
+// plain resize scales the polygon proportionally so the shape survives.
+export function scaleFootprintAxis(next, axis, newSize) {
+  if (!hasCustomFootprint(next)) return false;
+  const poly = footprintPolygon(next);
+  const bounds = footprintBounds(poly);
+  const oldSize = axis === 'x' ? bounds.w : bounds.d;
+  if (!(oldSize > 0) || Math.abs(newSize - oldSize) < 0.05) return true;
+  const factor = newSize / oldSize;
+  const scaled = poly.map(([x, y]) => (axis === 'x' ? [Math.round(x * factor * 2) / 2, y] : [x, Math.round(y * factor * 2) / 2]));
+  const normalized = normalizeFootprint(scaled);
+  if (normalized) anchorFootprint(next, normalized);
+  return true;
+}
+
 // Which polygon edge an opening lives on: the edge with the opening's facing
 // whose span contains it (fallback: the longest edge facing that way). On a
 // plain rectangle this is always the single cardinal edge — legacy unchanged.
@@ -577,9 +592,13 @@ function normalizeRooms(spec) {
 
 function detectIssues(spec) {
   const issues = [];
-  const enclosedRooms = spec.rooms.filter((room) => room.x >= 0 && room.y >= 0 && room.x + room.w <= spec.shell.widthFt && room.y + room.d <= spec.shell.depthFt);
+  const poly = footprintPolygon(spec);
+  const custom = hasCustomFootprint(spec);
+  const enclosedRooms = spec.rooms.filter((room) => (custom
+    ? rectInFootprint(poly, { x: room.x, y: room.y, w: room.w, d: room.d })
+    : room.x >= 0 && room.y >= 0 && room.x + room.w <= spec.shell.widthFt && room.y + room.d <= spec.shell.depthFt));
   const conditionedArea = enclosedRooms.reduce((sum, room) => sum + room.w * room.d, 0);
-  const shellArea = spec.shell.widthFt * spec.shell.depthFt;
+  const shellArea = polygonArea(poly);
 
   if (conditionedArea > shellArea * 1.08) issues.push({ severity: 'critical', title: 'Room program exceeds shell area', owner: 'Architect', fix: 'Reduce room footprints or enlarge the shell before issuing drawings.' });
   if (!spec.rooms.some((room) => room.type === 'wet')) issues.push({ severity: 'critical', title: 'No wet core defined', owner: 'Engineer', fix: 'Add a bathroom/mechanical wet core and align plumbing walls.' });
@@ -657,6 +676,9 @@ export function operationDescription(operation, spec) {
   if (op.type === 'set_reclaimed') return `Marked ${op.system || 'materials'} as ${op.value ? 'reclaimed / salvaged' : 'new'}.`;
   if (op.type === 'set_flooring') return `Set flooring${op.value ? ` to ${op.value}` : ''}.`;
   if (op.type === 'set_shell' || op.type === 'add_pad_extension') return `Updated shell ${op.field || 'padExtensionFt'} to ${op.value || op.w}.`;
+  if (op.type === 'set_footprint') return 'Set the building footprint outline.';
+  if (op.type === 'move_wall_edge') return `Moved the ${op.wall || op.field || 'selected'} wall ${Number(op.value) > 0 ? 'out' : 'in'} ${Math.abs(Number(op.value) || 0)} ft.`;
+  if (op.type === 'split_wall_edge') return `Split the ${op.wall || op.field || 'selected'} wall into segments.`;
   if (op.type === 'add_opening') return `Added ${op.widthFt || 3}' ${op.openingType || 'opening'} on the ${op.wall} wall.`;
   if (op.type === 'add_opening_from_reference' || op.type === 'trace_image_request') return op.reason || 'Image tracing needs wall, type, width, and location before BIM openings can be placed.';
   if (op.type === 'request_clarification') return op.reason || 'More information is needed before changing the BIM.';
@@ -814,8 +836,8 @@ export function applyBimOperations(currentSpec, plan) {
       // Planners (and people) naturally say "the shell is 40.5 × 23" — accept
       // w/d numbers directly when no single field is named.
       if (operation.type === 'set_shell' && !operation.field && (Number(operation.w) > 0 || Number(operation.d) > 0)) {
-        if (Number(operation.w) > 0) next.shell.widthFt = clamp(Number(operation.w), 18, 120);
-        if (Number(operation.d) > 0) next.shell.depthFt = clamp(Number(operation.d), 18, 120);
+        if (Number(operation.w) > 0 && !scaleFootprintAxis(next, 'x', clamp(Number(operation.w), 18, 120))) next.shell.widthFt = clamp(Number(operation.w), 18, 120);
+        if (Number(operation.d) > 0 && !scaleFootprintAxis(next, 'y', clamp(Number(operation.d), 18, 120))) next.shell.depthFt = clamp(Number(operation.d), 18, 120);
         if (Number(operation.h) > 0) {
           const h = clamp(Number(operation.h), 7, 40);
           next.shell.wallHeightFt = h;
@@ -828,13 +850,17 @@ export function applyBimOperations(currentSpec, plan) {
       const field = operation.field || 'padExtensionFt';
       const numeric = Number(operation.value || operation.w);
       if (field === 'widthFt') {
-        next.shell.widthFt = clamp(numeric, 18, 120);
+        if (!scaleFootprintAxis(next, 'x', clamp(numeric, 18, 120))) next.shell.widthFt = clamp(numeric, 18, 120);
         // absorb a companion depth riding in the same op (planner shorthand)
-        if (Number(operation.d) > 0) next.shell.depthFt = clamp(Number(operation.d), 18, 120);
+        if (Number(operation.d) > 0 && !scaleFootprintAxis(next, 'y', clamp(Number(operation.d), 18, 120))) {
+          next.shell.depthFt = clamp(Number(operation.d), 18, 120);
+        }
       }
       else if (field === 'depthFt') {
-        next.shell.depthFt = clamp(numeric, 18, 120);
-        if (Number(operation.w) > 0 && Number(operation.w) !== numeric) next.shell.widthFt = clamp(Number(operation.w), 18, 120);
+        if (!scaleFootprintAxis(next, 'y', clamp(numeric, 18, 120))) next.shell.depthFt = clamp(numeric, 18, 120);
+        if (Number(operation.w) > 0 && Number(operation.w) !== numeric && !scaleFootprintAxis(next, 'x', clamp(Number(operation.w), 18, 120))) {
+          next.shell.widthFt = clamp(Number(operation.w), 18, 120);
+        }
       }
       else if (field === 'wallHeightFt') {
         // Global wall height = "one height for all": reset the S/N mirrors and
@@ -944,6 +970,93 @@ export function applyBimOperations(currentSpec, plan) {
         next.shell.omittedWalls = [...set];
       }
       actions.push(operationDescription(operation, next));
+      continue;
+    }
+
+    // --- Footprint ops (the geometry pass) ---------------------------------
+    if (operation.type === 'set_footprint') {
+      const raw = typeof operation.value === 'string' && operation.value && operation.value !== 'rect'
+        ? (() => { try { return JSON.parse(operation.value); } catch { return null; } })()
+        : Array.isArray(operation.value) ? operation.value : null;
+      if (operation.value === 'rect' || operation.value === '' || (Array.isArray(raw) && raw.length === 0)) {
+        delete next.shell.footprint;
+        actions.push('Reset the footprint to a plain rectangle.');
+        continue;
+      }
+      const normalized = normalizeFootprint(raw);
+      if (!normalized) {
+        warnings.push('The footprint outline was not usable — it needs 4–24 corners, straight north/south/east/west walls, and a real enclosed area.');
+        rejectedOperations.push(operation);
+        continue;
+      }
+      anchorFootprint(next, normalized);
+      actions.push(`Set the footprint outline (${normalized.length} corners, ${Math.round(polygonArea(normalized))} sf).`);
+      continue;
+    }
+
+    if (operation.type === 'move_wall_edge') {
+      const poly = footprintPolygon(next);
+      const edges = footprintEdges(next);
+      let edgeIndex = -1;
+      if (/^e\d+$/.test(String(operation.field))) edgeIndex = Number(String(operation.field).slice(1));
+      if (edgeIndex < 0 && WALL_SIDES.includes(operation.wall)) {
+        const facing = edges.filter((edge) => edge.facing === operation.wall);
+        const best = facing.reduce((a, b) => (!a || b.lengthFt > a.lengthFt ? b : a), null);
+        edgeIndex = best ? best.index : -1;
+      }
+      if (edgeIndex < 0 || edgeIndex >= edges.length) {
+        warnings.push(`Could not find the wall edge to move (${operation.field || operation.wall || 'unspecified'}).`);
+        rejectedOperations.push(operation);
+        continue;
+      }
+      const offset = clamp(Number(operation.value ?? operation.w), -48, 48);
+      const moved = moveFootprintEdge(poly, edgeIndex, offset);
+      if (!moved) {
+        warnings.push('That wall move would collapse the building outline — try a smaller offset.');
+        rejectedOperations.push(operation);
+        continue;
+      }
+      anchorFootprint(next, moved);
+      const edge = edges[edgeIndex];
+      actions.push(`Moved the ${edge.facing} wall ${edge.facingSeq > 1 ? `(segment ${edge.facingSeq}) ` : ''}${offset > 0 ? 'out' : 'in'} ${Math.abs(offset)} ft.`);
+      continue;
+    }
+
+    if (operation.type === 'split_wall_edge') {
+      const poly = footprintPolygon(next);
+      const edges = footprintEdges(next);
+      let edgeIndex = -1;
+      if (/^e\d+$/.test(String(operation.field))) edgeIndex = Number(String(operation.field).slice(1));
+      if (edgeIndex < 0 && WALL_SIDES.includes(operation.wall)) {
+        const facing = edges.filter((edge) => edge.facing === operation.wall);
+        const best = facing.reduce((a, b) => (!a || b.lengthFt > a.lengthFt ? b : a), null);
+        edgeIndex = best ? best.index : -1;
+      }
+      if (edgeIndex < 0 || edgeIndex >= edges.length) {
+        warnings.push(`Could not find the wall edge to split (${operation.field || operation.wall || 'unspecified'}).`);
+        rejectedOperations.push(operation);
+        continue;
+      }
+      const split = splitFootprintEdge(poly, edgeIndex, Number(operation.x) || undefined, Number(operation.y) || undefined);
+      if (!split) {
+        warnings.push('That wall is too short to split into three pieces.');
+        rejectedOperations.push(operation);
+        continue;
+      }
+      // Splitting alone changes nothing visible; the optional value nudges the
+      // middle piece right away (an instant L / notch in one op).
+      const nudge = clamp(Number(operation.value) || 0, -48, 48);
+      const result = nudge ? moveFootprintEdge(split.vertices, split.middleIndex, nudge) : normalizeFootprint(split.vertices);
+      if (!result) {
+        warnings.push('That wall split/move would collapse the building outline.');
+        rejectedOperations.push(operation);
+        continue;
+      }
+      anchorFootprint(next, result);
+      const edge = edges[edgeIndex];
+      actions.push(nudge
+        ? `Split the ${edge.facing} wall and moved its middle ${nudge > 0 ? 'out' : 'in'} ${Math.abs(nudge)} ft.`
+        : `Split the ${edge.facing} wall into three segments — drag the middle one in the Plan to make an L.`);
       continue;
     }
 
