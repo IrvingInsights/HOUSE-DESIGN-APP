@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { createPortal } from 'react-dom';
 import { pushToBlender, exportIfcViaBlender } from './blenderBridge.js';
 import { OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES, resolveInsulation } from '../backend/bim-core.mjs';
 import {
@@ -4788,6 +4789,10 @@ function App() {
   const [activeFloor, setActiveFloor] = useState(1);
   const [buildProgress, setBuildProgress] = useState(() => initialSaved?.buildProgress || {});
   const [inspectorView, setInspectorView] = useState('inspect');
+  // The inspector lives IN the left control column (portal target) — the model
+  // stays the selector surface, the left bar the single control surface.
+  const [inspectorDock, setInspectorDock] = useState(null);
+  const [selMenuOpen, setSelMenuOpen] = useState(false);
   const [dimensionPreview, setDimensionPreview] = useState(null);
   const [savedAt, setSavedAt] = useState(() => initialSaved?.savedAt || '');
   const [libraryActionMode, setLibraryActionMode] = useState(() => initialSaved?.libraryActionMode || 'apply');
@@ -5618,6 +5623,10 @@ function App() {
   function selectObject(id) {
     setSelectedRoom(id);
     setInspectorView('inspect');
+    // The editor lives in the Systems column — make sure it's visible when
+    // something is picked from the model, the plan, or the selector chip.
+    setConsoleView('systems');
+    setSelMenuOpen(false);
   }
 
   function updateSelectedRoom(field, value) {
@@ -6290,6 +6299,10 @@ function App() {
           );
         })()}
 
+        {/* The BIM inspector docks HERE (portal target) — selected-object controls
+            live in the same column as the system controls: one control surface. */}
+        {appMode === 'design' && consoleView === 'systems' && <div className="inspectorDock" ref={setInspectorDock} />}
+
         {appMode === 'design' && consoleView === 'systems' && <section className="panelBlock consolePanel systemsPanel">
           <nav className="systemNav" aria-label="Building systems">
             {SYSTEM_GROUPS.map((group) => (
@@ -6297,7 +6310,7 @@ function App() {
                 <div className="systemNavEyebrow">{group.label}</div>
                 <div className="systemTabs">
                   {group.keys.map((key) => (
-                    <button key={key} className={systemView === key ? 'active' : ''} onClick={() => { setSystemView(key); setInspectorView('schedule'); }} title={flaggedSystems.has(key) ? 'A council check is failing in this system' : undefined}>
+                    <button key={key} className={systemView === key ? 'active' : ''} onClick={() => setSystemView(key)} title={flaggedSystems.has(key) ? 'A council check is failing in this system' : undefined}>
                       <span className={flaggedSystems.has(key) ? 'sysDot flag' : 'sysDot'} />{SYSTEM_META[key].label}
                     </button>
                   ))}
@@ -6966,7 +6979,7 @@ function App() {
               </div>
               <div className="costRows">
                 {rows.map((row) => (
-                  <button type="button" className="costRow" key={row.key} onClick={() => { setConsoleView('systems'); setSystemView(row.system); setInspectorView('schedule'); }}>
+                  <button type="button" className="costRow" key={row.key} onClick={() => { setConsoleView('systems'); setSystemView(row.system); }}>
                     <span className="costRowLabel">{row.label}</span>
                     <span className="costBar"><span className="costBarFill" style={{ width: `${Math.max(3, (row.amount / maxAmount) * 100)}%` }} /></span>
                     <span className="costRowAmt">{fmtMoney(row.amount)}</span>
@@ -7028,7 +7041,7 @@ function App() {
                     <span>{issue.fix}</span>
                     <div className="issueActions">
                       {issue.system && issue.severity !== 'pass' && (
-                        <button type="button" className="issueJump" onClick={() => { setConsoleView('systems'); setSystemView(issue.system); setInspectorView('schedule'); }}>Go to {SYSTEM_META[issue.system]?.label || issue.system}</button>
+                        <button type="button" className="issueJump" onClick={() => { setConsoleView('systems'); setSystemView(issue.system); }}>Go to {SYSTEM_META[issue.system]?.label || issue.system}</button>
                       )}
                       {issue.fixId && FIX_LABELS[issue.fixId] && (
                         <button type="button" className="issueFix" onClick={() => fixIssue(issue)}><Wrench size={13} /> {FIX_LABELS[issue.fixId]}</button>
@@ -7208,9 +7221,51 @@ function App() {
             </div>
           )}
           {viewMode === '3d' && <div className="northBadge">N</div>}
+          {/* Live selection chip: the model is the selector surface. The chip
+              names what's selected; tapping it lists every selectable object —
+              including ones that are hard to click (far walls, upper bands). */}
+          {(() => {
+            const kind = selectedIsWall ? 'Wall'
+              : selectedIsOpening ? ((OPENING_TYPES[selected?.type] || OPENING_TYPES.window).label)
+              : selectedIsRoof ? 'Roof'
+              : selectedIsPad ? 'Site pad'
+              : selectedIsGrid ? 'Grid'
+              : selectedIsElement ? titleCase(selected?.category || 'element')
+              : 'Room';
+            return (
+              <div className="selChipWrap">
+                <button type="button" className={`selChip${selMenuOpen ? ' open' : ''}`} title="What's selected — tap to pick anything" onClick={() => setSelMenuOpen((open) => !open)}>
+                  <span className="selChipKind">{kind}</span>
+                  <b>{selected?.name || '—'}</b>
+                  <span className="selChipCaret">▾</span>
+                </button>
+                {selMenuOpen && (
+                  <div className="selMenu" onMouseLeave={() => setSelMenuOpen(false)}>
+                    {[
+                      ['Rooms', (spec.rooms || []).map((room) => ({ id: room.id, label: room.name, sub: `${room.w}×${room.d}′` }))],
+                      ['Walls', wallSections.map((wall) => ({ id: wall.id, label: wall.name, sub: wall.assembly }))],
+                      ['Openings', (spec.openings || []).map((opening, index) => ({ id: `opening-${index}`, label: opening.label || `${titleCase(opening.wall)} ${titleCase(opening.type)}`, sub: `${opening.widthFt}′` }))],
+                      ['Structure & site', [{ id: 'roof-main', label: 'Roof', sub: spec.shell.roofType || 'gable' }, { id: 'site-pad', label: 'Site pad', sub: '' }]],
+                      ['Elements', (spec.elements || []).filter((element) => element.category !== 'floor').map((element) => ({ id: element.id, label: element.name, sub: titleCase(element.category || '') }))]
+                    ].filter(([, items]) => items.length > 0).map(([groupLabel, items]) => (
+                      <div className="selMenuGroup" key={groupLabel}>
+                        <span className="selMenuEyebrow">{groupLabel}</span>
+                        {items.map((item) => (
+                          <button type="button" key={item.id} className={selectedRoom === item.id ? 'active' : ''} onClick={() => selectObject(item.id)}>
+                            <span>{item.label}</span>
+                            {item.sub && <small>{item.sub}</small>}
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
-        <div className="lowerDeck">
+        {inspectorDock && createPortal(<div className="lowerDeck">
           <section className="bimEditor">
             <div className="bimEditorHead">
               <div>
@@ -7490,7 +7545,7 @@ function App() {
             )}
 
           </section>
-        </div>
+        </div>, inspectorDock)}
       </section>
 
       {welcomeOpen && (
