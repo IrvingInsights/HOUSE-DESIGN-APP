@@ -497,7 +497,10 @@ export function anchorFootprint(next, vertices) {
   }
   next.shell.widthFt = Math.round(bounds.w * 10) / 10;
   next.shell.depthFt = Math.round(bounds.d * 10) / 10;
-  if (isRectFootprint(shifted)) delete next.shell.footprint;
+  // Only a PURE 4-corner rectangle returns to the legacy representation —
+  // a split rectangle (collinear points) must keep its field, or the split
+  // would be erased before the middle segment could ever be moved.
+  if (shifted.length === 4 && isRectFootprint(shifted)) delete next.shell.footprint;
   else next.shell.footprint = shifted;
 }
 
@@ -1240,8 +1243,11 @@ export function applyBimOperations(currentSpec, plan) {
         category: operation.category || (operation.type === 'add_site_element' ? 'site' : operation.type.replace('add_', '') || 'custom'),
         sourceCategory: 'AI Planner',
         note: operation.reason || 'Custom BIM element generated from natural-language design request.',
-        x: Number(operation.x || next.shell.widthFt + 3),
-        y: Number(operation.y || 3),
+        // "0 is unset" here because emptyBimOperation zero-fills — but a floor
+        // (storey extent) plate belongs ON the house, not beside it, so its
+        // unset default is the origin. Fixes storey plates landing at x=16,y=3.
+        x: Number(operation.x || (operation.category === 'floor' ? 0 : next.shell.widthFt + 3)),
+        y: Number(operation.y || (operation.category === 'floor' ? 0 : 3)),
         z: Number(operation.z || 0),
         w: Math.max(1, Number(operation.w || 10)),
         d: Math.max(1, Number(operation.d || 10)),
@@ -1273,7 +1279,10 @@ export function applyBimOperations(currentSpec, plan) {
       const position = clampObjectPosition(next, target, operation.x, operation.y);
       target.x = position.x;
       target.y = position.y;
-      if (Number.isFinite(operation.z)) target.z = operation.z;
+      // Ops are zero-filled, so z=0 means "not a z move" — a plain plan drag
+      // must not drop an elevated element (storey plate, loft) to the ground.
+      // An explicit drop-to-ground goes through update_object field z.
+      if (Number.isFinite(operation.z) && operation.z !== 0) target.z = operation.z;
       changedIds.push(target.id);
       actions.push(operationDescription({ ...operation, name: target.name }, next));
     } else if (operation.type === 'resize_object') {
