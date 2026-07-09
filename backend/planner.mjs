@@ -355,11 +355,23 @@ export async function aiPlan(payload) {
     addToTarget: payload.addToTarget
   };
 
+  const hasAttachments = (payload.attachedImages || []).length > 0;
+  const traceMandate = hasAttachments ? `
+A DRAWING OR DOCUMENT IS ATTACHED. Your job is a COMPLETE takeoff, not a summary:
+1. set_shell from the overall plan dimensions: ONE op carrying BOTH numbers — w AND d (e.g. w:40.5, d:23, field:'', value:''). Never set only one dimension. Read dimension strings; if none, scale from a labeled element like a 3'-0" door and record that in assumptions. If the drawing shows multiple above-grade storeys, also set_shell field:'storeys'.
+2. ONE add_room PER ROOM visible on the floor plan — every single one — with its real name and x/y/w/d in feet. Plan coordinates: origin at the northwest corner of the shell, x increases east, y increases south. Rooms on an upper floor get level 2 (or 3).
+3. ONE add_opening PER WINDOW AND DOOR with wall (north/south/east/west), openingType, widthFt, and positionFt along that wall.
+4. Porches, decks, garages, and outbuildings: add_element with a fitting category and real dimensions.
+RULES: If the plan shows 11 rooms, emit 11 add_room operations. NEVER write "noted for future refinement" or defer anything — emit the operation instead. Basements/below-grade storeys are NOT modeled: put their contents in warnings, model only above-grade storeys. In the summary, report counts: "Traced: shell WxD, N rooms, M openings." If a page is illegible, say which page in warnings and keep going with the rest.
+MODEL WHAT THE DRAWING SHOWS — many documents are EXISTING conventional houses being modified, not natural builds. A framed house gets framed walls (set_wall_side field=assembly value=framed, or set_assembly), a slab stays a slab (set_utility foundationType), standard storeys stay standard. Do NOT convert the building to natural systems unless the user asks. Mine EVERY page for usable data: dimension strings, room and door/window schedules, elevation heights (wall heights, storeys), roof type and pitch, site plans (lot, setbacks, orientation -> set_site), and existing-condition notes (put constraints the model can't express into warnings/assumptions so nothing is lost).
+` : '';
+
   const content = [
     {
       type: 'input_text',
       text: `You are the BIM planning brain for a natural building 3D design dashboard.
 Return only structured operations. Do not invent dimensions from drawings unless visible and reasonably inferable.
+${traceMandate}
 Prefer real model changes over prose. If the user asks for floors, lofts, towers, site objects, unusual natural-building forms, or arbitrary elements, create add_level or add_element operations.
 Stacking: for localized requests like "a loft above the kitchen" or "a tower above that", look up the base room's x/y/w/d in the BIM state and REUSE that footprint. Use add_loft (category loft) or add_tower (category tower) as VOLUMES: set z to the top of whatever it sits on (ground rooms top out at shell.wallHeightFt; a stacked element's top is its z + h) and give a real h (a loft 7-8 ft, a tower room 8-10 ft per storey). Chain them: the second element's z = the first element's z + its h. Reserve add_level for a full new storey across the whole footprint.
 For wall system changes, use set_assembly. For roofs, use set_roof. For openings, use add_opening with wall/type/width/position; openingType may be window, picture, awning, clerestory, door, french (french doors), slider, dutch, barn, bay (bay window), or skylight (wall "roof", place with x and y plan coordinates).

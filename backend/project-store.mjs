@@ -87,6 +87,71 @@ export async function saveProjectState(incomingState, options = {}) {
   };
 }
 
+// Every save snapshots into revisions/ with the design's name inside — so the
+// snapshots ARE the design library. Group by projectName, newest first.
+export async function listDesigns(projectId = DEFAULT_PROJECT_ID) {
+  await ensureProjectDirs(projectId);
+  const entries = await fs.readdir(projectRevisionsDir(projectId), { withFileTypes: true });
+  const files = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .map((entry) => entry.name)
+    .sort()
+    .reverse();
+  const byName = new Map();
+  for (const file of files) {
+    const state = await readJsonIfExists(path.join(projectRevisionsDir(projectId), file));
+    const spec = state?.spec;
+    if (!spec?.shell) continue;
+    const name = spec.projectName || 'Untitled';
+    if (byName.has(name)) continue; // files are newest-first — first hit wins
+    byName.set(name, {
+      projectName: name,
+      file,
+      revision: Number(spec.revision || 1),
+      savedAt: state?.savedAt || state?.updatedAt || null,
+      roomCount: Array.isArray(spec.rooms) ? spec.rooms.length : 0,
+      shell: `${spec.shell.widthFt}×${spec.shell.depthFt}`
+    });
+  }
+  // The rename box autosaves per keystroke, so "T", "Tom", "Tom's Hous" all
+  // left snapshots. Collapse partials: drop a name when a kept name extends it,
+  // or sits within edit-distance 2 of it (typo stubs like "Housz\e").
+  const editDistance = (a, b) => {
+    if (Math.abs(a.length - b.length) > 2) return 3;
+    const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...new Array(b.length).fill(0)]);
+    for (let j = 0; j <= b.length; j += 1) dp[0][j] = j;
+    for (let i = 1; i <= a.length; i += 1) {
+      for (let j = 1; j <= b.length; j += 1) {
+        dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      }
+    }
+    return dp[a.length][b.length];
+  };
+  // Keep the most-advanced name in each cluster (highest revision, then most
+  // recent) — the real "Tom's House" outranks the "Tom's Housz\e" typo stub.
+  const candidates = [...byName.values()].sort((a, b) =>
+    (b.revision - a.revision) || (new Date(b.savedAt || 0) - new Date(a.savedAt || 0)) || (b.projectName.length - a.projectName.length));
+  const kept = [];
+  for (const design of candidates) {
+    const shadowed = kept.some((other) =>
+      other.projectName.startsWith(design.projectName)
+      || design.projectName.startsWith(other.projectName)
+      || editDistance(other.projectName, design.projectName) <= 2);
+    if (!shadowed) kept.push(design);
+  }
+  return kept;
+}
+
+// Bring a snapshot back as the current design (a restore is itself saved, so
+// nothing is ever overwritten — the timeline only grows).
+export async function restoreRevision(file, projectId = DEFAULT_PROJECT_ID) {
+  const safe = path.basename(String(file || ''));
+  if (!safe.endsWith('.json')) throw new Error('Not a revision file.');
+  const state = await readJsonIfExists(path.join(projectRevisionsDir(projectId), safe));
+  if (!state?.spec?.shell) throw new Error('Revision not found or unreadable.');
+  return saveProjectState(state, { projectId });
+}
+
 export async function loadProjectRevisions(projectId = DEFAULT_PROJECT_ID, limit = 20) {
   await ensureProjectDirs(projectId);
   const entries = await fs.readdir(projectRevisionsDir(projectId), { withFileTypes: true });

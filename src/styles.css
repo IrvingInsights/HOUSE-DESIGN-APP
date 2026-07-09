@@ -3958,6 +3958,26 @@ button.danger:hover,
 .welcomeFile { grid-column: 1 / -1; cursor: pointer; }
 .welcomeFile input { display: none; }
 
+/* previous-design rows on the opening card */
+.welcomePrevious { margin-top: 4px; }
+.welcomePrevRow {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  width: 100%; margin-top: 6px; padding: 9px 12px; text-align: left;
+  background: var(--panel-2, #281F1A); border: 1px solid var(--line2, #564A3F);
+  border-radius: 9px; color: #ECE4D6; cursor: pointer;
+}
+.welcomePrevRow:hover { border-color: var(--active-line, #C88A5B); background: var(--active, #3A2C22); }
+.welcomePrevRow b { font-size: 13.5px; }
+.welcomePrevRow small { font-size: 11px; color: #978C79; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* the AI-planning indicator in the chat stream */
+.planningBubble { opacity: 0.95; }
+.planningBubble small { display: block; margin-top: 3px; font-size: 10.5px; color: var(--ink3, #978C79); }
+.planningDots i { font-style: normal; animation: planningBlink 1.2s infinite; }
+.planningDots i:nth-child(2) { animation-delay: 0.2s; }
+.planningDots i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes planningBlink { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }
+
 /* ---- Toggle-able chat: hidden, the model takes its width ---- */
 .app.chatClosed { grid-template-columns: minmax(420px, 500px) minmax(480px, 1fr); }
 .app.chatClosed .rightPanel { display: none; }

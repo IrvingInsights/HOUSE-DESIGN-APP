@@ -424,10 +424,31 @@ export function applyBimOperations(currentSpec, plan) {
     }
 
     if (operation.type === 'set_shell' || operation.type === 'add_pad_extension') {
+      // Planners (and people) naturally say "the shell is 40.5 × 23" — accept
+      // w/d numbers directly when no single field is named.
+      if (operation.type === 'set_shell' && !operation.field && (Number(operation.w) > 0 || Number(operation.d) > 0)) {
+        if (Number(operation.w) > 0) next.shell.widthFt = clamp(Number(operation.w), 18, 120);
+        if (Number(operation.d) > 0) next.shell.depthFt = clamp(Number(operation.d), 18, 120);
+        if (Number(operation.h) > 0) {
+          const h = clamp(Number(operation.h), 7, 40);
+          next.shell.wallHeightFt = h;
+          next.shell.southWallHeightFt = h;
+          next.shell.northWallHeightFt = h;
+        }
+        actions.push(`Set shell to ${next.shell.widthFt}' x ${next.shell.depthFt}'.`);
+        continue;
+      }
       const field = operation.field || 'padExtensionFt';
       const numeric = Number(operation.value || operation.w);
-      if (field === 'widthFt') next.shell.widthFt = clamp(numeric, 18, 120);
-      else if (field === 'depthFt') next.shell.depthFt = clamp(numeric, 18, 120);
+      if (field === 'widthFt') {
+        next.shell.widthFt = clamp(numeric, 18, 120);
+        // absorb a companion depth riding in the same op (planner shorthand)
+        if (Number(operation.d) > 0) next.shell.depthFt = clamp(Number(operation.d), 18, 120);
+      }
+      else if (field === 'depthFt') {
+        next.shell.depthFt = clamp(numeric, 18, 120);
+        if (Number(operation.w) > 0 && Number(operation.w) !== numeric) next.shell.widthFt = clamp(Number(operation.w), 18, 120);
+      }
       else if (field === 'wallHeightFt') {
         // Global wall height = "one height for all": reset the S/N mirrors and
         // clear any per-side height overrides so every wall follows it again.

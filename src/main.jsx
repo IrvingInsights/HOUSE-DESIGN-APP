@@ -4907,6 +4907,36 @@ function App() {
   // continue / start-fresh choices. It shows on every open; Continue is one tap.
   const [welcomeOpen, setWelcomeOpen] = useState(true);
   const [welcomeIsFirstRun, setWelcomeIsFirstRun] = useState(() => !initialSaved);
+  // Every design ever saved lives in the revision snapshots — the card offers
+  // them back ("start other previous model").
+  const [previousDesigns, setPreviousDesigns] = useState([]);
+  useEffect(() => {
+    if (!welcomeOpen) return;
+    let cancelled = false;
+    fetch('/api/projects/current/designs')
+      .then((response) => response.json())
+      .then((data) => { if (!cancelled) setPreviousDesigns(data?.designs || []); })
+      .catch(() => { /* backend not up yet — the list just stays empty */ });
+    return () => { cancelled = true; };
+  }, [welcomeOpen]);
+
+  async function restorePreviousDesign(design) {
+    try {
+      const response = await fetch('/api/projects/current/restore', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ file: design.file })
+      });
+      const data = await response.json();
+      if (!data?.ok || !data?.state?.spec) throw new Error(data?.error || 'restore failed');
+      restoreDashboardState(data.state);
+      setWelcomeOpen(false);
+      setWelcomeIsFirstRun(false);
+      setLastModelChange(`Restored ${design.projectName} (rev ${design.revision}).`);
+    } catch (error) {
+      window.alert(`Could not restore that design: ${error.message}`);
+    }
+  }
   const [welcomeName, setWelcomeName] = useState('');
   const [geoQuery, setGeoQuery] = useState('');
   const [geoResults, setGeoResults] = useState([]);
@@ -5187,7 +5217,7 @@ function App() {
     const stream = chatStreamRef.current;
     if (!stream) return;
     stream.scrollTop = stream.scrollHeight;
-  }, [chatMessages]);
+  }, [chatMessages, isPlanning]);
 
   useEffect(() => {
     function onKeyDown(event) {
@@ -5304,7 +5334,13 @@ function App() {
     const submittedPrompt = prompt.trim();
     setPrompt('');
 
-    if (isConsultativePrompt(submittedPrompt, attachedImages)) {
+    // Design mode is ACTION-FIRST: everything goes to the planner. Pure
+    // questions still get a conversational answer — but only when the plan
+    // produces no operations, never by hijacking a build request. (The old
+    // "sounds like a question" pre-check swallowed asks like "build the house
+    // from this plan" into chat mode — the drawing never reached the planner.)
+    const questionOnly = !attachedImages.length && isConsultativePrompt(submittedPrompt, []) && !/\b(apply|build|make|create|add|move|resize|change|set|trace|use|model|draw)\b/i.test(submittedPrompt);
+    if (questionOnly) {
       await answerConsultativePrompt(submittedPrompt);
       return;
     }
@@ -5317,6 +5353,9 @@ function App() {
       return;
     }
 
+    // Show the user's message and the working state IMMEDIATELY — the planner
+    // can take 30-60s on a full drawing takeoff and silence reads as a hang.
+    setChatMessages((items) => [...items, { role: 'user', speaker: 'You', text: submittedPrompt }]);
     setIsPlanning(true);
 
     try {
@@ -5345,7 +5384,6 @@ function App() {
         setLastModelChange(structuredReport.actions[0]);
         setChatMessages((items) => [
           ...items,
-          { role: 'user', speaker: 'You', text: submittedPrompt },
           { role: 'studio', speaker: 'Studio', text: `Applied to Revision ${next.revision}.\n\n${structuredPlanSummary(structuredReport)}` }
         ]);
         setRevisionLog((items) => [`Rev ${next.revision}: Planner applied ${structuredReport.actions.length} structured BIM operation${structuredReport.actions.length === 1 ? '' : 's'}.`, ...items]);
@@ -5354,7 +5392,6 @@ function App() {
 
       setChatMessages((items) => [
         ...items,
-        { role: 'user', speaker: 'You', text: submittedPrompt },
         { role: 'studio', speaker: 'Studio', text: isConsultativePrompt(submittedPrompt, attachedImages) ? buildStudioConversationResponse(submittedPrompt, spec, selected, issues, attachedImages) : `No BIM change made.\n\n${structuredPlanSummary(structuredReport)}` }
       ]);
       setRevisionLog((items) => [`No change: Planner could not turn "${submittedPrompt}" into a safe BIM operation.`, ...items]);
@@ -5364,7 +5401,6 @@ function App() {
         const reply = buildStudioConversationResponse(submittedPrompt, spec, selected, issues, attachedImages);
         setChatMessages((items) => [
           ...items,
-          { role: 'user', speaker: 'You', text: submittedPrompt },
           { role: 'studio', speaker: 'Studio', text: `${reply}\n\nNote: the BIM planner was unavailable just now (${error.message}), so I stayed in conversation mode instead of pretending that was a geometry request.` }
         ]);
         setRevisionLog((items) => [`Studio consult fallback: answered "${submittedPrompt}" while planner was unavailable.`, ...items]);
@@ -5374,7 +5410,6 @@ function App() {
       if (!report.actions.length) {
         setChatMessages((items) => [
           ...items,
-          { role: 'user', speaker: 'You', text: submittedPrompt },
           { role: 'studio', speaker: 'Studio', text: `No BIM change made.\n\nPlanner error: ${error.message}\n\n${interpreterSummary(report)}` }
         ]);
         setRevisionLog((items) => [`No change: Planner failed and fallback could not apply "${submittedPrompt}".`, ...items]);
@@ -5387,7 +5422,6 @@ function App() {
       setLastModelChange(report.actions[0] || 'Revision applied, but no visible geometry command was detected.');
       setChatMessages((items) => [
         ...items,
-        { role: 'user', speaker: 'You', text: submittedPrompt },
         { role: 'studio', speaker: 'Studio', text: `Applied to Revision ${next.revision} with fallback parser.\n\nPlanner error: ${error.message}\n\n${interpreterSummary(report)}` }
       ]);
       setRevisionLog((items) => [`Rev ${next.revision}: Fallback parser applied changes after planner error.`, ...items]);
@@ -7745,6 +7779,21 @@ function App() {
                 <small>{spec.projectName} · revision {spec.revision}</small>
               </button>
             )}
+            {(() => {
+              const others = previousDesigns.filter((design) => design.projectName !== spec.projectName);
+              if (!others.length) return null;
+              return (
+                <div className="welcomePrevious">
+                  <div className="welcomeDivider">or open a previous design</div>
+                  {others.slice(0, 5).map((design) => (
+                    <button key={design.file} className="welcomePrevRow" onClick={() => restorePreviousDesign(design)}>
+                      <b>{design.projectName}</b>
+                      <small>rev {design.revision} · {design.shell}′ · {design.roomCount} room{design.roomCount === 1 ? '' : 's'}{design.savedAt ? ` · ${design.savedAt}` : ''}</small>
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
             <div className="welcomeDivider">{welcomeIsFirstRun ? 'Start a design' : 'or start a new design'}</div>
             <label className="welcomeName">
               <span>Name your design</span>
@@ -7816,6 +7865,13 @@ function App() {
                 <span>{message.text}</span>
               </div>
             ))}
+            {isPlanning && (
+              <div className="chatBubble studio planningBubble">
+                <b>Studio</b>
+                <span>{attachedImages.length ? 'Reading your drawing and building the model' : 'Planning the change'}<span className="planningDots"><i>.</i><i>.</i><i>.</i></span></span>
+                <small>a full drawing takeoff can take up to a minute</small>
+              </div>
+            )}
           </div>
           <textarea
             value={chatTarget === 'design' ? prompt : expertQuestion}

@@ -3,7 +3,7 @@ import { ensureBlenderRunning } from './blender-launcher.mjs';
 import { annualRainInches, geoSearch } from './geo.mjs';
 import { readJson, sendJson } from './http.mjs';
 import { DEFAULT_PROJECT_ID } from './config.mjs';
-import { listProjects, loadProjectRevisions, loadProjectState, saveProjectState } from './project-store.mjs';
+import { listDesigns, listProjects, loadProjectRevisions, loadProjectState, restoreRevision, saveProjectState } from './project-store.mjs';
 import { applyBimOperations } from './bim-core.mjs';
 import { buildContextPacket, ensureProjectBrain, updateProjectBrainAfterOperation } from './project-brain-service.mjs';
 import { respondFromStudioAgent } from './studio-agent-service.mjs';
@@ -25,6 +25,22 @@ export async function handleApiRoute(req, res, pathname) {
       state: nextState,
       revisions: await loadProjectRevisions(DEFAULT_PROJECT_ID, 12)
     });
+    return true;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/projects/current/designs') {
+    sendJson(res, 200, { designs: await listDesigns(DEFAULT_PROJECT_ID) });
+    return true;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/projects/current/restore') {
+    try {
+      const payload = await readJson(req);
+      const result = await restoreRevision(payload?.file, DEFAULT_PROJECT_ID);
+      sendJson(res, 200, { ok: true, projectId: result.projectId, state: result.state });
+    } catch (error) {
+      sendJson(res, 400, { ok: false, error: String(error?.message || error) });
+    }
     return true;
   }
 
