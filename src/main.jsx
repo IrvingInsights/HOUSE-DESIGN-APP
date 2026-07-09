@@ -6433,7 +6433,7 @@ function App() {
               <button className={consoleView === 'costs' ? 'active' : ''} onClick={() => setConsoleView('costs')}><Coins size={14} /> Costs</button>
               <button className={consoleView === 'review' ? 'active' : ''} onClick={() => setConsoleView('review')}><ShieldCheck size={14} /> Review</button>
               <button className={`moreToggle${moreShown ? ' active' : ''}`} onClick={() => setMoreTabsOpen((open) => !open)} title="More views" aria-label="More views">⋯</button>
-              {moreShown && <button className={consoleView === 'os' ? 'active' : ''} onClick={() => setConsoleView('os')}><ClipboardCheck size={14} /> Plan</button>}
+              {moreShown && <button className={consoleView === 'os' ? 'active' : ''} onClick={() => setConsoleView('os')}><ClipboardCheck size={14} /> Project</button>}
               {moreShown && <button className={consoleView === 'audit' ? 'active' : ''} onClick={() => setConsoleView('audit')}><FileJson size={14} /> History</button>}
             </nav>
           );
