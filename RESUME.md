@@ -106,6 +106,12 @@ items. Site keyword geocode + real rainfall. Dark "paper→charcoal→lit-model"
 Model-view layers + partial-view cue. Real cost/sweat/carbon/water/power engine
 (`deriveDesign`) + aiCritic council checks w/ nav dots. Gemini planner (+ PDF/doc
 upload). Blender/IFC round-trip (one-click headless launch). Build mode. Welcome/New.
+**Frame drawings** (`src/frameDrawings.js`, Export menu + Frame page): timber-frame
+shop-drawing sheets from the live spec — per-facing frame elevations (posts/plates/
+braces/rafters, raked shed plates w/ plumb cuts, gable ends, rafter-end ticks at
+o.c.), bay + height dimension strings, leader callouts, hand-drafting title block,
+frame plan w/ post layout, member takeoff. Member sizes follow the Frame page type;
+footprint-aware (per wall run); load-bearing prints an honest no-frame sheet.
 
 **Rooms/plan (this session's focus):**
 - Rooms quick-add palette + **non-destructive add** (`planNewRoomPlacements`/`findFreeSpot`:

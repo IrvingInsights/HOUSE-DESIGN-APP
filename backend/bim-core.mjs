@@ -47,7 +47,7 @@ function roomProfile(name) {
   return { type: 'living', floor: 'wood', w: 10, d: 10 };
 }
 
-function roofProfile(shell = {}) {
+export function roofProfile(shell = {}) {
   const roofType = shell.roofType || 'gable';
   const southWallHeightFt = Number(shell.southWallHeightFt || shell.wallHeightFt || 10);
   const northWallHeightFt = Number(shell.northWallHeightFt || shell.wallHeightFt || 10);

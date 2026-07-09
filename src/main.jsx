@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
 import { pushToBlender, exportIfcViaBlender } from './blenderBridge.js';
+import { createFrameDrawingSetHtml } from './frameDrawings.js';
 import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES, resolveInsulation,
   footprintPolygon, footprintEdges, hasCustomFootprint, polygonArea, polygonPerimeter, expandFootprint,
@@ -6909,6 +6910,12 @@ function App() {
     downloadFile(`permit-track-set-rev-${spec.revision}.html`, createDrawingSetHtml(spec, qualityScore, issues), 'text/html');
   }
 
+  // Frame shop drawings: elevation views of the structure (posts/beams/braces/
+  // rafters) + frame plan + member schedule, drawn from the live model.
+  function exportFrameDrawings() {
+    downloadFile(`frame-drawings-rev-${spec.revision}.html`, createFrameDrawingSetHtml(spec), 'text/html');
+  }
+
   const SYSTEM_LABELS = { site: 'Site', rooms: 'Rooms', shell: 'Shell', foundation: 'Foundation', walls: 'Walls', roof: 'Roof', windows: 'Windows', heat: 'Heat', water: 'Water', waste: 'Waste', power: 'Power', outdoors: 'Outdoors' };
   const systemOfRoom = (room) => {
     const t = String(room?.type || '').toLowerCase();
@@ -7394,6 +7401,10 @@ function App() {
                 {savings.count > 0
                   ? <p className="systemNote"><b>♺ Reclaimed materials are saving</b> about {fmtMoney(savings.cost)} and {(savings.carbon / 1000).toFixed(1)} t CO₂e versus buying everything new.</p>
                   : <p className="systemNote">Nothing marked reclaimed yet. Salvaged windows, timber, and roofing are the biggest, cheapest carbon wins on a natural build.</p>}
+
+                <div className="sectionHead">Frame drawings</div>
+                <p className="systemNote">Shop-drawing sheets of THIS frame — elevation views with posts, plates, braces, and rafters called out and dimensioned, a frame plan, and a member takeoff. Print at 11×17.</p>
+                <button type="button" className="secondary" onClick={exportFrameDrawings}><Ruler size={15} /> Download frame drawings</button>
               </div>
             );
           })()}
@@ -7869,6 +7880,7 @@ function App() {
               {exportMenuOpen && (
                 <div className="exportMenuPop" onMouseLeave={() => setExportMenuOpen(false)}>
                   <button onClick={() => { setExportMenuOpen(false); exportSheetSet(); }}><FileText size={15} /> Permit set (SVG sheets)</button>
+                  <button title="Elevation views of the frame — posts, beams, braces, rafters — with dimensions, callouts, and a member schedule" onClick={() => { setExportMenuOpen(false); exportFrameDrawings(); }}><Ruler size={15} /> Frame drawings (SVG sheets)</button>
                   <button title="Push this design to Blender and write a validated IFC4 file" onClick={async () => { setExportMenuOpen(false); try { const r = await exportIfcViaBlender(spec); window.alert(r && r.ok ? ('IFC written: ' + r.path + ' (' + r.count + ' elements). Open it in any BIM viewer.') : ('IFC export failed: ' + ((r && r.error) || 'unknown'))); } catch (e) { window.alert('Blender backend not reachable. Start Blender 5.1 with the Dashboard add-on, then retry. (' + e.message + ')'); } }}><Box size={15} /> IFC file (Blender)</button>
                   <button title="Rebuild this design in the Blender backend (starts a headless Blender automatically if needed)" onClick={async () => { setExportMenuOpen(false); try { await pushToBlender(spec); window.alert('Synced to Blender: the model is rebuilding in the Natural Building GC backend.'); } catch (e) { window.alert('Blender sync failed: ' + e.message + ' (First start can take up to a minute — try once more.)'); } }}><RefreshCcw size={15} /> Sync to Blender</button>
                   <button onClick={() => { setExportMenuOpen(false); exportBrief(); }}><Download size={15} /> Brief (coordination summary)</button>

@@ -42,6 +42,9 @@ complex instructions won't.
 - Review tab → take a one-tap fix.
 - Layers (top-right of the model) → **Exploded view**.
 - Export → Permit set.
+- Export → **Frame drawings** (or the button on the Frame page): shop-drawing
+  elevation sheets of the structure — posts, plates, braces, rafters — with
+  dimensions, callouts, a frame plan, and a member takeoff. Print at 11×17.
 
 ## Known limitations (honest list)
 
