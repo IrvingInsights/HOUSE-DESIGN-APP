@@ -6,8 +6,9 @@ building model with cost, code checks, and carbon while you design.
 ## Run it (2 minutes)
 
 1. Install **Node.js 20+** (nodejs.org).
-2. In this folder: `npm install` (first time only), then double-click
-   **start.bat** (Windows) or run `./start.sh` (Mac/Linux).
+2. Double-click **start.bat** (Windows) or **Start Mac.command** (Mac —
+   first time: right-click it → Open, to get past Gatekeeper). Dependencies
+   install themselves on first run; the Mac launcher also opens the browser.
 3. Open **http://127.0.0.1:5184/** in a browser.
 
 That's the whole app: design, 3D/plan/detail views, costs, code checks,
