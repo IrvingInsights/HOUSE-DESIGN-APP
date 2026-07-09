@@ -593,6 +593,21 @@ function storeyInfo(shell = {}) {
   return { storeys, baseWallFt, extraFt: (storeys - 1) * baseWallFt };
 }
 
+// The extent of an upper storey: a 'floor' plate element at that level defines
+// how much of the footprint the storey covers (a second storey over only one
+// side of the building). No plate = the full footprint (legacy designs).
+function upperPlateRect(spec, level = 2) {
+  const plate = (spec.elements || []).find((element) => element.category === 'floor' && Number(element.level || 1) === level);
+  if (!plate) return null;
+  return {
+    id: plate.id,
+    x: Number(plate.x) || 0,
+    y: Number(plate.y) || 0,
+    w: Number(plate.w) || Number(spec.shell.widthFt) || 36,
+    d: Number(plate.d) || Number(spec.shell.depthFt) || 28
+  };
+}
+
 // How many floors the plan has = whichever is larger: the storeys setting, or
 // the highest floor any room actually lives on.
 function floorCount(spec) {
@@ -1261,12 +1276,21 @@ function getWallSections(spec) {
     east: { name: 'East Wall', lengthFt: spec.shell.depthFt, x: spec.shell.widthFt, y: 0 }
   };
   const { storeys, extraFt } = storeyInfo(spec.shell);
+  // Upper walls ring the storey's EXTENT plate, not necessarily the footprint.
+  const plate2 = upperPlateRect(spec, 2);
   const buildSection = (side, level) => {
     const r = resolveWallSide(spec, side, level);
     if (r.omitted) return null;
     const upper = level > 1;
     const heightFt = upper ? extraFt : r.heightFt;
-    const base = layout[side];
+    const base = upper && plate2
+      ? {
+        name: layout[side].name,
+        lengthFt: side === 'north' || side === 'south' ? plate2.w : plate2.d,
+        x: side === 'east' ? plate2.x + plate2.w : plate2.x,
+        y: side === 'south' ? plate2.y + plate2.d : plate2.y
+      }
+      : layout[side];
     return {
       id: upper ? `wall-${side}-u` : `wall-${side}`,
       name: upper ? `${base.name} (upper)` : base.name,
@@ -2617,11 +2641,20 @@ function deriveDesign(spec, wallSections) {
   const d = Number(spec.shell.depthFt) || 0;
   const floor = w * d;
   const { storeys, extraFt: storeyExtraFt, baseWallFt } = storeyInfo(spec.shell);
-  // Lofts, tower rooms, and planner floor plates are heated area too.
-  const stackedArea = (spec.elements || [])
-    .filter((element) => ['loft', 'tower', 'floor'].includes(element.category))
+  // Upper storeys cover their extent PLATE (a storey can sit over only one
+  // side of the building); no plate = the full footprint. Lofts and towers
+  // add their own heated area on top. A 1½-storey loft counts half.
+  const loftTowerArea = (spec.elements || [])
+    .filter((element) => ['loft', 'tower'].includes(element.category))
     .reduce((sum, element) => sum + (Number(element.w) * Number(element.d) || 0), 0);
-  const heatedFloor = floor * storeys + stackedArea;
+  let upperFloorArea = 0;
+  for (let lvl = 2; lvl <= Math.ceil(storeys); lvl += 1) {
+    const plate = upperPlateRect(spec, lvl);
+    const factorForLevel = clamp(storeys - (lvl - 1), 0, 1);
+    upperFloorArea += (plate ? plate.w * plate.d : floor) * factorForLevel;
+  }
+  const stackedArea = loftTowerArea + upperFloorArea;
+  const heatedFloor = floor + upperFloorArea + loftTowerArea;
   const pitch = Number(spec.shell.roofPitch || 0.32);
   const overhangs = resolveOverhangs(spec.shell);
   const roofFootprint = (w + overhangs.east + overhangs.west) * (d + overhangs.north + overhangs.south);
@@ -2770,7 +2803,9 @@ function deriveDesign(spec, wallSections) {
   const groundFrameKey = resolveFrameType(spec, 1);
   const upperFrameKey = resolveFrameType(spec, 2);
   const groundFrameArea = perimeterFt * baseWallFt;
-  const upperFrameArea = perimeterFt * storeyExtraFt;
+  const upperPlateForFrame = upperPlateRect(spec, 2);
+  const upperPerimeterFt = upperPlateForFrame ? 2 * (upperPlateForFrame.w + upperPlateForFrame.d) : perimeterFt;
+  const upperFrameArea = upperPerimeterFt * storeyExtraFt;
   const frameCostRaw = groundFrameArea * (FRAME_TYPES[groundFrameKey]?.costPsf ?? 0) + upperFrameArea * (FRAME_TYPES[upperFrameKey]?.costPsf ?? 0);
   const frameCarbonRaw = groundFrameArea * (FRAME_TYPES[groundFrameKey]?.carbonPsf ?? 0) + upperFrameArea * (FRAME_TYPES[upperFrameKey]?.carbonPsf ?? 0);
   const frameCost = frameCostRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.cost : 1);
@@ -2784,7 +2819,7 @@ function deriveDesign(spec, wallSections) {
     foundation: foundationCost,
     frame: frameCost,
     flooring: flooringCostRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.cost : 1) + subfloorCost + floorInsulCost,
-    upperFloors: (storeys - 1) * floor * 12 + stackedArea * 12,
+    upperFloors: (upperFloorArea + loftTowerArea) * 12,
     outdoors: outdoorCost,
     walls: wallsCostRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.cost : 1),
     windows: windowsCostRaw * (reclaimed.windows ? RECLAIMED_FACTORS.windows.cost : 1),
@@ -3714,6 +3749,14 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShel
             {shellGhost && <text x={shellW / 2} y={shellD / 2} textAnchor="middle" fontSize={2.4} fill="var(--active-line)" fontWeight="700" pointerEvents="none">{shellW}′ × {shellD}′</text>}
           </>
         )}
+        {/* the plan reflects the selection: a selected wall's edge glows */}
+        {(() => {
+          const m = /^wall-(north|south|east|west)/.exec(String(selectedRoom || ''));
+          if (!m) return null;
+          const s = m[1];
+          const pts = s === 'north' ? [0, 0, W, 0] : s === 'south' ? [0, D, W, D] : s === 'east' ? [W, 0, W, D] : [0, 0, 0, D];
+          return <line x1={pts[0]} y1={pts[1]} x2={pts[2]} y2={pts[3]} stroke="var(--active-line)" strokeWidth={0.7} opacity={0.9} pointerEvents="none" />;
+        })()}
         {/* rooms */}
         {(spec.rooms || []).map((raw) => {
           const onFloor = Number(raw.level || 1) === activeFloor;
@@ -3746,7 +3789,9 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShel
         })}
         {/* placed elements (heater, tank, garden, coop, stairs…) — dashed to
             read as objects/fixtures rather than rooms; drag + resize like rooms */}
-        {(spec.elements || []).filter((el) => el.category !== 'floor' && (Number(el.level || 1) === activeFloor || (/stair|ladder/i.test(el.name || '') && Number(el.level || 1) === activeFloor - 1))).map((raw) => {
+        {(spec.elements || []).filter((el) => (el.category === 'floor'
+          ? (activeFloor > 1 && Number(el.level || 1) === activeFloor)
+          : (Number(el.level || 1) === activeFloor || (/stair|ladder/i.test(el.name || '') && Number(el.level || 1) === activeFloor - 1)))).map((raw) => {
           const el = roomAt(raw);
           const isSel = raw.id === selectedRoom;
           const w = Number(el.w) || 4;
@@ -3775,10 +3820,13 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShel
         {/* openings as white gaps on the walls */}
         {openings.map((o, i) => {
           const wide = Number(o.widthFt) || 3;
-          if (o.wall === 'north') return <line key={i} x1={o.x} y1={0} x2={o.x + wide} y2={0} stroke="#e8e6dd" strokeWidth={1.1} />;
-          if (o.wall === 'south') return <line key={i} x1={o.x} y1={D} x2={o.x + wide} y2={D} stroke="#e8e6dd" strokeWidth={1.1} />;
-          if (o.wall === 'east') return <line key={i} x1={W} y1={o.y} x2={W} y2={o.y + wide} stroke="#e8e6dd" strokeWidth={1.1} />;
-          if (o.wall === 'west') return <line key={i} x1={0} y1={o.y} x2={0} y2={o.y + wide} stroke="#e8e6dd" strokeWidth={1.1} />;
+          const isSel = String(selectedRoom || '') === `opening-${(spec.openings || []).indexOf(o)}`;
+          const stroke = isSel ? 'var(--active-line)' : '#e8e6dd';
+          const sw = isSel ? 1.5 : 1.1;
+          if (o.wall === 'north') return <line key={i} x1={o.x} y1={0} x2={o.x + wide} y2={0} stroke={stroke} strokeWidth={sw} />;
+          if (o.wall === 'south') return <line key={i} x1={o.x} y1={D} x2={o.x + wide} y2={D} stroke={stroke} strokeWidth={sw} />;
+          if (o.wall === 'east') return <line key={i} x1={W} y1={o.y} x2={W} y2={o.y + wide} stroke={stroke} strokeWidth={sw} />;
+          if (o.wall === 'west') return <line key={i} x1={0} y1={o.y} x2={0} y2={o.y + wide} stroke={stroke} strokeWidth={sw} />;
           return null;
         })}
         {/* dimensions */}
@@ -3984,25 +4032,34 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       const hS = roofSpec.roofType === 'shed' ? southWallHeight : wallResolved.south.heightFt + storeyLift;
       const hE = wallResolved.east.heightFt + storeyLift;
       const hW = wallResolved.west.heightFt + storeyLift;
+      // Upper bands ring the storey's EXTENT plate — a second storey can sit
+      // over only one side of the building. No plate = the full footprint.
+      const plate2 = upperPlateRect(spec, 2) || { x: 0, y: 0, w: width, d: depth };
       const wallMeshSpecs = [];
       const pushSideBoxes = (side, totalH, thickness, place) => {
         const groundH = Math.max(1, totalH - storeyLift);
         wallMeshSpecs.push({ side, storey: 'ground', mesh: place(thickness, groundH, 0) });
         if (storeyLift > 0) {
           const u = wallUpper[side];
-          wallMeshSpecs.push({ side, storey: 'upper', mesh: place(u.thicknessFt, storeyLift, groundH, wallMatOf(u)) });
+          const tU = u.thicknessFt;
+          const p = plate2;
+          const upperMesh = side === 'north' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + tU / 2, wallMatOf(u))
+            : side === 'south' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + p.d - tU / 2, wallMatOf(u))
+            : side === 'west' ? box(tU, storeyLift, p.d, p.x + tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u))
+            : box(tU, storeyLift, p.d, p.x + p.w - tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u));
+          wallMeshSpecs.push({ side, storey: 'upper', mesh: upperMesh });
         }
       };
       if (roofSpec.roofType === 'shed') {
-        pushSideBoxes('north', hN, tN, (t, h, y0, mat) => box(width, h, t, width / 2, y0 + h / 2, t / 2, mat || wallMatFor('north')));
-        pushSideBoxes('south', hS, tS, (t, h, y0, mat) => box(width, h, t, width / 2, y0 + h / 2, depth - t / 2, mat || wallMatFor('south')));
+        pushSideBoxes('north', hN, tN, (t, h, y0) => box(width, h, t, width / 2, y0 + h / 2, t / 2, wallMatFor('north')));
+        pushSideBoxes('south', hS, tS, (t, h, y0) => box(width, h, t, width / 2, y0 + h / 2, depth - t / 2, wallMatFor('south')));
         wallMeshSpecs.push({ side: 'west', storey: 'ground', mesh: makeShedSideWall(0, tW, depth, northWallHeight, southWallHeight, wallMatFor('west')) });
         wallMeshSpecs.push({ side: 'east', storey: 'ground', mesh: makeShedSideWall(width - tE, tE, depth, northWallHeight, southWallHeight, wallMatFor('east')) });
       } else {
-        pushSideBoxes('north', hN, tN, (t, h, y0, mat) => box(width, h, t, width / 2, y0 + h / 2, t / 2, mat || wallMatFor('north')));
-        pushSideBoxes('south', hS, tS, (t, h, y0, mat) => box(width, h, t, width / 2, y0 + h / 2, depth - t / 2, mat || wallMatFor('south')));
-        pushSideBoxes('west', hW, tW, (t, h, y0, mat) => box(t, h, depth, t / 2, y0 + h / 2, depth / 2, mat || wallMatFor('west')));
-        pushSideBoxes('east', hE, tE, (t, h, y0, mat) => box(t, h, depth, width - t / 2, y0 + h / 2, depth / 2, mat || wallMatFor('east')));
+        pushSideBoxes('north', hN, tN, (t, h, y0) => box(width, h, t, width / 2, y0 + h / 2, t / 2, wallMatFor('north')));
+        pushSideBoxes('south', hS, tS, (t, h, y0) => box(width, h, t, width / 2, y0 + h / 2, depth - t / 2, wallMatFor('south')));
+        pushSideBoxes('west', hW, tW, (t, h, y0) => box(t, h, depth, t / 2, y0 + h / 2, depth / 2, wallMatFor('west')));
+        pushSideBoxes('east', hE, tE, (t, h, y0) => box(t, h, depth, width - t / 2, y0 + h / 2, depth / 2, wallMatFor('east')));
       }
       wallMeshSpecs.forEach(({ side, storey, mesh }) => {
         if (omittedWalls.has(side) || wallResolved[side].omitted) return;
@@ -4035,9 +4092,9 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
         ring.forEach((segment) => { segment.name = 'Stem wall foundation'; group.add(segment); });
       }
 
-      // Upper floor plate(s): one deck per full-or-partial storey above the first,
-      // seated on the ground-storey wall tops, inset by the wall thicknesses.
-      if (storeys > 1 && layers.upperFloors) {
+      // Upper floor plate: only auto-drawn when the storey has no extent-plate
+      // element (which renders — and drags — through the elements pass).
+      if (storeys > 1 && layers.upperFloors && !upperPlateRect(spec, 2)) {
         const plateMat = new THREE.MeshStandardMaterial({ color: 0xb3a284, roughness: 0.85, transparent: true, opacity: 0.92 });
         const plate = box(
           Math.max(1, width - tE - tW), 0.4, Math.max(1, depth - tN - tS),
@@ -4222,6 +4279,17 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       grid.userData.generated = true;
       group.add(grid);
       }
+
+      // The 3D view reflects the selection like Plan and Detail do: whatever is
+      // selected — wall band, roof, opening, pad — glows warm. (Rooms and
+      // elements already carry their own active tint; the glow just unifies it.)
+      group.traverse((node) => {
+        if (!node.isMesh || !node.material || !node.material.emissive) return;
+        if (String(node.userData.roomId || '') === String(selectedRoom || '')) {
+          node.material.emissive = new THREE.Color(0xc88a5b);
+          node.material.emissiveIntensity = 0.35;
+        }
+      });
 
       // Exploded view: pull the systems apart so their joints and layers read —
       // roof lifts, walls slide outward by side, upper bands rise a little more,
@@ -4835,7 +4903,9 @@ function App() {
   const [layersOpen, setLayersOpen] = useState(false);
   // First run (nothing saved anywhere): ask how to begin instead of silently
   // dropping the visitor into a finished sample house. Also reusable as "New".
-  const [welcomeOpen, setWelcomeOpen] = useState(() => !initialSaved);
+  // The opening card is the front door: what the app is, how to use it, and
+  // continue / start-fresh choices. It shows on every open; Continue is one tap.
+  const [welcomeOpen, setWelcomeOpen] = useState(true);
   const [welcomeIsFirstRun, setWelcomeIsFirstRun] = useState(() => !initialSaved);
   const [welcomeName, setWelcomeName] = useState('');
   const [geoQuery, setGeoQuery] = useState('');
@@ -5051,7 +5121,8 @@ function App() {
         const result = await requestCurrentProjectState();
         if (!cancelled && result?.state?.spec) {
           restoreDashboardState(result.state);
-          setWelcomeOpen(false);
+          // A design exists — the opening card stays up as the front door,
+          // now offering "Continue where you left off."
           setWelcomeIsFirstRun(false);
         }
       } catch (error) {
@@ -6046,20 +6117,51 @@ function App() {
 
   function addStorey() {
     const next = Math.min(3, floorCount(spec) + 1);
-    // Just add the storey — do NOT auto-drop a stair. A stair depends on how the
-    // rest of the floor lays out, so it's added later, by hand: Rooms → Add a
-    // fixture → Stairs, or the one-click "Add a stair" fix in Review (the council
-    // check flags it as a reminder until then). Daniel's call: place first, stair after.
+    // Adds the storey AND its extent plate — the plate defines how much of the
+    // footprint the storey covers. Full footprint by default; drag/resize it in
+    // the Plan (on that floor) to put the storey over only one side. No stair is
+    // auto-dropped (a stair depends on the layout — add it when things settle).
     const hasStair = (spec.rooms || []).concat(spec.elements || []).some((o) => /stair|ladder/i.test(o.name || ''));
+    const { baseWallFt } = storeyInfo(spec.shell);
+    const operations = [{ type: 'set_shell', field: 'storeys', value: String(next) }];
+    if (!upperPlateRect(spec, next)) {
+      operations.push({
+        type: 'add_element',
+        name: `Storey ${next} extent`,
+        category: 'floor',
+        x: 0, y: 0, z: baseWallFt * (next - 1),
+        w: Number(spec.shell.widthFt), d: Number(spec.shell.depthFt), h: 0.4,
+        level: next,
+        reason: 'How much of the footprint this storey covers — resize it in the Plan.'
+      });
+    }
     void applyBackendOperations({
-      operations: [{ type: 'set_shell', field: 'storeys', value: String(next) }],
+      operations,
       promptText: `Add a storey (now ${next})`,
       logPrefix: 'Storeys',
-      chatText: hasStair
-        ? `Added a storey — floor ${next} is ready to lay out.`
-        : `Added a storey — floor ${next} is ready to lay out. Add a stair once the layout settles (Rooms → Add a fixture → Stairs, or the "Add a stair" fix in Review) so it lands where you want it.`
+      chatText: `Added storey ${next} over the whole footprint — switch to its floor in the Plan and resize its extent plate to put it over only part of the building.${hasStair ? '' : ' Add a stair once the layout settles.'}`
     });
     setActiveFloor(next);
+  }
+
+  function removeStorey() {
+    const current = floorCount(spec);
+    if (current <= 1) return;
+    const next = current - 1;
+    const operations = [{ type: 'set_shell', field: 'storeys', value: String(next) }];
+    // The removed level's extent plates go; rooms up there come down to ground
+    // rather than vanishing — removing a storey must never delete living space.
+    (spec.elements || []).filter((element) => element.category === 'floor' && Number(element.level || 1) === current)
+      .forEach((plate) => operations.push({ type: 'remove_object', targetId: plate.id, name: plate.name }));
+    const strandedRooms = (spec.rooms || []).filter((room) => Number(room.level || 1) === current);
+    strandedRooms.forEach((room) => operations.push({ type: 'update_object', targetId: room.id, name: room.name, field: 'level', value: '1' }));
+    void applyBackendOperations({
+      operations,
+      promptText: `Remove storey ${current}`,
+      logPrefix: 'Storeys',
+      chatText: `Removed storey ${current}.${strandedRooms.length ? ` ${strandedRooms.length} room${strandedRooms.length === 1 ? ' that was' : 's that were'} up there moved to the ground floor — delete or rearrange as needed.` : ''}`
+    });
+    setActiveFloor(Math.min(activeFloor, next));
   }
 
   async function arrangeRooms() {
@@ -6246,6 +6348,7 @@ function App() {
           <div>
             <h1>Natural Building</h1>
           </div>
+          <button type="button" className="brandHelp" title="What is this? — the opening card" onClick={() => setWelcomeOpen(true)}>?</button>
         </div>
 
         <section className="panelBlock compact consoleSummary">
@@ -6372,15 +6475,14 @@ function App() {
                   <label>Wall height (ft)<input type="number" value={shellHeights[0] ?? spec.shell.wallHeightFt} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
                 )}
                 <label>Storeys
-                  <select value={String(storeyInfo(spec.shell).storeys)} onChange={(event) => updateShell('storeys', event.target.value)}>
-                    <option value="1">1 — single storey</option>
-                    <option value="1.5">1½ — loft with knee walls</option>
-                    <option value="2">2 — full two storeys</option>
-                    <option value="3">3 — three storeys</option>
-                  </select>
+                  <div className="storeyControl">
+                    <strong>{floorCount(spec)}</strong>
+                    <button type="button" className="secondary" disabled={floorCount(spec) >= 3} title="Add a storey — it gets an extent plate you can resize in the Plan" onClick={addStorey}>+ Add</button>
+                    <button type="button" className="secondary" disabled={floorCount(spec) <= 1} title="Remove the top storey — rooms up there move to the ground floor" onClick={removeStorey}>− Remove</button>
+                  </div>
                 </label>
               </div>
-              <p className="systemNote">Footprint: {spec.shell.widthFt} × {spec.shell.depthFt} ft = {Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt))} sf{storeyInfo(spec.shell).storeys > 1 ? ` · ${Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt) * storeyInfo(spec.shell).storeys)} sf heated across ${storeyInfo(spec.shell).storeys} storeys` : ''}. Per-wall heights, systems, and thickness live on the <b>Walls</b> page (a taller south than north makes a shed roof). Put a room upstairs by setting its Level in the inspector. Roof shape lives on the Roof page.</p>
+              <p className="systemNote">Footprint: {spec.shell.widthFt} × {spec.shell.depthFt} ft = {Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt))} sf{floorCount(spec) > 1 ? ` · ${fmtNum(derived.heatedFloor)} sf heated across ${floorCount(spec)} storeys` : ''}. Each added storey gets an <b>extent plate</b> — switch to that floor in the Plan and resize it to put the storey over only part of the building. Per-wall heights and systems live on the <b>Walls</b> page; put a room upstairs by setting its Level in the inspector.</p>
             </div>
             );
           })()}
@@ -7317,7 +7419,11 @@ function App() {
                       ['Rooms', (spec.rooms || []).map((room) => ({ id: room.id, label: room.name, sub: `${room.w}×${room.d}′` }))],
                       ['Walls', wallSections.map((wall) => ({ id: wall.id, label: wall.name, sub: wall.assembly }))],
                       ['Openings', (spec.openings || []).map((opening, index) => ({ id: `opening-${index}`, label: opening.label || `${titleCase(opening.wall)} ${titleCase(opening.type)}`, sub: `${opening.widthFt}′` }))],
-                      ['Structure & site', [{ id: 'roof-main', label: 'Roof', sub: spec.shell.roofType || 'gable' }, { id: 'site-pad', label: 'Site pad', sub: '' }]],
+                      ['Structure & site', [
+                        { id: 'roof-main', label: 'Roof', sub: spec.shell.roofType || 'gable' },
+                        { id: 'site-pad', label: 'Site pad', sub: '' },
+                        ...(spec.elements || []).filter((element) => element.category === 'floor').map((element) => ({ id: element.id, label: element.name || 'Storey extent', sub: `${element.w}×${element.d}′` }))
+                      ]],
                       ['Elements', (spec.elements || []).filter((element) => element.category !== 'floor').map((element) => ({ id: element.id, label: element.name, sub: titleCase(element.category || '') }))]
                     ].filter(([, items]) => items.length > 0).map(([groupLabel, items]) => (
                       <div className="selMenuGroup" key={groupLabel}>
@@ -7612,8 +7718,21 @@ function App() {
         <div className="welcomeOverlay">
           <div className="welcomeCard">
             <div className="welcomeMark" aria-hidden="true"><span className="brandGable" /></div>
-            <h2>{welcomeIsFirstRun ? 'Welcome — let\'s design a natural home' : 'Start a new design'}</h2>
-            <p className="welcomeIntro">Design system by system — walls, roof, water, power — with live cost and code checks, and a real BIM model at the end.</p>
+            <h2>Natural Building</h2>
+            <p className="welcomeIntro">A design studio for natural homes — straw bale, cob, timber — that keeps a real building model with live cost, code checks, and carbon while you work.</p>
+            <div className="welcomeHow">
+              <div><b>Design by system</b><span>Pick a system on the left — foundation, walls, roof, water — and set its plain numbers first.</span></div>
+              <div><b>Tap anything to edit it</b><span>The model is the selector: tap a wall, room, or window (or use the chip on the preview) and its controls open on the left. 3D, Plan, and Detail are three views of the same selection.</span></div>
+              <div><b>Ask for the big moves</b><span>The Studio chat adds rooms, moves walls, and consults the council. Review flags what doesn't add up — most flags have a one-tap fix.</span></div>
+              <div><b>Take it to the real world</b><span>Export a permit drawing set, an IFC model for any BIM tool, or a build plan with materials.</span></div>
+            </div>
+            {!welcomeIsFirstRun && (
+              <button className="welcomeContinue" onClick={() => { setWelcomeName(''); setWelcomeOpen(false); }}>
+                <b>Continue where you left off</b>
+                <small>{spec.projectName} · revision {spec.revision}</small>
+              </button>
+            )}
+            <div className="welcomeDivider">{welcomeIsFirstRun ? 'Start a design' : 'or start a new design'}</div>
             <label className="welcomeName">
               <span>Name your design</span>
               <input
@@ -7621,7 +7740,6 @@ function App() {
                 placeholder="e.g. Cedar Hollow Homestead"
                 value={welcomeName}
                 onChange={(event) => setWelcomeName(event.target.value)}
-                autoFocus
               />
             </label>
             <div className="welcomeChoices">
@@ -7636,8 +7754,7 @@ function App() {
             </div>
             {!welcomeIsFirstRun && (
               <div className="welcomeFoot">
-                <span>This replaces the design that's open now.</span>
-                <button className="welcomeCancel" onClick={() => { setWelcomeName(''); setWelcomeOpen(false); }}>Keep working instead</button>
+                <span>Starting new replaces the design that's open now.</span>
               </div>
             )}
           </div>
@@ -7646,7 +7763,10 @@ function App() {
 
       <aside className="rightPanel">
         <section className="panelBlock consolePanel chatPanel">
-          <div className="blockTitle"><Send size={16} /> Studio</div>
+          <div className="blockTitle chatTitle">
+            <span><Send size={16} /> Studio</span>
+            <button type="button" className="chatClose" title="Close the chat — reopen with the Chat button up top" onClick={() => setChatOpen(false)}>×</button>
+          </div>
           <p className="studioHint">Type a design edit, attach a sketch, or consult the team.</p>
           <div className="chatTargets compactTargets">
             <button className={chatTarget === 'design' ? 'chatTarget active' : 'chatTarget'} onClick={() => chooseChatTarget('design')}>
