@@ -9,7 +9,7 @@
 // north, origin at SW corner). The Dashboard uses site coords centered on the
 // house (x east, y north). Translate by centering.
 
-import { OPENING_TYPES, WALL_SIDES, resolveWallSide } from '../backend/bim-core.mjs';
+import { OPENING_TYPES, WALL_SIDES, resolveWallSide, hasCustomFootprint, footprintPolygon, footprintEdges, polygonArea } from '../backend/bim-core.mjs';
 
 const BLENDER_URL = 'http://localhost:8000';
 
@@ -82,6 +82,28 @@ export function specToDashboardState(spec) {
     y: cy - ((Number(el.y) || 0) + (Number(el.d) || 8) / 2),
   }));
 
+  // Custom (L/T/U) footprints: the add-on's procedural rebuild is still
+  // rectangle-based, so Blender/IFC model the BOUNDING RECTANGLE for now —
+  // an honest one-increment lag. The real outline and per-edge wall segments
+  // ride along so the add-on can pick them up when it learns the edge walk.
+  const customFootprint = hasCustomFootprint(spec);
+  const footprint = customFootprint ? footprintPolygon(spec) : null;
+  const wallSegments = customFootprint
+    ? footprintEdges(spec).map((edge) => {
+      const r = resolveWallSide(spec, edge.facing);
+      return {
+        key: edge.key,
+        facing: edge.facing,
+        x0: edge.x0, y0: edge.y0, x1: edge.x1, y1: edge.y1,
+        lengthFt: edge.lengthFt,
+        heightFt: r.heightFt,
+        assembly: r.assemblyKey,
+        thicknessFt: r.thicknessFt,
+        omitted: r.omitted,
+      };
+    })
+    : null;
+
   return {
     length: widthFt,
     width: depthFt,
@@ -91,6 +113,7 @@ export function specToDashboardState(spec) {
     showRafters: true,
     hasGreenhouse: false, // this app's specs are conventional envelopes by default
     walls,
+    ...(customFootprint ? { footprint, footprintAreaSf: Math.round(polygonArea(footprint)), wallSegments } : {}),
     customOpenings,
     rooms,
     naturalElements,

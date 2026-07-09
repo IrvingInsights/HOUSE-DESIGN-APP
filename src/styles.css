@@ -4107,3 +4107,8 @@ button.danger:hover,
 }
 .detailHint { font-size: 12.5px; color: #868A7C; max-width: 560px; text-align: center; line-height: 1.55; margin: 0; }
 .detailEmpty { font-size: 14px; color: #868A7C; max-width: 420px; text-align: center; line-height: 1.6; }
+
+/* --- Geometry pass: wall move/split controls (inspector) -------------------- */
+.wallMoveRow { display: flex; gap: 6px; align-items: center; }
+.wallMoveRow input { width: 64px; flex: 0 0 auto; }
+.wallMoveRow button { flex: 0 0 auto; padding: 6px 10px; font-size: 12px; white-space: nowrap; }

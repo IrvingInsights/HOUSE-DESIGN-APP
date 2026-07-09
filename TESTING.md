@@ -45,9 +45,14 @@ complex instructions won't.
 
 ## Known limitations (honest list)
 
-- Footprints are rectangular; a partial upper storey works, but the roof
-  still spans the full footprint (stepped roofs are in progress). No L/U
-  plan shapes yet.
+- Footprints can now be L / T / U shapes (drag a wall edge in the Plan view,
+  or tap a wall → "Split into 3" → drag the middle), and a partial upper
+  storey gets a real **stepped roof** (upper roof over the storey, low wings
+  over the rest). Still honest gaps: roof VALLEYS aren't modeled (segments
+  just meet), skylights on stepped/L roofs sit approximately, and the
+  **Blender/IFC export + permit sheets still model the bounding rectangle**
+  for a custom outline — the app's own model, costs, and checks use the real
+  shape.
 - Costs/carbon/heat numbers are directional early-design figures, not
   stamped engineering.
 - One shared design per server ("the current project") — two browser tabs

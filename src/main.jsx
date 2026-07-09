@@ -2,7 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
 import { pushToBlender, exportIfcViaBlender } from './blenderBridge.js';
-import { OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES, resolveInsulation } from '../backend/bim-core.mjs';
+import {
+  OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES, resolveInsulation,
+  footprintPolygon, footprintEdges, hasCustomFootprint, polygonArea, polygonPerimeter, expandFootprint,
+  decomposeFootprint, subtractRect, subtractRectFromFootprint, rectInFootprint, pointInFootprint, edgeForOpening
+} from '../backend/bim-core.mjs';
 import {
   AlertTriangle,
   Box,
@@ -850,13 +854,16 @@ function rectsOverlap(a, b, gap = 0) {
 
 // Find the first free spot for a w×d room inside the shell that doesn't collide
 // with existing rooms — so adding a room never has to disturb the others.
-function findFreeSpot(shellW, shellD, rooms, w, d) {
+function findFreeSpot(shellW, shellD, rooms, w, d, footprint = null) {
   const margin = 1;
   const gap = 0.5;
   for (let y = margin; y + d <= shellD - margin + 0.01; y += 1) {
     for (let x = margin; x + w <= shellW - margin + 0.01; x += 1) {
       const cand = { x, y, w, d };
-      if (!rooms.some((r) => rectsOverlap(cand, r, gap))) return { x: Math.round(x * 2) / 2, y: Math.round(y * 2) / 2 };
+      if (rooms.some((r) => rectsOverlap(cand, r, gap))) continue;
+      // On an L/U footprint the spot must sit inside the outline, not the notch.
+      if (footprint && !rectInFootprint(footprint, { x: x - 0.5, y: y - 0.5, w: w + 1, d: d + 1 })) continue;
+      return { x: Math.round(x * 2) / 2, y: Math.round(y * 2) / 2 };
     }
   }
   return null;
@@ -882,7 +889,8 @@ function planNewRoomPlacements(spec, newRooms, level = 1) {
     while (taken.has(name)) { name = `${nr.name} ${n}`; n += 1; }
     taken.add(name);
     names.push(name);
-    let spot = findFreeSpot(shellW, shellD, virtualRooms, nr.w, nr.d);
+    const fpForSpots = hasCustomFootprint(spec) && shellW === Number(spec.shell.widthFt) && shellD === Number(spec.shell.depthFt) ? footprintPolygon(spec) : null;
+    let spot = findFreeSpot(shellW, shellD, virtualRooms, nr.w, nr.d, fpForSpots);
     if (!spot) {
       if (nr.w > shellW - 2) shellW = clamp(Math.ceil(nr.w + 2), 18, 120);
       const bottom = virtualRooms.length ? Math.max(...virtualRooms.map((r) => r.y + r.d)) : 1;
@@ -1278,6 +1286,84 @@ function getWallSections(spec) {
   const { storeys, extraFt } = storeyInfo(spec.shell);
   // Upper walls ring the storey's EXTENT plate, not necessarily the footprint.
   const plate2 = upperPlateRect(spec, 2);
+
+  // Custom footprint: walls are the POLYGON EDGES (id wall-e0, wall-e1, …).
+  // Construction is still keyed by facing (all north-facing edges share the
+  // 'north' wall settings), so every editor keeps working through side.
+  if (hasCustomFootprint(spec)) {
+    const edgeSection = (edge, level) => {
+      const r = resolveWallSide(spec, edge.facing, level);
+      if (r.omitted) return null;
+      const upper = level > 1;
+      const heightFt = upper ? extraFt : r.heightFt;
+      const name = `${WALL_SIDE_LABELS[edge.facing]} Wall${edge.facingSeq > 1 ? ` ${edge.facingSeq}` : ''}`;
+      return {
+        id: upper ? `wall-${edge.key}-u` : `wall-${edge.key}`,
+        name: upper ? `${name} (upper)` : name,
+        side: edge.facing,
+        edgeIndex: edge.index,
+        edgeKey: edge.key,
+        storey: upper ? 'upper' : 'ground',
+        level: upper ? 2 : 1,
+        lengthFt: edge.lengthFt,
+        heightFt,
+        x: Math.min(edge.x0, edge.x1),
+        y: Math.min(edge.y0, edge.y1),
+        x0: edge.x0, y0: edge.y0, x1: edge.x1, y1: edge.y1,
+        horizontal: edge.horizontal,
+        category: 'wall-section',
+        type: 'wall',
+        w: edge.horizontal ? edge.lengthFt : r.thicknessFt,
+        d: edge.horizontal ? r.thicknessFt : edge.lengthFt,
+        h: heightFt,
+        assembly: r.assembly.label,
+        assemblyKey: r.assemblyKey,
+        thicknessFt: r.thicknessFt,
+        rValue: r.assembly.rValue,
+        interiorFinish: r.interiorFinish,
+        exteriorFinish: r.exteriorFinish,
+        note: `${r.assembly.label} (R≈${r.assembly.rValue}, ${r.thicknessFt.toFixed(2)}' thick); ${edge.lengthFt}' long, ${heightFt}' ${upper ? 'of upper storey' : 'high'}. One segment of the ${edge.facing}-facing walls — construction is shared across that facing. Move it in the Plan view.`
+      };
+    };
+    const edges = footprintEdges(spec);
+    const sections = edges.map((edge) => edgeSection(edge, 1)).filter(Boolean);
+    if (storeys > 1 && extraFt > 0) {
+      if (plate2) {
+        // Upper storey rings its extent plate — a plain rectangle, so the four
+        // cardinal upper sections stay exactly as on a legacy design.
+        for (const side of WALL_SIDES) {
+          const r = resolveWallSide(spec, side, 2);
+          if (r.omitted) continue;
+          sections.push({
+            id: `wall-${side}-u`,
+            name: `${layout[side].name} (upper)`,
+            side,
+            storey: 'upper',
+            level: 2,
+            lengthFt: side === 'north' || side === 'south' ? plate2.w : plate2.d,
+            heightFt: extraFt,
+            x: side === 'east' ? plate2.x + plate2.w : plate2.x,
+            y: side === 'south' ? plate2.y + plate2.d : plate2.y,
+            category: 'wall-section',
+            type: 'wall',
+            w: side === 'north' || side === 'south' ? plate2.w : r.thicknessFt,
+            d: side === 'east' || side === 'west' ? plate2.d : r.thicknessFt,
+            h: extraFt,
+            assembly: r.assembly.label,
+            assemblyKey: r.assemblyKey,
+            thicknessFt: r.thicknessFt,
+            rValue: r.assembly.rValue,
+            interiorFinish: r.interiorFinish,
+            exteriorFinish: r.exteriorFinish,
+            note: `${r.assembly.label} upper band around the storey extent plate.`
+          });
+        }
+      } else {
+        sections.push(...edges.map((edge) => edgeSection(edge, 2)).filter(Boolean));
+      }
+    }
+    return sections;
+  }
   const buildSection = (side, level) => {
     const r = resolveWallSide(spec, side, level);
     if (r.omitted) return null;
@@ -2514,9 +2600,23 @@ function repairNorthBandRooms(spec) {
 
 function detectIssues(spec) {
   const issues = [];
-  const enclosedRooms = spec.rooms.filter((room) => room.x >= 0 && room.y >= 0 && room.x + room.w <= spec.shell.widthFt && room.y + room.d <= spec.shell.depthFt);
+  const customFpCheck = hasCustomFootprint(spec);
+  const fpPolyCheck = customFpCheck ? footprintPolygon(spec) : null;
+  const enclosedRooms = spec.rooms.filter((room) => (customFpCheck
+    ? rectInFootprint(fpPolyCheck, { x: room.x, y: room.y, w: room.w, d: room.d })
+    : room.x >= 0 && room.y >= 0 && room.x + room.w <= spec.shell.widthFt && room.y + room.d <= spec.shell.depthFt));
   const conditionedArea = enclosedRooms.reduce((sum, room) => sum + room.w * room.d, 0);
-  const shellArea = spec.shell.widthFt * spec.shell.depthFt;
+  const shellArea = customFpCheck ? polygonArea(fpPolyCheck) : spec.shell.widthFt * spec.shell.depthFt;
+  // A room hanging outside the walls of an L/U footprint is a real flag —
+  // on a rectangle it just reads as "outside the shell" in the plan.
+  if (customFpCheck) {
+    const strayRoom = spec.rooms.find((room) => Number(room.level || 1) === 1
+      && room.x >= 0 && room.y >= 0 && room.x + room.w <= spec.shell.widthFt && room.y + room.d <= spec.shell.depthFt
+      && !rectInFootprint(fpPolyCheck, { x: room.x, y: room.y, w: room.w, d: room.d }));
+    if (strayRoom) {
+      issues.push({ severity: 'warning', title: `${strayRoom.name} sits outside the building outline`, owner: 'Architect', system: 'rooms', fix: 'The footprint is not a plain rectangle — drag the room fully inside the outline in the Plan view, or move a wall edge out to enclose it.' });
+    }
+  }
 
   if (conditionedArea > shellArea * 1.08) {
     issues.push({ severity: 'critical', title: 'Room program exceeds shell area', owner: 'Architect', system: 'rooms', fix: 'Reduce room footprints or enlarge the shell before issuing drawings.' });
@@ -2639,7 +2739,11 @@ function deriveDesign(spec, wallSections) {
   const utilities = utilitiesOf(spec);
   const w = Number(spec.shell.widthFt) || 0;
   const d = Number(spec.shell.depthFt) || 0;
-  const floor = w * d;
+  // Custom footprints measure the real polygon; a legacy rectangle keeps the
+  // exact w*d / 2(w+d) formulas so existing designs don't shift by a cent.
+  const customFp = hasCustomFootprint(spec);
+  const fpPoly = customFp ? footprintPolygon(spec) : null;
+  const floor = customFp ? polygonArea(fpPoly) : w * d;
   const { storeys, extraFt: storeyExtraFt, baseWallFt } = storeyInfo(spec.shell);
   // Upper storeys cover their extent PLATE (a storey can sit over only one
   // side of the building); no plate = the full footprint. Lofts and towers
@@ -2657,7 +2761,9 @@ function deriveDesign(spec, wallSections) {
   const heatedFloor = floor + upperFloorArea + loftTowerArea;
   const pitch = Number(spec.shell.roofPitch || 0.32);
   const overhangs = resolveOverhangs(spec.shell);
-  const roofFootprint = (w + overhangs.east + overhangs.west) * (d + overhangs.north + overhangs.south);
+  const roofFootprint = customFp
+    ? polygonArea(expandFootprint(fpPoly, overhangs))
+    : (w + overhangs.east + overhangs.west) * (d + overhangs.north + overhangs.south);
   const roofArea = roofFootprint / Math.cos(Math.atan(pitch));
   // True face area per wall, roof-shape aware:
   // - shed: east/west walls are RAKED — a trapezoid from the north eave to
@@ -2681,7 +2787,10 @@ function deriveDesign(spec, wallSections) {
         : wall.lengthFt * ((northEaveFt + southEaveFt) / 2);
     }
     let area = wall.lengthFt * wall.heightFt;
-    if (roofTypeNow === 'gable' && topmost && (wall.side === 'north' || wall.side === 'south')) {
+    // Gable-peak triangles ride the topmost N/S walls of a plain rectangle.
+    // On a custom footprint the roof breaks into segments whose gables vary —
+    // the small triangle areas are left out (a slight, honest undercount).
+    if (roofTypeNow === 'gable' && !customFp && topmost && (wall.side === 'north' || wall.side === 'south')) {
       area += (wall.lengthFt * gableRiseFt) / 2;
     }
     return area;
@@ -2772,7 +2881,7 @@ function deriveDesign(spec, wallSections) {
   const waterCostBySource = { well: 7500, spring: 2500, catchment: 3500, town: 1500 };
   const wasteCostByMethod = { septic: 8500, composting: 1500, reedbed: 1200 };
   const foundationCostPsf = { rubble: 8, stemwall: 12, slab: 15 };
-  const perimeterFt = 2 * (w + d);
+  const perimeterFt = customFp ? polygonPerimeter(fpPoly) : 2 * (w + d);
   const stemwallHeightFt = Math.min(6, Math.max(0.5, Number(utilities.stemwallHeightFt) || 1.5));
   // Stem wall cost scales with the wall itself: base prep + footing by floor
   // area, plus the perimeter wall by face area (calibrated so the default
@@ -3628,16 +3737,20 @@ const PLAN_CONTEXT_LABEL = {
   rooms: 'Room plan — drag to move, corners to resize',
   windows: 'Openings plan — white gaps mark windows & doors'
 };
-function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShell, context = null, activeFloor = 1 }) {
+function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShell, onMoveEdge, context = null, activeFloor = 1 }) {
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
   const [shellGhost, setShellGhost] = useState(null);
+  const [edgeDrag, setEdgeDrag] = useState(null);
   const W = Number(spec.shell.widthFt) || 36;
   const D = Number(spec.shell.depthFt) || 28;
   const pad = Math.max(6, Math.round(Math.max(W, D) * 0.14));
   const snap = (v) => Math.round(v * 2) / 2;
   const buildingContext = ['foundation', 'shell', 'frame', 'flooring', 'roof'].includes(context);
   const siteContext = context === 'site' || context === 'outdoors';
+  const fpCustom = hasCustomFootprint(spec);
+  const fpPoly = footprintPolygon(spec);
+  const fpEdgesList = footprintEdges(spec);
   // In a building context the footprint is the subject; dim the room fill so it
   // recedes. In a site context the outbuildings are the subject; dim the house.
   const roomsDim = buildingContext ? 0.18 : siteContext ? 0.28 : 1;
@@ -3696,6 +3809,28 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShel
     setDrag(null);
   }
 
+  // Drag a wall EDGE perpendicular to itself — "move a wall" / make an L.
+  function startEdgeDrag(event, edge) {
+    event.stopPropagation();
+    event.preventDefault();
+    try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
+    const { fx, fy } = clientToFeet(event);
+    setEdgeDrag({ index: edge.index, edge, startFx: fx, startFy: fy, offset: 0 });
+    onSelect?.(`wall-${edge.key}`);
+  }
+  function onEdgeMove(event) {
+    if (!edgeDrag) return;
+    const { fx, fy } = clientToFeet(event);
+    // outward component of the pointer delta along the edge normal
+    const raw = (fx - edgeDrag.startFx) * edgeDrag.edge.nx + (fy - edgeDrag.startFy) * edgeDrag.edge.ny;
+    setEdgeDrag((current) => current && { ...current, offset: clamp(snap(raw), -48, 48) });
+  }
+  function endEdgeDrag() {
+    if (!edgeDrag) return;
+    if (Math.abs(edgeDrag.offset) >= 0.5 && onMoveEdge) onMoveEdge(edgeDrag.index, edgeDrag.offset);
+    setEdgeDrag(null);
+  }
+
   function startShellDrag(event) {
     event.stopPropagation();
     event.preventDefault();
@@ -3732,25 +3867,66 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShel
         className="planSvg"
         viewBox={`${-pad} ${-pad} ${W + pad * 2} ${D + pad * 2}`}
         preserveAspectRatio="xMidYMid meet"
-        onPointerMove={(event) => { onPointerMove(event); onShellMove(event); }}
-        onPointerUp={(event) => { endDrag(); endShellDrag(event); }}
-        onPointerLeave={(event) => { endDrag(); endShellDrag(event); }}
+        onPointerMove={(event) => { onPointerMove(event); onShellMove(event); onEdgeMove(event); }}
+        onPointerUp={(event) => { endDrag(); endShellDrag(event); endEdgeDrag(); }}
+        onPointerLeave={(event) => { endDrag(); endShellDrag(event); endEdgeDrag(); }}
         onClick={() => {}}
       >
         {/* site around the house */}
         <rect x={-pad} y={-pad} width={W + pad * 2} height={D + pad * 2} fill="var(--canvas)" />
         {gridLines}
         {/* shell / exterior wall — the footprint (editable in a building context) */}
-        <rect x={0} y={0} width={shellW} height={shellD} fill={buildingContext ? 'var(--active-line)' : 'none'} fillOpacity={buildingContext ? 0.08 : 0} stroke={buildingContext ? 'var(--active-line)' : 'var(--ink3)'} strokeWidth={buildingContext ? 0.5 : 1} />
-        <rect x={0.7} y={0.7} width={Math.max(0, shellW - 1.4)} height={Math.max(0, shellD - 1.4)} fill="none" stroke="var(--line2)" strokeWidth={0.12} />
+        {fpCustom ? (
+          <>
+            <polygon points={fpPoly.map(([px, py]) => `${px},${py}`).join(' ')} fill={buildingContext ? 'var(--active-line)' : 'none'} fillOpacity={buildingContext ? 0.08 : 0} stroke={buildingContext ? 'var(--active-line)' : 'var(--ink3)'} strokeWidth={buildingContext ? 0.5 : 1} />
+            {shellGhost && <rect x={0} y={0} width={shellW} height={shellD} fill="none" stroke="var(--active-line)" strokeWidth={0.2} strokeDasharray="1 0.6" pointerEvents="none" />}
+          </>
+        ) : (
+          <>
+            <rect x={0} y={0} width={shellW} height={shellD} fill={buildingContext ? 'var(--active-line)' : 'none'} fillOpacity={buildingContext ? 0.08 : 0} stroke={buildingContext ? 'var(--active-line)' : 'var(--ink3)'} strokeWidth={buildingContext ? 0.5 : 1} />
+            <rect x={0.7} y={0.7} width={Math.max(0, shellW - 1.4)} height={Math.max(0, shellD - 1.4)} fill="none" stroke="var(--line2)" strokeWidth={0.12} />
+          </>
+        )}
         {buildingContext && onResizeShell && (
           <>
             <circle cx={shellW} cy={shellD} r={1.1} fill="var(--active-line)" stroke="#fff" strokeWidth={0.18} style={{ cursor: 'se-resize' }} onPointerDown={startShellDrag} />
             {shellGhost && <text x={shellW / 2} y={shellD / 2} textAnchor="middle" fontSize={2.4} fill="var(--active-line)" fontWeight="700" pointerEvents="none">{shellW}′ × {shellD}′</text>}
           </>
         )}
+        {/* wall edges: grab-and-slide in a building context ("move a wall") */}
+        {buildingContext && onMoveEdge && fpEdgesList.map((edge) => {
+          const active = edgeDrag && edgeDrag.index === edge.index;
+          const gx = active ? edge.nx * edgeDrag.offset : 0;
+          const gy = active ? edge.ny * edgeDrag.offset : 0;
+          return (
+            <g key={edge.key}>
+              {active && (
+                <>
+                  <line x1={edge.x0 + gx} y1={edge.y0 + gy} x2={edge.x1 + gx} y2={edge.y1 + gy} stroke="var(--active-line)" strokeWidth={0.6} strokeDasharray="1 0.6" pointerEvents="none" />
+                  <line x1={edge.x0} y1={edge.y0} x2={edge.x0 + gx} y2={edge.y0 + gy} stroke="var(--active-line)" strokeWidth={0.15} strokeDasharray="0.5 0.5" pointerEvents="none" />
+                  <line x1={edge.x1} y1={edge.y1} x2={edge.x1 + gx} y2={edge.y1 + gy} stroke="var(--active-line)" strokeWidth={0.15} strokeDasharray="0.5 0.5" pointerEvents="none" />
+                  <text x={(edge.x0 + edge.x1) / 2 + gx + edge.nx * 2.2} y={(edge.y0 + edge.y1) / 2 + gy + edge.ny * 2.2} textAnchor="middle" fontSize={2.2} fill="var(--active-line)" fontWeight="700" pointerEvents="none">
+                    {edgeDrag.offset > 0 ? '+' : ''}{edgeDrag.offset}′
+                  </text>
+                </>
+              )}
+              <line
+                x1={edge.x0} y1={edge.y0} x2={edge.x1} y2={edge.y1}
+                stroke="var(--active-line)" strokeWidth={1.6} strokeOpacity={active ? 0.35 : 0.001}
+                style={{ cursor: edge.horizontal ? 'ns-resize' : 'ew-resize' }}
+                onPointerDown={(event) => startEdgeDrag(event, edge)}
+              />
+            </g>
+          );
+        })}
         {/* the plan reflects the selection: a selected wall's edge glows */}
         {(() => {
+          const em = /^wall-e(\d+)/.exec(String(selectedRoom || ''));
+          if (em) {
+            const edge = fpEdgesList[Number(em[1])];
+            if (!edge) return null;
+            return <line x1={edge.x0} y1={edge.y0} x2={edge.x1} y2={edge.y1} stroke="var(--active-line)" strokeWidth={0.7} opacity={0.9} pointerEvents="none" />;
+          }
           const m = /^wall-(north|south|east|west)/.exec(String(selectedRoom || ''));
           if (!m) return null;
           const s = m[1];
@@ -3823,10 +3999,12 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShel
           const isSel = String(selectedRoom || '') === `opening-${(spec.openings || []).indexOf(o)}`;
           const stroke = isSel ? 'var(--active-line)' : '#e8e6dd';
           const sw = isSel ? 1.5 : 1.1;
-          if (o.wall === 'north') return <line key={i} x1={o.x} y1={0} x2={o.x + wide} y2={0} stroke={stroke} strokeWidth={sw} />;
-          if (o.wall === 'south') return <line key={i} x1={o.x} y1={D} x2={o.x + wide} y2={D} stroke={stroke} strokeWidth={sw} />;
-          if (o.wall === 'east') return <line key={i} x1={W} y1={o.y} x2={W} y2={o.y + wide} stroke={stroke} strokeWidth={sw} />;
-          if (o.wall === 'west') return <line key={i} x1={0} y1={o.y} x2={0} y2={o.y + wide} stroke={stroke} strokeWidth={sw} />;
+          // On a custom footprint the gap draws on the opening's actual edge.
+          const oEdge = fpCustom ? edgeForOpening(spec, o) : null;
+          const lineNS = oEdge && oEdge.horizontal ? oEdge.y0 : (o.wall === 'north' ? 0 : D);
+          const lineEW = oEdge && !oEdge.horizontal ? oEdge.x0 : (o.wall === 'east' ? W : 0);
+          if (o.wall === 'north' || o.wall === 'south') return <line key={i} x1={o.x} y1={lineNS} x2={o.x + wide} y2={lineNS} stroke={stroke} strokeWidth={sw} />;
+          if (o.wall === 'east' || o.wall === 'west') return <line key={i} x1={lineEW} y1={o.y} x2={lineEW} y2={o.y + wide} stroke={stroke} strokeWidth={sw} />;
           return null;
         })}
         {/* dimensions */}
@@ -3834,7 +4012,7 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShel
         <text x={-pad + 1.6} y={D / 2} textAnchor="middle" fontSize={2} fill="var(--ink2)" transform={`rotate(-90 ${-pad + 1.6} ${D / 2})`}>{D}′</text>
       </svg>
       <div className="planNorth">▲ N</div>
-      <div className="planHint">{PLAN_CONTEXT_LABEL[context] || `${floorLabel(spec, activeFloor)} plan · drag to move, drag corners to resize (½ ft snap)`}{floorCount(spec) > 1 ? ' · switch floors top-left' : ''}</div>
+      <div className="planHint">{buildingContext && onMoveEdge ? `${PLAN_CONTEXT_LABEL[context] || 'Footprint'} · drag a wall edge to move that wall · corner dot resizes the whole plan` : PLAN_CONTEXT_LABEL[context] || `${floorLabel(spec, activeFloor)} plan · drag to move, drag corners to resize (½ ft snap)`}{floorCount(spec) > 1 ? ' · switch floors top-left' : ''}</div>
     </div>
   );
 }
@@ -4036,6 +4214,9 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       // over only one side of the building. No plate = the full footprint.
       const plate2 = upperPlateRect(spec, 2) || { x: 0, y: 0, w: width, d: depth };
       const wallMeshSpecs = [];
+      const customFp = hasCustomFootprint(spec);
+      const fpPoly = customFp ? footprintPolygon(spec) : null;
+      const fpEdges = customFp ? footprintEdges(spec) : null;
       const pushSideBoxes = (side, totalH, thickness, place) => {
         const groundH = Math.max(1, totalH - storeyLift);
         wallMeshSpecs.push({ side, storey: 'ground', mesh: place(thickness, groundH, 0) });
@@ -4050,7 +4231,67 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
           wallMeshSpecs.push({ side, storey: 'upper', mesh: upperMesh });
         }
       };
-      if (roofSpec.roofType === 'shed') {
+      if (customFp) {
+        // Custom footprint: one wall per polygon edge, thickness inward.
+        // Construction resolves by facing, so every north-facing segment wears
+        // the 'north' wall system. Under a shed roof the eave line runs
+        // north→south: horizontal segments seat at their own y, vertical
+        // segments rake between their two end heights.
+        const shed = roofSpec.roofType === 'shed';
+        const eaveAt = (yy) => northWallHeight + (southWallHeight - northWallHeight) * clamp(depth > 0 ? yy / depth : 0, 0, 1);
+        const hasPlate = Boolean(upperPlateRect(spec, 2));
+        fpEdges.forEach((edge) => {
+          const rG = wallResolved[edge.facing];
+          if (rG.omitted || omittedWalls.has(edge.facing)) return;
+          const t = rG.thicknessFt;
+          const midX = (edge.x0 + edge.x1) / 2;
+          const midY = (edge.y0 + edge.y1) / 2;
+          const cx = midX - edge.nx * (t / 2);
+          const cy = midY - edge.ny * (t / 2);
+          const len = edge.lengthFt;
+          const totalH = shed
+            ? (edge.horizontal ? eaveAt(edge.y0) : Math.max(eaveAt(edge.y0), eaveAt(edge.y1)))
+            : rG.heightFt + storeyLift;
+          const groundH = Math.max(1, totalH - storeyLift);
+          let mesh;
+          if (shed && !edge.horizontal) {
+            const z0 = Math.min(edge.y0, edge.y1);
+            const z1 = Math.max(edge.y0, edge.y1);
+            mesh = makeRakedWallSegment(cx - t / 2, cx + t / 2, z0, z1, Math.max(1, eaveAt(z0) - (hasPlate ? storeyLift : 0)), Math.max(1, eaveAt(z1) - (hasPlate ? storeyLift : 0)), wallMatOf(rG));
+          } else {
+            mesh = edge.horizontal
+              ? box(len, groundH, t, cx, groundH / 2, cy, wallMatOf(rG))
+              : box(t, groundH, len, cx, groundH / 2, cy, wallMatOf(rG));
+          }
+          wallMeshSpecs.push({ side: edge.facing, storey: 'ground', edgeKey: edge.key, mesh });
+          // No extent plate: the upper band rides this same edge.
+          if (storeyLift > 0 && !hasPlate) {
+            const u = wallUpper[edge.facing];
+            const tU = u.thicknessFt;
+            const ux = midX - edge.nx * (tU / 2);
+            const uy = midY - edge.ny * (tU / 2);
+            const upperMesh = edge.horizontal
+              ? box(len, storeyLift, tU, ux, groundH + storeyLift / 2, uy, wallMatOf(u))
+              : box(tU, storeyLift, len, ux, groundH + storeyLift / 2, uy, wallMatOf(u));
+            wallMeshSpecs.push({ side: edge.facing, storey: 'upper', edgeKey: edge.key, mesh: upperMesh });
+          }
+        });
+        // With a plate, upper bands ring IT — same cardinal ids as a rectangle.
+        if (storeyLift > 0 && hasPlate) {
+          const p = plate2;
+          WALL_SIDES.forEach((side) => {
+            if (omittedWalls.has(side) || wallResolved[side].omitted) return;
+            const u = wallUpper[side];
+            const tU = u.thicknessFt;
+            const groundH = Math.max(1, (shed ? Math.max(northWallHeight, southWallHeight) : wallResolved[side].heightFt + storeyLift) - storeyLift);
+            const upperMesh = side === 'north' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + tU / 2, wallMatOf(u))
+              : side === 'south' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + p.d - tU / 2, wallMatOf(u))
+              : side === 'west' ? box(tU, storeyLift, p.d, p.x + tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u))
+              : box(tU, storeyLift, p.d, p.x + p.w - tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u));
+            wallMeshSpecs.push({ side, storey: 'upper', mesh: upperMesh });
+          });
+        }
+      } else if (roofSpec.roofType === 'shed') {
         pushSideBoxes('north', hN, tN, (t, h, y0) => box(width, h, t, width / 2, y0 + h / 2, t / 2, wallMatFor('north')));
         pushSideBoxes('south', hS, tS, (t, h, y0) => box(width, h, t, width / 2, y0 + h / 2, depth - t / 2, wallMatFor('south')));
         wallMeshSpecs.push({ side: 'west', storey: 'ground', mesh: makeShedSideWall(0, tW, depth, northWallHeight, southWallHeight, wallMatFor('west')) });
@@ -4061,12 +4302,15 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
         pushSideBoxes('west', hW, tW, (t, h, y0) => box(t, h, depth, t / 2, y0 + h / 2, depth / 2, wallMatFor('west')));
         pushSideBoxes('east', hE, tE, (t, h, y0) => box(t, h, depth, width - t / 2, y0 + h / 2, depth / 2, wallMatFor('east')));
       }
-      wallMeshSpecs.forEach(({ side, storey, mesh }) => {
+      wallMeshSpecs.forEach(({ side, storey, mesh, edgeKey }) => {
         if (omittedWalls.has(side) || wallResolved[side].omitted) return;
         if (!layers[`wall${titleCase(side)}`]) return;
         const resolved = storey === 'upper' ? wallUpper[side] : wallResolved[side];
         mesh.name = `${titleCase(side)} Wall${storey === 'upper' ? ' (upper)' : ''} - ${resolved.assembly.label}`;
-        mesh.userData.roomId = storey === 'upper' ? `wall-${side}-u` : `wall-${side}`;
+        mesh.userData.roomId = edgeKey
+          ? (storey === 'upper' ? `wall-${edgeKey}-u` : `wall-${edgeKey}`)
+          : (storey === 'upper' ? `wall-${side}-u` : `wall-${side}`);
+        mesh.userData.wallSide = side;
         roomMeshes.push(mesh);
         group.add(mesh);
       });
@@ -4083,12 +4327,22 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
         const stemH = Math.min(6, Math.max(0.5, Number(utilitiesOf(spec).stemwallHeightFt) || 1.5));
         const stemMat = new THREE.MeshStandardMaterial({ color: 0xaaa79b, roughness: 0.95 });
         const lip = 0.25;
-        const ring = [
-          box(width + lip * 2, stemH, tN + lip, width / 2, stemH / 2, tN / 2, stemMat),
-          box(width + lip * 2, stemH, tS + lip, width / 2, stemH / 2, depth - tS / 2, stemMat),
-          box(tW + lip, stemH, depth + lip * 2, tW / 2, stemH / 2, depth / 2, stemMat),
-          box(tE + lip, stemH, depth + lip * 2, width - tE / 2, stemH / 2, depth / 2, stemMat)
-        ];
+        const ring = customFp
+          // Custom footprint: the plinth follows every polygon edge.
+          ? fpEdges.map((edge) => {
+            const t = wallResolved[edge.facing].thicknessFt;
+            const cx = (edge.x0 + edge.x1) / 2 - edge.nx * (t / 2);
+            const cy = (edge.y0 + edge.y1) / 2 - edge.ny * (t / 2);
+            return edge.horizontal
+              ? box(edge.lengthFt + lip * 2, stemH, t + lip, cx, stemH / 2, cy, stemMat)
+              : box(t + lip, stemH, edge.lengthFt + lip * 2, cx, stemH / 2, cy, stemMat);
+          })
+          : [
+            box(width + lip * 2, stemH, tN + lip, width / 2, stemH / 2, tN / 2, stemMat),
+            box(width + lip * 2, stemH, tS + lip, width / 2, stemH / 2, depth - tS / 2, stemMat),
+            box(tW + lip, stemH, depth + lip * 2, tW / 2, stemH / 2, depth / 2, stemMat),
+            box(tE + lip, stemH, depth + lip * 2, width - tE / 2, stemH / 2, depth / 2, stemMat)
+          ];
         ring.forEach((segment) => { segment.name = 'Stem wall foundation'; group.add(segment); });
       }
 
@@ -4199,29 +4453,37 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
             const slopeAngle = Math.atan2(Math.max(0, gableRise - 0.25), width / 2);
             mesh.rotation.z = onWest ? slopeAngle : -slopeAngle;
           }
-        } else if (profile.bay) {
-          // Bay window: a wood-framed box pushed out from the wall, glass on its face.
-          const bayD = 1.4;
-          let glassFace = null;
-          if (opening.wall === 'south') {
-            mesh = box(size, openH, bayD, opening.x + size / 2, centerY, depth + bayD / 2, bayFrameMat);
-            glassFace = box(Math.max(1, size - 0.5), Math.max(1, openH - 0.5), 0.14, opening.x + size / 2, centerY, depth + bayD + 0.06, glassMat);
-          } else if (opening.wall === 'north') {
-            mesh = box(size, openH, bayD, opening.x + size / 2, centerY, -bayD / 2, bayFrameMat);
-            glassFace = box(Math.max(1, size - 0.5), Math.max(1, openH - 0.5), 0.14, opening.x + size / 2, centerY, -bayD - 0.06, glassMat);
-          } else if (opening.wall === 'east') {
-            mesh = box(bayD, openH, size, width + bayD / 2, centerY, opening.y + size / 2, bayFrameMat);
-            glassFace = box(0.14, Math.max(1, openH - 0.5), Math.max(1, size - 0.5), width + bayD + 0.06, centerY, opening.y + size / 2, glassMat);
-          } else {
-            mesh = box(bayD, openH, size, -bayD / 2, centerY, opening.y + size / 2, bayFrameMat);
-            glassFace = box(0.14, Math.max(1, openH - 0.5), Math.max(1, size - 0.5), -bayD - 0.06, centerY, opening.y + size / 2, glassMat);
-          }
-          if (glassFace) group.add(glassFace);
         } else {
-          if (opening.wall === 'north') mesh = box(size, openH, 0.18, opening.x + size / 2, centerY, -0.08, mat);
-          if (opening.wall === 'south') mesh = box(size, openH, 0.18, opening.x + size / 2, centerY, depth + 0.08, mat);
-          if (opening.wall === 'east') mesh = box(0.18, openH, size, width + 0.08, centerY, opening.y + size / 2, mat);
-          if (opening.wall === 'west') mesh = box(0.18, openH, size, -0.08, centerY, opening.y + size / 2, mat);
+          // The wall line the opening sits on: on a custom footprint it is the
+          // containing polygon edge; on a rectangle these are the classic
+          // 0 / depth / width / 0 lines (edgeForOpening returns exactly those).
+          const oEdge = customFp ? edgeForOpening(spec, opening) : null;
+          const lineNS = oEdge && oEdge.horizontal ? oEdge.y0 : (opening.wall === 'north' ? 0 : depth);
+          const lineEW = oEdge && !oEdge.horizontal ? oEdge.x0 : (opening.wall === 'east' ? width : 0);
+          if (profile.bay) {
+            // Bay window: a wood-framed box pushed out from the wall, glass on its face.
+            const bayD = 1.4;
+            let glassFace = null;
+            if (opening.wall === 'south') {
+              mesh = box(size, openH, bayD, opening.x + size / 2, centerY, lineNS + bayD / 2, bayFrameMat);
+              glassFace = box(Math.max(1, size - 0.5), Math.max(1, openH - 0.5), 0.14, opening.x + size / 2, centerY, lineNS + bayD + 0.06, glassMat);
+            } else if (opening.wall === 'north') {
+              mesh = box(size, openH, bayD, opening.x + size / 2, centerY, lineNS - bayD / 2, bayFrameMat);
+              glassFace = box(Math.max(1, size - 0.5), Math.max(1, openH - 0.5), 0.14, opening.x + size / 2, centerY, lineNS - bayD - 0.06, glassMat);
+            } else if (opening.wall === 'east') {
+              mesh = box(bayD, openH, size, lineEW + bayD / 2, centerY, opening.y + size / 2, bayFrameMat);
+              glassFace = box(0.14, Math.max(1, openH - 0.5), Math.max(1, size - 0.5), lineEW + bayD + 0.06, centerY, opening.y + size / 2, glassMat);
+            } else {
+              mesh = box(bayD, openH, size, lineEW - bayD / 2, centerY, opening.y + size / 2, bayFrameMat);
+              glassFace = box(0.14, Math.max(1, openH - 0.5), Math.max(1, size - 0.5), lineEW - bayD - 0.06, centerY, opening.y + size / 2, glassMat);
+            }
+            if (glassFace) group.add(glassFace);
+          } else {
+            if (opening.wall === 'north') mesh = box(size, openH, 0.18, opening.x + size / 2, centerY, lineNS - 0.08, mat);
+            if (opening.wall === 'south') mesh = box(size, openH, 0.18, opening.x + size / 2, centerY, lineNS + 0.08, mat);
+            if (opening.wall === 'east') mesh = box(0.18, openH, size, lineEW + 0.08, centerY, opening.y + size / 2, mat);
+            if (opening.wall === 'west') mesh = box(0.18, openH, size, lineEW - 0.08, centerY, opening.y + size / 2, mat);
+          }
         }
         if (mesh) {
           mesh.name = opening.label || `${opening.wall} ${opening.type}`;
@@ -4236,10 +4498,103 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
           roofMat.transparent = true;
           roofMat.opacity = layers.xray ? 0.4 : 0.55;
         }
-        const roof = makeRoof(width, depth, wallHeight, spec.shell.roofPitch, roofMat, roofSpec, resolveOverhangs(spec.shell));
-        roof.userData.roomId = 'roof-main';
-        roomMeshes.push(roof);
-        group.add(roof);
+        const oAll = resolveOverhangs(spec.shell);
+        const plateReal = upperPlateRect(spec, 2);
+        const fpAreaNow = customFp ? polygonArea(fpPoly) : width * depth;
+        // The roof STEPS when an upper storey covers only part of the plan:
+        // an upper roof over the extent plate, low wings over the remainder.
+        const steps = storeyLift > 0 && plateReal && plateReal.w * plateReal.d < fpAreaNow - 1;
+        if (!customFp && !steps) {
+          // Legacy path, byte-for-byte: one roof over the whole rectangle.
+          const roof = makeRoof(width, depth, wallHeight, spec.shell.roofPitch, roofMat, roofSpec, oAll);
+          roof.userData.roomId = 'roof-main';
+          roomMeshes.push(roof);
+          group.add(roof);
+        } else {
+          // Roof as SEGMENTS — per rectangle of an L/T/U footprint and/or the
+          // stepped upper-block + wings. Valleys are not modeled; segments meet.
+          const pitchNow = Number(spec.shell.roofPitch || 0.32);
+          const insideFp = (px, py) => (customFp
+            ? pointInFootprint(fpPoly, px, py)
+            : px > 0.01 && px < width - 0.01 && py > 0.01 && py < depth - 0.01);
+          const inPlate = (px, py) => Boolean(steps && plateReal
+            && px > plateReal.x + 0.01 && px < plateReal.x + plateReal.w - 0.01
+            && py > plateReal.y + 0.01 && py < plateReal.y + plateReal.d - 0.01);
+          // A segment side is a true eave only when nothing lies beyond it:
+          // probe just outside — upper wall → tuck under it; neighbor segment
+          // → hairline lap; open air → the shell overhang for that facing.
+          const segOverhangs = (rect, isUpper) => {
+            const probe = 0.4;
+            const probes = {
+              north: [rect.x + rect.w / 2, rect.y - probe],
+              south: [rect.x + rect.w / 2, rect.y + rect.d + probe],
+              west: [rect.x - probe, rect.y + rect.d / 2],
+              east: [rect.x + rect.w + probe, rect.y + rect.d / 2]
+            };
+            const out = {};
+            for (const side of WALL_SIDES) {
+              const [px, py] = probes[side];
+              if (!isUpper && inPlate(px, py)) out[side] = 0.35;
+              else if (insideFp(px, py)) out[side] = 0.05;
+              else out[side] = oAll[side];
+            }
+            return out;
+          };
+          const segments = [];
+          if (steps) {
+            segments.push({ rect: { x: plateReal.x, y: plateReal.y, w: plateReal.w, d: plateReal.d }, eave: wallHeight, kind: 'full', upper: true });
+            const lowers = customFp
+              ? subtractRectFromFootprint(fpPoly, plateReal)
+              : subtractRect({ x: 0, y: 0, w: width, d: depth }, plateReal);
+            const groundEave = roofSpec.highWallHeightFt;
+            lowers.forEach((rect) => {
+              const overlapX = rect.x < plateReal.x + plateReal.w && rect.x + rect.w > plateReal.x;
+              const overlapY = rect.y < plateReal.y + plateReal.d && rect.y + rect.d > plateReal.y;
+              const touch = Math.abs(rect.y + rect.d - plateReal.y) < 0.05 && overlapX ? 'south'
+                : Math.abs(rect.y - (plateReal.y + plateReal.d)) < 0.05 && overlapX ? 'north'
+                : Math.abs(rect.x + rect.w - plateReal.x) < 0.05 && overlapY ? 'east'
+                : Math.abs(rect.x - (plateReal.x + plateReal.w)) < 0.05 && overlapY ? 'west'
+                : (Math.abs((rect.x + rect.w / 2) - (plateReal.x + plateReal.w / 2)) > Math.abs((rect.y + rect.d / 2) - (plateReal.y + plateReal.d / 2))
+                  ? ((rect.x + rect.w / 2) < (plateReal.x + plateReal.w / 2) ? 'east' : 'west')
+                  : ((rect.y + rect.d / 2) < (plateReal.y + plateReal.d / 2) ? 'south' : 'north'));
+              segments.push({ rect, eave: groundEave, kind: 'wing', highSide: touch });
+            });
+          } else {
+            decomposeFootprint(fpPoly).forEach((rect) => segments.push({ rect, eave: wallHeight, kind: 'full', upper: true }));
+          }
+          // The global shed plane (eave line north→south across the whole
+          // house) — 'full' shed segments are coplanar pieces of it.
+          const shedYAt = (zz) => {
+            const z0 = -oAll.north, z1 = depth + oAll.south;
+            const nH = roofSpec.northWallHeightFt + storeyLift + 0.28;
+            const sH = roofSpec.southWallHeightFt + storeyLift + 0.28;
+            return nH + (sH - nH) * clamp((zz - z0) / Math.max(0.01, z1 - z0), 0, 1);
+          };
+          segments.forEach((seg) => {
+            const o = segOverhangs(seg.rect, Boolean(seg.upper));
+            let mesh = null;
+            if (seg.kind === 'wing') {
+              mesh = makeStepRoofPlane(seg.rect, seg.highSide, seg.eave + 0.25, pitchNow, o, roofMat);
+            } else if (roofSpec.roofType === 'shed') {
+              mesh = makeShedPiece(seg.rect, o, shedYAt, roofMat);
+            } else if (roofSpec.roofType === 'flat') {
+              mesh = makeShedPiece(seg.rect, o, () => seg.eave + 0.25, roofMat);
+            } else if (roofSpec.roofType === 'hip') {
+              mesh = makeRoof(seg.rect.w, seg.rect.d, seg.eave, pitchNow, roofMat, roofSpec, o);
+              mesh.position.x += seg.rect.x;
+              mesh.position.z += seg.rect.y;
+            } else {
+              mesh = makeGableSegment(seg.rect, seg.eave, pitchNow, o, roofMat);
+            }
+            if (mesh) {
+              mesh.name = seg.kind === 'wing' ? 'Roof (lower wing)' : 'Roof';
+              mesh.userData.roomId = 'roof-main';
+              mesh.userData.generated = true;
+              roomMeshes.push(mesh);
+              group.add(mesh);
+            }
+          });
+        }
       }
 
       const fixedGridSize = Number(spec.shell.outdoorGridSizeFt || DEFAULT_OUTDOOR_GRID_SIZE_FT);
@@ -4303,7 +4658,8 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
           const name = String(node.name || '');
           if (id === 'roof-main' || /roof/i.test(name)) { node.position.y += 9; return; }
           if (id.startsWith('wall-')) {
-            const side = id.split('-')[1];
+            // Edge walls (wall-e3) carry their facing in userData.wallSide.
+            const side = node.userData.wallSide || id.split('-')[1];
             const off = sideOut[side];
             if (off) { node.position.x += off[0]; node.position.z += off[2]; }
             if (id.endsWith('-u')) node.position.y += 3;
@@ -4355,6 +4711,113 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       const mesh = new THREE.Mesh(geometry, material);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      mesh.userData.generated = true;
+      return mesh;
+    }
+
+    // A raked wall segment between z0..z1 (heights vary along z) — the
+    // per-edge cousin of makeShedSideWall for custom footprints under sheds.
+    function makeRakedWallSegment(x0, x1, z0, z1, h0, h1, material) {
+      const geometry = new THREE.BufferGeometry();
+      const vertices = new Float32Array([
+        x0, 0, z0, x1, 0, z0, x1, h0, z0, x0, h0, z0,
+        x0, 0, z1, x1, 0, z1, x1, h1, z1, x0, h1, z1
+      ]);
+      const indices = [
+        0, 1, 2, 0, 2, 3,
+        4, 6, 5, 4, 7, 6,
+        0, 4, 5, 0, 5, 1,
+        3, 2, 6, 3, 6, 7,
+        0, 3, 7, 0, 7, 4,
+        1, 5, 6, 1, 6, 2
+      ];
+      geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData.generated = true;
+      return mesh;
+    }
+
+    // One sloped plane over a rect: high along highSide (tucked against the
+    // upper block), falling away at the given pitch — the stepped roof's wing.
+    function makeStepRoofPlane(rect, highSide, topY, pitch, o, material) {
+      const x0 = rect.x - o.west, x1 = rect.x + rect.w + o.east;
+      const z0 = rect.y - o.north, z1 = rect.y + rect.d + o.south;
+      const run = (highSide === 'north' || highSide === 'south') ? (z1 - z0) : (x1 - x0);
+      const drop = Math.max(0.1, run * pitch);
+      const yAt = (px, pz) => {
+        if (highSide === 'north') return topY - ((pz - z0) / (z1 - z0)) * drop;
+        if (highSide === 'south') return topY - ((z1 - pz) / (z1 - z0)) * drop;
+        if (highSide === 'west') return topY - ((px - x0) / (x1 - x0)) * drop;
+        return topY - ((x1 - px) / (x1 - x0)) * drop;
+      };
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+        x0, yAt(x0, z0), z0,
+        x1, yAt(x1, z0), z0,
+        x1, yAt(x1, z1), z1,
+        x0, yAt(x0, z1), z1
+      ]), 3));
+      geometry.setIndex([0, 1, 2, 0, 2, 3]);
+      geometry.computeVertexNormals();
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.userData.generated = true;
+      return mesh;
+    }
+
+    // A flat-or-sloped quad over a rect where height is any function of z —
+    // flat roofs (constant) and coplanar pieces of the global shed plane.
+    function makeShedPiece(rect, o, yAt, material) {
+      const x0 = rect.x - o.west, x1 = rect.x + rect.w + o.east;
+      const z0 = rect.y - o.north, z1 = rect.y + rect.d + o.south;
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+        x0, yAt(z0), z0,
+        x1, yAt(z0), z0,
+        x1, yAt(z1), z1,
+        x0, yAt(z1), z1
+      ]), 3));
+      geometry.setIndex([0, 1, 2, 0, 2, 3]);
+      geometry.computeVertexNormals();
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.userData.generated = true;
+      return mesh;
+    }
+
+    // A gable over one rect segment with the ridge along its LONGER axis
+    // (an L's wing gets a wing-wise ridge). Two slopes + two end triangles.
+    function makeGableSegment(rect, eave, pitch, o, material) {
+      const x0 = rect.x - o.west, x1 = rect.x + rect.w + o.east;
+      const z0 = rect.y - o.north, z1 = rect.y + rect.d + o.south;
+      const spanX = x1 - x0, spanZ = z1 - z0;
+      const alongX = spanX >= spanZ;         // ridge runs east-west when wider
+      const ridgeY = eave + 0.25 + (Math.min(spanX, spanZ) / 2) * pitch;
+      const base = eave + 0.25;
+      const verts = [];
+      const quad = (p0, p1, p2, p3) => { verts.push(...p0, ...p1, ...p2, ...p0, ...p2, ...p3); };
+      const tri = (p0, p1, p2) => { verts.push(...p0, ...p1, ...p2); };
+      if (alongX) {
+        const cz = (z0 + z1) / 2;
+        const rA = [x0, ridgeY, cz], rB = [x1, ridgeY, cz];
+        quad([x0, base, z0], [x1, base, z0], rB, rA);               // north slope
+        quad([x1, base, z1], [x0, base, z1], rA, rB);               // south slope
+        tri([x0, base, z1], [x0, base, z0], rA);                    // west gable end
+        tri([x1, base, z0], [x1, base, z1], rB);                    // east gable end
+      } else {
+        const cx = (x0 + x1) / 2;
+        const rA = [cx, ridgeY, z0], rB = [cx, ridgeY, z1];
+        quad([x0, base, z1], [x0, base, z0], rA, rB);               // west slope
+        quad([x1, base, z0], [x1, base, z1], rB, rA);               // east slope
+        tri([x0, base, z0], [x1, base, z0], rA);                    // north gable end
+        tri([x1, base, z1], [x0, base, z1], rB);                    // south gable end
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3));
+      geometry.computeVertexNormals();
+      const mesh = new THREE.Mesh(geometry, material);
       mesh.userData.generated = true;
       return mesh;
     }
@@ -4854,6 +5317,7 @@ function App() {
   const [projectId, setProjectId] = useState(() => initialSaved?.projectId || 'current-project');
   const [spec, setSpec] = useState(() => initialSaved?.spec || seedSpec);
   const [systemView, setSystemView] = useState('shell');
+  const [wallMoveFt, setWallMoveFt] = useState(2);
   const [wallOpeningType, setWallOpeningType] = useState('window');
   const [windowAddWall, setWindowAddWall] = useState('south');
   const [overhangBreakOpen, setOverhangBreakOpen] = useState(false);
@@ -6154,6 +6618,55 @@ function App() {
     });
   }
 
+  // Move one wall edge of the footprint (Plan drag or inspector) — the
+  // "move a wall" primitive. One dispatch; the backend keeps rooms/openings
+  // anchored and re-derives the bounding box.
+  function planMoveEdge(edgeIndex, offsetFt) {
+    const edge = footprintEdges(spec)[edgeIndex];
+    void applyBackendOperations({
+      operations: [{ type: 'move_wall_edge', field: `e${edgeIndex}`, value: String(offsetFt) }],
+      promptText: `Move ${edge ? `${edge.facing} wall` : 'wall'} ${offsetFt > 0 ? 'out' : 'in'} ${Math.abs(offsetFt)}′`,
+      logPrefix: 'Footprint'
+    });
+  }
+
+  // Move the selected wall (inspector "Move in/out"): edge segments move by
+  // edge index, plain cardinal walls by facing. One dispatch either way.
+  function moveSelectedWall(offsetFt) {
+    const wall = wallSections.find((item) => item.id === selectedRoom);
+    const amount = clamp(Number(offsetFt) || 0, -48, 48);
+    if (!wall || !amount) return;
+    void applyBackendOperations({
+      operations: [wall.edgeKey
+        ? { type: 'move_wall_edge', field: wall.edgeKey, value: String(amount) }
+        : { type: 'move_wall_edge', wall: wall.side, value: String(amount) }],
+      promptText: `Move ${wall.name.toLowerCase()} ${amount > 0 ? 'out' : 'in'} ${Math.abs(amount)}′`,
+      logPrefix: 'Footprint',
+      chatText: `Moved ${wall.name} ${amount > 0 ? 'outward' : 'inward'} ${Math.abs(amount)} ft. The rooms and openings stayed put; the outline re-anchored around them.`
+    });
+  }
+
+  // Split the selected wall into three segments so its middle can be moved —
+  // the first step of an L-shape or notch. Selection follows the middle piece.
+  function splitSelectedWall() {
+    const wall = wallSections.find((item) => item.id === selectedRoom);
+    if (!wall) return;
+    const edgeRef = wall.edgeKey || null;
+    const operations = [{
+      type: 'split_wall_edge',
+      ...(edgeRef ? { field: edgeRef } : { wall: wall.side })
+    }];
+    const edges = footprintEdges(spec);
+    const idx = edgeRef ? Number(edgeRef.slice(1)) : (edges.find((e) => e.facing === wall.side)?.index ?? 0);
+    void applyBackendOperations({
+      operations,
+      promptText: `Split the ${wall.name.toLowerCase()}`,
+      logPrefix: 'Footprint',
+      nextSelectedId: `wall-e${idx + 1}`,
+      chatText: `Split ${wall.name} into three segments. Drag the middle one in the Plan view (or use Move in/out here) to shape an L or a notch.`
+    });
+  }
+
   // Resize the whole footprint by dragging its corner in the Foundation plan —
   // one dispatch for both dimensions so they don't race on a stale spec.
   function resizeShellPlan(w, d) {
@@ -6559,7 +7072,23 @@ function App() {
                   </div>
                 </label>
               </div>
-              <p className="systemNote">Footprint: {spec.shell.widthFt} × {spec.shell.depthFt} ft = {Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt))} sf{floorCount(spec) > 1 ? ` · ${fmtNum(derived.heatedFloor)} sf heated across ${floorCount(spec)} storeys` : ''}. Each added storey gets an <b>extent plate</b> — switch to that floor in the Plan and resize it to put the storey over only part of the building. Per-wall heights and systems live on the <b>Walls</b> page; put a room upstairs by setting its Level in the inspector.</p>
+              <div className="sectionHead">Footprint shape</div>
+              {hasCustomFootprint(spec) ? (
+                <>
+                  <div className="controlGrid">
+                    <label>Outline
+                      <div className="mixedField"><span>{footprintPolygon(spec).length} corners · {fmtNum(Math.round(polygonArea(footprintPolygon(spec))))} sf inside {spec.shell.widthFt} × {spec.shell.depthFt} ft</span></div>
+                    </label>
+                    <label>Back to a rectangle
+                      <button type="button" className="secondary" title="Straighten the outline back to the full bounding rectangle" onClick={() => applyBackendOperations({ operations: [{ type: 'set_footprint', value: 'rect' }], promptText: 'Reset footprint to rectangle', logPrefix: 'Footprint' })}>Reset outline</button>
+                    </label>
+                  </div>
+                  <p className="systemNote">The plan is an L / custom shape. <b>Drag any wall edge in the Plan view</b> to move that wall; tap a wall and use <b>Split into 3</b> in the inspector to add another jog. Width/Length above scale the whole outline.</p>
+                </>
+              ) : (
+                <p className="systemNote">The plan is a plain rectangle. To make an <b>L-shape or notch</b>: tap a wall (model, Plan, or the Walls page), press <b>Split into 3</b> in the inspector, then drag the middle segment in the Plan view — or just ask the assistant ("make this an L with a 16×13 porch notch on the southeast corner").</p>
+              )}
+              <p className="systemNote">Footprint: {spec.shell.widthFt} × {spec.shell.depthFt} ft = {fmtNum(Math.round(derived.floor))} sf{floorCount(spec) > 1 ? ` · ${fmtNum(derived.heatedFloor)} sf heated across ${floorCount(spec)} storeys` : ''}. Each added storey gets an <b>extent plate</b> — switch to that floor in the Plan and resize it to put the storey over only part of the building (the roof steps down over the rest). Per-wall heights and systems live on the <b>Walls</b> page; put a room upstairs by setting its Level in the inspector.</p>
             </div>
             );
           })()}
@@ -6652,18 +7181,28 @@ function App() {
                 <div className="sectionHead">{storeyInfo(spec.shell).storeys > 1 ? 'Ground storey — each side' : 'Each side'}</div>
                 <p className="systemNote">Tap a wall — here or in the model — to edit that side (system, height, thickness, finishes) in the Inspector below. Toggle a side open for no wall there.</p>
                 <div className="pickList">
-                  {resolvedSides.map(({ side, r }) => (
-                    <div key={side} className={`pickRow${r.omitted ? ' muted' : ''}${selectedRoom === `wall-${side}` ? ' active' : ''}`}>
-                      <button type="button" className="pickRowMain" onClick={() => selectObject(`wall-${side}`)} disabled={r.omitted}>
-                        <strong>{WALL_SIDE_LABELS[side]}</strong>
-                        <small>{r.omitted ? 'open — no wall' : `${r.assembly.label} · ${r.heightFt}′ · ${r.thicknessFt.toFixed(2)}′ · ${spec.openings.filter((opening) => opening.wall === side).length} opening(s)`}</small>
-                      </button>
-                      <label className="pickRowToggle" title="No wall on this side">
-                        <input type="checkbox" checked={r.omitted} onChange={(event) => updateWallSide(side, 'omitted', event.target.checked)} />
-                        <span>open</span>
-                      </label>
-                    </div>
-                  ))}
+                  {resolvedSides.map(({ side, r }) => {
+                    // On a custom footprint a facing can have several segments —
+                    // the row selects its longest one (each is tappable in the
+                    // model/plan/chip); construction stays shared per facing.
+                    const facingSections = wallSections.filter((wall) => wall.side === side && wall.level === 1);
+                    const rowTarget = facingSections.length
+                      ? facingSections.reduce((best, wall) => (wall.lengthFt > best.lengthFt ? wall : best)).id
+                      : `wall-${side}`;
+                    const rowActive = facingSections.some((wall) => wall.id === selectedRoom) || selectedRoom === `wall-${side}`;
+                    return (
+                      <div key={side} className={`pickRow${r.omitted ? ' muted' : ''}${rowActive ? ' active' : ''}`}>
+                        <button type="button" className="pickRowMain" onClick={() => selectObject(rowTarget)} disabled={r.omitted}>
+                          <strong>{WALL_SIDE_LABELS[side]}{facingSections.length > 1 ? ` (${facingSections.length} segments)` : ''}</strong>
+                          <small>{r.omitted ? 'open — no wall' : `${r.assembly.label} · ${r.heightFt}′ · ${r.thicknessFt.toFixed(2)}′ · ${spec.openings.filter((opening) => opening.wall === side).length} opening(s)`}</small>
+                        </button>
+                        <label className="pickRowToggle" title="No wall on this side">
+                          <input type="checkbox" checked={r.omitted} onChange={(event) => updateWallSide(side, 'omitted', event.target.checked)} />
+                          <span>open</span>
+                        </label>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 {storeyInfo(spec.shell).storeys > 1 && (() => {
@@ -7379,6 +7918,7 @@ function App() {
               onMove={planMoveObject}
               onResize={planResizeObject}
               onResizeShell={resizeShellPlan}
+              onMoveEdge={planMoveEdge}
               context={consoleView === 'systems' ? systemView : null}
               activeFloor={activeFloor}
             />
@@ -7638,7 +8178,7 @@ function App() {
                 {!selectedIsElement && !selectedIsWall && !selectedIsSpecial && <div className="modelEditHint"><Camera size={15} /> Drag the room body to move it. Drag green corner cubes in the model to resize; dimensions appear live.</div>}
                 <div className={selectedIsWall ? 'liveEdit wallEdit' : 'liveEdit'}>
                   <label>Name<input value={selected?.name || ''} onChange={(event) => updateSelectedRoom('name', event.target.value)} /></label>
-                  <label>{selectedIsWall ? 'Length' : 'Width'}<input type="number" value={selectedIsWall ? selected?.lengthFt || 0 : selected?.w || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom('w', event.target.value)} /></label>
+                  <label>{selectedIsWall ? 'Length' : 'Width'}<input type="number" value={selectedIsWall ? selected?.lengthFt || 0 : selected?.w || 0} disabled={selectedIsRoof || selectedIsGrid || Boolean(selected?.edgeKey)} title={selected?.edgeKey ? 'A segment’s length follows the outline — move walls in the Plan view or with Move in/out below.' : undefined} onChange={(event) => updateSelectedRoom('w', event.target.value)} /></label>
                   <label>{selectedIsWall ? 'Thickness' : 'Depth'}<input type="number" step={selectedIsWall ? 0.05 : undefined} value={selectedIsWall ? selected?.thicknessFt ?? modeledWallProfile.thicknessFt : selected?.d || 0} disabled={selectedIsOpening || selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom(selectedIsWall ? 'thickness' : 'd', event.target.value)} /></label>
                   {selectedIsWall && <label>System
                     <select value={selected?.assemblyKey || 'framed'} onChange={(event) => updateSelectedRoom('assembly', event.target.value)}>
@@ -7649,6 +8189,15 @@ function App() {
                   </label>}
                   {selectedIsWall && <label>Interior finish<input type="text" value={selected?.interiorFinish || ''} onChange={(event) => updateSelectedRoom('interiorFinish', event.target.value)} /></label>}
                   {selectedIsWall && <label>Exterior finish<input type="text" value={selected?.exteriorFinish || ''} onChange={(event) => updateSelectedRoom('exteriorFinish', event.target.value)} /></label>}
+                  {selectedIsWall && (selected?.level || 1) === 1 && (
+                    <label>Move in/out (ft)
+                      <span className="wallMoveRow">
+                        <input type="number" step="0.5" value={wallMoveFt} onChange={(event) => setWallMoveFt(Number(event.target.value))} />
+                        <button type="button" className="secondary" title="Negative pulls the wall inward" onClick={() => moveSelectedWall(wallMoveFt)}>Move</button>
+                        <button type="button" className="secondary" title="Split this wall into three segments, then move the middle to shape an L or a notch" onClick={splitSelectedWall}>Split into 3</button>
+                      </span>
+                    </label>
+                  )}
                   {!selectedIsWall && <label>{selectedIsOpening ? 'Along Wall' : 'X'}<input type="number" value={selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? selected.x : selected.y) || 0 : selected?.x || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom(selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? 'x' : 'y') : 'x', event.target.value)} /></label>}
                   {!selectedIsWall && !selectedIsOpening && <label>Y<input type="number" value={selected?.y || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom('y', event.target.value)} /></label>}
                   {!selectedIsWall && !selectedIsSpecial && !selectedIsElement && storeyInfo(spec.shell).storeys > 1 && <label>Level<input type="number" min="1" max={Math.ceil(storeyInfo(spec.shell).storeys)} value={Number(selected?.level || 1)} onChange={(event) => updateSelectedRoom('level', event.target.value)} /></label>}

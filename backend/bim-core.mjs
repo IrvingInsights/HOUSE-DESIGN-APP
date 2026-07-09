@@ -657,9 +657,12 @@ function findDesignObject(spec, targetId, name = '') {
     const opening = (spec.openings || [])[openingIndex];
     if (opening) return { ...opening, id: targetId, __kind: 'opening', __openingIndex: openingIndex, name: opening.label || `${titleCase(opening.wall)} ${titleCase(opening.type)}` };
   }
+  // An empty name must NOT name-match ("x".includes('') is always true —
+  // an op carrying only a targetId would silently hit the first room).
   const normalizedName = normalizeDesignLabel(name);
-  return (spec.rooms || []).find((room) => room.id === targetId || normalizeDesignLabel(room.name) === normalizedName || normalizeDesignLabel(room.name).includes(normalizedName))
-    || (spec.elements || []).find((element) => element.id === targetId || normalizeDesignLabel(element.name) === normalizedName || normalizeDesignLabel(element.name).includes(normalizedName))
+  const nameMatches = (label) => Boolean(normalizedName) && (normalizeDesignLabel(label) === normalizedName || normalizeDesignLabel(label).includes(normalizedName));
+  return (spec.rooms || []).find((room) => room.id === targetId || nameMatches(room.name))
+    || (spec.elements || []).find((element) => element.id === targetId || nameMatches(element.name))
     || null;
 }
 
