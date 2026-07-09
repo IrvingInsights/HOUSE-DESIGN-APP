@@ -718,6 +718,7 @@ const FIX_LABELS = {
   'add-south-glass': 'Add south glazing',
   'add-stair': 'Add a stair',
   'raise-stemwall': 'Raise stem wall to 18″',
+  'add-stemwall': 'Add an 18″ stem wall',
   'well-septic': 'Set 100 ft separation',
   'deepen-overhang': 'Deepen overhangs to 2 ft',
   'reduce-south-overhang': 'Trim south overhang to 2.5 ft',
@@ -2555,6 +2556,9 @@ function detectIssues(spec) {
     const resolved = resolveWallSide(spec, side);
     return !resolved.omitted && resolved.assemblyKey === 'straw-bale';
   });
+  if (hasBaleWall && utilitiesForChecks.foundationType !== 'stemwall') {
+    issues.push({ severity: 'critical', title: 'Straw bale walls sit too near the ground', owner: 'Natural Builder', system: 'foundation', fixId: 'add-stemwall', fix: 'Bales cannot take ground splash or rising damp — they must ride a stem wall at least 12″ above grade. Switch the foundation to a stem wall (the rubble trench stays underneath as drainage).' });
+  }
   if (hasBaleWall && utilitiesForChecks.foundationType === 'stemwall' && derivedForChecks.stemwallHeightFt < 1) {
     issues.push({ severity: 'warning', title: `Stem wall is only ${Math.round(derivedForChecks.stemwallHeightFt * 12)}" under bale walls`, owner: 'Natural Builder', system: 'foundation', fixId: 'raise-stemwall', fix: 'Straw bale wants its base at least 12" above grade for splash protection — raise the stem wall to 1 ft or more.' });
   }
@@ -3477,7 +3481,11 @@ function JointDetail({ spec, derived, kind, side = 'south', opening = null }) {
   if (kind === 'wall') {
     const r = resolveWallSide(spec, side);
     const t = r.thicknessFt;
-    const stemH = u.foundationType === 'stemwall' ? Math.min(6, Math.max(0.5, Number(u.stemwallHeightFt) || 1.5)) : u.foundationType === 'slab' ? 0.5 : 0.8;
+    // Draw what's actually designed: a stem wall's real height, a slab's edge,
+    // or a rubble trench's low plinth. Straw bale must ride ≥12″ above grade —
+    // if this wall doesn't, the drawing says so in red (and Review flags it).
+    const stemH = u.foundationType === 'stemwall' ? Math.min(6, Math.max(0.5, Number(u.stemwallHeightFt) || 1.5)) : u.foundationType === 'slab' ? 0.5 : 0.3;
+    const baleAtRisk = r.assemblyKey === 'straw-bale' && stemH < 1;
     const wallTop = 0, wallBot = 3.2, grade = wallBot + stemH;
     const finish = FLOORING_TYPES[resolveFlooring(spec)]?.label || 'finish floor';
     const insul = INSULATION_TYPES[resolveInsulation(u.floorInsulation, 'cellulose')]?.label || 'insulation';
@@ -3506,7 +3514,15 @@ function JointDetail({ spec, derived, kind, side = 'south', opening = null }) {
         {label(t + 1.1, grade + 0.8, `${u.foundationType} foundation`)}
         {dim(0, -0.45, t, -0.45, `${t.toFixed(2)}′`)}
         {u.foundationType === 'stemwall' && dim(-1.6, wallBot, -1.6, grade, '')}
-        {u.foundationType === 'stemwall' && label(-3.2, wallBot + stemH / 2 + 0.2, `${Math.round(stemH * 12)}″ stem`)}
+        {u.foundationType === 'stemwall' && label(-3.2, wallBot + stemH / 2 + 0.2, `${Math.round(stemH * 12)}″ stem wall`)}
+        {baleAtRisk && (
+          <g>
+            {/* the stem wall this bale wall REQUIRES but doesn't have */}
+            <rect x={-0.35} y={wallBot - 1 + stemH} width={t + 0.7} height={1} fill="none" stroke="#AE452F" strokeWidth={0.09} strokeDasharray="0.3 0.2" />
+            <text x={t + 0.6} y={wallBot - 1.5} fontSize={0.5} fill="#AE452F" fontWeight="700">⚠ bales need a ≥12″ stem wall</text>
+            <text x={t + 0.6} y={wallBot - 0.85} fontSize={0.42} fill="#AE452F">splash + damp rot the bottom course — see Review</text>
+          </g>
+        )}
       </svg>
     );
   }
@@ -3956,7 +3972,9 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
         east: resolveWallSide(spec, 'east', 2),
         west: resolveWallSide(spec, 'west', 2)
       };
-      const wallMatOf = (resolved) => new THREE.MeshStandardMaterial({ color: resolved.assembly.color, roughness: 0.88, transparent: layers.xray, opacity: layers.xray ? 0.34 : 1 });
+      // X-ray AND exploded views both need see-through walls — exploded pulls
+      // the shell apart, translucency lets the interior read through it.
+      const wallMatOf = (resolved) => new THREE.MeshStandardMaterial({ color: resolved.assembly.color, roughness: 0.88, transparent: layers.xray || layers.explode, opacity: layers.xray ? 0.34 : layers.explode ? 0.55 : 1 });
       const wallMatFor = (side) => wallMatOf(wallResolved[side]);
       const tN = wallResolved.north.thicknessFt;
       const tS = wallResolved.south.thicknessFt;
@@ -4157,9 +4175,9 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       });
 
       if (layers.roof) {
-        if (layers.xray) {
+        if (layers.xray || layers.explode) {
           roofMat.transparent = true;
-          roofMat.opacity = 0.4;
+          roofMat.opacity = layers.xray ? 0.4 : 0.55;
         }
         const roof = makeRoof(width, depth, wallHeight, spec.shell.roofPitch, roofMat, roofSpec, resolveOverhangs(spec.shell));
         roof.userData.roomId = 'roof-main';
@@ -4793,6 +4811,13 @@ function App() {
   // stays the selector surface, the left bar the single control surface.
   const [inspectorDock, setInspectorDock] = useState(null);
   const [selMenuOpen, setSelMenuOpen] = useState(false);
+  // The chat column is toggle-able — hidden, the model gets its width.
+  const [chatOpen, setChatOpen] = useState(() => {
+    try { return window.localStorage.getItem('nbChatOpen') !== '0'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem('nbChatOpen', chatOpen ? '1' : '0'); } catch { /* private mode */ }
+  }, [chatOpen]);
   // When the SELECTION changes (tap in the model, plan, chip, or a summary
   // row), bring the docked editor into view — it sits below the system page in
   // the left bar's general→specific sequence, so it may be off-screen.
@@ -5944,6 +5969,8 @@ function App() {
         return void placeFixture({ name: 'Stairs', category: 'structure', w: 3.5, d: 10, h: 8 });
       case 'raise-stemwall':
         return void applyBackendOperations({ operations: [{ type: 'set_utility', field: 'stemwallHeightFt', value: 1.5 }], promptText: 'Raise the stem wall', logPrefix: 'Fix', chatText: 'Raised the stem wall to 18″ so the bale base clears splash and grade.' });
+      case 'add-stemwall':
+        return void applyBackendOperations({ operations: [{ type: 'set_utility', field: 'foundationType', value: 'stemwall' }, { type: 'set_utility', field: 'stemwallHeightFt', value: 1.5 }], promptText: 'Add a stem wall under the bale walls', logPrefix: 'Fix', chatText: 'Switched the foundation to a stem wall, 18″ above grade — the bales now ride clear of splash and rising damp. The Detail view shows the new joint.' });
       case 'well-septic':
         return void applyBackendOperations({ operations: [{ type: 'set_utility', field: 'wellSepticFt', value: 100 }], promptText: 'Separate well and septic', logPrefix: 'Fix', chatText: 'Set the well-to-septic separation to 100 ft. Confirm the exact figure with your local health department.' });
       case 'deepen-overhang':
@@ -6212,7 +6239,7 @@ function App() {
   const systemFocus = consoleView === 'systems' ? systemView : null;
 
   return (
-    <main className="app">
+    <main className={chatOpen ? 'app' : 'app chatClosed'}>
       <aside className="leftPanel">
         <div className="brand">
           <div className="brandMark" aria-hidden="true"><span className="brandGable" /></div>
@@ -7118,6 +7145,7 @@ function App() {
             <button className="ghost" title="Start a new design" onClick={() => setWelcomeOpen(true)}><Plus size={16} /> New</button>
             <button className="ghost backButton" onClick={goBackRevision} disabled={history.length === 0}><Undo2 size={16} /> Undo</button>
             <button className="ghost saveButton" onClick={saveHouseState}><Save size={16} /> Save</button>
+            <button className="ghost" title={chatOpen ? 'Hide the Studio chat — the model gets the room' : 'Show the Studio chat'} onClick={() => setChatOpen((open) => !open)}><Send size={16} /> {chatOpen ? 'Hide chat' : 'Chat'}</button>
             <div className="exportMenu">
               <button className="ghost" onClick={() => setExportMenuOpen((open) => !open)} title="Export the design"><Download size={16} /> Export ▾</button>
               {exportMenuOpen && (

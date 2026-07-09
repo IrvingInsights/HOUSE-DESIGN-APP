@@ -3905,6 +3905,10 @@ button.danger:hover,
 .diyToggle input { accent-color: var(--clay); }
 ::selection { background: color-mix(in srgb, var(--straw) 40%, transparent); }
 
+/* ---- Toggle-able chat: hidden, the model takes its width ---- */
+.app.chatClosed { grid-template-columns: minmax(420px, 500px) minmax(480px, 1fr); }
+.app.chatClosed .rightPanel { display: none; }
+
 /* ---- Left bar readability: wider column, calmer type, roomier controls ---- */
 .leftPanel { padding: 16px; font-size: 13.5px; }
 .leftPanel .systemNote,
