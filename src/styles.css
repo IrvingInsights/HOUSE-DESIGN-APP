@@ -3954,6 +3954,9 @@ button.danger:hover,
   letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink3, #978C79);
 }
 .welcomeDivider::before, .welcomeDivider::after { content: ''; flex: 1; height: 1px; background: var(--line, #423931); }
+/* the file-start choice spans the row; the input hides behind the label */
+.welcomeFile { grid-column: 1 / -1; cursor: pointer; }
+.welcomeFile input { display: none; }
 
 /* ---- Toggle-able chat: hidden, the model takes its width ---- */
 .app.chatClosed { grid-template-columns: minmax(420px, 500px) minmax(480px, 1fr); }

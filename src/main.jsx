@@ -5020,6 +5020,19 @@ function App() {
     setWelcomeIsFirstRun(false);
   }
 
+  // Start from a file or drawing: a fresh design with the sketch/PDF attached
+  // to the planner and the ask pre-filled — add scale/orientation, hit Apply.
+  function startFromFile(file) {
+    if (!file) return;
+    startNewDesign('blank');
+    handleImage(file);
+    setPrompt('Start this design from the attached drawing: read the footprint, the rooms and their sizes, and the windows and doors, and build them.');
+    setChatMessages((items) => [
+      ...items,
+      { role: 'studio', speaker: 'Studio', text: `Fresh design started from ${file.name}. Tell me anything the drawing can't say — overall width in feet, which way is south — then press Apply Design and I'll build it.` }
+    ]);
+  }
+
   async function answerConsultativePrompt(submittedPrompt) {
     try {
       const result = await requestStudioResponse({
@@ -7751,6 +7764,11 @@ function App() {
                 <b>Start from the sample homestead</b>
                 <small>A small working house — rooms, systems, and checks already alive. Change everything.</small>
               </button>
+              <label className="welcomeChoice welcomeFile">
+                <b>Start from a file or drawing</b>
+                <small>A sketch, photo, floor plan, or PDF — the assistant reads it and builds the model from it.</small>
+                <input type="file" accept="image/*,application/pdf,.pdf,.txt,.md,.csv" onChange={(event) => { startFromFile(event.target.files?.[0]); event.target.value = ''; }} />
+              </label>
             </div>
             {!welcomeIsFirstRun && (
               <div className="welcomeFoot">
