@@ -7789,6 +7789,7 @@ function App() {
       {welcomeOpen && (
         <div className="welcomeOverlay">
           <div className="welcomeCard">
+            <div className="welcomeSide">
             <div className="welcomeMark" aria-hidden="true"><span className="brandGable" /></div>
             <h2>Natural Building</h2>
             <p className="welcomeIntro">A design studio for natural homes — straw bale, cob, timber — that keeps a real building model with live cost, code checks, and carbon while you work.</p>
@@ -7798,6 +7799,8 @@ function App() {
               <div><b>Ask for the big moves</b><span>The Studio chat adds rooms, moves walls, and consults the council. Review flags what doesn't add up — most flags have a one-tap fix.</span></div>
               <div><b>Take it to the real world</b><span>Export a permit drawing set, an IFC model for any BIM tool, or a build plan with materials.</span></div>
             </div>
+            </div>
+            <div className="welcomeActions">
             <div className="welcomeDivider">Start a design</div>
             <label className="welcomeName">
               <span>Name your design</span>
@@ -7852,6 +7855,7 @@ function App() {
                 </div>
               );
             })()}
+            </div>
           </div>
         </div>
       )}
