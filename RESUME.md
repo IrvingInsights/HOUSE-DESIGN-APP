@@ -1,5 +1,15 @@
 # Resume / Handoff — Natural Building GC app (house-bim-app)
 
+**FEATURE FREEZE (2026-07-09, Daniel's call).** The path to MVP is fixed:
+1. **The geometry pass** — stepped roofs over partial storeys, L/U footprints,
+   move-a-wall. Fresh session, focused. **Read `GEOMETRY_PASS.md` first** —
+   it maps every rectangle assumption, the design direction, invariants, and
+   the test recipe.
+2. Re-run the op smoke suite over everything.
+3. Hand `TESTING.md` to 2–3 testers.
+4. MVP when their first hour doesn't produce a "wait, why can't I—."
+No new features until then.
+
 Updated 2026-07-09. Working tree clean, ~50 commits since baseline `e9c99c1`.
 Recent arc: actionable metrics → Frame/Floor(+subfloor+insulation) systems →
 one-editor reorg → Zen minimization → contextual plan + outbuildings →
