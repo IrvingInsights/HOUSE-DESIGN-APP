@@ -3513,7 +3513,7 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
 
       const slabMat = new THREE.MeshStandardMaterial({ color: 0xc0b49b, roughness: 0.92 });
       const wallMat = new THREE.MeshStandardMaterial({ color: wallProfile.color, roughness: 0.88 });
-      const roofMat = new THREE.MeshStandardMaterial({ color: 0x8a938f, roughness: 0.55, metalness: 0.15 });
+      const roofMat = new THREE.MeshStandardMaterial({ color: 0x8a938f, roughness: 0.55, metalness: 0.15, side: THREE.DoubleSide });
       const glassMat = new THREE.MeshStandardMaterial({ color: 0x7fb2cc, transparent: true, opacity: 0.55, roughness: 0.12, metalness: 0.1 });
       const zonePalette = {
         living: 0x79a7a8,
@@ -3906,6 +3906,63 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
         const mesh = new THREE.Mesh(geometry, material);
         mesh.userData.generated = true;
         mesh.name = 'Shed / lean-to roof plane';
+        return mesh;
+      }
+      if (roofSpec.roofType === 'flat') {
+        // A near-flat roof: one horizontal plane just above the walls, extended
+        // to the overhangs. (Low-slope drainage is left implicit at this scale.)
+        const y = wallHeight + 0.25;
+        const geometry = new THREE.BufferGeometry();
+        const vertices = new Float32Array([
+          -o.west, y, -o.north,
+          width + o.east, y, -o.north,
+          width + o.east, y, depth + o.south,
+          -o.west, y, depth + o.south
+        ]);
+        geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+        geometry.setIndex([0, 1, 2, 0, 2, 3]);
+        geometry.computeVertexNormals();
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.userData.generated = true;
+        mesh.name = 'Flat roof plane';
+        return mesh;
+      }
+      if (roofSpec.roofType === 'hip') {
+        // A hip roof: all four sides slope up to a ridge. The ridge runs along
+        // the longer axis and is inset from the short ends by half the short
+        // span (a standard 45° hip), collapsing to a point when the plan is
+        // square. Two trapezoids on the long sides, two triangles on the ends.
+        const x0 = -o.west, x1 = width + o.east, z0 = -o.north, z1 = depth + o.south;
+        const spanX = x1 - x0, spanZ = z1 - z0;
+        const ridgeY = wallHeight + Math.min(spanX, spanZ) / 2 * pitch;
+        const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+        let rA, rB;
+        if (spanX >= spanZ) {
+          const inset = spanZ / 2;
+          rA = [x0 + inset, ridgeY, cz];
+          rB = [x1 - inset, ridgeY, cz];
+        } else {
+          const inset = spanX / 2;
+          rA = [cx, ridgeY, z0 + inset];
+          rB = [cx, ridgeY, z1 - inset];
+        }
+        const c00 = [x0, wallHeight, z0], c10 = [x1, wallHeight, z0], c11 = [x1, wallHeight, z1], c01 = [x0, wallHeight, z1];
+        // Wind each face counter-clockwise seen from outside so normals point up/out.
+        const faces = spanX >= spanZ
+          ? [[c00, c10, rB, rA], [c11, c01, rA, rB], [c10, c11, rB], [c01, c00, rA]]
+          : [[c10, c11, rB, rA], [c01, c00, rA, rB], [c00, c10, rA], [c11, c01, rB]];
+        const verts = [];
+        for (const face of faces) {
+          const [p0, p1, p2, p3] = face;
+          verts.push(...p0, ...p1, ...p2);
+          if (p3) verts.push(...p0, ...p2, ...p3);
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3));
+        geometry.computeVertexNormals();
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.userData.generated = true;
+        mesh.name = 'Hip roof';
         return mesh;
       }
       const shape = new THREE.Shape();
@@ -6013,6 +6070,13 @@ function App() {
 
           {systemView === 'foundation' && (
             <div className="systemPage">
+              <div className="sectionHead">Foundation size</div>
+              <div className="controlGrid">
+                <label>Width (ft)<input type="number" value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
+                <label>Length (ft)<input type="number" value={spec.shell.depthFt} onChange={(event) => updateShell('depthFt', event.target.value)} /></label>
+              </div>
+              <p className="systemNote">The foundation carries the building footprint — <b>{spec.shell.widthFt} × {spec.shell.depthFt} ft = {Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt))} sf</b>, {Math.round(2 * (Number(spec.shell.widthFt) + Number(spec.shell.depthFt)))} ft of perimeter. Set it here, on Shell, or on Walls — they all stay in step.</p>
+
               <div className="sectionHead">What the house sits on</div>
               <div className="controlGrid">
                 <label>Type
