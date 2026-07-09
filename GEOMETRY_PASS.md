@@ -1,8 +1,19 @@
 # The Geometry Pass — brief for a fresh session
 
-**Status: feature freeze as of commit `1df5789` (2026-07-09).** This pass is
-the one body of work between here and MVP. Do it in a fresh context, alone.
-After it: re-run the op smoke suite, hand TESTING.md to 2–3 testers, MVP.
+**STATUS: DONE (2026-07-09, commits `33e63dd` → `ea5fb66`).** Shipped as
+designed below: explicit rectilinear `spec.shell.footprint` (absent = legacy
+rectangle, byte-exact), walls as polygon edges with facing-keyed construction,
+`set_footprint`/`move_wall_edge`/`split_wall_edge` ops (+ planner vocabulary),
+Plan-view edge dragging, inspector Move in/out + Split into 3, stepped roofs
+over partial storeys, per-rectangle roof segments for L/T/U footprints,
+polygon-aware engine + checks. Verified live per the test recipe; op suite is
+now durable at `tools/op_smoke_test.mjs` (53/53). Honest remaining gaps (see
+TESTING.md): no roof valleys, skylights approximate on stepped/L roofs,
+Blender/IFC + permit sheets still model the bounding rectangle (the bridge
+already emits `footprint` + `wallSegments` for the add-on's future edge walk),
+and `arrangeRoomsPlan` packs into the bounding box (quick-adds respect the
+polygon; auto-arrange may need a follow-up on L-shapes).
+The map below is kept for provenance.
 
 ## The goal (Daniel's asks, in his words across sessions)
 

@@ -20,10 +20,24 @@ real AI consult-only persona, previous-designs picker, 3D canvas follows its
 container (chat toggle refits the model).
 
 **Path to MVP, in order:**
-1. **The geometry pass** — stepped roofs over partial storeys, L/U footprints,
-   move-a-wall. Own session. **Read `GEOMETRY_PASS.md` FIRST** — rectangle-
-   assumption map, design direction, invariants, test recipe.
-2. Re-run the op smoke suite over everything (scratchpad patterns in memory).
+1. **The geometry pass — DONE (2026-07-09, commits `33e63dd`→`ea5fb66`).**
+   `spec.shell.footprint` rectilinear polygon (absent = legacy rectangle,
+   exact); walls are polygon edges (`wall-e0`…, construction keyed by facing);
+   ops `set_footprint` / `move_wall_edge` / `split_wall_edge` (+ planner
+   vocab); Plan view drags wall edges; inspector has Move in/out + Split
+   into 3; **stepped roof** over partial storeys (upper gable + low shed
+   wings) and per-rectangle roof segments for L/T/U; engine + checks measure
+   the real polygon. Verified live end-to-end (notch via plan drag; stepped
+   roof over a west-half storey; exploded view coherent; Blender/IFC still
+   works). Honest gaps in TESTING.md: no roof valleys, skylights approximate
+   on stepped/L roofs, Blender/IFC + permit sheets still model the bounding
+   rectangle (the payload already carries `footprint` + `wallSegments` for
+   when the add-on learns the edge walk).
+2. **Op smoke suite — now durable in-repo: `node tools/op_smoke_test.mjs`**
+   (50 headless op round-trips; add `--http` for live-server sanity with
+   persist:false). 53/53 passing at `ea5fb66`. It caught 4 real bugs on its
+   first runs (empty-name target matching, split-erasing anchor, plate
+   spawn position, move_object z-clobber) — run it after ANY bim-core edit.
 3. Refresh the tester zip (`git archive --format=zip -o <Desktop>\natural-building-mvp.zip HEAD`)
    — the .gitattributes LF rules are load-bearing for the Mac launcher.
 4. MVP when 2–3 testers' first hour produces no "wait, why can't I—."
