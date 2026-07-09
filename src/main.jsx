@@ -7134,7 +7134,37 @@ function App() {
         </header>
 
         <div className="modelShell">
-          {viewMode === 'plan' ? (
+          {viewMode === 'detail' ? (() => {
+            // Connection details live in the preview — the drawing gets the big
+            // canvas, and picking another part redraws it in place.
+            const detailKind = selectedIsWall ? 'wall'
+              : selectedIsRoof ? 'roof'
+              : (selectedIsOpening && selected?.wall !== 'roof') ? 'opening'
+              : null;
+            return (
+              <div className="detailStage">
+                {detailKind ? (
+                  <>
+                    <div className="detailTitle">
+                      {detailKind === 'wall' ? `${selected?.name} — connection at the foundation`
+                        : detailKind === 'roof' ? 'Eave — where the roof meets the wall'
+                        : `${selected?.name || 'Opening'} — how it sits in its wall`}
+                    </div>
+                    <JointDetail
+                      spec={spec}
+                      derived={derived}
+                      kind={detailKind}
+                      side={selectedIsWall ? selected?.side : 'south'}
+                      opening={selectedIsOpening ? selected : null}
+                    />
+                    <p className="detailHint">Drawn from the live design — edit the fields in the left bar and the joint redraws. Pick another wall, the roof, or an opening (the chip above lists them all).</p>
+                  </>
+                ) : (
+                  <div className="detailEmpty">Select a wall, the roof, or a window/door — its connection detail draws here at full size.</div>
+                )}
+              </div>
+            );
+          })() : viewMode === 'plan' ? (
             <PlanView
               spec={spec}
               selectedRoom={selectedRoom}
@@ -7160,8 +7190,9 @@ function App() {
           <div className="viewModeToggle">
             <button className={viewMode === '3d' ? 'active' : ''} onClick={() => setViewMode('3d')}>3D</button>
             <button className={viewMode === 'plan' ? 'active' : ''} onClick={() => setViewMode('plan')}>Plan</button>
+            <button className={viewMode === 'detail' ? 'active' : ''} title="Connection details — how the selected part is built" onClick={() => setViewMode('detail')}>Detail</button>
           </div>
-          {(viewMode === 'plan' || floorCount(spec) > 1) && <div className="floorTabs">
+          {viewMode !== 'detail' && (viewMode === 'plan' || floorCount(spec) > 1) && <div className="floorTabs">
             {Array.from({ length: floorCount(spec) }, (_, i) => i + 1).map((floor) => (
               <button key={floor} className={activeFloor === floor ? 'active' : ''} onClick={() => setActiveFloor(floor)} title={`${floorLabel(spec, floor)} — view & edit this floor`}>{floor === 1 ? 'Ground' : floorLabel(spec, floor).replace(' floor', '')}</button>
             ))}
@@ -7495,21 +7526,9 @@ function App() {
                   </div>
                 </div>
                 {(selectedIsWall || selectedIsRoof || (selectedIsOpening && selected?.wall !== 'roof')) && (
-                  <details className="jointDetail" open>
-                    <summary>
-                      {selectedIsWall ? `Connection detail — ${selected?.name?.toLowerCase()} at the foundation (2D section)`
-                        : selectedIsRoof ? 'Connection detail — eave, where roof meets wall (2D section)'
-                        : 'Connection detail — this opening in its wall (2D section)'}
-                    </summary>
-                    <JointDetail
-                      spec={spec}
-                      derived={derived}
-                      kind={selectedIsWall ? 'wall' : selectedIsRoof ? 'roof' : 'opening'}
-                      side={selectedIsWall ? selected?.side : 'south'}
-                      opening={selectedIsOpening ? selected : null}
-                    />
-                    <p className="jointNote">Drawn from this design's real numbers — edit the fields above (or the pages on the left) and the joint redraws. For the whole-building version, flip on <b>Exploded view</b> in the model's Layers panel.</p>
-                  </details>
+                  <button type="button" className="secondary detailJump" onClick={() => setViewMode('detail')}>
+                    ⌗ Connection detail — view it in the preview
+                  </button>
                 )}
               </div>
             )}

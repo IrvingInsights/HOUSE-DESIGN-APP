@@ -136,7 +136,8 @@ html, body {
 .app {
   height: 100vh;
   display: grid;
-  grid-template-columns: minmax(360px, 420px) minmax(520px, 1fr) minmax(300px, 360px);
+  /* Left bar is the single control surface — give it real room to breathe. */
+  grid-template-columns: minmax(420px, 500px) minmax(480px, 1fr) minmax(300px, 360px);
   position: relative;
   z-index: 1;
   max-width: 100vw;
@@ -2124,7 +2125,7 @@ button.danger {
 }
 
 .app {
-  grid-template-columns: minmax(360px, 420px) minmax(520px, 1fr) minmax(300px, 360px);
+  grid-template-columns: minmax(420px, 500px) minmax(480px, 1fr) minmax(300px, 360px);
   background: #ECEBE4;
 }
 
@@ -3903,3 +3904,54 @@ button.danger:hover,
 .phaseCard summary input,
 .diyToggle input { accent-color: var(--clay); }
 ::selection { background: color-mix(in srgb, var(--straw) 40%, transparent); }
+
+/* ---- Left bar readability: wider column, calmer type, roomier controls ---- */
+.leftPanel { padding: 16px; font-size: 13.5px; }
+.leftPanel .systemNote,
+.leftPanel .studioHint { font-size: 12.5px; line-height: 1.6; }
+.leftPanel .systemPage label,
+.leftPanel .controlGrid label { font-size: 12.5px; gap: 4px; }
+.leftPanel input,
+.leftPanel select { font-size: 13.5px; padding: 7px 9px; }
+.leftPanel .pickRowMain strong { font-size: 13.5px; }
+.leftPanel .pickRowMain small { font-size: 12px; }
+.leftPanel .systemTabs button { font-size: 12.5px; padding: 6px 11px; }
+.leftPanel .readValue { font-size: 18px; }
+.leftPanel .whyNote { font-size: 12.5px; line-height: 1.6; }
+.detailJump { margin-top: 12px; width: 100%; font-size: 12.5px; }
+
+/* ---- Detail view: connection sections drawn big in the preview window ---- */
+.detailStage {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 56px 42px 42px;
+  /* The stage sits on the bright scene canvas — pin light-theme drawing tokens. */
+  --ink: #22251F;
+  --ink2: #565A4F;
+  --ink3: #868A7C;
+  --line: #DBD9CE;
+  --straw: #C9A24B;
+  --limesage: #7E8A6A;
+  background: radial-gradient(circle at 50% 30%, #F2EDE0, #E9E1CF 75%);
+  color: #22251F;
+}
+.detailStage .jointSvg {
+  background: transparent;
+  border: none;
+  max-height: none;
+  flex: 1;
+  min-height: 0;
+  width: min(100%, 1040px);
+}
+.detailTitle {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 19px;
+  font-weight: 600;
+  color: #26424C;
+}
+.detailHint { font-size: 12.5px; color: #868A7C; max-width: 560px; text-align: center; line-height: 1.55; margin: 0; }
+.detailEmpty { font-size: 14px; color: #868A7C; max-width: 420px; text-align: center; line-height: 1.6; }
