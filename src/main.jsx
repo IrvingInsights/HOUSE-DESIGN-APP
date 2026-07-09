@@ -7889,6 +7889,7 @@ function App() {
               </select>
             </label>
           )}
+          {isPlanning && <div className="planningBar" aria-hidden="true"><span /></div>}
           <div className="chatStream" ref={chatStreamRef}>
             {chatMessages.map((message, index) => (
               <div key={`${message.role}-${index}`} className={`chatBubble ${message.role}`}>
@@ -7900,7 +7901,7 @@ function App() {
             {isPlanning && (
               <div className="chatBubble studio planningBubble">
                 <b>Studio</b>
-                <span>{chatTarget !== 'design' ? 'Consulting the team' : attachedImages.length ? 'Reading your drawing and building the model' : 'Planning the change'}<span className="planningDots"><i>.</i><i>.</i><i>.</i></span></span>
+                <span><span className="planningWheel" aria-hidden="true" />{chatTarget !== 'design' ? 'Consulting the team' : attachedImages.length ? 'Reading your drawing and building the model' : 'Planning the change'}<span className="planningDots"><i>.</i><i>.</i><i>.</i></span></span>
                 <small>a full drawing takeoff can take up to a minute</small>
               </div>
             )}
