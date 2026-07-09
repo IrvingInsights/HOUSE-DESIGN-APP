@@ -603,13 +603,16 @@ function detectIssues(spec) {
   const conditionedArea = enclosedRooms.reduce((sum, room) => sum + room.w * room.d, 0);
   const shellArea = polygonArea(poly);
 
+  // The passive-solar / homestead checks are the NATURAL approach's opinions —
+  // valuable when chosen, noise when modeling a conventional house as-built.
+  const naturalApproach = (spec.shell?.designApproach || 'natural') !== 'standard';
   if (conditionedArea > shellArea * 1.08) issues.push({ severity: 'critical', title: 'Room program exceeds shell area', owner: 'Architect', fix: 'Reduce room footprints or enlarge the shell before issuing drawings.' });
   if (!spec.rooms.some((room) => room.type === 'wet')) issues.push({ severity: 'critical', title: 'No wet core defined', owner: 'Engineer', fix: 'Add a bathroom/mechanical wet core and align plumbing walls.' });
-  if (!spec.openings.some((item) => item.type === 'door' && item.wall === 'south')) issues.push({ severity: 'warning', title: 'Primary entry lacks clear solar-side approach', owner: 'Designer', fix: 'Add or move the main entry to a legible approach with weather protection.' });
-  if (!spec.openings.some((item) => item.type === 'window' && item.wall === 'south')) issues.push({ severity: 'warning', title: 'Insufficient south-facing daylight strategy', owner: 'Permaculture', fix: 'Add balanced south glazing with summer shading and winter solar gain.' });
+  if (naturalApproach && !spec.openings.some((item) => item.type === 'door' && item.wall === 'south')) issues.push({ severity: 'warning', title: 'Primary entry lacks clear solar-side approach', owner: 'Designer', fix: 'Add or move the main entry to a legible approach with weather protection.' });
+  if (naturalApproach && !spec.openings.some((item) => item.type === 'window' && item.wall === 'south')) issues.push({ severity: 'warning', title: 'Insufficient south-facing daylight strategy', owner: 'Permaculture', fix: 'Add balanced south glazing with summer shading and winter solar gain.' });
   if (spec.shell.wallHeightFt > 12) issues.push({ severity: 'warning', title: 'Tall walls need explicit lateral strategy', owner: 'Engineer', fix: 'Add shear wall schedule, hold-downs, and diaphragm notes.' });
   if (String(spec.systems.envelope || '').toLowerCase().includes('natural') && !String(spec.systems.envelope || '').toLowerCase().includes('rainscreen')) issues.push({ severity: 'warning', title: 'Natural wall lacks drying layer', owner: 'Natural Builder', fix: 'Include rainscreen, generous roof overhangs, and capillary breaks.' });
-  if (!spec.rooms.some((room) => /mud|laundry|service/i.test(room.name))) issues.push({ severity: 'warning', title: 'Farm workflow has no dirty entry', owner: 'Homestead/Farm', fix: 'Add a mud/laundry buffer between exterior work and clean living space.' });
+  if (naturalApproach && !spec.rooms.some((room) => /mud|laundry|service/i.test(room.name))) issues.push({ severity: 'warning', title: 'Farm workflow has no dirty entry', owner: 'Homestead/Farm', fix: 'Add a mud/laundry buffer between exterior work and clean living space.' });
   if (issues.length === 0) issues.push({ severity: 'pass', title: 'Schematic passes current council checks', owner: 'Project Manager', fix: 'Ready for PE/architect review, structural sizing, jurisdictional code check, and stamped drawing development.' });
   return issues;
 }
@@ -734,7 +737,41 @@ export const UTILITY_DEFAULTS = {
   diyFrame: false
 };
 
-export const SITE_DEFAULTS = { zip: '', placeName: '', latitudeDeg: 43, rainInYr: 38 };
+// Topography: the site is not flat. slopeFt = total fall of grade across the
+// building footprint in the downhill direction; slopeDir = which way it falls;
+// gradeFt = how far the finish floor (the model's y=0 datum) sits above grade
+// at the UPHILL building edge (a normal stem wall). Downhill, grade drops by
+// slopeFt more, so that much foundation/basement wall is exposed — the walkout
+// condition the drawings show. slopeFt = 0 → flat site (legacy behavior).
+export const SITE_DEFAULTS = { zip: '', placeName: '', latitudeDeg: 43, rainInYr: 38, slopeFt: 0, slopeDir: 'south', gradeFt: 1.5, contourInterval: 2 };
+
+// Grade elevation (feet, relative to the finish-floor datum; negative = below
+// the floor) at a plan point. A tilted plane through the footprint, extended
+// linearly beyond it so the whole site slopes. This is the single source both
+// the 3D terrain and every derived view (elevations, sections) read.
+export function gradeElevationAt(spec, x, y) {
+  const site = { ...SITE_DEFAULTS, ...(spec?.site || {}) };
+  const slopeFt = Math.max(0, Number(site.slopeFt) || 0);
+  const gradeFt = Math.max(0, Number(site.gradeFt ?? 1.5));
+  if (slopeFt <= 0) return -gradeFt;
+  const W = Number(spec?.shell?.widthFt) || 36;
+  const D = Number(spec?.shell?.depthFt) || 28;
+  const dir = ['north', 'south', 'east', 'west'].includes(site.slopeDir) ? site.slopeDir : 'south';
+  // t = downhill fraction across the footprint (0 at the high edge, 1 at the
+  // low edge); linear beyond [0,1] so the site keeps sloping past the house.
+  const t = dir === 'south' ? y / D
+    : dir === 'north' ? (D - y) / D
+      : dir === 'east' ? x / W
+        : (W - x) / W;
+  return -gradeFt - slopeFt * t;
+}
+
+// The lowest grade anywhere on the footprint perimeter — how deep the deepest
+// (downhill) foundation goes. Drives the "walkout basement" check + display.
+export function maxFoundationExposureFt(spec) {
+  const site = { ...SITE_DEFAULTS, ...(spec?.site || {}) };
+  return Math.max(0, Number(site.gradeFt ?? 1.5)) + Math.max(0, Number(site.slopeFt) || 0);
+}
 
 // Structural frame — the skeleton the roof and floors hang on. It sits BETWEEN
 // the foundation and the wall infill: a timber frame can carry straw-bale
@@ -887,6 +924,7 @@ export function applyBimOperations(currentSpec, plan) {
         delete next.shell.overhangs;
       }
       else if (field === 'roofType') next.shell.roofType = String(operation.value || next.shell.roofType || 'gable');
+      else if (field === 'designApproach') next.shell.designApproach = operation.value === 'standard' ? 'standard' : 'natural';
       else if (field === 'projectName') next.projectName = String(operation.value || next.projectName || 'Untitled Natural Building Study');
       else if (field === 'sitePad') {
         const currentPad = next.shell.sitePad || { x: -padExtension(next.shell), y: -padExtension(next.shell), w: next.shell.widthFt + padExtension(next.shell) * 2, d: next.shell.depthFt + padExtension(next.shell) * 2, h: 0.45 };
@@ -1086,6 +1124,10 @@ export function applyBimOperations(currentSpec, plan) {
       else if (field === 'latitudeDeg') next.site.latitudeDeg = clamp(Number(operation.value), 0, 70);
       else if (field === 'rainInYr') next.site.rainInYr = clamp(Number(operation.value), 0, 200);
       else if (field === 'azimuthDeg') next.site.azimuthDeg = clamp(Number(operation.value) || 0, -90, 90);
+      else if (field === 'slopeFt') next.site.slopeFt = clamp(Number(operation.value) || 0, 0, 60);
+      else if (field === 'slopeDir') next.site.slopeDir = ['north', 'south', 'east', 'west'].includes(operation.value) ? operation.value : next.site.slopeDir;
+      else if (field === 'gradeFt') next.site.gradeFt = clamp(Number(operation.value) || 0, 0, 12);
+      else if (field === 'contourInterval') next.site.contourInterval = clamp(Number(operation.value) || 2, 1, 10);
       actions.push(`Set site ${field} to ${operation.value}.`);
       continue;
     }
@@ -1178,11 +1220,65 @@ export function applyBimOperations(currentSpec, plan) {
       } else {
         const maxAlong = wall === 'north' || wall === 'south' ? next.shell.widthFt : next.shell.depthFt;
         const along = clamp(Number(operation.positionFt || 0), 0, Math.max(0, maxAlong - widthFt));
-        next.openings.push(wall === 'north' || wall === 'south'
+        const incoming = wall === 'north' || wall === 'south'
           ? { type: openingType, wall, x: along, widthFt, label }
-          : { type: openingType, wall, y: along, widthFt, label });
+          : { type: openingType, wall, y: along, widthFt, label };
+        // Openings have no ids, so a re-trace lands the same window again a
+        // foot to the left — forever. If the new opening OVERLAPS an existing
+        // one on the same wall, it REPLACES it instead of stacking (two doors
+        // can't share the same stretch of wall in the real world either).
+        const a0 = along, a1 = along + widthFt;
+        const clashIndex = next.openings.findIndex((existing) => {
+          if (existing.wall !== wall) return false;
+          const e0 = Number(existing.x ?? existing.y ?? 0);
+          const e1 = e0 + (Number(existing.widthFt) || 3);
+          return a0 < e1 - 0.05 && a1 > e0 + 0.05;
+        });
+        if (clashIndex >= 0) {
+          next.openings[clashIndex] = { ...incoming, label: operation.name || next.openings[clashIndex].label };
+        } else {
+          next.openings.push(incoming);
+        }
       }
       actions.push(operationDescription(operation, next));
+      continue;
+    }
+
+    // Wholesale opening cleanup: collapse overlapping/duplicate openings per
+    // wall (keep the widest of each overlapping cluster; doors beat windows).
+    // Mechanical work — the UI and the local chat parser can run it without
+    // any AI, and the planner can emit it instead of enumerating removals.
+    if (operation.type === 'dedupe_openings') {
+      const scope = WALL_SIDES.includes(operation.wall) || operation.wall === 'roof' ? operation.wall : null;
+      const before = next.openings.length;
+      const keep = [];
+      for (const opening of next.openings) {
+        if (scope && opening.wall !== scope) { keep.push(opening); continue; }
+        const o0 = Number(opening.x ?? opening.y ?? 0);
+        const o1 = o0 + (Number(opening.widthFt) || 3);
+        const rivalIndex = keep.findIndex((existing) => {
+          if (existing.wall !== opening.wall) return false;
+          if (opening.wall === 'roof') {
+            return Math.abs(Number(existing.x || 0) - Number(opening.x || 0)) < 2 && Math.abs(Number(existing.y || 0) - Number(opening.y || 0)) < 2;
+          }
+          const e0 = Number(existing.x ?? existing.y ?? 0);
+          const e1 = e0 + (Number(existing.widthFt) || 3);
+          return o0 < e1 - 0.05 && o1 > e0 + 0.05;
+        });
+        if (rivalIndex < 0) { keep.push(opening); continue; }
+        const rival = keep[rivalIndex];
+        const openingIsDoor = Boolean(OPENING_TYPES[opening.type]?.entry);
+        const rivalIsDoor = Boolean(OPENING_TYPES[rival.type]?.entry);
+        // doors win over windows; otherwise the wider one stays
+        if ((openingIsDoor && !rivalIsDoor) || (openingIsDoor === rivalIsDoor && (Number(opening.widthFt) || 0) > (Number(rival.widthFt) || 0))) {
+          keep[rivalIndex] = opening;
+        }
+      }
+      next.openings = keep;
+      const removed = before - next.openings.length;
+      actions.push(removed > 0
+        ? `Removed ${removed} duplicate/overlapping opening${removed === 1 ? '' : 's'}${scope ? ` on the ${scope} wall` : ''} (${next.openings.length} remain).`
+        : 'No overlapping openings found — nothing to clean.');
       continue;
     }
 

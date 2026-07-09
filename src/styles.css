@@ -4112,3 +4112,26 @@ button.danger:hover,
 .wallMoveRow { display: flex; gap: 6px; align-items: center; }
 .wallMoveRow input { width: 64px; flex: 0 0 auto; }
 .wallMoveRow button { flex: 0 0 auto; padding: 6px 10px; font-size: 12px; white-space: nowrap; }
+
+/* --- Selector relocated into the left panel (BIM Inspector header) ---------- */
+.selChipWrap.inDock { position: relative; top: auto; left: auto; z-index: 40; }
+.selChipWrap.inDock .selChip {
+  background: var(--card, #2A231E);
+  border: 1px solid var(--line, #4A4038);
+  color: var(--ink, #ECE4D6);
+  display: flex; align-items: center; gap: 8px; max-width: 100%;
+}
+.selChipWrap.inDock .selChip b { color: var(--ink, #ECE4D6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selChipWrap.inDock .selChip .selDetail { font-size: 11px; color: var(--ink3, #978C79); white-space: nowrap; }
+.selChipWrap.inDock .selChip:hover, .selChipWrap.inDock .selChip.open { border-color: var(--clay, #B4623F); }
+.selChipWrap.inDock .selMenu {
+  position: absolute; left: 0; right: auto; top: calc(100% + 6px);
+  max-height: 46vh; overflow-y: auto; min-width: 260px;
+  background: var(--card, #2A231E); border: 1px solid var(--line, #4A4038);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+}
+.selChipWrap.inDock .selMenu button { color: var(--ink, #ECE4D6); }
+.selChipWrap.inDock .selMenu button:hover { background: rgba(180, 98, 63, 0.16); }
+.selChipWrap.inDock .selMenu button.active { background: rgba(180, 98, 63, 0.28); color: var(--ink, #ECE4D6); }
+.selChipWrap.inDock .selMenu button small { color: var(--ink3, #978C79); }
+.selChipWrap.inDock .selMenu .selMenuEyebrow { color: var(--ink3, #978C79); }

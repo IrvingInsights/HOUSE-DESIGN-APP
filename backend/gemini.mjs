@@ -48,7 +48,7 @@ export async function callGemini({ parts, responseSchema, model = GEMINI_MODEL }
   if (responseSchema) {
     // A full drawing takeoff can be dozens of operations — give the model
     // room (and keep it literal: low temperature for tracing work).
-    body.generationConfig = { responseMimeType: 'application/json', responseSchema, maxOutputTokens: 16384, temperature: 0.2 };
+    body.generationConfig = { responseMimeType: 'application/json', responseSchema, maxOutputTokens: 32768, temperature: 0.2 };
   }
 
   let response;

@@ -7,8 +7,11 @@
 //   node tools/op_smoke_test.mjs --http   # + live-server sanity (server must run)
 import {
   applyBimOperations, footprintPolygon, polygonArea, hasCustomFootprint,
-  WALL_ASSEMBLIES, FRAME_TYPES, FLOORING_TYPES, SUBFLOOR_TYPES, OPENING_TYPES
+  WALL_ASSEMBLIES, FRAME_TYPES, FLOORING_TYPES, SUBFLOOR_TYPES, OPENING_TYPES,
+  gradeElevationAt, maxFoundationExposureFt
 } from '../backend/bim-core.mjs';
+
+function near(a, b, eps = 0.01) { return Math.abs(a - b) <= eps; }
 
 let pass = 0, fail = 0;
 function ok(cond, label, extra = '') {
@@ -136,6 +139,44 @@ r = apply(freshSpec(), [{ type: 'move_wall_edge', field: 'e2', value: 200 }]);
 ok(r.spec.shell.depthFt <= 80 || r.rejectedOperations.length === 1 || r.warnings.length > 0, 'absurd edge move clamped or rejected');
 r = apply(freshSpec(), [{ type: 'set_footprint', value: JSON.stringify([[0, 0], [10, 5], [10, 10]]) }]);
 ok(r.rejectedOperations.length === 1, 'diagonal/short footprint rejected');
+
+// --- openings hygiene (the duplicate plague) ----------------------------------
+r = apply(freshSpec(), [
+  { type: 'add_opening', wall: 'north', openingType: 'window', widthFt: 3, positionFt: 8 },
+  { type: 'add_opening', wall: 'north', openingType: 'window', widthFt: 3, positionFt: 9 } // overlaps -> replaces
+]);
+ok(r.spec.openings.filter((o) => o.wall === 'north').length === 1, 'overlapping re-add replaces, not stacks');
+r = apply(freshSpec(), [
+  { type: 'add_opening', wall: 'north', openingType: 'window', widthFt: 3, positionFt: 4 },
+  { type: 'add_opening', wall: 'north', openingType: 'window', widthFt: 3, positionFt: 12 }
+]);
+ok(r.spec.openings.filter((o) => o.wall === 'north').length === 2, 'separated windows both stay');
+r = apply({ ...freshSpec(), openings: [
+  { type: 'window', wall: 'south', x: 6, widthFt: 5, label: 'A' },
+  { type: 'window', wall: 'south', x: 7, widthFt: 3, label: 'B' },
+  { type: 'door', wall: 'south', x: 8, widthFt: 3, label: 'C' },
+  { type: 'window', wall: 'east', y: 4, widthFt: 3, label: 'D' }
+] }, [{ type: 'dedupe_openings' }]);
+ok(r.spec.openings.length === 2 && r.spec.openings.some((o) => o.type === 'door'), 'dedupe keeps the door of an overlapping cluster + untouched walls', JSON.stringify(r.spec.openings));
+
+// --- design approach -----------------------------------------------------------
+r = apply(freshSpec(), [{ type: 'set_shell', field: 'designApproach', value: 'standard' }]);
+ok(r.spec.shell.designApproach === 'standard', 'set designApproach standard');
+ok(!r.issues.some((i) => /solar-side|dirty entry/i.test(i.title)), 'standard mode silences passive-solar/homestead flags', JSON.stringify(r.issues.map((i) => i.title)));
+r = apply(freshSpec(), [{ type: 'set_shell', field: 'designApproach', value: 'weird' }]);
+ok(r.spec.shell.designApproach === 'natural', 'unknown approach falls back to natural');
+
+// --- topography ------------------------------------------------------------------
+r = apply(freshSpec(), [
+  { type: 'set_site', field: 'slopeFt', value: 9 },
+  { type: 'set_site', field: 'slopeDir', value: 'south' },
+  { type: 'set_site', field: 'gradeFt', value: 1.5 }
+]);
+ok(r.spec.site.slopeFt === 9 && r.spec.site.slopeDir === 'south' && r.spec.site.gradeFt === 1.5, 'set_site topography fields');
+ok(near(gradeElevationAt(r.spec, 0, 0), -1.5), 'grade at uphill edge = -gradeFt', String(gradeElevationAt(r.spec, 0, 0)));
+ok(near(gradeElevationAt(r.spec, 0, 28), -10.5), 'grade at downhill edge = -(gradeFt+slope)', String(gradeElevationAt(r.spec, 0, 28)));
+ok(near(maxFoundationExposureFt(r.spec), 10.5), 'max exposure = grade + slope');
+ok(near(gradeElevationAt(freshSpec(), 5, 5), -1.5), 'flat site grade = -gradeFt everywhere');
 
 // --- vocab sanity: shared tables exist for every consumer ---------------------
 ok(Object.keys(WALL_ASSEMBLIES).length === 7, 'WALL_ASSEMBLIES table');

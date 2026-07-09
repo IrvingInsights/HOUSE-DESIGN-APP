@@ -6,7 +6,8 @@ import { createFrameDrawingSetHtml } from './frameDrawings.js';
 import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES, resolveInsulation,
   footprintPolygon, footprintEdges, hasCustomFootprint, polygonArea, polygonPerimeter, expandFootprint,
-  decomposeFootprint, subtractRect, subtractRectFromFootprint, rectInFootprint, pointInFootprint, edgeForOpening
+  decomposeFootprint, subtractRect, subtractRectFromFootprint, rectInFootprint, pointInFootprint, edgeForOpening,
+  gradeElevationAt, maxFoundationExposureFt
 } from '../backend/bim-core.mjs';
 import {
   AlertTriangle,
@@ -1073,7 +1074,8 @@ const LAYER_PRESETS = {
   site: { ...DEFAULT_MODEL_LAYERS, roof: true, rooms: false, openings: false, labels: false }
 };
 
-const SITE_DEFAULTS = { zip: '', placeName: '', latitudeDeg: 43, rainInYr: 38 };
+// Mirror of bim-core SITE_DEFAULTS — keep in sync (topography fields included).
+const SITE_DEFAULTS = { zip: '', placeName: '', latitudeDeg: 43, rainInYr: 38, slopeFt: 0, slopeDir: 'south', gradeFt: 1.5, contourInterval: 2 };
 
 function siteOf(spec) {
   return { ...SITE_DEFAULTS, ...(spec.site || {}) };
@@ -2017,8 +2019,9 @@ function interpreterSummary(report) {
     ? `Done — here's what changed:\n${report.actions.slice(0, 8).map((action) => `- ${action}`).join('\n')}`
     : `I couldn't turn that into a change to the house, so nothing was altered.${report.plan?.missing?.length ? ` To do it I still need: ${report.plan.missing.join(', ')}.` : ''} Try a direct instruction like "make all exterior walls straw bale" or "add pantry 8 x 10 near kitchen".`;
   const assumptions = report.assumptions.length ? `\n\nI assumed: ${report.assumptions.join(' ')}` : '';
-  const issues = report.issues.length ? `\n\nThe council flagged:\n${report.issues.slice(0, 4).map((issue) => `- ${issue.owner}: ${issue.title}`).join('\n')}` : '';
-  return `${opening}${assumptions}${issues}`;
+  // Council opinions are OPT-IN (the Council Loop button / Review tab) — they
+  // don't ride along on every ordinary edit reply.
+  return `${opening}${assumptions}`;
 }
 
 function isConsultativePrompt(prompt, attachedImages = []) {
@@ -2403,8 +2406,9 @@ function structuredPlanSummary(report) {
   const warnings = report.warnings.length ? `\n\nWatch out: ${report.warnings.join(' ')}` : '';
   const assumptions = report.assumptions.length ? `\n\nI assumed: ${report.assumptions.join(' ')}` : '';
   const questions = report.questions.length ? `\n\nTo do this better, tell me:\n${report.questions.map((item) => `- ${item}`).join('\n')}` : '';
-  const issues = report.issues.length ? `\n\nThe council flagged:\n${report.issues.slice(0, 4).map((issue) => `- ${issue.owner}: ${issue.title}`).join('\n')}` : '';
-  return `${opening}${warnings}${assumptions}${questions}${issues}`;
+  // Council opinions are OPT-IN (Council Loop button / Review tab), not a
+  // sermon appended to every reply.
+  return `${opening}${warnings}${assumptions}${questions}`;
 }
 
 async function requestCurrentProjectState() {
@@ -2625,10 +2629,13 @@ function detectIssues(spec) {
   if (!spec.rooms.some((room) => room.type === 'wet')) {
     issues.push({ severity: 'critical', title: 'No wet core defined', owner: 'Engineer', system: 'rooms', fixId: 'add-wet-core', fix: 'Add a bathroom/mechanical wet core and align plumbing walls.' });
   }
-  if (!spec.openings.some((item) => (OPENING_TYPES[item.type]?.entry) && item.wall === 'south')) {
+  // Passive-solar / homestead checks belong to the NATURAL approach — a
+  // conventional as-built (designApproach 'standard') isn't judged by them.
+  const naturalApproach = (spec.shell?.designApproach || 'natural') !== 'standard';
+  if (naturalApproach && !spec.openings.some((item) => (OPENING_TYPES[item.type]?.entry) && item.wall === 'south')) {
     issues.push({ severity: 'warning', title: 'Primary entry lacks clear solar-side approach', owner: 'Designer', system: 'windows', fixId: 'add-south-entry', fix: 'Add or move the main entry (a door, french doors, or a slider) to a legible south approach with weather protection.' });
   }
-  if (!spec.openings.some((item) => (OPENING_TYPES[item.type] || OPENING_TYPES.window).glazed && item.wall === 'south')) {
+  if (naturalApproach && !spec.openings.some((item) => (OPENING_TYPES[item.type] || OPENING_TYPES.window).glazed && item.wall === 'south')) {
     issues.push({ severity: 'warning', title: 'Insufficient south-facing daylight strategy', owner: 'Permaculture', system: 'windows', fixId: 'add-south-glass', fix: 'Add balanced south glazing with summer shading and winter solar gain.' });
   }
   if (spec.shell.wallHeightFt > 12) {
@@ -2647,7 +2654,7 @@ function detectIssues(spec) {
   if (frameKeyNow === 'load-bearing' && hasFramedWall) {
     issues.push({ severity: 'warning', title: 'Framed wall has no frame to carry it', owner: 'Engineer', system: 'frame', fixId: 'set-stick-frame', fix: 'A framed (stud) wall is not load-bearing on its own — pick a frame on the Frame page (light stick frame matches), or switch that side to a load-bearing natural assembly.' });
   }
-  if (!spec.rooms.some((room) => /mud|laundry|service/i.test(room.name))) {
+  if (naturalApproach && !spec.rooms.some((room) => /mud|laundry|service/i.test(room.name))) {
     issues.push({ severity: 'warning', title: 'Farm workflow has no dirty entry', owner: 'Homestead/Farm', system: 'rooms', fixId: 'add-mudroom', fix: 'Add a mud/laundry buffer between exterior work and clean living space.' });
   }
   const hasStackedSpace = Number(spec.shell.storeys || 1) > 1
@@ -2697,7 +2704,7 @@ function detectIssues(spec) {
   if (derivedForChecks.panels > 0 && derivedForChecks.panels > derivedForChecks.panelRoom) {
     issues.push({ severity: 'warning', title: `Solar needs ${derivedForChecks.panels} panels but the roof holds ~${derivedForChecks.panelRoom}`, owner: 'Engineer', system: 'power', fix: 'Grow the roof, cut electric loads (a wood heat source helps), or plan a ground-mount array.' });
   }
-  if (derivedForChecks.total > 324700) {
+  if (naturalApproach && derivedForChecks.total > 324700) {
     issues.push({ severity: 'warning', title: 'Cost is over the owner-builder loan ceiling', owner: 'Project Manager', system: 'shell', fix: `Estimated ${'$' + Math.round(derivedForChecks.total).toLocaleString()} exceeds a typical USDA direct-loan limit ($324,700). Shrink the footprint, simplify systems, or take on more sweat equity.` });
   }
   // Overhang rules (aiCritic R325.5.4-style protection + passive-solar shading).
@@ -2710,7 +2717,7 @@ function detectIssues(spec) {
     issues.push({ severity: 'critical', title: `Roof overhang is only ${(overhangCheck.min * 12).toFixed(0)}" on the shortest side`, owner: 'Natural Builder', system: 'roof', fixId: 'deepen-overhang', fix: 'Plastered natural walls need at least 24" of overhang to stay dry (Appendix S R325.5.4-style). Deepen the overhang or switch the exposed side to a framed rainscreen wall.' });
   }
   const hasSouthGlass = spec.openings.some((opening) => opening.wall === 'south' && opening.type !== 'door');
-  if (hasSouthGlass && derivedForChecks.winterShadeFrac > 0.33) {
+  if (naturalApproach && hasSouthGlass && derivedForChecks.winterShadeFrac > 0.33) {
     issues.push({ severity: 'warning', title: `South overhang shades ${Math.round(derivedForChecks.winterShadeFrac * 100)}% of the winter sun`, owner: 'Designer', system: 'roof', fixId: 'reduce-south-overhang', fix: `At your latitude the winter noon sun sits at ${Math.round(derivedForChecks.sunWinterDeg)}° — the ${overhangCheck.south.toFixed(1)} ft south overhang casts that much shadow on your solar glass. Trim it, or raise the south wall.` });
   }
   if (issues.length === 0) {
@@ -4157,9 +4164,13 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       slab.name = `Site pad (${padRect.w}' x ${padRect.d}')`;
       slab.userData.roomId = 'site-pad';
       slab.userData.footprint = { w: padRect.w, d: padRect.d };
-      slab.visible = layers.pad;
-      if (layers.pad) roomMeshes.push(slab);
-      if (layers.pad && selectedRoom === 'site-pad') {
+      // On a sloped site the huge DEFAULT pad would hover over the falling
+      // ground — the terrain is the ground there. A pad the user placed/sized
+      // (shell.sitePad) still renders: that's a deliberate leveled terrace.
+      const flatPadOk = !(Math.max(0, Number(siteOf(spec).slopeFt) || 0) > 0 && !spec.shell.sitePad);
+      slab.visible = layers.pad && flatPadOk;
+      if (layers.pad && flatPadOk) roomMeshes.push(slab);
+      if (layers.pad && flatPadOk && selectedRoom === 'site-pad') {
         const padObject = {
           id: 'site-pad',
           name: 'Site Pad',
@@ -4345,6 +4356,33 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
             box(tE + lip, stemH, depth + lip * 2, width - tE / 2, stemH / 2, depth / 2, stemMat)
           ];
         ring.forEach((segment) => { segment.name = 'Stem wall foundation'; group.add(segment); });
+      }
+
+      // Topography: when the site slopes, the foundation steps DOWN to meet
+      // grade around the perimeter — taller (a walkout basement) on the
+      // downhill side, the exact condition the elevations/sections show. Each
+      // footprint edge gets a concrete face from the sill (y≈0) to the grade
+      // line at its two ends, so the bottom follows the falling ground.
+      const slopeNow = Math.max(0, Number(siteOf(spec).slopeFt) || 0);
+      if (slopeNow > 0) {
+        const foundMat = new THREE.MeshStandardMaterial({ color: 0x9c988c, roughness: 0.96, side: THREE.DoubleSide });
+        footprintEdges(spec).forEach((edge) => {
+          const gA = gradeElevationAt(spec, edge.x0, edge.y0);
+          const gB = gradeElevationAt(spec, edge.x1, edge.y1);
+          if (gA > -0.12 && gB > -0.12) return; // flush with the floor — nothing to show
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+            edge.x0, 0.05, edge.y0, edge.x1, 0.05, edge.y1, edge.x1, gB, edge.y1,
+            edge.x0, 0.05, edge.y0, edge.x1, gB, edge.y1, edge.x0, gA, edge.y0
+          ]), 3));
+          geo.computeVertexNormals();
+          const face = new THREE.Mesh(geo, foundMat);
+          face.name = 'Foundation to grade';
+          face.userData.generated = true;
+          face.castShadow = true;
+          face.receiveShadow = true;
+          group.add(face);
+        });
       }
 
       // Upper floor plate: only auto-drawn when the storey has no extent-plate
@@ -4615,25 +4653,95 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       fade.addColorStop(1, 'rgba(190, 190, 168, 0)');
       groundCtx.fillStyle = fade;
       groundCtx.fillRect(0, 0, 256, 256);
-      const groundPlane = new THREE.Mesh(
-        new THREE.PlaneGeometry(fixedGridSize * 2.5, fixedGridSize * 2.5),
-        new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(groundCanvas), transparent: true, roughness: 1 })
-      );
-      groundPlane.rotation.x = -Math.PI / 2;
-      groundPlane.position.set(width / 2, -0.52, depth / 2);
-      groundPlane.receiveShadow = true;
-      groundPlane.userData.generated = true;
-      group.add(groundPlane);
+      const groundSlope = Math.max(0, Number(siteOf(spec).slopeFt) || 0);
+      const groundMat = new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(groundCanvas), transparent: true, roughness: 1, side: THREE.DoubleSide });
+      const gSize = fixedGridSize * 2.5;
+      if (groundSlope <= 0) {
+        // Flat site (legacy): one horizontal plane just below the floor datum.
+        const groundPlane = new THREE.Mesh(new THREE.PlaneGeometry(gSize, gSize), groundMat);
+        groundPlane.rotation.x = -Math.PI / 2;
+        groundPlane.position.set(width / 2, -0.52, depth / 2);
+        groundPlane.receiveShadow = true;
+        groundPlane.userData.generated = true;
+        group.add(groundPlane);
+      } else {
+        // Sloped site: a real terrain surface warped to the grade plane, so the
+        // land falls away and the house sits on it true to the drawings.
+        const segs = 60;
+        const gx0 = width / 2 - gSize / 2;
+        const gz0 = depth / 2 - gSize / 2;
+        const positions = [];
+        const uvs = [];
+        for (let i = 0; i <= segs; i += 1) {
+          for (let j = 0; j <= segs; j += 1) {
+            const wx = gx0 + (gSize * i) / segs;
+            const wz = gz0 + (gSize * j) / segs;
+            positions.push(wx, gradeElevationAt(spec, wx, wz) - 0.05, wz);
+            uvs.push(i / segs, j / segs);
+          }
+        }
+        const idx = (i, j) => i * (segs + 1) + j;
+        const indices = [];
+        for (let i = 0; i < segs; i += 1) {
+          for (let j = 0; j < segs; j += 1) {
+            indices.push(idx(i, j), idx(i, j + 1), idx(i + 1, j));
+            indices.push(idx(i + 1, j), idx(i, j + 1), idx(i + 1, j + 1));
+          }
+        }
+        const terrainGeo = new THREE.BufferGeometry();
+        terrainGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+        terrainGeo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
+        terrainGeo.setIndex(indices);
+        terrainGeo.computeVertexNormals();
+        const terrain = new THREE.Mesh(terrainGeo, groundMat);
+        terrain.receiveShadow = true;
+        terrain.userData.generated = true;
+        terrain.name = `Sloped terrain (${groundSlope}′ fall to the ${siteOf(spec).slopeDir})`;
+        group.add(terrain);
 
-      const grid = new THREE.GridHelper(fixedGridSize, Math.max(48, Math.round(fixedGridSize / 4)), 0x6e6a58, 0x8b8672);
-      grid.material.transparent = true;
-      grid.material.opacity = 0.8;
-      // Just above the pad's top surface (y=0) so the scale grid peeks through
-      // the site pad instead of being buried under it.
-      grid.position.set(width / 2, 0.03, depth / 2);
-      grid.name = `Fixed outdoor reference grid (${fixedGridSize}' x ${fixedGridSize}')`;
-      grid.userData.generated = true;
-      group.add(grid);
+        // Contour lines: iso-elevation lines across the terrain (the topo look).
+        // Grade is a tilted plane, so each contour is a straight line of constant
+        // elevation — solve the grade equation for the axis coordinate.
+        const site = siteOf(spec);
+        const interval = Math.min(10, Math.max(1, Number(site.contourInterval) || 2));
+        const dir = ['north', 'south', 'east', 'west'].includes(site.slopeDir) ? site.slopeDir : 'south';
+        const axisIsY = dir === 'north' || dir === 'south';
+        const span = axisIsY ? depth : width;
+        const contourMat = new THREE.LineBasicMaterial({ color: 0x8a8468, transparent: true, opacity: 0.55 });
+        const eLo = gradeElevationAt(spec, axisIsY ? width / 2 : gx0, axisIsY ? gz0 + gSize : depth / 2);
+        const eHi = gradeElevationAt(spec, axisIsY ? width / 2 : gx0 + gSize, axisIsY ? gz0 : depth / 2);
+        const [lo, hi] = [Math.min(eLo, eHi), Math.max(eLo, eHi)];
+        for (let e = Math.ceil(lo / interval) * interval; e <= hi; e += interval) {
+          // coordinate along the slope axis where grade == e
+          const frac = (-e - (Number(site.gradeFt ?? 1.5))) / groundSlope; // t in the grade eqn
+          if (frac < -6 || frac > 6) continue;
+          const coord = dir === 'south' ? frac * depth
+            : dir === 'north' ? depth - frac * depth
+              : dir === 'east' ? frac * width
+                : width - frac * width;
+          const pts = axisIsY
+            ? [new THREE.Vector3(gx0, e - 0.02, coord), new THREE.Vector3(gx0 + gSize, e - 0.02, coord)]
+            : [new THREE.Vector3(coord, e - 0.02, gz0), new THREE.Vector3(coord, e - 0.02, gz0 + gSize)];
+          const cl = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), contourMat);
+          cl.userData.generated = true;
+          group.add(cl);
+        }
+      }
+
+      // The flat reference grid only makes sense on flat ground — on a sloped
+      // site it floats downhill and buries uphill; the contour lines take over
+      // as the scale/elevation reference there.
+      if (groundSlope <= 0) {
+        const grid = new THREE.GridHelper(fixedGridSize, Math.max(48, Math.round(fixedGridSize / 4)), 0x6e6a58, 0x8b8672);
+        grid.material.transparent = true;
+        grid.material.opacity = 0.8;
+        // Just above the pad's top surface (y=0) so the scale grid peeks through
+        // the site pad instead of being buried under it.
+        grid.position.set(width / 2, 0.03, depth / 2);
+        grid.name = `Fixed outdoor reference grid (${fixedGridSize}' x ${fixedGridSize}')`;
+        grid.userData.generated = true;
+        group.add(grid);
+      }
       }
 
       // The 3D view reflects the selection like Plan and Detail do: whatever is
@@ -5815,6 +5923,23 @@ function App() {
       return;
     }
 
+    // Fast local path: "remove the duplicate/excess windows" is mechanical —
+    // the backend dedupes deterministically; no AI needed (and the planner
+    // used to choke on exactly this ask). Runs even with a drawing attached.
+    if (/\b(remove|delete|clean\s?up|clear|get rid of|fix)\b[^.]*\b(duplicate|duplicated|excess|extra|overlap\w*|redundant)\b[^.]*\b(opening|window|door)/i.test(submittedPrompt)
+      || /\b(duplicate|excess|extra|overlapping)\b[^.]*\b(openings?|windows?|doors?)\b[^.]*\b(remove|delete|clean|clear|out)\b/i.test(submittedPrompt)
+      || /\bdedupe?\b.*\b(openings?|windows?|doors?)\b/i.test(submittedPrompt)) {
+      setChatMessages((items) => [...items, { role: 'user', speaker: 'You', text: submittedPrompt }]);
+      setPrompt('');
+      await applyBackendOperations({
+        operations: [{ type: 'dedupe_openings' }],
+        promptText: 'Clean up duplicate openings',
+        logPrefix: 'Openings',
+        chatText: 'Cleaned overlapping and duplicate windows/doors — where two openings shared the same stretch of wall, the door (or the wider one) stayed. Instant, no planner needed.'
+      });
+      return;
+    }
+
     // Fast local path: simple "add a bedroom / a kitchen 14x12" requests skip
     // the slow planner entirely and go straight through the layout engine.
     const localRooms = attachedImages.length ? null : parseLocalRoomAdds(submittedPrompt);
@@ -5902,6 +6027,7 @@ function App() {
 
   function loopRevisions() {
     rememberRevision();
+    const flaggedBefore = detectIssues(spec).filter((issue) => issue.severity !== 'pass');
     let next = structuredClone(spec);
     let passes = 0;
     while (passes < 4 && detectIssues(next).some((issue) => issue.severity !== 'pass')) {
@@ -5911,6 +6037,16 @@ function App() {
     const displayedPasses = passes || 1;
     setSpec(next);
     setRevisionLog((items) => [`Rev ${next.revision}: Council loop ran ${displayedPasses} pass${displayedPasses === 1 ? '' : 'es'} and resolved available schematic blockers.`, ...items]);
+    // The council speaks when ASKED — this button is the ask. Report what it
+    // found and what remains, here in the conversation.
+    const remaining = detectIssues(next).filter((issue) => issue.severity !== 'pass');
+    const foundText = flaggedBefore.length
+      ? `The council reviewed the design and flagged:\n${flaggedBefore.slice(0, 6).map((issue) => `- ${issue.owner}: ${issue.title}`).join('\n')}`
+      : 'The council reviewed the design and found no blocking issues.';
+    const remainText = remaining.length
+      ? `\n\nStill open after ${displayedPasses} pass${displayedPasses === 1 ? '' : 'es'}:\n${remaining.slice(0, 6).map((issue) => `- ${issue.owner}: ${issue.title}`).join('\n')}\n\nSee Review for one-tap fixes.`
+      : flaggedBefore.length ? `\n\nAll of it was resolved automatically in ${displayedPasses} pass${displayedPasses === 1 ? '' : 'es'}.` : '';
+    setChatMessages((items) => [...items, { role: 'studio', speaker: 'Council', text: `${foundText}${remainText}` }]);
   }
 
   function handleImage(file) {
@@ -6036,6 +6172,8 @@ function App() {
       if (value === 'shed') {
         operations.push({ type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: spec.shell.southWallHeightFt || spec.shell.wallHeightFt + 2, northWallHeightFt: spec.shell.northWallHeightFt || spec.shell.wallHeightFt });
       }
+    } else if (field === 'designApproach') {
+      operations.push({ type: 'set_shell', field: 'designApproach', value });
     } else if (field === 'southWallHeightFt' || field === 'northWallHeightFt') {
       operations.push({ type: 'set_wall_height', wall: field === 'southWallHeightFt' ? 'south' : 'north', h: clamp(numeric, 7, 24) });
     } else {
@@ -7058,6 +7196,19 @@ function App() {
             const shellHeightsMixed = new Set(shellHeights).size > 1;
             return (
             <div className="systemPage">
+              <div className="sectionHead">Design approach</div>
+              <div className="controlGrid">
+                <label>Building approach
+                  <select value={spec.shell.designApproach === 'standard' ? 'standard' : 'natural'} onChange={(event) => updateShell('designApproach', event.target.value)}>
+                    <option value="natural">Natural building (straw bale, cob, passive solar…)</option>
+                    <option value="standard">Standard construction (conventional framing)</option>
+                  </select>
+                </label>
+              </div>
+              <p className="systemNote">{spec.shell.designApproach === 'standard'
+                ? 'Standard mode: the assistant models conventional construction and the passive-solar / homestead checks stand down. Natural techniques stay available — just ask for them.'
+                : 'Natural mode: the assistant prefers natural systems and the full council watches the design. Switch to Standard when modeling an existing conventional house.'}</p>
+
               <div className="sectionHead">Overall shape</div>
               <div className="controlGrid">
                 <label>Width (ft)<input type="number" value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
@@ -7280,6 +7431,27 @@ function App() {
                 <label>Orientation off south (°) <em className="pitchHint">{(() => { const a = Number(siteOf(spec).azimuthDeg) || 0; return a === 0 ? 'due south' : `${Math.abs(a)}° ${a < 0 ? 'east' : 'west'} of south · ${Math.round(derived.solarFactor * 100)}% sun`; })()}</em><input type="number" step="5" min="-90" max="90" value={Number(siteOf(spec).azimuthDeg) || 0} onChange={(event) => updateSite('azimuthDeg', event.target.value)} /></label>
               </div>
               <p className="systemNote">Search by name for real coordinates and last year's actual rainfall, or fine-tune by hand. Latitude sets sun angles; rain decides whether the roof can supply water. Orientation is how far the south face is turned off true south — the further you rotate, the less winter sun your south glass gathers.</p>
+
+              <div className="sectionHead">Topography — the lay of the land</div>
+              <div className="controlGrid">
+                <label>Fall across the house (ft)
+                  <input type="number" step="0.5" min="0" max="60" value={Number(siteOf(spec).slopeFt) || 0} onChange={(event) => updateSite('slopeFt', event.target.value)} />
+                </label>
+                <label>Downhill direction
+                  <select value={siteOf(spec).slopeDir || 'south'} onChange={(event) => updateSite('slopeDir', event.target.value)} disabled={!(Number(siteOf(spec).slopeFt) > 0)}>
+                    <option value="north">North</option>
+                    <option value="south">South</option>
+                    <option value="east">East</option>
+                    <option value="west">West</option>
+                  </select>
+                </label>
+                <label>Floor above grade, uphill (ft)
+                  <input type="number" step="0.25" min="0" max="12" value={Number(siteOf(spec).gradeFt ?? 1.5)} onChange={(event) => updateSite('gradeFt', event.target.value)} />
+                </label>
+              </div>
+              <p className="systemNote">{(Number(siteOf(spec).slopeFt) || 0) > 0
+                ? <>The land falls <b>{siteOf(spec).slopeFt}′ toward the {siteOf(spec).slopeDir}</b> across the footprint — the model's terrain slopes to match and the foundation steps down to meet grade, exposing up to <b>{maxFoundationExposureFt(spec).toFixed(1)}′</b> of wall on the downhill side{maxFoundationExposureFt(spec) >= 6 ? ' (a walkout/daylight basement condition)' : ''}. Drawings and sections read this same grade line.</>
+                : 'Flat site. Give it a fall in feet (from a survey, contour lines, or pacing it off) and the terrain, foundation, and future drawings will follow the real ground.'}</p>
 
               <div className="sectionHead">Outbuildings</div>
               <div className="roomAddGrid">
@@ -8024,52 +8196,8 @@ function App() {
             </div>
           )}
           {viewMode === '3d' && <div className="northBadge">N</div>}
-          {/* Live selection chip: the model is the selector surface. The chip
-              names what's selected; tapping it lists every selectable object —
-              including ones that are hard to click (far walls, upper bands). */}
-          {(() => {
-            const kind = selectedIsWall ? 'Wall'
-              : selectedIsOpening ? ((OPENING_TYPES[selected?.type] || OPENING_TYPES.window).label)
-              : selectedIsRoof ? 'Roof'
-              : selectedIsPad ? 'Site pad'
-              : selectedIsGrid ? 'Grid'
-              : selectedIsElement ? titleCase(selected?.category || 'element')
-              : 'Room';
-            return (
-              <div className="selChipWrap">
-                <button type="button" className={`selChip${selMenuOpen ? ' open' : ''}`} title="What's selected — tap to pick anything" onClick={() => setSelMenuOpen((open) => !open)}>
-                  <span className="selChipKind">{kind}</span>
-                  <b>{selected?.name || '—'}</b>
-                  <span className="selChipCaret">▾</span>
-                </button>
-                {selMenuOpen && (
-                  <div className="selMenu" onMouseLeave={() => setSelMenuOpen(false)}>
-                    {[
-                      ['Rooms', (spec.rooms || []).map((room) => ({ id: room.id, label: room.name, sub: `${room.w}×${room.d}′` }))],
-                      ['Walls', wallSections.map((wall) => ({ id: wall.id, label: wall.name, sub: wall.assembly }))],
-                      ['Openings', (spec.openings || []).map((opening, index) => ({ id: `opening-${index}`, label: opening.label || `${titleCase(opening.wall)} ${titleCase(opening.type)}`, sub: `${opening.widthFt}′` }))],
-                      ['Structure & site', [
-                        { id: 'roof-main', label: 'Roof', sub: spec.shell.roofType || 'gable' },
-                        { id: 'site-pad', label: 'Site pad', sub: '' },
-                        ...(spec.elements || []).filter((element) => element.category === 'floor').map((element) => ({ id: element.id, label: element.name || 'Storey extent', sub: `${element.w}×${element.d}′` }))
-                      ]],
-                      ['Elements', (spec.elements || []).filter((element) => element.category !== 'floor').map((element) => ({ id: element.id, label: element.name, sub: titleCase(element.category || '') }))]
-                    ].filter(([, items]) => items.length > 0).map(([groupLabel, items]) => (
-                      <div className="selMenuGroup" key={groupLabel}>
-                        <span className="selMenuEyebrow">{groupLabel}</span>
-                        {items.map((item) => (
-                          <button type="button" key={item.id} className={selectedRoom === item.id ? 'active' : ''} onClick={() => selectObject(item.id)}>
-                            <span>{item.label}</span>
-                            {item.sub && <small>{item.sub}</small>}
-                          </button>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
+          {/* The selector moved into the left panel (BIM Inspector header) —
+              the model stays a pure tap-to-select surface. */}
         </div>
 
         {inspectorDock && createPortal(<div className="lowerDeck">
@@ -8084,6 +8212,10 @@ function App() {
                 </nav>
               </div>
               {(() => {
+                // The SELECTOR lives here in the left panel (Daniel's ask):
+                // the summary is a button; tapping it lists every selectable
+                // object — including ones hard to click in the model (far
+                // walls, upper bands). The model itself stays tap-to-select.
                 const kind = selectedIsWall ? 'Wall'
                   : selectedIsOpening ? ((OPENING_TYPES[selected?.type] || OPENING_TYPES.window).label)
                   : selectedIsRoof ? 'Roof'
@@ -8096,10 +8228,38 @@ function App() {
                   : (selectedIsRoof || selectedIsGrid) ? ''
                   : `${selected?.w || 0}′ × ${selected?.d || 0}′ · ${Math.round((selected?.w || 0) * (selected?.d || 0))} sf`;
                 return (
-                  <div className="selectedSummary" title="What you're editing below">
-                    <span className="selKind">{kind}</span>
-                    <b>{selected?.name || '—'}</b>
-                    {detail && <span className="selDetail">{detail}</span>}
+                  <div className="selChipWrap inDock">
+                    <button type="button" className={`selChip${selMenuOpen ? ' open' : ''}`} title="What's selected — tap to pick anything" onClick={() => setSelMenuOpen((open) => !open)}>
+                      <span className="selChipKind">{kind}</span>
+                      <b>{selected?.name || '—'}</b>
+                      {detail && <span className="selDetail">{detail}</span>}
+                      <span className="selChipCaret">▾</span>
+                    </button>
+                    {selMenuOpen && (
+                      <div className="selMenu" onMouseLeave={() => setSelMenuOpen(false)}>
+                        {[
+                          ['Rooms', (spec.rooms || []).map((room) => ({ id: room.id, label: room.name, sub: `${room.w}×${room.d}′` }))],
+                          ['Walls', wallSections.map((wall) => ({ id: wall.id, label: wall.name, sub: wall.assembly }))],
+                          ['Openings', (spec.openings || []).map((opening, index) => ({ id: `opening-${index}`, label: opening.label || `${titleCase(opening.wall)} ${titleCase(opening.type)}`, sub: `${opening.widthFt}′` }))],
+                          ['Structure & site', [
+                            { id: 'roof-main', label: 'Roof', sub: spec.shell.roofType || 'gable' },
+                            { id: 'site-pad', label: 'Site pad', sub: '' },
+                            ...(spec.elements || []).filter((element) => element.category === 'floor').map((element) => ({ id: element.id, label: element.name || 'Storey extent', sub: `${element.w}×${element.d}′` }))
+                          ]],
+                          ['Elements', (spec.elements || []).filter((element) => element.category !== 'floor').map((element) => ({ id: element.id, label: element.name, sub: titleCase(element.category || '') }))]
+                        ].filter(([, items]) => items.length > 0).map(([groupLabel, items]) => (
+                          <div className="selMenuGroup" key={groupLabel}>
+                            <span className="selMenuEyebrow">{groupLabel}</span>
+                            {items.map((item) => (
+                              <button type="button" key={item.id} className={selectedRoom === item.id ? 'active' : ''} onClick={() => { selectObject(item.id); setSelMenuOpen(false); }}>
+                                <span>{item.label}</span>
+                                {item.sub && <small>{item.sub}</small>}
+                              </button>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })()}
