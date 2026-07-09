@@ -13,6 +13,12 @@ previous designs (snapshot-grouped) + start-from-file. Daniel's active design:
 **"Tom's House"** — an EXISTING conventional home being modified (not natural
 build); he traces the PDF then adjusts verbally.
 
+**Late-session additions (all committed, tree clean at `1298168`):** opening
+card reordered (start-first), two-column full-visible card, colored start
+choices, chat-window planning indicators (sweep bar + wheel + dots), Team =
+real AI consult-only persona, previous-designs picker, 3D canvas follows its
+container (chat toggle refits the model).
+
 **Path to MVP, in order:**
 1. **The geometry pass** — stepped roofs over partial storeys, L/U footprints,
    move-a-wall. Own session. **Read `GEOMETRY_PASS.md` FIRST** — rectangle-
