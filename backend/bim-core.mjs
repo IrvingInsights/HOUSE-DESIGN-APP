@@ -291,7 +291,8 @@ export const UTILITY_DEFAULTS = {
   foundationType: 'rubble',
   foundationInsulation: 'perimeter',
   stemwallHeightFt: 1.5,
-  roofRValue: 38,
+  roofInsulation: 'cellulose',
+  floorInsulation: 'cellulose',
   windowQuality: 'double',
   panelCount: 0,
   batteryOverrideKwh: 0,
@@ -352,6 +353,23 @@ export function resolveSubfloor(spec) {
   const key = spec.flooring?.subfloor;
   if (SUBFLOOR_TYPES[key]) return key;
   return (spec.utilities?.foundationType === 'slab') ? 'slab' : 'insulated';
+}
+
+// Insulation — an explicit layer of the roof and floor assemblies. r = typical
+// installed R for a deep cavity; costPsf / carbonPsf per sf of insulated area.
+// Natural options (cellulose, wool, straw-clay, wood fiber) sit low on carbon;
+// rigid foam insulates hard but carries the most embodied carbon.
+export const INSULATION_TYPES = {
+  none: { label: 'None', r: 3, costPsf: 0, carbonPsf: 0 },
+  cellulose: { label: 'Dense-pack cellulose', r: 38, costPsf: 1.6, carbonPsf: 0.3 },
+  wool: { label: 'Sheep wool', r: 34, costPsf: 3.2, carbonPsf: 0.4 },
+  strawclay: { label: 'Straw / light clay', r: 24, costPsf: 0.8, carbonPsf: 0.2 },
+  woodfiber: { label: 'Wood fiber board', r: 32, costPsf: 2.6, carbonPsf: 0.5 },
+  mineralwool: { label: 'Mineral wool', r: 40, costPsf: 2.0, carbonPsf: 1.0 },
+  rigid: { label: 'Rigid foam board', r: 45, costPsf: 2.4, carbonPsf: 3.5 }
+};
+export function resolveInsulation(key, fallback = 'cellulose') {
+  return INSULATION_TYPES[key] ? key : fallback;
 }
 
 export const RECLAIMED_SYSTEMS = ['frame', 'walls', 'flooring', 'windows', 'roof'];
@@ -540,6 +558,8 @@ export function applyBimOperations(currentSpec, plan) {
         heatSource: ['rocket_mass', 'masonry', 'wood_stove', 'minisplit'],
         foundationType: ['rubble', 'stemwall', 'slab'],
         foundationInsulation: ['none', 'perimeter', 'full'],
+        roofInsulation: ['none', 'cellulose', 'wool', 'strawclay', 'woodfiber', 'mineralwool', 'rigid'],
+        floorInsulation: ['none', 'cellulose', 'wool', 'strawclay', 'woodfiber', 'mineralwool', 'rigid'],
         windowQuality: ['double', 'triple']
       };
       if (field === 'tankGal') next.utilities.tankGal = clamp(Number(operation.value) || 0, 0, 50000);
@@ -677,6 +697,7 @@ export function applyBimOperations(currentSpec, plan) {
         h: Math.max(0.2, Number(operation.h || 1.2)),
         level: Number(operation.level || 1),
         roofType: operation.roofType || '',
+        construction: operation.construction || '',
         type: operation.category || 'custom'
       };
       next.elements.push({ ...element, ...clampObjectPosition(next, element, element.x, element.y) });

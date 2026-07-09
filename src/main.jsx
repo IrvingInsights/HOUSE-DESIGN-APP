@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { pushToBlender, exportIfcViaBlender } from './blenderBridge.js';
-import { OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor } from '../backend/bim-core.mjs';
+import { OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES, resolveInsulation } from '../backend/bim-core.mjs';
 import {
   AlertTriangle,
   Box,
@@ -649,6 +649,28 @@ const OUTDOOR_ITEMS = [
   { key: 'sauna', name: 'Sauna', cost: 5500, w: 8, d: 8, h: 8, category: 'structure', note: 'Fire safety and a cool-down; near water is nice.' },
   { key: 'orchard', name: 'Orchard', cost: 1800, w: 30, d: 20, h: 1, category: 'landscape', note: 'Rows on contour; mind frost pockets.' },
   { key: 'pond', name: 'Pond', cost: 6000, w: 20, d: 16, h: 0.5, category: 'water', note: 'Fire reserve and habitat; watch setbacks.' }
+];
+
+// Outbuildings — sizable, constructable structures placed on the site (distinct
+// from the fixed Outdoors homestead items). Each drops a real element you resize
+// in the plan/model and cost by its construction.
+const OUTBUILDING_CONSTRUCTION = {
+  shed: { label: 'Simple shed frame', costPsf: 45 },
+  pole: { label: 'Pole barn', costPsf: 40 },
+  stick: { label: 'Stick frame', costPsf: 90 },
+  timber: { label: 'Timber frame', costPsf: 130 },
+  strawbale: { label: 'Straw bale', costPsf: 110 },
+  cordwood: { label: 'Cordwood', costPsf: 95 }
+};
+const OUTBUILDING_PRESETS = [
+  { name: 'Shed', w: 10, d: 8, h: 8, construction: 'shed' },
+  { name: 'Workshop', w: 16, d: 12, h: 9, construction: 'stick' },
+  { name: 'Studio', w: 14, d: 12, h: 9, construction: 'timber' },
+  { name: 'Barn', w: 24, d: 18, h: 14, construction: 'pole' },
+  { name: 'Garage', w: 20, d: 12, h: 9, construction: 'stick' },
+  { name: 'Guest cabin', w: 14, d: 12, h: 10, construction: 'timber' },
+  { name: 'Greenhouse', w: 12, d: 8, h: 8, construction: 'shed' },
+  { name: 'Sauna', w: 8, d: 8, h: 8, construction: 'timber' }
 ];
 
 function outdoorItemPresent(spec, item) {
@@ -2623,9 +2645,16 @@ function deriveDesign(spec, wallSections) {
     return sum + (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1);
   }, 0);
   const glazingU = utilities.windowQuality === 'triple' ? 0.28 : 0.5;
-  const roofR = clamp(Number(utilities.roofRValue) || 38, 10, 100);
+  // Insulation is an explicit layer of the roof and floor assemblies.
+  const roofInsulKey = resolveInsulation(utilities.roofInsulation, 'cellulose');
+  const floorInsulKey = resolveInsulation(utilities.floorInsulation, 'cellulose');
+  const roofR = INSULATION_TYPES[roofInsulKey].r;
+  const floorR = INSULATION_TYPES[floorInsulKey].r;
+  // Ground-coupled floors lose less than their full area — a 0.5 factor.
+  const floorLoss = (floor / Math.max(floorR, 3)) * 0.5;
   const heatUA = Math.max(0, wallArea - southGlass) / Math.max(wallR, 1)
     + Math.max(0, roofArea - skylightArea) / roofR
+    + floorLoss
     + (southGlass + skylightArea) * glazingU;
   const heatLoadKbtu = (heatUA * 70) / 1000;
 
@@ -2667,7 +2696,9 @@ function deriveDesign(spec, wallSections) {
   const foundationCost = (utilities.foundationType === 'stemwall'
     ? floor * 8 + perimeterFt * stemwallHeightFt * 18
     : floor * (foundationCostPsf[utilities.foundationType] ?? 10)) + foundationInsulationCost;
-  const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => sum + (outdoorItemPresent(spec, item) ? item.cost : 0), 0);
+  const outbuildingCost = (spec.elements || []).filter((element) => element.category === 'outbuilding')
+    .reduce((sum, element) => sum + (Number(element.w) * Number(element.d) || 0) * (OUTBUILDING_CONSTRUCTION[element.construction]?.costPsf ?? 60), 0);
+  const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => sum + (outdoorItemPresent(spec, item) ? item.cost : 0), 0) + outbuildingCost;
 
   // Floor assembly = finished floor over the whole heated area + the structural
   // subfloor deck under the ground floor (a slab foundation is its own deck, so
@@ -2693,11 +2724,13 @@ function deriveDesign(spec, wallSections) {
 
   const wallsCostRaw = wallsCost;
   const windowsCostRaw = totalGlass * (utilities.windowQuality === 'triple' ? 70 : 45);
-  const roofCostRaw = roofArea * 10;
+  const roofInsulCost = roofArea * INSULATION_TYPES[roofInsulKey].costPsf;
+  const floorInsulCost = floor * INSULATION_TYPES[floorInsulKey].costPsf;
+  const roofCostRaw = roofArea * 10 + roofInsulCost;
   const cost = {
     foundation: foundationCost,
     frame: frameCost,
-    flooring: flooringCostRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.cost : 1) + subfloorCost,
+    flooring: flooringCostRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.cost : 1) + subfloorCost + floorInsulCost,
     upperFloors: (storeys - 1) * floor * 12 + stackedArea * 12,
     outdoors: outdoorCost,
     walls: wallsCostRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.cost : 1),
@@ -2725,9 +2758,9 @@ function deriveDesign(spec, wallSections) {
   const wallCarbonRaw = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0);
   const wallCarbon = wallCarbonRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.carbon : 1);
   const frameCarbon = frameCarbonRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.carbon : 1);
-  const roofCarbonRaw = roofArea * 12;
+  const roofCarbonRaw = roofArea * (12 + INSULATION_TYPES[roofInsulKey].carbonPsf);
   const roofCarbon = roofCarbonRaw * (reclaimed.roof ? RECLAIMED_FACTORS.roof.carbon : 1);
-  const flooringCarbon = flooringCarbonRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.carbon : 1) + subfloorCarbon;
+  const flooringCarbon = flooringCarbonRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.carbon : 1) + subfloorCarbon + floor * INSULATION_TYPES[floorInsulKey].carbonPsf;
   const stemCarbonExtra = utilities.foundationType === 'stemwall' ? perimeterFt * Math.max(0, stemwallHeightFt - 1.5) * 40 : 0;
   const carbonKg = floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
@@ -2750,6 +2783,7 @@ function deriveDesign(spec, wallSections) {
     skylightArea, totalGlass, glazingU, stemwallHeightFt, azimuthDeg, solarFactor,
     frameGround: groundFrameKey, frameUpper: upperFrameKey, frameArea: groundFrameArea + upperFrameArea,
     flooring: flooringKey, subfloor: subfloorKey, subfloorCost,
+    roofInsulation: roofInsulKey, floorInsulation: floorInsulKey, roofR, floorR,
     heatLoadKbtu, bedrooms, people, waterGpd, catchmentGpd, supplyGpd, septicGpd,
     peakSunHrs, loadKwhDay, panels, panelRoom, batteryKwh,
     cost, totalBeforeSweat, sweat, total, carbonKg, pitch
@@ -3367,13 +3401,31 @@ const PLAN_ZONE_HEX = {
 // Top-down 2D floor-plan editor: drag rooms to move, drag corners to resize,
 // snapped to 0.5 ft. Commits on drop via onMove / onResize. This is the
 // natural surface for laying out a first floor.
-function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, activeFloor = 1 }) {
+const PLAN_CONTEXT_LABEL = {
+  foundation: 'Foundation plan — drag the footprint corner to resize',
+  shell: 'Footprint plan — drag the corner to resize',
+  frame: 'Frame plan — the footprint the frame carries',
+  flooring: 'Floor plan — the footprint the floor covers',
+  walls: 'Wall plan — tap a wall in the model to edit it',
+  roof: 'Roof plan — footprint the roof covers',
+  site: 'Site plan — place and drag outbuildings',
+  outdoors: 'Site plan — place and drag outbuildings',
+  rooms: 'Room plan — drag to move, corners to resize',
+  windows: 'Openings plan — white gaps mark windows & doors'
+};
+function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShell, context = null, activeFloor = 1 }) {
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
+  const [shellGhost, setShellGhost] = useState(null);
   const W = Number(spec.shell.widthFt) || 36;
   const D = Number(spec.shell.depthFt) || 28;
   const pad = Math.max(6, Math.round(Math.max(W, D) * 0.14));
   const snap = (v) => Math.round(v * 2) / 2;
+  const buildingContext = ['foundation', 'shell', 'frame', 'flooring', 'roof'].includes(context);
+  const siteContext = context === 'site' || context === 'outdoors';
+  // In a building context the footprint is the subject; dim the room fill so it
+  // recedes. In a site context the outbuildings are the subject; dim the house.
+  const roomsDim = buildingContext ? 0.18 : siteContext ? 0.28 : 1;
 
   function clientToFeet(event) {
     const svg = svgRef.current;
@@ -3429,6 +3481,27 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, activeFloor 
     setDrag(null);
   }
 
+  function startShellDrag(event) {
+    event.stopPropagation();
+    event.preventDefault();
+    try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
+    setShellGhost({ ghostW: W, ghostD: D });
+  }
+  function onShellMove(event) {
+    if (!shellGhost) return;
+    const { fx, fy } = clientToFeet(event);
+    setShellGhost((current) => current && { ...current, ghostW: clamp(snap(fx), 12, 96), ghostD: clamp(snap(fy), 12, 80) });
+  }
+  function endShellDrag() {
+    if (!shellGhost) return;
+    const w = shellGhost.ghostW ?? W;
+    const d = shellGhost.ghostD ?? D;
+    if ((w !== W || d !== D) && onResizeShell) onResizeShell(w, d);
+    setShellGhost(null);
+  }
+  const shellW = shellGhost?.ghostW ?? W;
+  const shellD = shellGhost?.ghostD ?? D;
+
   const roomAt = (room) => (drag && drag.id === room.id ? { ...room, ...drag.ghost } : room);
   const gridStep = W > 60 ? 10 : 5;
   const gridLines = [];
@@ -3444,17 +3517,23 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, activeFloor 
         className="planSvg"
         viewBox={`${-pad} ${-pad} ${W + pad * 2} ${D + pad * 2}`}
         preserveAspectRatio="xMidYMid meet"
-        onPointerMove={onPointerMove}
-        onPointerUp={endDrag}
-        onPointerLeave={endDrag}
+        onPointerMove={(event) => { onPointerMove(event); onShellMove(event); }}
+        onPointerUp={(event) => { endDrag(); endShellDrag(event); }}
+        onPointerLeave={(event) => { endDrag(); endShellDrag(event); }}
         onClick={() => {}}
       >
         {/* site around the house */}
         <rect x={-pad} y={-pad} width={W + pad * 2} height={D + pad * 2} fill="var(--canvas)" />
         {gridLines}
-        {/* shell / exterior wall */}
-        <rect x={0} y={0} width={W} height={D} fill="none" stroke="var(--ink3)" strokeWidth={1} />
-        <rect x={0.7} y={0.7} width={Math.max(0, W - 1.4)} height={Math.max(0, D - 1.4)} fill="none" stroke="var(--line2)" strokeWidth={0.12} />
+        {/* shell / exterior wall — the footprint (editable in a building context) */}
+        <rect x={0} y={0} width={shellW} height={shellD} fill={buildingContext ? 'var(--active-line)' : 'none'} fillOpacity={buildingContext ? 0.08 : 0} stroke={buildingContext ? 'var(--active-line)' : 'var(--ink3)'} strokeWidth={buildingContext ? 0.5 : 1} />
+        <rect x={0.7} y={0.7} width={Math.max(0, shellW - 1.4)} height={Math.max(0, shellD - 1.4)} fill="none" stroke="var(--line2)" strokeWidth={0.12} />
+        {buildingContext && onResizeShell && (
+          <>
+            <circle cx={shellW} cy={shellD} r={1.1} fill="var(--active-line)" stroke="#fff" strokeWidth={0.18} style={{ cursor: 'se-resize' }} onPointerDown={startShellDrag} />
+            {shellGhost && <text x={shellW / 2} y={shellD / 2} textAnchor="middle" fontSize={2.4} fill="var(--active-line)" fontWeight="700" pointerEvents="none">{shellW}′ × {shellD}′</text>}
+          </>
+        )}
         {/* rooms */}
         {(spec.rooms || []).map((raw) => {
           const onFloor = Number(raw.level || 1) === activeFloor;
@@ -3469,9 +3548,10 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, activeFloor 
               <rect
                 x={room.x} y={room.y} width={room.w} height={room.d}
                 fill={PLAN_ZONE_HEX[raw.type] || '#86a0a8'}
-                fillOpacity={isSel ? 0.9 : 0.66}
+                fillOpacity={(isSel ? 0.9 : 0.66) * roomsDim}
                 stroke={isSel ? 'var(--active-line)' : 'var(--line)'}
                 strokeWidth={isSel ? 0.4 : 0.18}
+                pointerEvents={buildingContext || siteContext ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
               />
               <text x={room.x + room.w / 2} y={room.y + room.d / 2 - 0.3} textAnchor="middle" fontSize={Math.min(2, room.w / 5)} fill="#1a1f1d" fontWeight="600" pointerEvents="none">{raw.name}</text>
@@ -3496,10 +3576,11 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, activeFloor 
               <rect
                 x={el.x} y={el.y} width={w} height={d}
                 fill={PLAN_ELEMENT_HEX[raw.category] || '#8a7768'}
-                fillOpacity={isSel ? 0.92 : 0.7}
+                fillOpacity={(isSel ? 0.92 : 0.7) * (buildingContext ? 0.25 : 1)}
                 stroke={isSel ? 'var(--active-line)' : '#5a5348'}
                 strokeWidth={isSel ? 0.4 : 0.22}
                 strokeDasharray="0.8 0.5"
+                pointerEvents={buildingContext ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
               />
               <text x={el.x + w / 2} y={el.y + d / 2 + 0.5} textAnchor="middle" fontSize={Math.min(1.5, w / 5)} fill="#1a1f1d" fontWeight="600" pointerEvents="none">{raw.name}</text>
@@ -3525,7 +3606,7 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, activeFloor 
         <text x={-pad + 1.6} y={D / 2} textAnchor="middle" fontSize={2} fill="var(--ink2)" transform={`rotate(-90 ${-pad + 1.6} ${D / 2})`}>{D}′</text>
       </svg>
       <div className="planNorth">▲ N</div>
-      <div className="planHint">{floorLabel(spec, activeFloor)} plan{floorCount(spec) > 1 ? ' · switch floors top-left' : ''} · drag to move, drag corners to resize (½ ft snap)</div>
+      <div className="planHint">{PLAN_CONTEXT_LABEL[context] || `${floorLabel(spec, activeFloor)} plan · drag to move, drag corners to resize (½ ft snap)`}{floorCount(spec) > 1 ? ' · switch floors top-left' : ''}</div>
     </div>
   );
 }
@@ -5583,6 +5664,21 @@ function App() {
     });
   }
 
+  // Drop an outbuilding on the site (beside the house) — a real sized element
+  // you can resize/move in the plan or model and give its own construction.
+  function placeOutbuilding(preset) {
+    const taken = new Set((spec.elements || []).map((element) => element.name));
+    let name = preset.name;
+    let n = 2;
+    while (taken.has(name)) { name = `${preset.name} ${n}`; n += 1; }
+    void applyBackendOperations({
+      operations: [{ type: 'add_element', name, category: 'outbuilding', x: Number(spec.shell.widthFt) + 6, y: 3, z: 0, w: preset.w, d: preset.d, h: preset.h, construction: preset.construction, reason: 'Outbuilding placed from the Site page.' }],
+      promptText: `Add ${name}`,
+      logPrefix: 'Outbuilding',
+      chatText: `Added a ${preset.name.toLowerCase()} on the site — drag it where you want it, and set its size and construction in the Inspector.`
+    });
+  }
+
   async function addRoomPreset(preset) {
     const plan = planNewRoomPlacements(spec, [preset], activeFloor);
     const where = activeFloor > 1 ? ` on the ${floorLabel(spec, activeFloor).toLowerCase()}` : '';
@@ -5671,6 +5767,19 @@ function App() {
       promptText: `Resize ${object.name}`,
       logPrefix: 'Plan edit',
       nextSelectedId: id
+    });
+  }
+
+  // Resize the whole footprint by dragging its corner in the Foundation plan —
+  // one dispatch for both dimensions so they don't race on a stale spec.
+  function resizeShellPlan(w, d) {
+    void applyBackendOperations({
+      operations: [
+        { type: 'set_shell', field: 'widthFt', value: String(clamp(Number(w), 12, 96)) },
+        { type: 'set_shell', field: 'depthFt', value: String(clamp(Number(d), 12, 80)) }
+      ],
+      promptText: 'Resize footprint',
+      logPrefix: 'Plan edit'
     });
   }
 
@@ -6152,6 +6261,33 @@ function App() {
                 <label>Orientation off south (°) <em className="pitchHint">{(() => { const a = Number(siteOf(spec).azimuthDeg) || 0; return a === 0 ? 'due south' : `${Math.abs(a)}° ${a < 0 ? 'east' : 'west'} of south · ${Math.round(derived.solarFactor * 100)}% sun`; })()}</em><input type="number" step="5" min="-90" max="90" value={Number(siteOf(spec).azimuthDeg) || 0} onChange={(event) => updateSite('azimuthDeg', event.target.value)} /></label>
               </div>
               <p className="systemNote">Search by name for real coordinates and last year's actual rainfall, or fine-tune by hand. Latitude sets sun angles; rain decides whether the roof can supply water. Orientation is how far the south face is turned off true south — the further you rotate, the less winter sun your south glass gathers.</p>
+
+              <div className="sectionHead">Outbuildings</div>
+              <div className="roomAddGrid">
+                {OUTBUILDING_PRESETS.map((preset) => (
+                  <button key={preset.name} className="roomAddChip" onClick={() => placeOutbuilding(preset)}>
+                    <b>{preset.name}</b>
+                    <small>{preset.w} × {preset.d}′ · {OUTBUILDING_CONSTRUCTION[preset.construction]?.label}</small>
+                  </button>
+                ))}
+              </div>
+              <p className="systemNote">Drop a structure on the site — drag it where it belongs in the plan or model, and set its size + construction by tapping it. Each costs by its footprint and how it's built.</p>
+              {(() => {
+                const outbuildings = (spec.elements || []).filter((element) => element.category === 'outbuilding');
+                if (outbuildings.length === 0) return null;
+                return (
+                  <div className="pickList">
+                    {outbuildings.map((element) => (
+                      <div className={`pickRow${selectedRoom === element.id ? ' active' : ''}`} key={element.id}>
+                        <button type="button" className="pickRowMain" onClick={() => selectObject(element.id)}>
+                          <strong>{element.name}</strong>
+                          <small>{element.w} × {element.d}′ · {OUTBUILDING_CONSTRUCTION[element.construction]?.label || 'construction: set it'} · {fmtMoney((Number(element.w) * Number(element.d) || 0) * (OUTBUILDING_CONSTRUCTION[element.construction]?.costPsf ?? 60))}</small>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -6262,6 +6398,11 @@ function App() {
                   <label>Subfloor
                     <select value={subfloorKey} onChange={(event) => updateSubfloor(event.target.value)}>
                       {Object.entries(SUBFLOOR_TYPES).map(([key, f]) => <option key={key} value={key}>{f.label}</option>)}
+                    </select>
+                  </label>
+                  <label>Insulation <em className="pitchHint">R-{derived.floorR}</em>
+                    <select value={resolveInsulation(utilitiesOf(spec).floorInsulation, 'cellulose')} onChange={(event) => updateUtility('floorInsulation', event.target.value)}>
+                      {Object.entries(INSULATION_TYPES).map(([key, ins]) => <option key={key} value={key}>{ins.label} (R≈{ins.r})</option>)}
                     </select>
                   </label>
                 </div>
@@ -6446,7 +6587,11 @@ function App() {
                   </select>
                 </label>
                 <label>Pitch <em className="pitchHint">≈ {Math.round(Number(spec.shell.roofPitch || 0.32) * 12)}:12</em><input type="number" step="0.01" value={spec.shell.roofPitch} onChange={(event) => updateShell('roofPitch', event.target.value)} /></label>
-                <label>Insulation (R-value)<input type="number" min="10" max="100" step="1" value={utilitiesOf(spec).roofRValue ?? 38} onChange={(event) => updateUtility('roofRValue', event.target.value)} /></label>
+                <label>Insulation <em className="pitchHint">R-{derived.roofR}</em>
+                  <select value={resolveInsulation(utilitiesOf(spec).roofInsulation, 'cellulose')} onChange={(event) => updateUtility('roofInsulation', event.target.value)}>
+                    {Object.entries(INSULATION_TYPES).map(([key, ins]) => <option key={key} value={key}>{ins.label} (R≈{ins.r})</option>)}
+                  </select>
+                </label>
               </div>
               <div className="breakOpenRow">
                 <div className="sectionHead">Overhang</div>
@@ -6723,6 +6868,8 @@ function App() {
               onSelect={selectObject}
               onMove={planMoveObject}
               onResize={planResizeObject}
+              onResizeShell={resizeShellPlan}
+              context={consoleView === 'systems' ? systemView : null}
               activeFloor={activeFloor}
             />
           ) : (
@@ -6964,6 +7111,11 @@ function App() {
                       {!selectedIsRoof && Object.entries(OPENING_TYPES).map(([key, profile]) => (
                         <option key={key} value={key}>{profile.label}</option>
                       ))}
+                    </select>
+                  </label>}
+                  {selectedIsElement && selected?.category === 'outbuilding' && <label>Construction
+                    <select value={OUTBUILDING_CONSTRUCTION[selected?.construction] ? selected.construction : 'stick'} onChange={(event) => updateSelectedRoom('construction', event.target.value)}>
+                      {Object.entries(OUTBUILDING_CONSTRUCTION).map(([key, c]) => <option key={key} value={key}>{c.label}</option>)}
                     </select>
                   </label>}
                   {!selectedIsWall && !selectedIsSpecial && <label>{selectedIsElement ? 'Category' : 'Type'}
