@@ -7798,28 +7798,7 @@ function App() {
               <div><b>Ask for the big moves</b><span>The Studio chat adds rooms, moves walls, and consults the council. Review flags what doesn't add up — most flags have a one-tap fix.</span></div>
               <div><b>Take it to the real world</b><span>Export a permit drawing set, an IFC model for any BIM tool, or a build plan with materials.</span></div>
             </div>
-            {!welcomeIsFirstRun && (
-              <button className="welcomeContinue" onClick={() => { setWelcomeName(''); setWelcomeOpen(false); }}>
-                <b>Continue where you left off</b>
-                <small>{spec.projectName} · revision {spec.revision}</small>
-              </button>
-            )}
-            {(() => {
-              const others = previousDesigns.filter((design) => design.projectName !== spec.projectName);
-              if (!others.length) return null;
-              return (
-                <div className="welcomePrevious">
-                  <div className="welcomeDivider">or open a previous design</div>
-                  {others.slice(0, 5).map((design) => (
-                    <button key={design.file} className="welcomePrevRow" onClick={() => restorePreviousDesign(design)}>
-                      <b>{design.projectName}</b>
-                      <small>rev {design.revision} · {design.shell}′ · {design.roomCount} room{design.roomCount === 1 ? '' : 's'}{design.savedAt ? ` · ${design.savedAt}` : ''}</small>
-                    </button>
-                  ))}
-                </div>
-              );
-            })()}
-            <div className="welcomeDivider">{welcomeIsFirstRun ? 'Start a design' : 'or start a new design'}</div>
+            <div className="welcomeDivider">Start a design</div>
             <label className="welcomeName">
               <span>Name your design</span>
               <input
@@ -7849,6 +7828,30 @@ function App() {
                 <span>Starting new replaces the design that's open now.</span>
               </div>
             )}
+            {!welcomeIsFirstRun && (
+              <>
+                <div className="welcomeDivider">or continue</div>
+                <button className="welcomeContinue" onClick={() => { setWelcomeName(''); setWelcomeOpen(false); }}>
+                  <b>Continue where you left off</b>
+                  <small>{spec.projectName} · revision {spec.revision}</small>
+                </button>
+              </>
+            )}
+            {(() => {
+              const others = previousDesigns.filter((design) => design.projectName !== spec.projectName);
+              if (!others.length) return null;
+              return (
+                <div className="welcomePrevious">
+                  <div className="welcomeDivider">or open a previous design</div>
+                  {others.slice(0, 5).map((design) => (
+                    <button key={design.file} className="welcomePrevRow" onClick={() => restorePreviousDesign(design)}>
+                      <b>{design.projectName}</b>
+                      <small>rev {design.revision} · {design.shell}′ · {design.roomCount} room{design.roomCount === 1 ? '' : 's'}{design.savedAt ? ` · ${design.savedAt}` : ''}</small>
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
