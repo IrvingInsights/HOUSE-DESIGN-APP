@@ -5300,6 +5300,14 @@ function App() {
     });
   }
 
+  // Selecting an object anywhere — the model, a plan, or a system-page summary
+  // row — routes it to the ONE editor: the Inspector below the model. This is
+  // what makes "click a thing, edit it in a single place" hold across the app.
+  function selectObject(id) {
+    setSelectedRoom(id);
+    setInspectorView('inspect');
+  }
+
   function updateSelectedRoom(field, value) {
     const numericFields = ['x', 'y', 'w', 'd', 'h'];
     if (selectedRoom === 'outdoor-grid') return;
@@ -5339,6 +5347,7 @@ function App() {
         else updated.y = along;
       }
       if (field === 'type') updated.type = value;
+      if (field === 'wall') { updated.wall = value; updated.x = 4; updated.y = 4; }
       const operations = [{ type: 'remove_object', targetId: selectedRoom, name: opening.label }, { type: 'add_opening', wall: updated.wall, openingType: OPENING_TYPES[updated.type] ? updated.type : 'window', widthFt: updated.widthFt, positionFt: updated.wall === 'north' || updated.wall === 'south' ? updated.x : updated.y, name: updated.label }];
       void applyBackendOperations({ operations, promptText: `Update opening ${opening.label}`, logPrefix: 'Opening edit', nextSelectedId: selectedRoom });
       return;
@@ -5349,6 +5358,8 @@ function App() {
       else if (field === 'w') updateShell(wall.side === 'north' || wall.side === 'south' ? 'widthFt' : 'depthFt', value);
       else if (field === 'thickness') updateWallSide(wall.side, 'thicknessFt', value);
       else if (field === 'assembly') updateWallSide(wall.side, 'assembly', value);
+      else if (field === 'interiorFinish') updateWallSide(wall.side, 'interiorFinish', value);
+      else if (field === 'exteriorFinish') updateWallSide(wall.side, 'exteriorFinish', value);
       return;
     }
     const object = spec.rooms.find((item) => item.id === selectedRoom) || (spec.elements || []).find((item) => item.id === selectedRoom);
@@ -6069,59 +6080,24 @@ function App() {
                   <input type="checkbox" checked={utilitiesOf(spec).diyWalls} onChange={(event) => updateUtility('diyWalls', event.target.checked)} />
                   <span>I'll raise the walls myself (sweat equity — walls are the most DIY-able system)</span>
                 </label>
-                <p className="systemNote">While all sides share one height you can set it here; the moment any side differs, <b>the per-side controls below are the only height controls</b>. Width is the north/south wall length; Length is the east/west wall length.</p>
+                <p className="systemNote">While all sides share one height you can set it here; once a side differs, set its height by tapping that wall below. Width is the north/south wall length; Length is the east/west wall length.</p>
 
-                <div className="breakOpenRow">
-                  <div className="sectionHead">Per side (N / S / E / W)</div>
-                  <button className="breakOpen" onClick={() => setWallBreakOpen((open) => !open)}>
-                    {wallBreakOpen ? '▾ collapse' : '▸ break open per side'}
-                  </button>
+                <div className="sectionHead">Each side</div>
+                <p className="systemNote">Tap a wall — here or in the model — to edit that side (system, height, thickness, finishes) in the Inspector below. Toggle a side open for no wall there.</p>
+                <div className="pickList">
+                  {resolvedSides.map(({ side, r }) => (
+                    <div key={side} className={`pickRow${r.omitted ? ' muted' : ''}${selectedRoom === `wall-${side}` ? ' active' : ''}`}>
+                      <button type="button" className="pickRowMain" onClick={() => selectObject(`wall-${side}`)} disabled={r.omitted}>
+                        <strong>{WALL_SIDE_LABELS[side]}</strong>
+                        <small>{r.omitted ? 'open — no wall' : `${r.assembly.label} · ${r.heightFt}′ · ${r.thicknessFt.toFixed(2)}′ · ${spec.openings.filter((opening) => opening.wall === side).length} opening(s)`}</small>
+                      </button>
+                      <label className="pickRowToggle" title="No wall on this side">
+                        <input type="checkbox" checked={r.omitted} onChange={(event) => updateWallSide(side, 'omitted', event.target.checked)} />
+                        <span>open</span>
+                      </label>
+                    </div>
+                  ))}
                 </div>
-
-                {!wallBreakOpen ? (
-                  <p className="systemNote">{mixed ? 'Walls currently differ by side — break open to see and edit each.' : 'All four sides share the settings above. Break open to give each side its own system, height, thickness, and finish.'}</p>
-                ) : (
-                  <div className="wallSideList">
-                    {resolvedSides.map(({ side, r }) => (
-                      <div key={side} className={r.omitted ? 'wallSideCard omitted' : 'wallSideCard'}>
-                        <div className="wallSideCardHead">
-                          <strong>{WALL_SIDE_LABELS[side]} wall</strong>
-                          <label className="wallOmitToggle">
-                            <input type="checkbox" checked={r.omitted} onChange={(event) => updateWallSide(side, 'omitted', event.target.checked)} />
-                            <span>open / no wall</span>
-                          </label>
-                        </div>
-                        {!r.omitted && (
-                          <>
-                            <div className="controlGrid tight">
-                              <label>System
-                                <select value={r.assemblyKey} onChange={(event) => updateWallSide(side, 'assembly', event.target.value)}>
-                                  {Object.values(WALL_ASSEMBLIES).map((assembly) => (
-                                    <option key={assembly.key} value={assembly.key}>{assembly.label}</option>
-                                  ))}
-                                </select>
-                              </label>
-                              {(spec.shell.roofType === 'shed' && (side === 'east' || side === 'west')) ? (
-                                <label>Height
-                                  <div className="mixedField">
-                                    <span>Raked — follows the roof, {resolveWallSide(spec, 'north').heightFt}' (N) → {resolveWallSide(spec, 'south').heightFt}' (S)</span>
-                                  </div>
-                                </label>
-                              ) : (
-                                <label>Height (ft){spec.shell.roofType === 'gable' && (side === 'north' || side === 'south') && <em className="pitchHint">eave · gable peaks +{Math.round(Number(spec.shell.depthFt || 28) * Number(spec.shell.roofPitch || 0.32))}'</em>}<input type="number" min="7" max="40" value={r.heightFt} onChange={(event) => updateWallSide(side, 'heightFt', event.target.value)} /></label>
-                              )}
-                              <label>Length (ft)<input type="number" value={side === 'north' || side === 'south' ? spec.shell.widthFt : spec.shell.depthFt} onChange={(event) => updateShell(side === 'north' || side === 'south' ? 'widthFt' : 'depthFt', event.target.value)} /></label>
-                              <label>Thickness (ft)<input type="number" step="0.05" min="0.2" max="3.5" value={r.thicknessFt} onChange={(event) => updateWallSide(side, 'thicknessFt', event.target.value)} /></label>
-                              <label>Interior finish<input type="text" value={r.interiorFinish} onChange={(event) => updateWallSide(side, 'interiorFinish', event.target.value)} /></label>
-                              <label>Exterior finish<input type="text" value={r.exteriorFinish} onChange={(event) => updateWallSide(side, 'exteriorFinish', event.target.value)} /></label>
-                            </div>
-                            <p className="wallSideMeta">R≈{r.assembly.rValue} · {r.thicknessFt.toFixed(2)}' thick · {spec.openings.filter((opening) => opening.wall === side).length} opening(s) · length is shared with the {side === 'north' ? 'south' : side === 'south' ? 'north' : side === 'east' ? 'west' : 'east'} wall</p>
-                          </>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             );
           })()}
@@ -6260,40 +6236,17 @@ function App() {
                   </select>
                 </label>
               </div>
-              <div className="sectionHead">Every opening, one by one</div>
+              <div className="sectionHead">Every opening</div>
               {spec.openings.length === 0 && <p className="systemNote">No windows or doors yet — add one below, or tell the assistant "add a south window 5 ft wide near the kitchen".</p>}
-              <div className="openingList">
+              {spec.openings.length > 0 && <p className="systemNote">Tap an opening — here or in the model — to edit its wall, type, width, and position in the Inspector below.</p>}
+              <div className="pickList">
                 {spec.openings.map((opening, index) => (
-                  <div className="openingRow" key={`${opening.label || opening.type}-${index}`}>
-                    <strong>{opening.label || `${titleCase(opening.wall)} ${titleCase(opening.type)}`}</strong>
-                    <div className="controlGrid tight">
-                      <label>Wall
-                        <select value={opening.wall} onChange={(event) => updateOpening(index, 'wall', event.target.value)}>
-                          <option value="north">North</option>
-                          <option value="south">South</option>
-                          <option value="east">East</option>
-                          <option value="west">West</option>
-                          <option value="roof">Roof</option>
-                        </select>
-                      </label>
-                      <label>Type
-                        <select value={OPENING_TYPES[opening.type] ? opening.type : 'window'} onChange={(event) => updateOpening(index, 'type', event.target.value)}>
-                          {Object.entries(OPENING_TYPES).map(([key, profile]) => (
-                            <option key={key} value={key}>{profile.label}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>Width (ft)<input type="number" min="1" max="24" value={opening.widthFt} onChange={(event) => updateOpening(index, 'w', event.target.value)} /></label>
-                      {opening.wall === 'roof' ? (
-                        <>
-                          <label>Across, W→E (ft)<input type="number" min="0" value={Number(opening.x) || 0} onChange={(event) => updateOpening(index, 'roofX', event.target.value)} /></label>
-                          <label>Down, N→S (ft)<input type="number" min="0" value={Number(opening.y) || 0} onChange={(event) => updateOpening(index, 'roofY', event.target.value)} /></label>
-                        </>
-                      ) : (
-                        <label>Along wall (ft)<input type="number" min="0" value={Number(opening.wall === 'north' || opening.wall === 'south' ? opening.x : opening.y) || 0} onChange={(event) => updateOpening(index, 'along', event.target.value)} /></label>
-                      )}
-                    </div>
-                    <button className="ghost openingRemove" onClick={() => removeOpening(index)}><Trash2 size={13} /> Remove</button>
+                  <div className={`pickRow${selectedRoom === `opening-${index}` ? ' active' : ''}`} key={`${opening.label || opening.type}-${index}`}>
+                    <button type="button" className="pickRowMain" onClick={() => selectObject(`opening-${index}`)}>
+                      <strong>{opening.label || `${titleCase(opening.wall)} ${titleCase(opening.type)}`}</strong>
+                      <small>{titleCase(opening.wall)} · {(OPENING_TYPES[opening.type] || OPENING_TYPES.window).label} · {opening.widthFt}′ wide</small>
+                    </button>
+                    <button className="ghost pickRowRemove" title="Remove opening" onClick={() => removeOpening(index)}><Trash2 size={13} /></button>
                   </div>
                 ))}
               </div>
@@ -6699,7 +6652,7 @@ function App() {
             <PlanView
               spec={spec}
               selectedRoom={selectedRoom}
-              onSelect={setSelectedRoom}
+              onSelect={selectObject}
               onMove={planMoveObject}
               onResize={planResizeObject}
               activeFloor={activeFloor}
@@ -6709,7 +6662,7 @@ function App() {
               spec={spec}
               selectedRoom={selectedRoom}
               layers={modelLayers}
-              onSelectRoom={setSelectedRoom}
+              onSelectRoom={selectObject}
               onMoveStart={beginPlanMove}
               onMoveEnd={finishPlanMove}
               onResizeEnd={finishPlanResize}
@@ -6806,7 +6759,26 @@ function App() {
                   <button className={inspectorView === 'outputs' ? 'active' : ''} onClick={() => setInspectorView('outputs')}>Outputs</button>
                 </nav>
               </div>
-              <div className="selectedSummary"><Ruler size={15} /> {selected?.name} · {selected?.w}' x {selected?.d}' · {Math.round(selected?.w * selected?.d)} sf</div>
+              {(() => {
+                const kind = selectedIsWall ? 'Wall'
+                  : selectedIsOpening ? ((OPENING_TYPES[selected?.type] || OPENING_TYPES.window).label)
+                  : selectedIsRoof ? 'Roof'
+                  : selectedIsPad ? 'Site pad'
+                  : selectedIsGrid ? 'Reference grid'
+                  : selectedIsElement ? titleCase(selected?.category || 'element')
+                  : 'Room';
+                const detail = selectedIsWall ? `${selected?.lengthFt || 0}′ long`
+                  : selectedIsOpening ? `${selected?.widthFt || selected?.w || 0}′ wide · ${titleCase(selected?.wall || '')}`
+                  : (selectedIsRoof || selectedIsGrid) ? ''
+                  : `${selected?.w || 0}′ × ${selected?.d || 0}′ · ${Math.round((selected?.w || 0) * (selected?.d || 0))} sf`;
+                return (
+                  <div className="selectedSummary" title="What you're editing below">
+                    <span className="selKind">{kind}</span>
+                    <b>{selected?.name || '—'}</b>
+                    {detail && <span className="selDetail">{detail}</span>}
+                  </div>
+                );
+              })()}
             </div>
 
             {inspectorView === 'schedule' && (
@@ -6903,10 +6875,21 @@ function App() {
                       ))}
                     </select>
                   </label>}
+                  {selectedIsWall && <label>Interior finish<input type="text" value={selected?.interiorFinish || ''} onChange={(event) => updateSelectedRoom('interiorFinish', event.target.value)} /></label>}
+                  {selectedIsWall && <label>Exterior finish<input type="text" value={selected?.exteriorFinish || ''} onChange={(event) => updateSelectedRoom('exteriorFinish', event.target.value)} /></label>}
                   {!selectedIsWall && <label>{selectedIsOpening ? 'Along Wall' : 'X'}<input type="number" value={selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? selected.x : selected.y) || 0 : selected?.x || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom(selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? 'x' : 'y') : 'x', event.target.value)} /></label>}
                   {!selectedIsWall && !selectedIsOpening && <label>Y<input type="number" value={selected?.y || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom('y', event.target.value)} /></label>}
                   {!selectedIsWall && !selectedIsSpecial && !selectedIsElement && storeyInfo(spec.shell).storeys > 1 && <label>Level<input type="number" min="1" max={Math.ceil(storeyInfo(spec.shell).storeys)} value={Number(selected?.level || 1)} onChange={(event) => updateSelectedRoom('level', event.target.value)} /></label>}
                   {(selectedIsElement || selectedIsWall || selectedIsRoof) && <label>Height<input type="number" value={selected?.h || 1.2} disabled={selectedIsOpening || selectedIsPad || selectedIsGrid || (selectedIsWall && spec.shell.roofType === 'shed' && (selected?.side === 'east' || selected?.side === 'west'))} title={selectedIsWall && spec.shell.roofType === 'shed' && (selected?.side === 'east' || selected?.side === 'west') ? 'Raked wall — its ends follow the north and south walls' : undefined} onChange={(event) => updateSelectedRoom('h', event.target.value)} /></label>}
+                  {selectedIsOpening && <label>Wall
+                    <select value={selected?.wall || 'south'} onChange={(event) => updateSelectedRoom('wall', event.target.value)}>
+                      <option value="north">North</option>
+                      <option value="south">South</option>
+                      <option value="east">East</option>
+                      <option value="west">West</option>
+                      <option value="roof">Roof</option>
+                    </select>
+                  </label>}
                   {selectedIsSpecial && !selectedIsPad && <label>{selectedIsRoof ? 'Roof Type' : 'Opening Type'}
                     <select value={selectedIsRoof ? (selected?.type || 'gable') : (OPENING_TYPES[selected?.type] ? selected.type : 'window')} onChange={(event) => updateSelectedRoom('type', event.target.value)}>
                       {selectedIsRoof && <option value="gable">gable</option>}

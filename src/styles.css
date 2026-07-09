@@ -3692,6 +3692,46 @@ button.danger:hover,
 .statGrid div { border-radius: 10px; background: var(--ivory); border-color: var(--line); }
 .statGrid button:hover { border-color: var(--active-line); }
 
+/* ---- One-editor reorg: click-to-select summary rows on system pages ---- */
+.pickList { display: flex; flex-direction: column; gap: 5px; margin: 8px 0; }
+.pickRow {
+  display: flex; align-items: stretch; gap: 0;
+  border: 1px solid var(--line2, #564A3F); border-radius: 9px;
+  background: var(--panel-2, #281F1A); overflow: hidden;
+  transition: border-color .14s ease, background .14s ease;
+}
+.pickRow.active { border-color: var(--active-line, #C88A5B); background: var(--active, #3A2C22); }
+.pickRow.muted { opacity: 0.55; }
+.pickRowMain {
+  flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 9px 11px; background: transparent; border: none; border-radius: 0;
+  color: var(--ink, #ECE4D6); text-align: left; cursor: pointer;
+}
+.pickRowMain:hover:not(:disabled) { background: var(--panel-3, #221C17); }
+.pickRowMain:disabled { cursor: default; }
+.pickRowMain strong { font-size: 13px; font-weight: 600; }
+.pickRowMain small { font-size: 11px; color: var(--ink3, #978C79); }
+.pickRowToggle {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  padding: 4px 10px; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--ink3, #978C79); border-left: 1px solid var(--line, #423931); cursor: pointer;
+}
+.pickRowToggle input { accent-color: var(--clay, #B4623F); }
+.pickRowRemove {
+  align-self: center; margin: 0 6px; padding: 6px; background: transparent;
+  border: none; color: var(--ink3, #978C79); cursor: pointer; border-radius: 6px;
+}
+.pickRowRemove:hover { color: var(--bad, #E0977B); background: var(--bad-bg, #3B2A22); }
+
+/* Inspector header — a clear "what am I editing" chip */
+.selectedSummary { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: transparent !important; border: none !important; padding: 0 !important; }
+.selKind {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: #FBF3EA; background: var(--clay, #B4623F); padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+}
+.selectedSummary b { font-size: 14px; color: var(--ink, #ECE4D6); }
+.selDetail { font-size: 12px; color: var(--ink3, #978C79); }
+
 /* ---- Reclaimed-materials toggles (Frame page) ---- */
 .reclaimedGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 6px 0 4px; }
 .reclaimedItem {
