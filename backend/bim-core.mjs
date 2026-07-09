@@ -252,6 +252,7 @@ export function operationDescription(operation, spec) {
   if (op.type === 'set_wall_side') return `Set ${op.wall || 'wall'} wall ${op.field || 'property'} to ${op.value}.`;
   if (op.type === 'set_frame') return `Set ${Number(op.level) > 1 ? `storey ${op.level} ` : ''}frame${op.value ? ` to ${op.value}` : ''}.`;
   if (op.type === 'set_reclaimed') return `Marked ${op.system || 'materials'} as ${op.value ? 'reclaimed / salvaged' : 'new'}.`;
+  if (op.type === 'set_flooring') return `Set flooring${op.value ? ` to ${op.value}` : ''}.`;
   if (op.type === 'set_shell' || op.type === 'add_pad_extension') return `Updated shell ${op.field || 'padExtensionFt'} to ${op.value || op.w}.`;
   if (op.type === 'add_opening') return `Added ${op.widthFt || 3}' ${op.openingType || 'opening'} on the ${op.wall} wall.`;
   if (op.type === 'add_opening_from_reference' || op.type === 'trace_image_request') return op.reason || 'Image tracing needs wall, type, width, and location before BIM openings can be placed.';
@@ -288,8 +289,12 @@ export const UTILITY_DEFAULTS = {
   powerMode: 'offgrid',
   heatSource: 'wood_stove',
   foundationType: 'rubble',
+  foundationInsulation: 'perimeter',
   stemwallHeightFt: 1.5,
+  roofRValue: 38,
   windowQuality: 'double',
+  panelCount: 0,
+  batteryOverrideKwh: 0,
   diyWalls: false,
   diyRoof: false,
   diyHeat: false,
@@ -313,8 +318,26 @@ export const FRAME_TYPES = {
 };
 
 export const FRAME_DEFAULTS = { type: 'load-bearing', storeyTypes: {} };
-export const RECLAIMED_SYSTEMS = ['frame', 'walls', 'windows', 'roof'];
-export const RECLAIMED_DEFAULTS = { frame: false, walls: false, windows: false, roof: false };
+
+// Flooring — the finished floor over the foundation. costPsf/carbonPsf per sf of
+// heated floor. Earthen and stone lean on thermal mass; wood/cork are warmer
+// underfoot. A per-room override (room.floor free text) can still differ.
+export const FLOORING_TYPES = {
+  earthen: { label: 'Earthen / lime slab', costPsf: 4, carbonPsf: 2, note: 'Poured earth or lime; high thermal mass, very low carbon, DIY-friendly.' },
+  concrete: { label: 'Polished concrete', costPsf: 9, carbonPsf: 14, note: 'Durable mass floor, but the most embodied carbon of the floors.' },
+  wood: { label: 'Wood boards', costPsf: 10, carbonPsf: 4, note: 'Warm underfoot; reclaimed boards cut cost and carbon sharply.' },
+  cork: { label: 'Cork', costPsf: 8, carbonPsf: 2, note: 'Soft, warm, renewable; good over radiant.' },
+  tile: { label: 'Tile / stone', costPsf: 12, carbonPsf: 6, note: 'Hard-wearing mass floor, good in wet cores and sun-tempered rooms.' },
+  bamboo: { label: 'Bamboo', costPsf: 7, carbonPsf: 3, note: 'Fast-renewable and hard; a warm low-carbon choice.' }
+};
+export const FLOORING_DEFAULTS = { type: 'earthen' };
+export function resolveFlooring(spec) {
+  const key = spec.flooring?.type;
+  return FLOORING_TYPES[key] ? key : 'earthen';
+}
+
+export const RECLAIMED_SYSTEMS = ['frame', 'walls', 'flooring', 'windows', 'roof'];
+export const RECLAIMED_DEFAULTS = { frame: false, walls: false, flooring: false, windows: false, roof: false };
 
 // The frame in effect on a given storey — a per-storey override falls back to
 // the base frame type. level 1 (or unset) is the ground/base.
@@ -472,7 +495,15 @@ export function applyBimOperations(currentSpec, plan) {
       else if (field === 'placeName') next.site.placeName = String(operation.value || '').slice(0, 80);
       else if (field === 'latitudeDeg') next.site.latitudeDeg = clamp(Number(operation.value), 0, 70);
       else if (field === 'rainInYr') next.site.rainInYr = clamp(Number(operation.value), 0, 200);
+      else if (field === 'azimuthDeg') next.site.azimuthDeg = clamp(Number(operation.value) || 0, -90, 90);
       actions.push(`Set site ${field} to ${operation.value}.`);
+      continue;
+    }
+
+    if (operation.type === 'set_flooring') {
+      next.flooring ||= { type: 'earthen' };
+      next.flooring.type = FLOORING_TYPES[operation.value] ? operation.value : next.flooring.type;
+      actions.push(`Set flooring to ${FLOORING_TYPES[next.flooring.type]?.label || next.flooring.type}.`);
       continue;
     }
 
@@ -485,11 +516,15 @@ export function applyBimOperations(currentSpec, plan) {
         powerMode: ['offgrid', 'hybrid', 'gridtie'],
         heatSource: ['rocket_mass', 'masonry', 'wood_stove', 'minisplit'],
         foundationType: ['rubble', 'stemwall', 'slab'],
+        foundationInsulation: ['none', 'perimeter', 'full'],
         windowQuality: ['double', 'triple']
       };
       if (field === 'tankGal') next.utilities.tankGal = clamp(Number(operation.value) || 0, 0, 50000);
       else if (field === 'stemwallHeightFt') next.utilities.stemwallHeightFt = clamp(Number(operation.value) || 1.5, 0.5, 6);
       else if (field === 'wellSepticFt') next.utilities.wellSepticFt = clamp(Number(operation.value) || 0, 0, 2000);
+      else if (field === 'roofRValue') next.utilities.roofRValue = clamp(Number(operation.value) || 38, 10, 100);
+      else if (field === 'panelCount') next.utilities.panelCount = clamp(Math.round(Number(operation.value) || 0), 0, 200);
+      else if (field === 'batteryOverrideKwh') next.utilities.batteryOverrideKwh = clamp(Number(operation.value) || 0, 0, 500);
       else if (field === 'diyWalls' || field === 'diyRoof' || field === 'diyHeat' || field === 'diyFoundation' || field === 'diyFrame') {
         next.utilities[field] = value === 'true' || operation.value === true || value === '1';
       } else if (allowed[field]) {

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { pushToBlender, exportIfcViaBlender } from './blenderBridge.js';
-import { OPENING_TYPES, FRAME_TYPES, resolveFrameType } from '../backend/bim-core.mjs';
+import { OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring } from '../backend/bim-core.mjs';
 import {
   AlertTriangle,
   Box,
@@ -1042,11 +1042,12 @@ function frameOf(spec) {
 // cut cost and (especially) embodied carbon — reused stock carries no new
 // manufacturing burden.
 function reclaimedOf(spec) {
-  return { frame: false, walls: false, windows: false, roof: false, ...(spec.reclaimed || {}) };
+  return { frame: false, walls: false, flooring: false, windows: false, roof: false, ...(spec.reclaimed || {}) };
 }
 const RECLAIMED_FACTORS = {
   frame: { cost: 0.4, carbon: 0.15 },
   walls: { cost: 0.65, carbon: 0.3 },
+  flooring: { cost: 0.45, carbon: 0.25 },
   windows: { cost: 0.4, carbon: 0.35 },
   roof: { cost: 0.6, carbon: 0.3 }
 };
@@ -2606,7 +2607,12 @@ function deriveDesign(spec, wallSections) {
       const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
       return sum + (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1);
     }, 0);
-  const glassPct = floor ? (southGlass / floor) * 100 : 0;
+  // House orientation: how far the south face is rotated off true south. Solar
+  // gain falls with the cosine of that angle, so a house aimed SE/SW harvests
+  // less winter sun from the same glass.
+  const azimuthDeg = Number(site.azimuthDeg) || 0;
+  const solarFactor = Math.cos(azimuthDeg * Math.PI / 180);
+  const glassPct = floor ? (southGlass * solarFactor / floor) * 100 : 0;
   // All glazing (every wall + skylights) for cost and heat loss.
   const skylightArea = (spec.openings || []).filter((opening) => opening.wall === 'roof')
     .reduce((sum, opening) => sum + (Number(opening.widthFt) || 2.5) ** 2, 0);
@@ -2617,7 +2623,7 @@ function deriveDesign(spec, wallSections) {
     return sum + (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1);
   }, 0);
   const glazingU = utilities.windowQuality === 'triple' ? 0.28 : 0.5;
-  const roofR = 38;
+  const roofR = clamp(Number(utilities.roofRValue) || 38, 10, 100);
   const heatUA = Math.max(0, wallArea - southGlass) / Math.max(wallR, 1)
     + Math.max(0, roofArea - skylightArea) / roofR
     + (southGlass + skylightArea) * glazingU;
@@ -2640,9 +2646,11 @@ function deriveDesign(spec, wallSections) {
   let loadKwhDay = 2 + people * 2.2;
   if (utilities.waterSource === 'well') loadKwhDay += 2;
   if (utilities.heatSource === 'minisplit') loadKwhDay += 6;
-  const panels = utilities.powerMode === 'gridtie' ? 0 : Math.ceil(loadKwhDay / (peakSunHrs * 0.78) / 0.4);
+  const autoPanels = utilities.powerMode === 'gridtie' ? 0 : Math.ceil(loadKwhDay / (peakSunHrs * 0.78) / 0.4);
+  const panels = Number(utilities.panelCount) > 0 ? Math.round(Number(utilities.panelCount)) : autoPanels;
   const panelRoom = Math.floor(roofArea / 22);
-  const batteryKwh = utilities.powerMode === 'offgrid' ? Math.round(loadKwhDay * 2 / 0.8) : 0;
+  const autoBattery = utilities.powerMode === 'offgrid' ? Math.round(loadKwhDay * 2 / 0.8) : 0;
+  const batteryKwh = Number(utilities.batteryOverrideKwh) > 0 ? Number(utilities.batteryOverrideKwh) : autoBattery;
 
   // Costs (add-on constants, keyed to the structured utility choices).
   const heatCostBySource = { rocket_mass: 2500, masonry: 6000, wood_stove: 3000, minisplit: 4500 };
@@ -2654,10 +2662,17 @@ function deriveDesign(spec, wallSections) {
   // Stem wall cost scales with the wall itself: base prep + footing by floor
   // area, plus the perimeter wall by face area (calibrated so the default
   // 18" stem matches the old flat $12/sf).
-  const foundationCost = utilities.foundationType === 'stemwall'
+  const foundationInsulation = utilities.foundationInsulation || 'perimeter';
+  const foundationInsulationCost = foundationInsulation === 'full' ? floor * 3 : foundationInsulation === 'perimeter' ? perimeterFt * 6 : 0;
+  const foundationCost = (utilities.foundationType === 'stemwall'
     ? floor * 8 + perimeterFt * stemwallHeightFt * 18
-    : floor * (foundationCostPsf[utilities.foundationType] ?? 10);
+    : floor * (foundationCostPsf[utilities.foundationType] ?? 10)) + foundationInsulationCost;
   const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => sum + (outdoorItemPresent(spec, item) ? item.cost : 0), 0);
+
+  // Flooring over the whole heated floor. Reclaimed boards cut cost + carbon.
+  const flooringKey = resolveFlooring(spec);
+  const flooringCostRaw = heatedFloor * (FLOORING_TYPES[flooringKey]?.costPsf ?? 4);
+  const flooringCarbonRaw = heatedFloor * (FLOORING_TYPES[flooringKey]?.carbonPsf ?? 2);
 
   // Frame (structure): framing quantity ≈ perimeter × wall height, split ground
   // vs. upper storeys so each can run a different frame. A load-bearing wall has
@@ -2677,6 +2692,7 @@ function deriveDesign(spec, wallSections) {
   const cost = {
     foundation: foundationCost,
     frame: frameCost,
+    flooring: flooringCostRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.cost : 1),
     upperFloors: (storeys - 1) * floor * 12 + stackedArea * 12,
     outdoors: outdoorCost,
     walls: wallsCostRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.cost : 1),
@@ -2706,25 +2722,29 @@ function deriveDesign(spec, wallSections) {
   const frameCarbon = frameCarbonRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.carbon : 1);
   const roofCarbonRaw = roofArea * 12;
   const roofCarbon = roofCarbonRaw * (reclaimed.roof ? RECLAIMED_FACTORS.roof.carbon : 1);
+  const flooringCarbon = flooringCarbonRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.carbon : 1);
   const stemCarbonExtra = utilities.foundationType === 'stemwall' ? perimeterFt * Math.max(0, stemwallHeightFt - 1.5) * 40 : 0;
-  const carbonKg = floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra + wallCarbon + frameCarbon + roofCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
+  const carbonKg = floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
   // What the reclaimed choices saved vs. buying everything new.
   const reclaimedSavings = {
     cost: (reclaimed.frame ? frameCostRaw - frameCost : 0)
       + (reclaimed.walls ? wallsCostRaw - cost.walls : 0)
+      + (reclaimed.flooring ? flooringCostRaw - cost.flooring : 0)
       + (reclaimed.windows ? windowsCostRaw - cost.windows : 0)
       + (reclaimed.roof ? roofCostRaw - cost.roof : 0),
     carbon: (reclaimed.frame ? frameCarbonRaw - frameCarbon : 0)
       + (reclaimed.walls ? wallCarbonRaw - wallCarbon : 0)
+      + (reclaimed.flooring ? flooringCarbonRaw - flooringCarbon : 0)
       + (reclaimed.roof ? roofCarbonRaw - roofCarbon : 0),
     count: Object.values(reclaimed).filter(Boolean).length
   };
 
   return {
     site, utilities, reclaimed, reclaimedSavings, floor, heatedFloor, storeys, roofArea, roofFootprint, overhangs, wallArea, wallR, southGlass, glassPct,
-    skylightArea, totalGlass, glazingU, stemwallHeightFt,
+    skylightArea, totalGlass, glazingU, stemwallHeightFt, azimuthDeg, solarFactor,
     frameGround: groundFrameKey, frameUpper: upperFrameKey, frameArea: groundFrameArea + upperFrameArea,
+    flooring: flooringKey,
     heatLoadKbtu, bedrooms, people, waterGpd, catchmentGpd, supplyGpd, septicGpd,
     peakSunHrs, loadKwhDay, panels, panelRoom, batteryKwh,
     cost, totalBeforeSweat, sweat, total, carbonKg, pitch
@@ -2736,7 +2756,7 @@ const fmtNum = (value) => Math.round(value).toLocaleString();
 
 const SYSTEM_GROUPS = [
   { label: 'Land & program', keys: ['site', 'rooms'] },
-  { label: 'The building', keys: ['shell', 'foundation', 'frame', 'walls', 'roof', 'windows'] },
+  { label: 'The building', keys: ['shell', 'foundation', 'frame', 'flooring', 'walls', 'roof', 'windows'] },
   { label: 'Systems', keys: ['heat', 'water', 'waste', 'power', 'outdoors'] }
 ];
 
@@ -2745,6 +2765,7 @@ const SYSTEM_GROUPS = [
 const COST_ROWS = [
   { key: 'foundation', label: 'Foundation', system: 'foundation' },
   { key: 'frame', label: 'Frame', system: 'frame' },
+  { key: 'flooring', label: 'Flooring', system: 'flooring' },
   { key: 'walls', label: 'Walls', system: 'walls' },
   { key: 'roof', label: 'Roof', system: 'roof' },
   { key: 'windows', label: 'Windows & doors', system: 'windows' },
@@ -2804,6 +2825,15 @@ const SYSTEM_META = {
       ...(dd.storeys > 1 ? [['Upper frame', FRAME_TYPES[dd.frameUpper]?.label.split(' (')[0] || dd.frameUpper, '', `${dd.storeys} storeys`]] : []),
       ['This system', fmtMoney(dd.cost.frame), '', dd.reclaimed.frame ? 'reclaimed timber' : ''],
       ...(dd.utilities.diyFrame ? [['You save', fmtMoney(dd.cost.frame * 0.6), '', 'raising it yourself']] : [])
+    ]
+  },
+  flooring: {
+    label: 'Flooring',
+    why: 'The finished floor over the foundation. Earthen, tile, and stone add thermal mass that steadies indoor temperature; wood, cork, and bamboo are warmer underfoot. Reclaimed boards are a cheap carbon win.',
+    feeds: ['Cost'],
+    reads: (dd) => [
+      ['Floor', FLOORING_TYPES[dd.flooring]?.label || dd.flooring, '', dd.reclaimed.flooring ? 'reclaimed' : ''],
+      ['This system', fmtMoney(dd.cost.flooring), '', `${fmtNum(dd.heatedFloor)} sf`]
     ]
   },
   walls: {
@@ -4431,7 +4461,6 @@ function App() {
   const [projectId, setProjectId] = useState(() => initialSaved?.projectId || 'current-project');
   const [spec, setSpec] = useState(() => initialSaved?.spec || seedSpec);
   const [systemView, setSystemView] = useState('shell');
-  const [wallBreakOpen, setWallBreakOpen] = useState(false);
   const [wallOpeningType, setWallOpeningType] = useState('window');
   const [windowAddWall, setWindowAddWall] = useState('south');
   const [overhangBreakOpen, setOverhangBreakOpen] = useState(false);
@@ -5150,6 +5179,14 @@ function App() {
     });
   }
 
+  function updateFlooring(value) {
+    void applyBackendOperations({
+      operations: [{ type: 'set_flooring', value }],
+      promptText: `Set flooring to ${FLOORING_TYPES[value]?.label || value}`,
+      logPrefix: 'Flooring'
+    });
+  }
+
   function updateReclaimed(system, value) {
     void applyBackendOperations({
       operations: [{ type: 'set_reclaimed', system, value: Boolean(value) }],
@@ -5211,42 +5248,6 @@ function App() {
       operations: [{ type: 'set_overhang', wall: side, value: String(clamp(Number(value) || 0, 0, 12)) }],
       promptText: `Set ${side} overhang`,
       logPrefix: 'Roof'
-    });
-  }
-
-  function updateOpening(index, field, value) {
-    const opening = spec.openings?.[index];
-    if (!opening) return;
-    const updated = structuredClone(opening);
-    if (field === 'w') updated.widthFt = clamp(Number(value), 1, 24);
-    if (field === 'type') updated.type = value;
-    if (field === 'roofX') updated.x = clamp(Number(value), 0, Math.max(0, spec.shell.widthFt - Number(updated.widthFt || 3)));
-    if (field === 'roofY') updated.y = clamp(Number(value), 0, Math.max(0, spec.shell.depthFt - Number(updated.widthFt || 3)));
-    if (field === 'along') {
-      const maxAlong = updated.wall === 'north' || updated.wall === 'south' ? spec.shell.widthFt : spec.shell.depthFt;
-      const along = clamp(Number(value), 0, Math.max(0, maxAlong - Number(updated.widthFt || 3)));
-      if (updated.wall === 'north' || updated.wall === 'south') { updated.x = along; delete updated.y; }
-      else { updated.y = along; delete updated.x; }
-    }
-    if (field === 'wall') {
-      // Keep a sensible position when the opening moves to another wall (or the roof).
-      const along = Number(opening.wall === 'north' || opening.wall === 'south' ? opening.x : opening.y) || 0;
-      updated.wall = value;
-      if (value === 'roof') { updated.x = Math.min(along, spec.shell.widthFt - 4); updated.y = 4; }
-      else if (value === 'north' || value === 'south') { updated.x = along; delete updated.y; }
-      else { updated.y = along; delete updated.x; }
-    }
-    const toRoof = updated.wall === 'roof' || Boolean(OPENING_TYPES[updated.type]?.roof);
-    const addOp = toRoof
-      ? { type: 'add_opening', wall: 'roof', openingType: 'skylight', widthFt: updated.widthFt, x: Number(updated.x) || 4, y: Number(updated.y) || 4, name: updated.label }
-      : { type: 'add_opening', wall: updated.wall === 'roof' ? 'south' : updated.wall, openingType: OPENING_TYPES[updated.type] && updated.type !== 'skylight' ? updated.type : 'window', widthFt: updated.widthFt, positionFt: Number(updated.wall === 'north' || updated.wall === 'south' ? updated.x : updated.y) || 0, name: updated.label };
-    void applyBackendOperations({
-      operations: [
-        { type: 'remove_object', targetId: `opening-${index}`, name: opening.label },
-        addOp
-      ],
-      promptText: `Update opening ${opening.label}`,
-      logPrefix: 'Windows'
     });
   }
 
@@ -6132,8 +6133,9 @@ function App() {
               <div className="controlGrid">
                 <label>Latitude (°)<input type="number" step="0.5" min="0" max="70" value={siteOf(spec).latitudeDeg} onChange={(event) => updateSite('latitudeDeg', event.target.value)} /></label>
                 <label>Yearly rain (in)<input type="number" min="0" max="200" value={siteOf(spec).rainInYr} onChange={(event) => updateSite('rainInYr', event.target.value)} /></label>
+                <label>Orientation off south (°) <em className="pitchHint">{(() => { const a = Number(siteOf(spec).azimuthDeg) || 0; return a === 0 ? 'due south' : `${Math.abs(a)}° ${a < 0 ? 'east' : 'west'} of south · ${Math.round(derived.solarFactor * 100)}% sun`; })()}</em><input type="number" step="5" min="-90" max="90" value={Number(siteOf(spec).azimuthDeg) || 0} onChange={(event) => updateSite('azimuthDeg', event.target.value)} /></label>
               </div>
-              <p className="systemNote">Search by name for real coordinates and last year's actual rainfall, or fine-tune the numbers by hand if you know your land better. Latitude sets sun angles and solar output; rain decides whether the roof can be your water source.</p>
+              <p className="systemNote">Search by name for real coordinates and last year's actual rainfall, or fine-tune by hand. Latitude sets sun angles; rain decides whether the roof can supply water. Orientation is how far the south face is turned off true south — the further you rotate, the less winter sun your south glass gathers.</p>
             </div>
           )}
 
@@ -6158,6 +6160,13 @@ function App() {
                 {utilitiesOf(spec).foundationType === 'stemwall' && (
                   <label>Stem wall height (ft)<input type="number" step="0.25" min="0.5" max="6" value={utilitiesOf(spec).stemwallHeightFt ?? 1.5} onChange={(event) => updateUtility('stemwallHeightFt', event.target.value)} /></label>
                 )}
+                <label>Insulation
+                  <select value={utilitiesOf(spec).foundationInsulation || 'perimeter'} onChange={(event) => updateUtility('foundationInsulation', event.target.value)}>
+                    <option value="none">None — unheated / mass-coupled</option>
+                    <option value="perimeter">Perimeter — insulate the edge</option>
+                    <option value="full">Full under-slab / sub-grade</option>
+                  </select>
+                </label>
               </div>
               <label className="diyToggle">
                 <input type="checkbox" checked={utilitiesOf(spec).diyFoundation} onChange={(event) => updateUtility('diyFoundation', event.target.checked)} />
@@ -6211,7 +6220,7 @@ function App() {
                 <div className="sectionHead">Where materials are reclaimed</div>
                 <p className="systemNote">Mark each material system you're building from salvaged stock — it flows straight into cost and embodied carbon.</p>
                 <div className="reclaimedGrid">
-                  {[['frame', 'Frame timber'], ['walls', 'Wall materials'], ['windows', 'Windows & doors'], ['roof', 'Roofing']].map(([key, label]) => (
+                  {[['frame', 'Frame timber'], ['walls', 'Wall materials'], ['flooring', 'Flooring'], ['windows', 'Windows & doors'], ['roof', 'Roofing']].map(([key, label]) => (
                     <label key={key} className={reclaimed[key] ? 'reclaimedItem on' : 'reclaimedItem'}>
                       <input type="checkbox" checked={reclaimed[key]} onChange={(event) => updateReclaimed(key, event.target.checked)} />
                       <span>{label}</span>
@@ -6221,6 +6230,28 @@ function App() {
                 {savings.count > 0
                   ? <p className="systemNote"><b>♺ Reclaimed materials are saving</b> about {fmtMoney(savings.cost)} and {(savings.carbon / 1000).toFixed(1)} t CO₂e versus buying everything new.</p>
                   : <p className="systemNote">Nothing marked reclaimed yet. Salvaged windows, timber, and roofing are the biggest, cheapest carbon wins on a natural build.</p>}
+              </div>
+            );
+          })()}
+
+          {systemView === 'flooring' && (() => {
+            const flooringKey = resolveFlooring(spec);
+            const reclaimed = reclaimedOf(spec);
+            return (
+              <div className="systemPage">
+                <div className="sectionHead">Finished floor</div>
+                <div className="controlGrid">
+                  <label>Floor type
+                    <select value={flooringKey} onChange={(event) => updateFlooring(event.target.value)}>
+                      {Object.entries(FLOORING_TYPES).map(([key, f]) => <option key={key} value={key}>{f.label}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <p className="systemNote">{FLOORING_TYPES[flooringKey]?.note} Covers the whole {fmtNum(derived.heatedFloor)} sf heated floor · {fmtMoney(derived.cost.flooring)}. A single room can differ — set its floor by tapping it (its floor shows in the schedule).</p>
+                <label className="diyToggle">
+                  <input type="checkbox" checked={reclaimed.flooring} onChange={(event) => updateReclaimed('flooring', event.target.checked)} />
+                  <span>The flooring is reclaimed / salvaged (reclaimed boards or tile — cuts cost and carbon)</span>
+                </label>
               </div>
             );
           })()}
@@ -6346,8 +6377,10 @@ function App() {
                     <option value="gridtie">Grid only — simplest, no battery</option>
                   </select>
                 </label>
+                <label>Panels <em className="pitchHint">{Number(utilitiesOf(spec).panelCount) > 0 ? 'manual' : `auto ≈ ${derived.panels}`}</em><input type="number" min="0" max="200" step="1" placeholder={`auto (${derived.panels})`} value={Number(utilitiesOf(spec).panelCount) || ''} onChange={(event) => updateUtility('panelCount', event.target.value || 0)} /></label>
+                <label>Battery (kWh) <em className="pitchHint">{Number(utilitiesOf(spec).batteryOverrideKwh) > 0 ? 'manual' : `auto ≈ ${derived.batteryKwh}`}</em><input type="number" min="0" max="500" step="1" placeholder={`auto (${derived.batteryKwh})`} value={Number(utilitiesOf(spec).batteryOverrideKwh) || ''} onChange={(event) => updateUtility('batteryOverrideKwh', event.target.value || 0)} /></label>
               </div>
-              <p className="systemNote">The well pump and an electric heater land here as loads; panels are then sized against your roof and your site's sun.</p>
+              <p className="systemNote">The well pump and an electric heater land here as loads; panels and battery are auto-sized against your roof and your site's sun — leave the fields blank for auto, or type a number to override. Roof holds ~{derived.panelRoom} panels.</p>
             </div>
           )}
 
@@ -6385,6 +6418,7 @@ function App() {
                   </select>
                 </label>
                 <label>Pitch <em className="pitchHint">≈ {Math.round(Number(spec.shell.roofPitch || 0.32) * 12)}:12</em><input type="number" step="0.01" value={spec.shell.roofPitch} onChange={(event) => updateShell('roofPitch', event.target.value)} /></label>
+                <label>Insulation (R-value)<input type="number" min="10" max="100" step="1" value={utilitiesOf(spec).roofRValue ?? 38} onChange={(event) => updateUtility('roofRValue', event.target.value)} /></label>
               </div>
               <div className="breakOpenRow">
                 <div className="sectionHead">Overhang</div>
