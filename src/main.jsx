@@ -4122,6 +4122,11 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
     scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xfff1dc, 1.9);
     sun.position.set(26, 48, 30);
+    // Cool low fill from the opposite quarter so shaded faces keep their form
+    // instead of going flat — the single biggest "clip-art" tell.
+    const fill = new THREE.DirectionalLight(0xdfe8f2, 0.4);
+    fill.position.set(-34, 22, -26);
+    scene.add(fill);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.left = -90;
@@ -4140,6 +4145,67 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
     const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     const dragPoint = new THREE.Vector3();
     let dragState = null;
+
+    // Procedural material grain — the difference between clip-art and a
+    // building. Each kind is drawn ONCE as a near-white canvas (cached), so
+    // material.color tints it: one plaster texture serves straw bale, cob,
+    // and hemp-lime alike, each in its own color.
+    const grainCache = new Map();
+    function grainTexture(kind) {
+      if (grainCache.has(kind)) return grainCache.get(kind);
+      const c = document.createElement('canvas');
+      c.width = 256; c.height = 256;
+      const g = c.getContext('2d');
+      g.fillStyle = '#ffffff';
+      g.fillRect(0, 0, 256, 256);
+      const speckle = (count, alphaMax, sizeMax, dark = true) => {
+        for (let i = 0; i < count; i += 1) {
+          const a = Math.random() * alphaMax;
+          g.fillStyle = dark && Math.random() < 0.72 ? `rgba(70,60,48,${a})` : `rgba(255,255,255,${a * 1.4})`;
+          const s = 0.5 + Math.random() * sizeMax;
+          g.fillRect(Math.random() * 256, Math.random() * 256, s, s);
+        }
+      };
+      if (kind === 'plaster') {
+        speckle(2600, 0.05, 2.2);
+        // faint horizontal trowel drift
+        for (let y = 0; y < 256; y += 7 + Math.random() * 9) {
+          g.fillStyle = `rgba(90,78,60,${0.015 + Math.random() * 0.025})`;
+          g.fillRect(0, y, 256, 1.4);
+        }
+      } else if (kind === 'metal') {
+        // standing-seam roofing: crisp vertical seams over a soft sheen
+        speckle(600, 0.03, 1.5);
+        for (let x = 0; x < 256; x += 21) {
+          g.fillStyle = 'rgba(45,50,52,0.30)';
+          g.fillRect(x, 0, 1.6, 256);
+          g.fillStyle = 'rgba(255,255,255,0.20)';
+          g.fillRect(x + 2, 0, 1, 256);
+        }
+      } else if (kind === 'concrete') {
+        speckle(4200, 0.075, 1.6);
+      } else if (kind === 'earth') {
+        speckle(3000, 0.10, 2.8);
+      } else if (kind === 'grass') {
+        speckle(5200, 0.09, 1.8);
+        for (let i = 0; i < 700; i += 1) {
+          g.fillStyle = `rgba(96,116,60,${Math.random() * 0.12})`;
+          g.fillRect(Math.random() * 256, Math.random() * 256, 1, 2 + Math.random() * 3);
+        }
+      } else if (kind === 'wood') {
+        for (let y = 0; y < 256; y += 3) {
+          g.fillStyle = `rgba(96,66,38,${0.05 + Math.random() * 0.10})`;
+          g.fillRect(0, y, 256, 1 + Math.random() * 2);
+        }
+        speckle(500, 0.05, 1.4);
+      }
+      const texture = new THREE.CanvasTexture(c);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(3, 3);
+      grainCache.set(kind, texture);
+      return texture;
+    }
 
     function renderModel() {
       scene.children.filter((child) => child.userData.generated).forEach((child) => scene.remove(child));
@@ -4161,10 +4227,12 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       const wallProfile = wallAssemblyProfile(spec.systems.envelope);
       const wallT = wallProfile.thicknessFt;
 
-      const slabMat = new THREE.MeshStandardMaterial({ color: 0xc0b49b, roughness: 0.92 });
-      const wallMat = new THREE.MeshStandardMaterial({ color: wallProfile.color, roughness: 0.88 });
-      const roofMat = new THREE.MeshStandardMaterial({ color: 0x8a938f, roughness: 0.55, metalness: 0.15, side: THREE.DoubleSide });
-      const glassMat = new THREE.MeshStandardMaterial({ color: 0x7fb2cc, transparent: true, opacity: 0.55, roughness: 0.12, metalness: 0.1 });
+      const slabMat = new THREE.MeshStandardMaterial({ color: 0xc0b49b, roughness: 0.92, map: grainTexture('earth') });
+      const wallMat = new THREE.MeshStandardMaterial({ color: wallProfile.color, roughness: 0.88, map: grainTexture('plaster') });
+      const roofMat = new THREE.MeshStandardMaterial({ color: 0x8a938f, roughness: 0.5, metalness: 0.22, map: grainTexture('metal'), side: THREE.DoubleSide });
+      const glassMat = new THREE.MeshStandardMaterial({ color: 0x9cc3d8, transparent: true, opacity: 0.5, roughness: 0.06, metalness: 0.25 });
+      const frameMat = new THREE.MeshStandardMaterial({ color: 0x7a5c3e, roughness: 0.7, map: grainTexture('wood') });
+      const doorMatWood = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.72, map: grainTexture('wood') });
       const zonePalette = {
         living: 0x79a7a8,
         service: 0xbe9b6f,
@@ -4256,7 +4324,7 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       };
       // X-ray AND exploded views both need see-through walls — exploded pulls
       // the shell apart, translucency lets the interior read through it.
-      const wallMatOf = (resolved) => new THREE.MeshStandardMaterial({ color: resolved.assembly.color, roughness: 0.88, transparent: layers.xray || layers.explode, opacity: layers.xray ? 0.34 : layers.explode ? 0.55 : 1 });
+      const wallMatOf = (resolved) => new THREE.MeshStandardMaterial({ color: resolved.assembly.color, roughness: 0.88, map: grainTexture('plaster'), transparent: layers.xray || layers.explode, opacity: layers.xray ? 0.34 : layers.explode ? 0.55 : 1 });
       const wallMatFor = (side) => wallMatOf(wallResolved[side]);
       const tN = wallResolved.north.thicknessFt;
       const tS = wallResolved.south.thicknessFt;
@@ -4381,7 +4449,7 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       // Stem wall foundation: a visible concrete plinth ring under the walls.
       if (utilitiesOf(spec).foundationType === 'stemwall') {
         const stemH = Math.min(6, Math.max(0.5, Number(utilitiesOf(spec).stemwallHeightFt) || 1.5));
-        const stemMat = new THREE.MeshStandardMaterial({ color: 0xaaa79b, roughness: 0.95 });
+        const stemMat = new THREE.MeshStandardMaterial({ color: 0xaaa79b, roughness: 0.95, map: grainTexture('concrete') });
         const lip = 0.25;
         const ring = customFp
           // Custom footprint: the plinth follows every polygon edge.
@@ -4409,7 +4477,7 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       // line at its two ends, so the bottom follows the falling ground.
       const slopeNow = Math.max(0, Number(siteOf(spec).slopeFt) || 0);
       if (slopeNow > 0) {
-        const foundMat = new THREE.MeshStandardMaterial({ color: 0x9c988c, roughness: 0.96, side: THREE.DoubleSide });
+        const foundMat = new THREE.MeshStandardMaterial({ color: 0x9c988c, roughness: 0.96, map: grainTexture('concrete'), side: THREE.DoubleSide });
         footprintEdges(spec).forEach((edge) => {
           const gA = gradeElevationAt(spec, edge.x0, edge.y0);
           const gB = gradeElevationAt(spec, edge.x1, edge.y1);
@@ -4562,10 +4630,47 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
             }
             if (glassFace) group.add(glassFace);
           } else {
-            if (opening.wall === 'north') mesh = box(size, openH, 0.18, opening.x + size / 2, centerY, lineNS - 0.08, mat);
-            if (opening.wall === 'south') mesh = box(size, openH, 0.18, opening.x + size / 2, centerY, lineNS + 0.08, mat);
-            if (opening.wall === 'east') mesh = box(0.18, openH, size, lineEW + 0.08, centerY, opening.y + size / 2, mat);
-            if (opening.wall === 'west') mesh = box(0.18, openH, size, lineEW - 0.08, centerY, opening.y + size / 2, mat);
+            // A real opening assembly instead of a pasted-on box: wood frame
+            // (head, sill member, jambs) standing proud of the wall, an inset
+            // glass pane or door slab, divided lites on windows, a projecting
+            // sill ledge, and a knob on doors. Every part carries the opening
+            // id so selection glow and the exploded view treat it as one thing.
+            const horizontalWall = opening.wall === 'north' || opening.wall === 'south';
+            const line = horizontalWall ? lineNS : lineEW;
+            const dirOut = opening.wall === 'south' || opening.wall === 'east' ? 1 : -1;
+            const along0 = horizontalWall ? Number(opening.x) || 0 : Number(opening.y) || 0;
+            const mid = along0 + size / 2;
+            const part = (alongLen, h, deep, alongC, yC, out, material) => {
+              const m = horizontalWall
+                ? box(alongLen, h, deep, alongC, yC, line + dirOut * out, material)
+                : box(deep, h, alongLen, line + dirOut * out, yC, alongC, material);
+              m.userData.roomId = `opening-${index}`;
+              group.add(m);
+              return m;
+            };
+            const fw = 0.22;
+            part(size + fw * 2, fw, 0.3, mid, profile.sill + openH + fw / 2, 0.14, frameMat);
+            part(size + fw * 2, fw, 0.3, mid, Math.max(fw / 2, profile.sill - fw / 2), 0.14, frameMat);
+            part(fw, openH, 0.3, mid - size / 2 - fw / 2, centerY, 0.14, frameMat);
+            part(fw, openH, 0.3, mid + size / 2 + fw / 2, centerY, 0.14, frameMat);
+            const paneMat = profile.glazed ? glassMat : doorMatWood;
+            mesh = part(Math.max(0.6, size - 0.08), openH, 0.14, mid, centerY, 0.05, paneMat);
+            if (profile.glazed && !profile.entry && size >= 2) {
+              // divided lites — one vertical + one horizontal muntin
+              part(0.09, openH, 0.2, mid, centerY, 0.13, frameMat);
+              part(size, 0.09, 0.2, mid, centerY, 0.13, frameMat);
+            }
+            if (opening.type === 'french' || opening.type === 'slider') {
+              part(0.12, openH, 0.24, mid, centerY, 0.13, frameMat);
+            }
+            if (profile.entry && !profile.glazed) {
+              // door hardware — a small knob at the latch side
+              part(0.14, 0.14, 0.14, mid + size * 0.34, profile.sill + Math.min(3.1, openH * 0.45), 0.2, frameMat);
+            }
+            if (profile.sill > 0.6) {
+              // projecting exterior sill ledge under windows
+              part(size + 0.5, 0.13, 0.5, mid, profile.sill - fw - 0.04, 0.22, frameMat);
+            }
           }
         }
         if (mesh) {
