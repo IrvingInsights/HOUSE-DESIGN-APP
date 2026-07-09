@@ -3976,6 +3976,29 @@ button.danger:hover,
   .welcomeCard { grid-template-columns: 1fr; max-height: calc(100vh - 32px); }
 }
 
+/* Start-choice cards carry their own material colors: earth-green for empty
+   land, straw-gold for the sample house, drafting-slate for file/drawing.
+   (Explicit hexes — the overlay is outside the dark token scope.) */
+.welcomeChoices .welcomeChoice:nth-child(1) {
+  background: linear-gradient(155deg, #2A342A, #23291F);
+  border: 1px solid #5C6B4F;
+}
+.welcomeChoices .welcomeChoice:nth-child(1) b { color: #A9BE8F; }
+.welcomeChoices .welcomeChoice:nth-child(1):hover { border-color: #8FA377; background: #2F3B2D; }
+.welcomeChoices .welcomeChoice:nth-child(2) {
+  background: linear-gradient(155deg, #37301F, #2B2519);
+  border: 1px solid #77623A;
+}
+.welcomeChoices .welcomeChoice:nth-child(2) b { color: #E0BE6E; }
+.welcomeChoices .welcomeChoice:nth-child(2):hover { border-color: #C9A24B; background: #3D351F; }
+.welcomeChoices .welcomeChoice.welcomeFile {
+  background: linear-gradient(155deg, #24333A, #1E2A2F);
+  border: 1px solid #45626E;
+}
+.welcomeChoices .welcomeChoice.welcomeFile b { color: #93C0CE; }
+.welcomeChoices .welcomeChoice.welcomeFile:hover { border-color: #7FA8B5; background: #283B44; }
+.welcomeChoices .welcomeChoice small { color: #BCB4A4; }
+
 /* previous-design rows on the opening card */
 .welcomePrevious { margin-top: 4px; }
 .welcomePrevRow {
