@@ -133,6 +133,393 @@ export function resolveWallSide(spec, side, level = 1) {
   };
 }
 
+// --- Footprint polygon model (the geometry pass) -----------------------------
+// The building outline is an explicit rectilinear polygon: ordered [x, y]
+// vertices in feet, axis-aligned edges, positively oriented in plan coords
+// (x → east, y → south; the derived rectangle [[0,0],[w,0],[w,d],[0,d]] walks
+// north wall → east wall → south wall → west wall). No spec.shell.footprint
+// field → the plain widthFt × depthFt rectangle, so EVERY legacy design keeps
+// its exact current behavior. The bounding box is always anchored at (0,0):
+// footprint edits re-anchor and carry rooms/openings/elements along.
+// Consecutive collinear edges are allowed — they are intentional split points
+// ("split this wall, then move the middle" is how an L-shape is born).
+
+export function footprintRect(shell = {}) {
+  const w = Number(shell.widthFt) || 36;
+  const d = Number(shell.depthFt) || 28;
+  return [[0, 0], [w, 0], [w, d], [0, d]];
+}
+
+function signedArea(vertices) {
+  let area = 0;
+  for (let i = 0; i < vertices.length; i += 1) {
+    const [x0, y0] = vertices[i];
+    const [x1, y1] = vertices[(i + 1) % vertices.length];
+    area += x0 * y1 - x1 * y0;
+  }
+  return area / 2;
+}
+
+export function polygonArea(vertices) {
+  return Math.abs(signedArea(vertices || []));
+}
+
+export function polygonPerimeter(vertices) {
+  let length = 0;
+  for (let i = 0; i < (vertices || []).length; i += 1) {
+    const [x0, y0] = vertices[i];
+    const [x1, y1] = vertices[(i + 1) % vertices.length];
+    length += Math.abs(x1 - x0) + Math.abs(y1 - y0);
+  }
+  return length;
+}
+
+export function footprintBounds(vertices) {
+  const xs = (vertices || []).map((v) => v[0]);
+  const ys = (vertices || []).map((v) => v[1]);
+  if (!xs.length) return { minX: 0, minY: 0, maxX: 0, maxY: 0, w: 0, d: 0 };
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  return { minX, minY, maxX, maxY, w: maxX - minX, d: maxY - minY };
+}
+
+// A footprint that is just the plain rectangle (4 corners spanning its own
+// bounding box) — such designs stay on the legacy field-free representation.
+export function isRectFootprint(vertices) {
+  if (!Array.isArray(vertices)) return false;
+  const cleaned = mergeCollinear(vertices);
+  if (cleaned.length !== 4) return false;
+  const b = footprintBounds(cleaned);
+  return cleaned.every(([x, y]) => (x === b.minX || x === b.maxX) && (y === b.minY || y === b.maxY));
+}
+
+// Validate + clean raw vertices: numbers snapped to 0.1', axis-aligned edges,
+// zero-length edges dropped, positive orientation enforced. Collinear split
+// points are KEPT. Returns null when the outline isn't a usable footprint.
+export function normalizeFootprint(raw) {
+  if (!Array.isArray(raw) || raw.length < 4 || raw.length > 24) return null;
+  let vertices = raw.map((v) => [Math.round(Number(v?.[0]) * 10) / 10, Math.round(Number(v?.[1]) * 10) / 10]);
+  if (vertices.some(([x, y]) => !Number.isFinite(x) || !Number.isFinite(y))) return null;
+  // Snap near-axis-aligned edges; reject genuinely diagonal ones.
+  for (let i = 0; i < vertices.length; i += 1) {
+    const a = vertices[i];
+    const b = vertices[(i + 1) % vertices.length];
+    const dx = Math.abs(a[0] - b[0]);
+    const dy = Math.abs(a[1] - b[1]);
+    if (dx > 0.05 && dy > 0.05) {
+      if (Math.min(dx, dy) > 0.5) return null;
+      if (dx < dy) b[0] = a[0]; else b[1] = a[1];
+    }
+  }
+  // Drop zero-length edges + backtracking spikes (a→b→a).
+  let changed = true;
+  while (changed && vertices.length >= 4) {
+    changed = false;
+    for (let i = 0; i < vertices.length; i += 1) {
+      const a = vertices[i];
+      const b = vertices[(i + 1) % vertices.length];
+      if (a[0] === b[0] && a[1] === b[1]) { vertices.splice((i + 1) % vertices.length, 1); changed = true; break; }
+      const c = vertices[(i + 2) % vertices.length];
+      if (a[0] === c[0] && a[1] === c[1]) {
+        // spike out-and-back — remove the far point and the duplicate
+        const j = (i + 1) % vertices.length;
+        vertices = vertices.filter((_, k) => k !== j && k !== (i + 2) % vertices.length);
+        changed = true;
+        break;
+      }
+    }
+  }
+  if (vertices.length < 4) return null;
+  if (polygonArea(vertices) < 40) return null;
+  if (signedArea(vertices) < 0) vertices.reverse();
+  return vertices;
+}
+
+function mergeCollinear(vertices) {
+  const out = [];
+  const n = vertices.length;
+  for (let i = 0; i < n; i += 1) {
+    const prev = vertices[(i - 1 + n) % n];
+    const cur = vertices[i];
+    const next = vertices[(i + 1) % n];
+    const alongX = prev[1] === cur[1] && cur[1] === next[1];
+    const alongY = prev[0] === cur[0] && cur[0] === next[0];
+    if (!alongX && !alongY) out.push(cur);
+  }
+  return out.length >= 4 ? out : vertices.slice();
+}
+
+// The polygon in effect — explicit footprint, or the legacy rectangle.
+export function footprintPolygon(spec) {
+  const normalized = normalizeFootprint(spec?.shell?.footprint);
+  return normalized || footprintRect(spec?.shell);
+}
+
+// True when the design carries a real (non-rectangular) footprint.
+export function hasCustomFootprint(spec) {
+  const normalized = normalizeFootprint(spec?.shell?.footprint);
+  return Boolean(normalized && !isRectFootprint(normalized));
+}
+
+const FACING_BY_NORMAL = { '0,-1': 'north', '0,1': 'south', '1,0': 'east', '-1,0': 'west' };
+
+// Walls are the edges of the polygon. Each edge knows its facing direction —
+// wall construction stays keyed by facing (all north-facing edges share the
+// 'north' wall settings), so resolveWallSide keeps working unchanged and the
+// cardinal names remain aliases while the footprint is a plain rectangle.
+export function footprintEdges(spec) {
+  const vertices = footprintPolygon(spec);
+  const n = vertices.length;
+  const edges = [];
+  const facingCount = {};
+  for (let i = 0; i < n; i += 1) {
+    const [x0, y0] = vertices[i];
+    const [x1, y1] = vertices[(i + 1) % n];
+    const horizontal = y0 === y1;
+    const dx = Math.sign(x1 - x0);
+    const dy = Math.sign(y1 - y0);
+    const facing = FACING_BY_NORMAL[`${dy},${-dx}`] || 'north';
+    facingCount[facing] = (facingCount[facing] || 0) + 1;
+    edges.push({
+      index: i,
+      key: `e${i}`,
+      x0, y0, x1, y1,
+      horizontal,
+      facing,
+      facingSeq: facingCount[facing],
+      lengthFt: Math.abs(x1 - x0) + Math.abs(y1 - y0),
+      // outward unit normal
+      nx: dy,
+      ny: -dx
+    });
+  }
+  return edges;
+}
+
+export function pointInFootprint(vertices, x, y) {
+  let inside = false;
+  const n = vertices.length;
+  for (let i = 0, j = n - 1; i < n; j = i, i += 1) {
+    const [xi, yi] = vertices[i];
+    const [xj, yj] = vertices[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// Decompose the rectilinear polygon into horizontal slab rectangles that
+// exactly cover it (used for roof segments, containment, and plan fills).
+export function decomposeFootprint(vertices) {
+  const ys = [...new Set(vertices.map((v) => v[1]))].sort((a, b) => a - b);
+  const rects = [];
+  for (let band = 0; band < ys.length - 1; band += 1) {
+    const y0 = ys[band];
+    const y1 = ys[band + 1];
+    const midY = (y0 + y1) / 2;
+    // x positions of vertical edges crossing this band
+    const crossings = [];
+    const n = vertices.length;
+    for (let i = 0; i < n; i += 1) {
+      const [ax, ay] = vertices[i];
+      const [bx, by] = vertices[(i + 1) % n];
+      if (ax === bx && Math.min(ay, by) <= midY && Math.max(ay, by) >= midY) crossings.push(ax);
+    }
+    crossings.sort((a, b) => a - b);
+    for (let k = 0; k + 1 < crossings.length; k += 2) {
+      const x0 = crossings[k];
+      const x1 = crossings[k + 1];
+      if (x1 - x0 > 0.01) rects.push({ x: x0, y: y0, w: x1 - x0, d: y1 - y0 });
+    }
+  }
+  // Merge vertically adjacent slabs with the same x-range so an L reads as
+  // two clean rectangles, not a stack of thin bands.
+  let merged = true;
+  while (merged) {
+    merged = false;
+    for (let i = 0; i < rects.length && !merged; i += 1) {
+      for (let j = i + 1; j < rects.length; j += 1) {
+        const a = rects[i], b = rects[j];
+        if (a.x === b.x && a.w === b.w && Math.abs(a.y + a.d - b.y) < 0.01) {
+          rects[i] = { x: a.x, y: a.y, w: a.w, d: a.d + b.d };
+          rects.splice(j, 1);
+          merged = true;
+          break;
+        }
+      }
+    }
+  }
+  return rects;
+}
+
+function rectIntersectionArea(a, b) {
+  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const d = Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y);
+  return w > 0 && d > 0 ? w * d : 0;
+}
+
+// Exact containment for rectilinear polygons: the rect is inside iff the
+// decomposed pieces cover its whole area.
+export function rectInFootprint(vertices, rect) {
+  const covered = decomposeFootprint(vertices).reduce((sum, piece) => sum + rectIntersectionArea(piece, rect), 0);
+  return covered >= rect.w * rect.d - 0.05;
+}
+
+// rectA − rectB as up to four rectangles (the stepped-roof remainder math).
+export function subtractRect(a, b) {
+  const out = [];
+  const ix0 = Math.max(a.x, b.x), ix1 = Math.min(a.x + a.w, b.x + b.w);
+  const iy0 = Math.max(a.y, b.y), iy1 = Math.min(a.y + a.d, b.y + b.d);
+  if (ix1 <= ix0 || iy1 <= iy0) return [{ ...a }];
+  if (iy0 > a.y) out.push({ x: a.x, y: a.y, w: a.w, d: iy0 - a.y });
+  if (iy1 < a.y + a.d) out.push({ x: a.x, y: iy1, w: a.w, d: a.y + a.d - iy1 });
+  if (ix0 > a.x) out.push({ x: a.x, y: iy0, w: ix0 - a.x, d: iy1 - iy0 });
+  if (ix1 < a.x + a.w) out.push({ x: ix1, y: iy0, w: a.x + a.w - ix1, d: iy1 - iy0 });
+  return out.filter((r) => r.w > 0.05 && r.d > 0.05);
+}
+
+// footprint − rect, as rectangles (lower-roof regions around a partial storey).
+export function subtractRectFromFootprint(vertices, rect) {
+  return decomposeFootprint(vertices).flatMap((piece) => subtractRect(piece, rect));
+}
+
+// Offset every edge outward by its facing's overhang and rebuild the outline —
+// exact roof-plan area over any rectilinear footprint. (Consecutive collinear
+// edges get the same offset, so they are merged first.)
+export function expandFootprint(vertices, offsets = {}) {
+  const merged = mergeCollinear(vertices);
+  const n = merged.length;
+  const lines = [];
+  for (let i = 0; i < n; i += 1) {
+    const [x0, y0] = merged[i];
+    const [x1, y1] = merged[(i + 1) % n];
+    const dx = Math.sign(x1 - x0);
+    const dy = Math.sign(y1 - y0);
+    const facing = FACING_BY_NORMAL[`${dy},${-dx}`] || 'north';
+    const off = Math.max(0, Number(offsets[facing]) || 0);
+    lines.push(y0 === y1
+      ? { horizontal: true, c: y0 + (facing === 'north' ? -off : off) }
+      : { horizontal: false, c: x0 + (facing === 'east' ? off : -off) });
+  }
+  const out = [];
+  for (let i = 0; i < n; i += 1) {
+    const prev = lines[(i - 1 + n) % n];
+    const cur = lines[i];
+    // consecutive edges alternate horizontal/vertical after merging
+    const vx = cur.horizontal ? prev.c : cur.c;
+    const vy = cur.horizontal ? cur.c : prev.c;
+    out.push([vx, vy]);
+  }
+  return out;
+}
+
+// Translate an edge along its outward normal. Where a neighbor edge runs
+// parallel (a collinear split point), a connector vertex is inserted so the
+// jog becomes real — this is exactly how "move the middle of a split wall"
+// turns a rectangle into an L. Returns normalized vertices, or null when the
+// move would collapse the outline.
+export function moveFootprintEdge(vertices, index, offsetFt) {
+  const n = vertices.length;
+  if (!Number.isFinite(offsetFt) || Math.abs(offsetFt) < 0.05) return vertices.slice();
+  const i = ((index % n) + n) % n;
+  const a = vertices[i];
+  const b = vertices[(i + 1) % n];
+  const dx = Math.sign(b[0] - a[0]);
+  const dy = Math.sign(b[1] - a[1]);
+  const shiftX = dy * offsetFt;   // outward normal = (dy, -dx)
+  const shiftY = -dx * offsetFt;
+  const prev = vertices[(i - 1 + n) % n];
+  const next = vertices[(i + 2) % n];
+  const horizontal = a[1] === b[1];
+  const prevParallel = horizontal ? prev[1] === a[1] : prev[0] === a[0];
+  const nextParallel = horizontal ? next[1] === b[1] : next[0] === b[0];
+  const movedA = [a[0] + shiftX, a[1] + shiftY];
+  const movedB = [b[0] + shiftX, b[1] + shiftY];
+  const out = [];
+  for (let k = 0; k < n; k += 1) {
+    if (k === i) {
+      if (prevParallel) out.push([a[0], a[1]]);   // connector stays at the old corner
+      out.push(movedA);
+    } else if (k === (i + 1) % n) {
+      out.push(movedB);
+      if (nextParallel) out.push([b[0], b[1]]);
+    } else {
+      out.push(vertices[k]);
+    }
+  }
+  return normalizeFootprint(out);
+}
+
+// Insert two split points along an edge (distances in feet from its start),
+// so the middle piece can be moved independently. Defaults to thirds.
+export function splitFootprintEdge(vertices, index, fromFt, toFt) {
+  const n = vertices.length;
+  const i = ((index % n) + n) % n;
+  const a = vertices[i];
+  const b = vertices[(i + 1) % n];
+  const len = Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
+  if (len < 6) return null; // too short to split into three walkable pieces
+  let f = Number.isFinite(fromFt) && fromFt > 0 ? fromFt : len / 3;
+  let t = Number.isFinite(toFt) && toFt > 0 ? toFt : (len * 2) / 3;
+  f = clamp(Math.round(f * 2) / 2, 1, len - 2);
+  t = clamp(Math.round(t * 2) / 2, f + 1, len - 1);
+  const ux = Math.sign(b[0] - a[0]);
+  const uy = Math.sign(b[1] - a[1]);
+  const pA = [a[0] + ux * f, a[1] + uy * f];
+  const pB = [a[0] + ux * t, a[1] + uy * t];
+  const out = vertices.slice(0, i + 1);
+  out.push(pA, pB);
+  out.push(...vertices.slice(i + 1));
+  return { vertices: out, middleIndex: i + 1 };
+}
+
+// Re-anchor the footprint's bounding box at (0,0) and carry every placed
+// thing (rooms, elements, openings, site pad) along by the same shift, then
+// write bbox dims back to shell.widthFt/depthFt. A footprint that is a plain
+// rectangle drops the field entirely — the design returns to the legacy
+// representation and behaves exactly as before the geometry pass.
+export function anchorFootprint(next, vertices) {
+  const bounds = footprintBounds(vertices);
+  const dx = -bounds.minX;
+  const dy = -bounds.minY;
+  const shifted = vertices.map(([x, y]) => [Math.round((x + dx) * 10) / 10, Math.round((y + dy) * 10) / 10]);
+  if (dx !== 0 || dy !== 0) {
+    (next.rooms || []).forEach((room) => { room.x = Number(room.x || 0) + dx; room.y = Number(room.y || 0) + dy; });
+    (next.elements || []).forEach((el) => { el.x = Number(el.x || 0) + dx; el.y = Number(el.y || 0) + dy; });
+    (next.openings || []).forEach((opening) => {
+      if (opening.wall === 'roof') { opening.x = Number(opening.x || 0) + dx; opening.y = Number(opening.y || 0) + dy; }
+      else if (opening.wall === 'north' || opening.wall === 'south') opening.x = Number(opening.x || 0) + dx;
+      else opening.y = Number(opening.y || 0) + dy;
+    });
+    if (next.shell.sitePad) {
+      next.shell.sitePad.x = Number(next.shell.sitePad.x || 0) + dx;
+      next.shell.sitePad.y = Number(next.shell.sitePad.y || 0) + dy;
+    }
+  }
+  next.shell.widthFt = Math.round(bounds.w * 10) / 10;
+  next.shell.depthFt = Math.round(bounds.d * 10) / 10;
+  if (isRectFootprint(shifted)) delete next.shell.footprint;
+  else next.shell.footprint = shifted;
+}
+
+// Which polygon edge an opening lives on: the edge with the opening's facing
+// whose span contains it (fallback: the longest edge facing that way). On a
+// plain rectangle this is always the single cardinal edge — legacy unchanged.
+export function edgeForOpening(spec, opening) {
+  const edges = footprintEdges(spec);
+  const facing = opening?.wall;
+  const candidates = edges.filter((edge) => edge.facing === facing);
+  if (!candidates.length) return null;
+  if (candidates.length === 1) return candidates[0];
+  const along = Number((facing === 'north' || facing === 'south') ? opening.x : opening.y) || 0;
+  const mid = along + (Number(opening.widthFt) || 3) / 2;
+  const containing = candidates.find((edge) => {
+    const lo = Math.min(facing === 'north' || facing === 'south' ? edge.x0 : edge.y0, facing === 'north' || facing === 'south' ? edge.x1 : edge.y1);
+    const hi = Math.max(facing === 'north' || facing === 'south' ? edge.x0 : edge.y0, facing === 'north' || facing === 'south' ? edge.x1 : edge.y1);
+    return mid >= lo && mid <= hi;
+  });
+  return containing || candidates.reduce((best, edge) => (edge.lengthFt > best.lengthFt ? edge : best));
+}
+
 function objectBounds(spec, object) {
   const pad = padExtension(spec.shell);
   const gridSize = Number(spec.shell?.outdoorGridSizeFt || DEFAULT_OUTDOOR_GRID_SIZE_FT);

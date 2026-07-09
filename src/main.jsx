@@ -4700,6 +4700,10 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
     renderer.domElement.addEventListener('pointerup', onPointerUp);
     renderer.domElement.addEventListener('pointercancel', onPointerUp);
     window.addEventListener('resize', resize);
+    // The container itself changes size without a window resize — hiding or
+    // showing the chat column, for one. Track the mount, not just the window.
+    const mountObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resize) : null;
+    mountObserver?.observe(mount);
 
     return () => {
       cameraStateRef.current = {
@@ -4711,6 +4715,7 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
       renderer.domElement.removeEventListener('pointercancel', onPointerUp);
       window.removeEventListener('resize', resize);
+      mountObserver?.disconnect();
       mount.removeChild(renderer.domElement);
       renderer.dispose();
     };
