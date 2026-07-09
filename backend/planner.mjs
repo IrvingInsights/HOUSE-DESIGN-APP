@@ -327,6 +327,104 @@ export function localPlan(payload) {
   };
 }
 
+function normName(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+// A takeoff of an attached drawing should be COMPLETE: real rooms AND real
+// openings. gemini-flash is capable but inconsistent — on an unlucky pass it
+// sets the shell and then defers the layout ("noted for future refinement",
+// the phrase the mandate bans). Detect that so we can repair it.
+export function traceLooksIncomplete(plan, sourceSpec) {
+  const ops = plan.operations || [];
+  const addRooms = ops.filter((o) => o.type === 'add_room').length;
+  const addOpenings = ops.filter((o) => o.type === 'add_opening').length;
+  const totalRooms = (sourceSpec.rooms || []).length + addRooms;
+  const text = `${plan.summary || ''} ${(plan.assumptions || []).join(' ')} ${(plan.warnings || []).join(' ')}`;
+  // A layout-scoped deferral (rooms/openings pushed to "later"), NOT a legit
+  // material warning like "chimney not fully modeled".
+  const deferral = /(room|layout|opening|window|door|space|floor plan)s?[^.]{0,60}(future refinement|refined later|to be (?:added|placed|detailed|refined|modeled|drawn)|not (?:yet )?(?:fully )?(?:placed|added|detailed|drawn)|placeholder|later)/i;
+  const deferred = deferral.test(text);
+  return { incomplete: deferred || addOpenings === 0 || totalRooms < 2, addRooms, addOpenings, totalRooms, deferred };
+}
+
+// Rewrite a summary that still brags about deferral so the user never sees the
+// banned phrase; state the real counts instead.
+export function scrubDeferralSummary(plan) {
+  const ops = plan.operations || [];
+  const rooms = ops.filter((o) => o.type === 'add_room').length;
+  const openings = ops.filter((o) => o.type === 'add_opening').length;
+  if (/future refinement|refined later|placeholder|to be (?:added|placed|detailed)/i.test(plan.summary || '')) {
+    plan.summary = `Traced the drawing: ${rooms} room${rooms === 1 ? '' : 's'}, ${openings} opening${openings === 1 ? '' : 's'} placed from the plan.`;
+  }
+  return plan;
+}
+
+// One focused repair call: hand the model what it already produced and the
+// same drawing, and ask ONLY for the rooms/openings it still owes. Merge the
+// missing pieces in (dedup rooms by name). Model-agnostic — makes a flaky
+// single pass reliable without a full multi-stage rework.
+async function repairTraceIfNeeded(plan, { attachmentParts, sourceSpec }) {
+  const check = traceLooksIncomplete(plan, sourceSpec);
+  if (!check.incomplete) return scrubDeferralSummary(plan);
+
+  const already = [
+    ...(sourceSpec.rooms || []).map((r) => r.name),
+    ...(plan.operations || []).filter((o) => o.type === 'add_room').map((o) => o.name)
+  ].filter(Boolean);
+
+  const repairText = {
+    text: `REPAIR PASS — your previous takeoff of the attached drawing was INCOMPLETE and must be finished now.
+Rooms already in the model: ${already.length ? already.join(', ') : '(none)'}.
+Openings placed so far: ${check.addOpenings}.
+Emit ONLY the operations still MISSING to complete the takeoff:
+- one add_room for EVERY room on the floor plan(s) not already listed above (do not repeat those names); real name + x/y/w/d in feet, origin NW corner, x east, y south. Upper-floor rooms get level 2.
+- one add_opening for EVERY exterior window and door (wall north/south/east/west, openingType, widthFt, positionFt).
+- if the elevations or sections show an upper floor (gable windows, a second row of windows, two levels in section), set_shell field:'storeys' value:'2'.
+Do NOT restate the shell or footprint unless the earlier value is wrong. NEVER defer, summarize, or write "future refinement" — emit the operations. Report final counts in summary.`
+  };
+
+  const res = await callGemini({ parts: [repairText, ...attachmentParts], responseSchema: geminiSchema(operationSchema) });
+  if (!res.ok) return scrubDeferralSummary(plan);
+  let extra;
+  try { extra = JSON.parse(res.text); } catch { return scrubDeferralSummary(plan); }
+  return mergeTracePlans(plan, extra, sourceSpec, already);
+}
+
+// Merge a repair pass into the first plan: append the missing rooms/openings/
+// storeys, drop repeated rooms (by name), never let the repair restate the
+// shell or footprint. Pure + exported so the dedup logic is unit-tested.
+export function mergeTracePlans(plan, extra, sourceSpec, alreadyNames) {
+  const already = alreadyNames || [
+    ...(sourceSpec.rooms || []).map((r) => r.name),
+    ...(plan.operations || []).filter((o) => o.type === 'add_room').map((o) => o.name)
+  ].filter(Boolean);
+  const takenNames = new Set(already.map(normName));
+  const extraOps = (extra.operations || []).filter((op) => {
+    if (op.type === 'add_room') {
+      const key = normName(op.name);
+      if (!key || takenNames.has(key)) return false;
+      takenNames.add(key);
+      return true;
+    }
+    if (op.type === 'add_opening' || op.type === 'add_element') return true;
+    // storeys is the only shell field the repair may set.
+    if (op.type === 'set_shell' && op.field === 'storeys') return true;
+    return false;
+  });
+
+  const merged = {
+    ...plan,
+    operations: [...(plan.operations || []), ...extraOps],
+    warnings: [...new Set([...(plan.warnings || []), ...(extra.warnings || [])])],
+    assumptions: [...new Set([...(plan.assumptions || []), ...(extra.assumptions || [])])]
+  };
+  const rooms = merged.operations.filter((o) => o.type === 'add_room').length + (sourceSpec.rooms || []).length;
+  const openings = merged.operations.filter((o) => o.type === 'add_opening').length;
+  merged.summary = `Traced the drawing: ${rooms} room${rooms === 1 ? '' : 's'}, ${openings} opening${openings === 1 ? '' : 's'} (completed in two passes).`;
+  return merged;
+}
+
 export async function aiPlan(payload) {
   if (!hasGemini() && !process.env.OPENAI_API_KEY) return localPlan(payload);
 
@@ -360,8 +458,9 @@ export async function aiPlan(payload) {
   const traceMandate = hasAttachments ? `
 A DRAWING OR DOCUMENT IS ATTACHED. Your job is a COMPLETE takeoff, not a summary:
 1. set_shell from the overall plan dimensions: ONE op carrying BOTH numbers — w AND d (e.g. w:40.5, d:23, field:'', value:''). Never set only one dimension. Read dimension strings; if none, scale from a labeled element like a 3'-0" door and record that in assumptions. If the drawing shows multiple above-grade storeys, also set_shell field:'storeys'.
-2. ONE add_room PER ROOM visible on the floor plan — every single one — with its real name and x/y/w/d in feet. Plan coordinates: origin at the northwest corner of the shell, x increases east, y increases south. Rooms on an upper floor get level 2 (or 3).
-3. ONE add_opening PER WINDOW AND DOOR with wall (north/south/east/west), openingType, widthFt, and positionFt along that wall.
+2. ONE add_room PER ROOM visible on the floor plan — every single one — with its real name and x/y/w/d in feet. Plan coordinates: origin at the northwest corner of the shell, x increases east, y increases south. Rooms on an upper floor get level 2 (or 3). If the CURRENT BIM STATE below already lists some rooms, KEEP them and ADD every remaining room from the drawing — never stop just because a few rooms already exist.
+2b. STOREYS: count the above-grade floors from the elevations and sections. A story-and-a-half or two-storey house (windows up in the gable, a second row of windows, two occupied levels in the section) gets set_shell field:'storeys' value:'2', with the upper rooms on level 2. A basement is below grade — do NOT count it as a storey.
+3. ONE add_opening PER WINDOW AND DOOR with wall (north/south/east/west), openingType, widthFt, and positionFt along that wall. A real floor plan ALWAYS has at least a front door plus several windows — never return zero openings.
 4. Porches, decks, garages, and outbuildings: add_element with a fitting category and real dimensions.
 RULES: If the plan shows 11 rooms, emit 11 add_room operations. NEVER write "noted for future refinement" or defer anything — emit the operation instead. Basements/below-grade storeys are NOT modeled: put their contents in warnings, model only above-grade storeys. In the summary, report counts: "Traced: shell WxD, N rooms, M openings." If a page is illegible, say which page in warnings and keep going with the rest.
 MODEL WHAT THE DRAWING SHOWS — many documents are EXISTING conventional houses being modified, not natural builds. A framed house gets framed walls (set_wall_side field=assembly value=framed, or set_assembly), a slab stays a slab (set_utility foundationType), standard storeys stay standard. Do NOT convert the building to natural systems unless the user asks. Mine EVERY page for usable data: dimension strings, room and door/window schedules, elevation heights (wall heights, storeys), roof type and pitch, site plans (lot, setbacks, orientation -> set_site), and existing-condition notes (put constraints the model can't express into warnings/assumptions so nothing is lost).
@@ -412,6 +511,11 @@ ${payload.prompt}`
       const fallback = localPlan(payload);
       fallback.warnings.unshift(`AI planner returned unreadable JSON: ${String(error?.message || error).slice(0, 120)}`);
       return fallback;
+    }
+    // A drawing takeoff must be complete — verify and repair a punted pass.
+    if (hasAttachments) {
+      const attachmentParts = geminiParts(content.filter((c) => c.type === 'input_image'));
+      plan = await repairTraceIfNeeded(plan, { attachmentParts, sourceSpec });
     }
     return setCached(cacheKey, { source: 'ai-planner-gemini', ...plan }, 3 * 60 * 1000);
   }

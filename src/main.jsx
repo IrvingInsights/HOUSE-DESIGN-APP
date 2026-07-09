@@ -8468,7 +8468,7 @@ function App() {
               <div className="chatBubble studio planningBubble">
                 <b>Studio</b>
                 <span><span className="planningWheel" aria-hidden="true" />{chatTarget !== 'design' ? 'Consulting the team' : attachedImages.length ? 'Reading your drawing and building the model' : 'Planning the change'}<span className="planningDots"><i>.</i><i>.</i><i>.</i></span></span>
-                <small>a full drawing takeoff can take up to a minute</small>
+                <small>{attachedImages.length ? 'a full drawing takeoff runs a trace, then a completeness check — up to two minutes' : 'a full drawing takeoff can take up to a minute'}</small>
               </div>
             )}
           </div>
