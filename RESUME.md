@@ -1,9 +1,13 @@
 # Resume / Handoff — Natural Building GC app (house-bim-app)
 
-Updated 2026-07-08. Working tree clean, ~42 commits since baseline `e9c99c1`
-(latest: `f487ad0` warm-earthen visual refresh; before it `aa9eabe` all-walls
-assembly fix + full opening-type picker, `8de8db8` actionable metric tiles).
-Live backend design: **FL-001 rev 52** (Daniel's real work: shell/walls, 0 rooms).
+Updated 2026-07-09. Working tree clean, ~50 commits since baseline `e9c99c1`.
+Recent arc: actionable metrics → Frame/Floor(+subfloor+insulation) systems →
+one-editor reorg → Zen minimization → contextual plan + outbuildings →
+per-storey walls + sun angles + exploded views (`230d77f`).
+Live backend design: **FL-001 ~rev 151** (Daniel works in it daily — ALWAYS
+GET /api/projects/current before assuming state; never clobber; persist:false
+for tests). Backend .mjs edits need a server restart; check
+$TEMP/nbapp_server.log for real vite errors (a 200 can be stale).
 Deep provenance + every decision: Claude memory `natural-building-gc-dashboard-inventory.md`.
 
 ## Daniel's standing priority (his words)
