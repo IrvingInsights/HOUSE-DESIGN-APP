@@ -3958,15 +3958,34 @@ button.danger:hover,
 .welcomeFile { grid-column: 1 / -1; cursor: pointer; }
 .welcomeFile input { display: none; }
 
+/* Opening card: wide, two columns, everything visible at once —
+   left = what this is / how it works, right = the ways in. */
+.welcomeCard {
+  width: min(1000px, calc(100vw - 48px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 8px 34px;
+  align-items: start;
+}
+.welcomeSide { min-width: 0; }
+.welcomeActions { min-width: 0; }
+.welcomeActions .welcomeDivider:first-child { margin-top: 4px; }
+@media (max-width: 900px) {
+  .welcomeCard { grid-template-columns: 1fr; max-height: calc(100vh - 32px); }
+}
+
 /* previous-design rows on the opening card */
 .welcomePrevious { margin-top: 4px; }
 .welcomePrevRow {
   display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
   width: 100%; margin-top: 6px; padding: 9px 12px; text-align: left;
-  background: var(--panel-2, #281F1A); border: 1px solid var(--line2, #564A3F);
+  /* the overlay sits outside the dark-scoped columns — pin the dark surface */
+  background: #281F1A; border: 1px solid #564A3F;
   border-radius: 9px; color: #ECE4D6; cursor: pointer;
 }
-.welcomePrevRow:hover { border-color: var(--active-line, #C88A5B); background: var(--active, #3A2C22); }
+.welcomePrevRow:hover { border-color: #C88A5B; background: #3A2C22; }
 .welcomePrevRow b { font-size: 13.5px; }
 .welcomePrevRow small { font-size: 11px; color: #978C79; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
