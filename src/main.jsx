@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { pushToBlender, exportIfcViaBlender } from './blenderBridge.js';
-import { OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring } from '../backend/bim-core.mjs';
+import { OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor } from '../backend/bim-core.mjs';
 import {
   AlertTriangle,
   Box,
@@ -2669,8 +2669,13 @@ function deriveDesign(spec, wallSections) {
     : floor * (foundationCostPsf[utilities.foundationType] ?? 10)) + foundationInsulationCost;
   const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => sum + (outdoorItemPresent(spec, item) ? item.cost : 0), 0);
 
-  // Flooring over the whole heated floor. Reclaimed boards cut cost + carbon.
+  // Floor assembly = finished floor over the whole heated area + the structural
+  // subfloor deck under the ground floor (a slab foundation is its own deck, so
+  // its subfloor is free). Reclaimed boards cut the finish cost + carbon.
   const flooringKey = resolveFlooring(spec);
+  const subfloorKey = resolveSubfloor(spec);
+  const subfloorCost = floor * (SUBFLOOR_TYPES[subfloorKey]?.costPsf ?? 0);
+  const subfloorCarbon = floor * (SUBFLOOR_TYPES[subfloorKey]?.carbonPsf ?? 0);
   const flooringCostRaw = heatedFloor * (FLOORING_TYPES[flooringKey]?.costPsf ?? 4);
   const flooringCarbonRaw = heatedFloor * (FLOORING_TYPES[flooringKey]?.carbonPsf ?? 2);
 
@@ -2692,7 +2697,7 @@ function deriveDesign(spec, wallSections) {
   const cost = {
     foundation: foundationCost,
     frame: frameCost,
-    flooring: flooringCostRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.cost : 1),
+    flooring: flooringCostRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.cost : 1) + subfloorCost,
     upperFloors: (storeys - 1) * floor * 12 + stackedArea * 12,
     outdoors: outdoorCost,
     walls: wallsCostRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.cost : 1),
@@ -2722,7 +2727,7 @@ function deriveDesign(spec, wallSections) {
   const frameCarbon = frameCarbonRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.carbon : 1);
   const roofCarbonRaw = roofArea * 12;
   const roofCarbon = roofCarbonRaw * (reclaimed.roof ? RECLAIMED_FACTORS.roof.carbon : 1);
-  const flooringCarbon = flooringCarbonRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.carbon : 1);
+  const flooringCarbon = flooringCarbonRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.carbon : 1) + subfloorCarbon;
   const stemCarbonExtra = utilities.foundationType === 'stemwall' ? perimeterFt * Math.max(0, stemwallHeightFt - 1.5) * 40 : 0;
   const carbonKg = floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
@@ -2744,7 +2749,7 @@ function deriveDesign(spec, wallSections) {
     site, utilities, reclaimed, reclaimedSavings, floor, heatedFloor, storeys, roofArea, roofFootprint, overhangs, wallArea, wallR, southGlass, glassPct,
     skylightArea, totalGlass, glazingU, stemwallHeightFt, azimuthDeg, solarFactor,
     frameGround: groundFrameKey, frameUpper: upperFrameKey, frameArea: groundFrameArea + upperFrameArea,
-    flooring: flooringKey,
+    flooring: flooringKey, subfloor: subfloorKey, subfloorCost,
     heatLoadKbtu, bedrooms, people, waterGpd, catchmentGpd, supplyGpd, septicGpd,
     peakSunHrs, loadKwhDay, panels, panelRoom, batteryKwh,
     cost, totalBeforeSweat, sweat, total, carbonKg, pitch
@@ -2765,7 +2770,7 @@ const SYSTEM_GROUPS = [
 const COST_ROWS = [
   { key: 'foundation', label: 'Foundation', system: 'foundation' },
   { key: 'frame', label: 'Frame', system: 'frame' },
-  { key: 'flooring', label: 'Flooring', system: 'flooring' },
+  { key: 'flooring', label: 'Floor', system: 'flooring' },
   { key: 'walls', label: 'Walls', system: 'walls' },
   { key: 'roof', label: 'Roof', system: 'roof' },
   { key: 'windows', label: 'Windows & doors', system: 'windows' },
@@ -2828,11 +2833,12 @@ const SYSTEM_META = {
     ]
   },
   flooring: {
-    label: 'Flooring',
-    why: 'The finished floor over the foundation. Earthen, tile, and stone add thermal mass that steadies indoor temperature; wood, cork, and bamboo are warmer underfoot. Reclaimed boards are a cheap carbon win.',
+    label: 'Floor',
+    why: 'The floor assembly: the structural subfloor deck (a slab is its own; a raised foundation needs a joisted deck) plus the finished floor. Earthen, tile, and stone add thermal mass; wood, cork, and bamboo are warmer underfoot. Reclaimed boards are a cheap carbon win.',
     feeds: ['Cost'],
     reads: (dd) => [
-      ['Floor', FLOORING_TYPES[dd.flooring]?.label || dd.flooring, '', dd.reclaimed.flooring ? 'reclaimed' : ''],
+      ['Subfloor', (SUBFLOOR_TYPES[dd.subfloor]?.label || dd.subfloor).split(' —')[0], '', ''],
+      ['Finish', FLOORING_TYPES[dd.flooring]?.label || dd.flooring, '', dd.reclaimed.flooring ? 'reclaimed' : ''],
       ['This system', fmtMoney(dd.cost.flooring), '', `${fmtNum(dd.heatedFloor)} sf`]
     ]
   },
@@ -5189,6 +5195,14 @@ function App() {
     });
   }
 
+  function updateSubfloor(value) {
+    void applyBackendOperations({
+      operations: [{ type: 'set_flooring', field: 'subfloor', value }],
+      promptText: `Set subfloor to ${SUBFLOOR_TYPES[value]?.label || value}`,
+      logPrefix: 'Flooring'
+    });
+  }
+
   function updateReclaimed(system, value) {
     void applyBackendOperations({
       operations: [{ type: 'set_reclaimed', system, value: Boolean(value) }],
@@ -6238,9 +6252,21 @@ function App() {
 
           {systemView === 'flooring' && (() => {
             const flooringKey = resolveFlooring(spec);
+            const subfloorKey = resolveSubfloor(spec);
             const reclaimed = reclaimedOf(spec);
+            const isSlab = utilitiesOf(spec).foundationType === 'slab';
             return (
               <div className="systemPage">
+                <div className="sectionHead">Subfloor (the deck)</div>
+                <div className="controlGrid">
+                  <label>Subfloor
+                    <select value={subfloorKey} onChange={(event) => updateSubfloor(event.target.value)}>
+                      {Object.entries(SUBFLOOR_TYPES).map(([key, f]) => <option key={key} value={key}>{f.label}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <p className="systemNote">{SUBFLOOR_TYPES[subfloorKey]?.note} {isSlab ? 'Your slab foundation is its own deck.' : `Your ${utilitiesOf(spec).foundationType} foundation raises the floor, so it needs a deck`}{isSlab ? '' : ` — ${fmtMoney(derived.subfloorCost)} over ${fmtNum(derived.floor)} sf`}. Change the foundation on the Foundation page and this follows.</p>
+
                 <div className="sectionHead">Finished floor</div>
                 <div className="controlGrid">
                   <label>Floor type
@@ -6249,7 +6275,7 @@ function App() {
                     </select>
                   </label>
                 </div>
-                <p className="systemNote">{FLOORING_TYPES[flooringKey]?.note} Covers the whole {fmtNum(derived.heatedFloor)} sf heated floor · {fmtMoney(derived.cost.flooring)}. A single room can differ — set its floor by tapping it (its floor shows in the schedule).</p>
+                <p className="systemNote">{FLOORING_TYPES[flooringKey]?.note} Covers the whole {fmtNum(derived.heatedFloor)} sf heated floor. Floor assembly (deck + finish): {fmtMoney(derived.cost.flooring)}. A single room can differ — set its floor by tapping it (its floor shows in the schedule).</p>
                 <label className="diyToggle">
                   <input type="checkbox" checked={reclaimed.flooring} onChange={(event) => updateReclaimed('flooring', event.target.checked)} />
                   <span>The flooring is reclaimed / salvaged (reclaimed boards or tile — cuts cost and carbon)</span>

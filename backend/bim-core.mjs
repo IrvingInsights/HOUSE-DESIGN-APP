@@ -336,6 +336,24 @@ export function resolveFlooring(spec) {
   return FLOORING_TYPES[key] ? key : 'earthen';
 }
 
+// Subfloor — the structural deck under the finished floor. On a slab foundation
+// the poured floor IS the structure (no separate deck, cost folded into the
+// foundation). On a rubble or stem-wall foundation the floor is raised, so it
+// needs a joisted deck — insulated if you want to slow floor heat loss.
+export const SUBFLOOR_TYPES = {
+  slab: { label: 'Slab — the foundation is the floor', costPsf: 0, carbonPsf: 0, note: 'For a slab foundation: the poured floor is the deck. Nothing extra to build.' },
+  joist: { label: 'Wood joist deck', costPsf: 6, carbonPsf: 3, note: 'Dimensional joists and subfloor sheathing over the foundation.' },
+  insulated: { label: 'Insulated wood deck', costPsf: 9, carbonPsf: 4, note: 'Joists with dense-pack or wool insulation and sheathing — warmer feet, less floor loss.' },
+  timber: { label: 'Timber deck over posts', costPsf: 8, carbonPsf: 4, note: 'Heavy timber joists on piers or a low stem wall; a natural-building classic.' }
+};
+// Default follows the foundation: a slab is its own deck; a raised (rubble /
+// stem-wall) foundation gets an insulated deck unless overridden.
+export function resolveSubfloor(spec) {
+  const key = spec.flooring?.subfloor;
+  if (SUBFLOOR_TYPES[key]) return key;
+  return (spec.utilities?.foundationType === 'slab') ? 'slab' : 'insulated';
+}
+
 export const RECLAIMED_SYSTEMS = ['frame', 'walls', 'flooring', 'windows', 'roof'];
 export const RECLAIMED_DEFAULTS = { frame: false, walls: false, flooring: false, windows: false, roof: false };
 
@@ -502,8 +520,13 @@ export function applyBimOperations(currentSpec, plan) {
 
     if (operation.type === 'set_flooring') {
       next.flooring ||= { type: 'earthen' };
-      next.flooring.type = FLOORING_TYPES[operation.value] ? operation.value : next.flooring.type;
-      actions.push(`Set flooring to ${FLOORING_TYPES[next.flooring.type]?.label || next.flooring.type}.`);
+      if (operation.field === 'subfloor') {
+        if (SUBFLOOR_TYPES[operation.value]) next.flooring.subfloor = operation.value;
+        actions.push(`Set subfloor to ${SUBFLOOR_TYPES[next.flooring.subfloor]?.label || next.flooring.subfloor}.`);
+      } else {
+        next.flooring.type = FLOORING_TYPES[operation.value] ? operation.value : next.flooring.type;
+        actions.push(`Set flooring to ${FLOORING_TYPES[next.flooring.type]?.label || next.flooring.type}.`);
+      }
       continue;
     }
 
