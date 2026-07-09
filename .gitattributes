@@ -1,0 +1,12 @@
+# Line-ending law: Unix launchers must ship LF (a CRLF shebang breaks macOS),
+# Windows launchers ship CRLF. Everything else normalizes to LF in the repo.
+* text=auto
+*.sh text eol=lf
+*.command text eol=lf
+*.mjs text eol=lf
+*.jsx text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+*.py text eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
