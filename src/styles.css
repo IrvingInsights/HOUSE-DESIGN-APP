@@ -3692,6 +3692,29 @@ button.danger:hover,
 .statGrid div { border-radius: 10px; background: var(--ivory); border-color: var(--line); }
 .statGrid button:hover { border-color: var(--active-line); }
 
+/* ---- Zen minimization: 3 tiles, ⋯ overflow tab, Export menu ---- */
+.statGrid.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.consoleTabs .moreToggle {
+  min-width: 30px; padding: 6px 8px; font-weight: 700; letter-spacing: 1px;
+  line-height: 1; color: var(--ink3, #978C79);
+}
+.consoleTabs .moreToggle.active { color: var(--plum, #EBD6B0); border-color: var(--active-line, #C88A5B); }
+.councilHead { margin-top: 16px; }
+
+.exportMenu { position: relative; display: inline-flex; }
+.exportMenuPop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
+  display: flex; flex-direction: column; min-width: 220px; padding: 6px;
+  background: var(--ivory, #2A231E); border: 1px solid var(--line2, #564A3F);
+  border-radius: 10px; box-shadow: 0 14px 34px -18px rgba(0,0,0,.8);
+}
+.exportMenuPop button {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 9px 10px; font-size: 13px; text-align: left;
+  background: transparent; border: none; border-radius: 7px; color: var(--ink, #ECE4D6); cursor: pointer;
+}
+.exportMenuPop button:hover { background: var(--panel-3, #221C17); color: var(--plum, #EBD6B0); }
+
 /* ---- One-editor reorg: click-to-select summary rows on system pages ---- */
 .pickList { display: flex; flex-direction: column; gap: 5px; margin: 8px 0; }
 .pickRow {

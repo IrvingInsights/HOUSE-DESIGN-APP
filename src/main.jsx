@@ -4480,6 +4480,8 @@ function App() {
   const [projectBrain, setProjectBrain] = useState(() => ensureProjectBrain(initialSaved?.projectBrain, initialSaved?.spec || seedSpec));
   const [clipboardObject, setClipboardObject] = useState(null);
   const [consoleView, setConsoleView] = useState('systems');
+  const [moreTabsOpen, setMoreTabsOpen] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [appMode, setAppMode] = useState('design');
   const [viewMode, setViewMode] = useState('3d');
   const [activeFloor, setActiveFloor] = useState(1);
@@ -5858,17 +5860,15 @@ function App() {
         <div className="brand">
           <div className="brandMark" aria-hidden="true"><span className="brandGable" /></div>
           <div>
-            <h1>Natural Building Design Dashboard</h1>
-            <p>Living BIM studio for ancient and regenerative design</p>
+            <h1>Natural Building</h1>
           </div>
         </div>
 
         <section className="panelBlock compact consoleSummary">
-          <div className="statGrid four">
+          <div className="statGrid three">
             <button type="button" title="See the full cost breakdown" onClick={() => { setAppMode('design'); setConsoleView('costs'); }}><strong>${estimatedCost.toLocaleString()}</strong><span>{derived.sweat > 0 ? `est. cost · sweat saves $${Math.round(derived.sweat / 1000)}k` : 'est. cost'}</span></button>
             <button type="button" title="Open the Rooms plan" onClick={() => { setConsoleView('systems'); setSystemView('rooms'); }}><strong>{spec.rooms.length}</strong><span>room{spec.rooms.length === 1 ? '' : 's'} · {area} sf</span></button>
-            <button type="button" title="See the code flags in Review" onClick={() => setConsoleView('review')}><strong>{openFlagCount}</strong><span>code flag{openFlagCount === 1 ? '' : 's'}</span></button>
-            <button type="button" className={openFlagCount === 0 ? 'stateStat ok' : 'stateStat bad'} title="See what does and doesn't add up in Review" onClick={() => setConsoleView('review')}><strong>{openFlagCount === 0 ? 'Yes' : 'Not yet'}</strong><span>adds up</span></button>
+            <button type="button" className={openFlagCount === 0 ? 'stateStat ok' : 'stateStat bad'} title="See the checks in Review" onClick={() => setConsoleView('review')}><strong>{openFlagCount === 0 ? 'All clear' : openFlagCount}</strong><span>{openFlagCount === 0 ? 'checks pass' : `check${openFlagCount === 1 ? '' : 's'} to fix`}</span></button>
           </div>
         </section>
 
@@ -5938,19 +5938,21 @@ function App() {
           );
         })()}
 
-        {appMode === 'design' && <nav className="consoleTabs" aria-label="Project console">
-          <button className={consoleView === 'systems' ? 'active' : ''} onClick={() => setConsoleView('systems')}><Grid3X3 size={14} /> Systems</button>
-          <button className={consoleView === 'costs' ? 'active' : ''} onClick={() => setConsoleView('costs')}><Coins size={14} /> Costs</button>
-          <button className={consoleView === 'os' ? 'active' : ''} onClick={() => setConsoleView('os')}><ClipboardCheck size={14} /> Plan</button>
-          <button className={consoleView === 'review' ? 'active' : ''} onClick={() => setConsoleView('review')}><ShieldCheck size={14} /> Review</button>
-          <button className={consoleView === 'experts' ? 'active' : ''} onClick={() => setConsoleView('experts')}><Users size={14} /> Experts</button>
-          <button className={consoleView === 'audit' ? 'active' : ''} onClick={() => setConsoleView('audit')}><FileJson size={14} /> History</button>
-          <button className={consoleView === 'log' ? 'active' : ''} onClick={() => setConsoleView('log')}><Layers size={14} /> Log</button>
-        </nav>}
+        {appMode === 'design' && (() => {
+          const moreShown = moreTabsOpen || consoleView === 'os' || consoleView === 'audit';
+          return (
+            <nav className="consoleTabs" aria-label="Project console">
+              <button className={consoleView === 'systems' ? 'active' : ''} onClick={() => setConsoleView('systems')}><Grid3X3 size={14} /> Systems</button>
+              <button className={consoleView === 'costs' ? 'active' : ''} onClick={() => setConsoleView('costs')}><Coins size={14} /> Costs</button>
+              <button className={consoleView === 'review' ? 'active' : ''} onClick={() => setConsoleView('review')}><ShieldCheck size={14} /> Review</button>
+              <button className={`moreToggle${moreShown ? ' active' : ''}`} onClick={() => setMoreTabsOpen((open) => !open)} title="More views" aria-label="More views">⋯</button>
+              {moreShown && <button className={consoleView === 'os' ? 'active' : ''} onClick={() => setConsoleView('os')}><ClipboardCheck size={14} /> Plan</button>}
+              {moreShown && <button className={consoleView === 'audit' ? 'active' : ''} onClick={() => setConsoleView('audit')}><FileJson size={14} /> History</button>}
+            </nav>
+          );
+        })()}
 
         {appMode === 'design' && consoleView === 'systems' && <section className="panelBlock consolePanel systemsPanel">
-          <div className="blockTitle"><Grid3X3 size={16} /> Systems</div>
-          <p className="studioHint">Design the house one system at a time. Each page shows what that system controls.</p>
           <nav className="systemNav" aria-label="Building systems">
             {SYSTEM_GROUPS.map((group) => (
               <div className="systemNavGroup" key={group.label}>
@@ -6618,16 +6620,12 @@ function App() {
                 </div>
               ))}
             </div>
-        </section>}
-
-        {appMode === 'design' && consoleView === 'experts' && <section className="panelBlock consolePanel">
-            <div className="blockTitle"><Users size={16} /> Council of Professionals</div>
-            <p className="studioHint">Select an expert here, then ask in Studio.</p>
+            <div className="sectionHead councilHead">Ask a professional</div>
             <div className="council">
               {council.map((expert) => {
                 const Icon = expert.icon;
                 return (
-                  <button key={expert.id} className={`expert ${expert.status}`} onClick={() => chooseChatTarget(expert.id)}>
+                  <button key={expert.id} className={`expert ${expert.status}`} onClick={() => chooseChatTarget(expert.id)} title="Aim the chat at this expert, then ask in Studio">
                     <Icon size={17} />
                     <div><b>{expert.name}</b><span>{expert.notes}</span></div>
                   </button>
@@ -6650,13 +6648,14 @@ function App() {
                 </article>
               ))}
             </div>
-        </section>}
-
-        {appMode === 'design' && consoleView === 'log' && <section className="panelBlock consolePanel">
-            <div className="blockTitle"><Layers size={16} /> Revision Log</div>
-            <div className="log">
-              {revisionLog.map((item, index) => <p key={`${item}-${index}`}>{item}</p>)}
-            </div>
+            {revisionLog.length > 0 && (
+              <>
+                <div className="sectionHead councilHead">Revision log</div>
+                <div className="log">
+                  {revisionLog.slice(0, 20).map((item, index) => <p key={`${item}-${index}`}>{item}</p>)}
+                </div>
+              </>
+            )}
         </section>}
 
       </aside>
@@ -6673,11 +6672,20 @@ function App() {
           </div>
           <div className="exportActions">
             <button className="ghost" title="Start a new design" onClick={() => setWelcomeOpen(true)}><Plus size={16} /> New</button>
-            <button className="ghost backButton" onClick={goBackRevision} disabled={history.length === 0}><Undo2 size={16} /> Back</button>
-            <button className="ghost saveButton" onClick={saveHouseState}><Save size={16} /> Save House</button>
-            <button className="ghost" onClick={exportSheetSet}><FileText size={16} /> Permit Set</button>
-            <button className="ghost" title="Rebuild this design in the Blender backend (starts a headless Blender automatically if needed)" onClick={async () => { try { await pushToBlender(spec); window.alert('Synced to Blender: the model is rebuilding in the Natural Building GC backend.'); } catch (e) { window.alert('Blender sync failed: ' + e.message + ' (First start can take up to a minute — try once more.)'); } }}>Sync to Blender</button>
-            <button className="ghost" title="Push this design to Blender and write a validated IFC4 file" onClick={async () => { try { const r = await exportIfcViaBlender(spec); window.alert(r && r.ok ? ('IFC written: ' + r.path + ' (' + r.count + ' elements). Open it in any BIM viewer.') : ('IFC export failed: ' + ((r && r.error) || 'unknown'))); } catch (e) { window.alert('Blender backend not reachable. Start Blender 5.1 with the Dashboard add-on, then retry. (' + e.message + ')'); } }}>Export IFC</button>
+            <button className="ghost backButton" onClick={goBackRevision} disabled={history.length === 0}><Undo2 size={16} /> Undo</button>
+            <button className="ghost saveButton" onClick={saveHouseState}><Save size={16} /> Save</button>
+            <div className="exportMenu">
+              <button className="ghost" onClick={() => setExportMenuOpen((open) => !open)} title="Export the design"><Download size={16} /> Export ▾</button>
+              {exportMenuOpen && (
+                <div className="exportMenuPop" onMouseLeave={() => setExportMenuOpen(false)}>
+                  <button onClick={() => { setExportMenuOpen(false); exportSheetSet(); }}><FileText size={15} /> Permit set (SVG sheets)</button>
+                  <button title="Push this design to Blender and write a validated IFC4 file" onClick={async () => { setExportMenuOpen(false); try { const r = await exportIfcViaBlender(spec); window.alert(r && r.ok ? ('IFC written: ' + r.path + ' (' + r.count + ' elements). Open it in any BIM viewer.') : ('IFC export failed: ' + ((r && r.error) || 'unknown'))); } catch (e) { window.alert('Blender backend not reachable. Start Blender 5.1 with the Dashboard add-on, then retry. (' + e.message + ')'); } }}><Box size={15} /> IFC file (Blender)</button>
+                  <button title="Rebuild this design in the Blender backend (starts a headless Blender automatically if needed)" onClick={async () => { setExportMenuOpen(false); try { await pushToBlender(spec); window.alert('Synced to Blender: the model is rebuilding in the Natural Building GC backend.'); } catch (e) { window.alert('Blender sync failed: ' + e.message + ' (First start can take up to a minute — try once more.)'); } }}><RefreshCcw size={15} /> Sync to Blender</button>
+                  <button onClick={() => { setExportMenuOpen(false); exportBrief(); }}><Download size={15} /> Brief (coordination summary)</button>
+                  <button onClick={() => { setExportMenuOpen(false); exportJson(); }}><FileJson size={15} /> BIM JSON (model data)</button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
@@ -6789,8 +6797,7 @@ function App() {
                 <nav className="inspectorTabs" aria-label="BIM inspector">
                   <button className={inspectorView === 'inspect' ? 'active' : ''} onClick={() => setInspectorView('inspect')}>Selected</button>
                   <button className={inspectorView === 'schedule' ? 'active' : ''} onClick={() => setInspectorView('schedule')}>Schedule</button>
-                  <button className={inspectorView === 'assemblies' ? 'active' : ''} onClick={() => setInspectorView('assemblies')}>Assemblies</button>
-                  <button className={inspectorView === 'outputs' ? 'active' : ''} onClick={() => setInspectorView('outputs')}>Outputs</button>
+                  <button className={inspectorView === 'assemblies' ? 'active' : ''} onClick={() => setInspectorView('assemblies')}>Library</button>
                 </nav>
               </div>
               {(() => {
@@ -6998,30 +7005,7 @@ function App() {
 
             {inspectorView === 'assemblies' && (
               <div className="assembliesPane fullPane">
-              <div className="shellEdit">
-                <label>Shell W<input type="number" value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
-                <label>Shell D<input type="number" value={spec.shell.depthFt} onChange={(event) => updateShell('depthFt', event.target.value)} /></label>
-                <label>Wall H<input type="number" value={spec.shell.wallHeightFt} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
-                <label>Roof <em className="pitchHint">≈ {Math.round(Number(spec.shell.roofPitch || 0.32) * 12)}:12</em><input type="number" step="0.01" value={spec.shell.roofPitch} onChange={(event) => updateShell('roofPitch', event.target.value)} /></label>
-                <label>Roof Type
-                  <select value={spec.shell.roofType || 'gable'} onChange={(event) => updateShell('roofType', event.target.value)}>
-                    <option value="gable">gable</option>
-                    <option value="shed">shed / lean-to</option>
-                  </select>
-                </label>
-                <label>S Wall H<input type="number" value={spec.shell.southWallHeightFt || spec.shell.wallHeightFt} onChange={(event) => updateShell('southWallHeightFt', event.target.value)} /></label>
-                <label>N Wall H<input type="number" value={spec.shell.northWallHeightFt || spec.shell.wallHeightFt} onChange={(event) => updateShell('northWallHeightFt', event.target.value)} /></label>
-                <label>Outdoor Grid<input type="number" value={spec.shell.padExtensionFt ?? DEFAULT_SITE_PAD_EXTENSION_FT} onChange={(event) => updateShell('padExtensionFt', event.target.value)} /></label>
-              </div>
-              <div className="assembly">
-                <em>Current House Assemblies</em>
-                <span>Modeled Wall Type</span><b>{modeledWallProfile.label} · {modeledWallProfile.thicknessFt}'</b>
-                <span>Modeled Roof</span><b>{modeledRoofProfile.roofType} · S {modeledRoofProfile.southWallHeightFt}' / N {modeledRoofProfile.northWallHeightFt}' · pitch {modeledRoofProfile.pitch.toFixed(3)}</b>
-                <span>Structure</span><b>{spec.systems.structure}</b>
-                <span>Envelope</span><b>{spec.systems.envelope}</b>
-                <span>Water</span><b>{spec.systems.water}</b>
-                <span>Energy</span><b>{spec.systems.energy}</b>
-              </div>
+              <p className="studioHint">Apply a ready-made assembly to the house, or place a catalog object in the model.</p>
               <div className="scheduleElements">
                 <div className="libraryMode">
                   <button className={libraryActionMode === 'apply' ? 'active' : ''} onClick={() => setLibraryActionMode('apply')}>Apply to House</button>
@@ -7062,22 +7046,6 @@ function App() {
               </div>
             )}
 
-            {inspectorView === 'outputs' && (
-              <div className="outputsPane fullPane">
-                <div className="outputCards">
-                  <button onClick={exportSheetSet}><FileText size={18} /><span><b>Permit Set</b><small>G/A/S/M drawing package</small></span></button>
-                  <button className="ghost" onClick={exportBrief}><Download size={18} /><span><b>Brief</b><small>Coordination summary</small></span></button>
-                  <button className="ghost" onClick={exportJson}><FileJson size={18} /><span><b>BIM JSON</b><small>Structured model data</small></span></button>
-                </div>
-                <div className="assembly outputNotes">
-                  <em>Export Status</em>
-                  <span>Revision</span><b>{spec.revision}</b>
-                  <span>Selected</span><b>{selected?.name}</b>
-                  <span>Readiness</span><b>{qualityScore}/100</b>
-                  <span>Open Flags</span><b>{issues.filter((issue) => issue.severity !== 'pass').length}</b>
-                </div>
-              </div>
-            )}
           </section>
         </div>
       </section>
