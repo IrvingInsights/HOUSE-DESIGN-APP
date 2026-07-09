@@ -3692,6 +3692,32 @@ button.danger:hover,
 .statGrid div { border-radius: 10px; background: var(--ivory); border-color: var(--line); }
 .statGrid button:hover { border-color: var(--active-line); }
 
+/* ---- 2D connection details (parametric joint sections) ---- */
+.jointDetail {
+  margin-top: 12px;
+  border: 1px solid var(--line, #423931);
+  border-radius: 10px;
+  background: var(--panel-2, #281F1A);
+  padding: 4px 10px 10px;
+}
+.jointDetail summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--plum, #EBD6B0);
+  padding: 6px 0;
+}
+.jointSvg {
+  display: block;
+  width: 100%;
+  max-height: 250px;
+  margin-top: 4px;
+  background: var(--panel-3, #221C17);
+  border: 1px solid var(--line, #423931);
+  border-radius: 8px;
+}
+.jointNote { font-size: 11px; color: var(--ink3, #978C79); margin: 8px 0 0; line-height: 1.5; }
+
 /* ---- Zen minimization: 3 tiles, ⋯ overflow tab, Export menu ---- */
 .statGrid.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .consoleTabs .moreToggle {

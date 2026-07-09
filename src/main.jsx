@@ -923,6 +923,7 @@ const DEFAULT_MODEL_LAYERS = {
   ground: true,
   labels: true,
   xray: false,
+  explode: false,
   hiddenCats: []
 };
 
@@ -1257,33 +1258,42 @@ function getWallSections(spec) {
     west: { name: 'West Wall', lengthFt: spec.shell.depthFt, x: 0, y: 0 },
     east: { name: 'East Wall', lengthFt: spec.shell.depthFt, x: spec.shell.widthFt, y: 0 }
   };
-  return WALL_SIDES
-    .map((side) => ({ side, ...layout[side], resolved: resolveWallSide(spec, side) }))
-    .filter((wall) => !wall.resolved.omitted)
-    .map((wall) => {
-      const r = wall.resolved;
-      return {
-        id: `wall-${wall.side}`,
-        name: wall.name,
-        side: wall.side,
-        lengthFt: wall.lengthFt,
-        heightFt: r.heightFt,
-        x: wall.x,
-        y: wall.y,
-        category: 'wall-section',
-        type: 'wall',
-        w: wall.side === 'north' || wall.side === 'south' ? wall.lengthFt : r.thicknessFt,
-        d: wall.side === 'east' || wall.side === 'west' ? wall.lengthFt : r.thicknessFt,
-        h: r.heightFt,
-        assembly: r.assembly.label,
-        assemblyKey: r.assemblyKey,
-        thicknessFt: r.thicknessFt,
-        rValue: r.assembly.rValue,
-        interiorFinish: r.interiorFinish,
-        exteriorFinish: r.exteriorFinish,
-        note: `${r.assembly.label} (R≈${r.assembly.rValue}, ${r.thicknessFt.toFixed(2)}' thick); ${wall.lengthFt}' long, ${r.heightFt}' high. Interior: ${r.interiorFinish}. Openings on this side: ${spec.openings.filter((opening) => opening.wall === wall.side).length}.`
-      };
-    });
+  const { storeys, extraFt } = storeyInfo(spec.shell);
+  const buildSection = (side, level) => {
+    const r = resolveWallSide(spec, side, level);
+    if (r.omitted) return null;
+    const upper = level > 1;
+    const heightFt = upper ? extraFt : r.heightFt;
+    const base = layout[side];
+    return {
+      id: upper ? `wall-${side}-u` : `wall-${side}`,
+      name: upper ? `${base.name} (upper)` : base.name,
+      side,
+      storey: upper ? 'upper' : 'ground',
+      level: upper ? 2 : 1,
+      lengthFt: base.lengthFt,
+      heightFt,
+      x: base.x,
+      y: base.y,
+      category: 'wall-section',
+      type: 'wall',
+      w: side === 'north' || side === 'south' ? base.lengthFt : r.thicknessFt,
+      d: side === 'east' || side === 'west' ? base.lengthFt : r.thicknessFt,
+      h: heightFt,
+      assembly: r.assembly.label,
+      assemblyKey: r.assemblyKey,
+      thicknessFt: r.thicknessFt,
+      rValue: r.assembly.rValue,
+      interiorFinish: r.interiorFinish,
+      exteriorFinish: r.exteriorFinish,
+      note: `${r.assembly.label} (R≈${r.assembly.rValue}, ${r.thicknessFt.toFixed(2)}' thick); ${base.lengthFt}' long, ${heightFt}' ${upper ? 'of upper storey' : 'high'}. Interior: ${r.interiorFinish}. Openings on this side: ${spec.openings.filter((opening) => opening.wall === side).length}.`
+    };
+  };
+  const sections = WALL_SIDES.map((side) => buildSection(side, 1)).filter(Boolean);
+  if (storeys > 1 && extraFt > 0) {
+    sections.push(...WALL_SIDES.map((side) => buildSection(side, 2)).filter(Boolean));
+  }
+  return sections;
 }
 
 function getSpecialBimObjects(spec) {
@@ -1563,7 +1573,7 @@ function wallAssemblyKeyFromText(text) {
   return 'framed';
 }
 
-function resolveWallSide(spec, side) {
+function resolveWallSide(spec, side, level = 1) {
   const shell = spec.shell || {};
   const w = (spec.walls || {})[side] || {};
   const assemblyKey = w.assembly && WALL_ASSEMBLIES[w.assembly] ? w.assembly : wallAssemblyKeyFromText(spec.systems?.envelope);
@@ -1572,7 +1582,7 @@ function resolveWallSide(spec, side) {
     : side === 'north' ? Number(shell.northWallHeightFt || shell.wallHeightFt || 10)
       : Number(shell.wallHeightFt || 10);
   const omittedSet = new Set(shell.omittedWalls || []);
-  return {
+  const ground = {
     side,
     heightFt: Number(w.heightFt ?? defaultHeight),
     assemblyKey,
@@ -1581,6 +1591,21 @@ function resolveWallSide(spec, side) {
     interiorFinish: w.interiorFinish || assembly.finish,
     exteriorFinish: w.exteriorFinish || 'rainscreen / lime render',
     omitted: Boolean(w.omitted) || omittedSet.has(side)
+  };
+  if (level <= 1) return ground;
+  // Upper storeys: spec.wallsUpper per-side overrides fall back to the ground
+  // wall — MUST mirror the bim-core copy exactly.
+  const u = (spec.wallsUpper || {})[side] || {};
+  const upperKey = u.assembly && WALL_ASSEMBLIES[u.assembly] ? u.assembly : ground.assemblyKey;
+  const upperAssembly = WALL_ASSEMBLIES[upperKey] || ground.assembly;
+  return {
+    ...ground,
+    level,
+    assemblyKey: upperKey,
+    assembly: upperAssembly,
+    thicknessFt: Number(u.thicknessFt ?? (u.assembly ? upperAssembly.thicknessFt : ground.thicknessFt)),
+    interiorFinish: u.interiorFinish || ground.interiorFinish,
+    exteriorFinish: u.exteriorFinish || ground.exteriorFinish
   };
 }
 
@@ -2555,8 +2580,8 @@ function detectIssues(spec) {
     issues.push({ severity: 'critical', title: `Roof overhang is only ${(overhangCheck.min * 12).toFixed(0)}" on the shortest side`, owner: 'Natural Builder', system: 'roof', fixId: 'deepen-overhang', fix: 'Plastered natural walls need at least 24" of overhang to stay dry (Appendix S R325.5.4-style). Deepen the overhang or switch the exposed side to a framed rainscreen wall.' });
   }
   const hasSouthGlass = spec.openings.some((opening) => opening.wall === 'south' && opening.type !== 'door');
-  if (hasSouthGlass && overhangCheck.south > 3.5) {
-    issues.push({ severity: 'warning', title: `South overhang (${overhangCheck.south.toFixed(1)} ft) will block winter sun`, owner: 'Designer', system: 'roof', fixId: 'reduce-south-overhang', fix: 'A deep south overhang casts winter shadow on your solar glass, starving the house of free heat. 2 to 3 ft is the usual sweet spot.' });
+  if (hasSouthGlass && derivedForChecks.winterShadeFrac > 0.33) {
+    issues.push({ severity: 'warning', title: `South overhang shades ${Math.round(derivedForChecks.winterShadeFrac * 100)}% of the winter sun`, owner: 'Designer', system: 'roof', fixId: 'reduce-south-overhang', fix: `At your latitude the winter noon sun sits at ${Math.round(derivedForChecks.sunWinterDeg)}° — the ${overhangCheck.south.toFixed(1)} ft south overhang casts that much shadow on your solar glass. Trim it, or raise the south wall.` });
   }
   if (issues.length === 0) {
     issues.push({ severity: 'pass', title: 'Schematic passes current council checks', owner: 'Project Manager', fix: 'Ready for PE/architect review, structural sizing, jurisdictional code check, and stamped drawing development.' });
@@ -2605,12 +2630,20 @@ function deriveDesign(spec, wallSections) {
   const northEaveFt = resolveWallSide(spec, 'north').heightFt;
   const southEaveFt = resolveWallSide(spec, 'south').heightFt;
   const gableRiseFt = roofTypeNow === 'gable' ? Math.max(0, d * pitch - 0.25) : 0;
+  // Sections come per storey now (each with its own height slice + assembly),
+  // so no storeyExtraFt here. The gable triangle rides the TOPMOST section;
+  // shed east/west walls are raked — ground slice uses the eave average, the
+  // upper slice is a parallelogram band of the storey lift.
+  const hasUpperSections = wallSections.some((wall) => wall.storey === 'upper');
   const wallFaceArea = (wall) => {
+    const topmost = wall.storey === 'upper' || !hasUpperSections;
     if (roofTypeNow === 'shed' && (wall.side === 'east' || wall.side === 'west')) {
-      return wall.lengthFt * ((northEaveFt + southEaveFt) / 2 + storeyExtraFt);
+      return wall.storey === 'upper'
+        ? wall.lengthFt * storeyExtraFt
+        : wall.lengthFt * ((northEaveFt + southEaveFt) / 2);
     }
-    let area = wall.lengthFt * (wall.heightFt + storeyExtraFt);
-    if (roofTypeNow === 'gable' && (wall.side === 'north' || wall.side === 'south')) {
+    let area = wall.lengthFt * wall.heightFt;
+    if (roofTypeNow === 'gable' && topmost && (wall.side === 'north' || wall.side === 'south')) {
       area += (wall.lengthFt * gableRiseFt) / 2;
     }
     return area;
@@ -2635,6 +2668,21 @@ function deriveDesign(spec, wallSections) {
   const azimuthDeg = Number(site.azimuthDeg) || 0;
   const solarFactor = Math.cos(azimuthDeg * Math.PI / 180);
   const glassPct = floor ? (southGlass * solarFactor / floor) * 100 : 0;
+  // Sun angles (solar-noon altitude at the solstices, from latitude) and what
+  // the south overhang does with them: the eave's shadow drops o·tan(altitude)
+  // down the wall — deep summer shade is free cooling, winter shade steals the
+  // heat the glass was placed to gather. Nominal south window: head 7', sill 3'.
+  const latDeg = Number(site.latitudeDeg) || 43;
+  const sunWinterDeg = clamp(90 - latDeg - 23.5, 2, 88);
+  const sunSummerDeg = clamp(90 - latDeg + 23.5, 2, 88);
+  const southEaveTopFt = resolveWallSide(spec, 'south').heightFt + storeyExtraFt;
+  const shadeFracAt = (altDeg) => {
+    const drop = (Number(resolveOverhangs(spec.shell).south) || 0) * Math.tan(altDeg * Math.PI / 180);
+    const shadowBottom = southEaveTopFt - drop;
+    return clamp((7 - shadowBottom) / (7 - 3), 0, 1);
+  };
+  const winterShadeFrac = shadeFracAt(sunWinterDeg);
+  const summerShadeFrac = shadeFracAt(sunSummerDeg);
   // All glazing (every wall + skylights) for cost and heat loss.
   const skylightArea = (spec.openings || []).filter((opening) => opening.wall === 'roof')
     .reduce((sum, opening) => sum + (Number(opening.widthFt) || 2.5) ** 2, 0);
@@ -2781,6 +2829,7 @@ function deriveDesign(spec, wallSections) {
   return {
     site, utilities, reclaimed, reclaimedSavings, floor, heatedFloor, storeys, roofArea, roofFootprint, overhangs, wallArea, wallR, southGlass, glassPct,
     skylightArea, totalGlass, glazingU, stemwallHeightFt, azimuthDeg, solarFactor,
+    sunWinterDeg, sunSummerDeg, winterShadeFrac, summerShadeFrac,
     frameGround: groundFrameKey, frameUpper: upperFrameKey, frameArea: groundFrameArea + upperFrameArea,
     flooring: flooringKey, subfloor: subfloorKey, subfloorCost,
     roofInsulation: roofInsulKey, floorInsulation: floorInsulKey, roofR, floorR,
@@ -2822,6 +2871,8 @@ const SYSTEM_META = {
     why: 'Where the house sits and how it faces the sun — every other system leans on this. Sun angles drive passive solar and panel output; rainfall decides whether a roof can supply your water.',
     feeds: ['Windows', 'Water', 'Power'],
     reads: (dd) => [
+      ['Winter noon sun', `${Math.round(dd.sunWinterDeg)}°`, '', 'low — you want it through the glass'],
+      ['Summer noon sun', `${Math.round(dd.sunSummerDeg)}°`, '', 'high — the overhang blocks it'],
       ['Peak sun', dd.peakSunHrs.toFixed(1), 'hrs/day', 'drives panel sizing'],
       ['Roof could catch', fmtNum(dd.catchmentGpd), 'gal/day', 'if you choose catchment']
     ]
@@ -2894,6 +2945,8 @@ const SYSTEM_META = {
     reads: (dd) => [
       ['Roof surface', fmtNum(dd.roofArea), 'sf', 'grows with pitch + overhang'],
       ['Smallest overhang', dd.overhangs.min.toFixed(1), 'ft', dd.overhangs.min >= 2 ? 'protects the walls' : 'too shallow for plastered walls'],
+      ['Summer shading', `${Math.round(dd.summerShadeFrac * 100)}%`, 'of south glass', `sun at ${Math.round(dd.sunSummerDeg)}° — more is cooler`],
+      ['Winter shading', `${Math.round(dd.winterShadeFrac * 100)}%`, 'of south glass', `sun at ${Math.round(dd.sunWinterDeg)}° — less is warmer`],
       ['Panel room', `~${dd.panelRoom}`, 'panels', ''],
       ['This system', fmtMoney(dd.cost.roof), '', '']
     ]
@@ -2905,6 +2958,7 @@ const SYSTEM_META = {
     reads: (dd) => [
       ['South glass', fmtNum(dd.southGlass), 'sf', ''],
       ['Of floor area', `${dd.glassPct.toFixed(1)}%`, '', dd.glassPct >= 7 && dd.glassPct <= 12 ? 'in the passive-solar range' : 'target 7–12%'],
+      ['Winter sun reaching it', `${Math.round((1 - dd.winterShadeFrac) * 100)}%`, '', `noon sun at ${Math.round(dd.sunWinterDeg)}° under the overhang`],
       ...(dd.skylightArea > 0 ? [['Skylights', fmtNum(dd.skylightArea), 'sf', 'roof glass leaks heat both ways']] : []),
       ['This system', fmtMoney(dd.cost.windows), '', dd.utilities.windowQuality === 'triple' ? 'triple pane' : 'double pane']
     ]
@@ -3387,7 +3441,7 @@ const PLAN_ELEMENT_HEX = {
   passive: '#b08b4f', thermal: '#9a5944', water: '#4c88a0', plant: '#6f9b61',
   homestead: '#8e7049', landscape: '#6d8c55', storage: '#8a7768', site: '#9a8f70',
   garden: '#5f8d49', animal: '#b0895b', floor: '#8d8473', loft: '#6f7f6a',
-  tower: '#7a5f49', custom: '#8b786d'
+  tower: '#7a5f49', outbuilding: '#a08a5f', custom: '#8b786d'
 };
 
 // Zone fill colors as hex strings for the 2D plan (mirrors the 3D zonePalette).
@@ -3401,6 +3455,115 @@ const PLAN_ZONE_HEX = {
 // Top-down 2D floor-plan editor: drag rooms to move, drag corners to resize,
 // snapped to 0.5 ft. Commits on drop via onMove / onResize. This is the
 // natural surface for laying out a first floor.
+// Parametric 2D connection details — real cross-sections drawn from the live
+// spec, so editing a thickness / stem height / overhang in the fields beside
+// the drawing redraws the joint. Feet are the SVG unit.
+const hexOf = (color) => `#${Number(color || 0x8a8a8a).toString(16).padStart(6, '0')}`;
+function JointDetail({ spec, derived, kind, side = 'south', opening = null }) {
+  const u = utilitiesOf(spec);
+  const label = (x, y, text, anchor = 'start') => (
+    <text x={x} y={y} fontSize={0.52} fill="var(--ink2)" textAnchor={anchor}>{text}</text>
+  );
+  const dim = (x1, y1, x2, y2, text) => (
+    <g stroke="var(--ink3)" strokeWidth={0.04}>
+      <line x1={x1} y1={y1} x2={x2} y2={y2} />
+      <line x1={x1} y1={y1 - 0.2} x2={x1} y2={y1 + 0.2} />
+      <line x1={x2} y1={y2 - 0.2} x2={x2} y2={y2 + 0.2} />
+      <text x={(x1 + x2) / 2} y={y1 - 0.25} fontSize={0.5} fill="var(--ink3)" textAnchor="middle" stroke="none">{text}</text>
+    </g>
+  );
+
+  if (kind === 'wall') {
+    const r = resolveWallSide(spec, side);
+    const t = r.thicknessFt;
+    const stemH = u.foundationType === 'stemwall' ? Math.min(6, Math.max(0.5, Number(u.stemwallHeightFt) || 1.5)) : u.foundationType === 'slab' ? 0.5 : 0.8;
+    const wallTop = 0, wallBot = 3.2, grade = wallBot + stemH;
+    const finish = FLOORING_TYPES[resolveFlooring(spec)]?.label || 'finish floor';
+    const insul = INSULATION_TYPES[resolveInsulation(u.floorInsulation, 'cellulose')]?.label || 'insulation';
+    const deck = SUBFLOOR_TYPES[resolveSubfloor(spec)]?.label.split(' —')[0] || 'deck';
+    return (
+      <svg viewBox="-3.4 -0.9 13.4 8.6" className="jointSvg">
+        {/* wall leaf + plasters */}
+        <rect x={0} y={wallTop} width={t} height={wallBot} fill={hexOf(r.assembly.color)} stroke="var(--ink3)" strokeWidth={0.05} />
+        <line x1={-0.12} y1={wallTop} x2={-0.12} y2={wallBot} stroke="var(--straw, #C9A24B)" strokeWidth={0.1} />
+        <line x1={t + 0.12} y1={wallTop} x2={t + 0.12} y2={wallBot} stroke="var(--ink2)" strokeWidth={0.08} />
+        {/* foundation / stem + footing */}
+        <rect x={-0.35} y={wallBot} width={t + 0.7} height={stemH} fill="#9a958b" stroke="var(--ink3)" strokeWidth={0.05} />
+        <rect x={-0.8} y={grade} width={t + 1.6} height={1.1} fill="none" stroke="var(--ink3)" strokeWidth={0.05} strokeDasharray="0.25 0.18" />
+        {/* grade line + hatch */}
+        <line x1={-3.2} y1={grade} x2={-0.35} y2={grade} stroke="var(--ink2)" strokeWidth={0.09} />
+        {[-2.9, -2.3, -1.7, -1.1].map((gx) => <line key={gx} x1={gx} y1={grade} x2={gx - 0.4} y2={grade + 0.4} stroke="var(--ink3)" strokeWidth={0.05} />)}
+        {/* interior floor assembly bands */}
+        <rect x={t + 0.35} y={wallBot - 0.16} width={4.6} height={0.16} fill="var(--straw, #C9A24B)" />
+        <rect x={t + 0.35} y={wallBot + 0.0} width={4.6} height={0.42} fill="var(--limesage, #7E8A6A)" opacity={0.8} />
+        <rect x={t + 0.35} y={wallBot + 0.42} width={4.6} height={0.24} fill="#8a7458" />
+        {label(t + 0.5, wallBot - 0.32, finish)}
+        {label(t + 0.5, wallBot + 0.3, insul)}
+        {label(t + 0.5, wallBot + 0.62, deck)}
+        {label(-3.2, wallTop + 0.5, 'exterior')}
+        {label(-0.4, wallBot - 0.4, `${r.assembly.label}`, 'end')}
+        {label(t + 1.1, grade + 0.8, `${u.foundationType} foundation`)}
+        {dim(0, -0.45, t, -0.45, `${t.toFixed(2)}′`)}
+        {u.foundationType === 'stemwall' && dim(-1.6, wallBot, -1.6, grade, '')}
+        {u.foundationType === 'stemwall' && label(-3.2, wallBot + stemH / 2 + 0.2, `${Math.round(stemH * 12)}″ stem`)}
+      </svg>
+    );
+  }
+
+  if (kind === 'roof') {
+    const o = resolveOverhangs(spec.shell).south;
+    const pitch = Number(spec.shell.roofPitch || 0.32);
+    const t = resolveWallSide(spec, 'south').thicknessFt;
+    const insul = INSULATION_TYPES[resolveInsulation(u.roofInsulation, 'cellulose')]?.label || 'insulation';
+    const eaveY = 2.4, run = 5;
+    const rise = run * pitch;
+    return (
+      <svg viewBox={`${-o - 1.6} -2.4 ${o + run + 3.4} 7.6`} className="jointSvg">
+        {/* wall top + plate */}
+        <rect x={0} y={eaveY} width={t} height={2.6} fill={hexOf(resolveWallSide(spec, 'south').assembly.color)} stroke="var(--ink3)" strokeWidth={0.05} />
+        <rect x={-0.05} y={eaveY - 0.22} width={t + 0.1} height={0.22} fill="#8a7458" />
+        {/* rafter from overhang tip up the slope */}
+        <line x1={-o} y1={eaveY} x2={run} y2={eaveY - rise} stroke="#8a7458" strokeWidth={0.28} />
+        <line x1={-o} y1={eaveY - 0.5} x2={run} y2={eaveY - rise - 0.5} stroke="var(--ink2)" strokeWidth={0.12} />
+        {/* insulation band between rafter and covering */}
+        <line x1={0.4} y1={eaveY - 0.38} x2={run} y2={eaveY - rise - 0.28} stroke="var(--limesage, #7E8A6A)" strokeWidth={0.3} opacity={0.85} />
+        {label(-o, eaveY + 0.6, `${o.toFixed(1)}′ overhang`)}
+        {label(run - 3.4, eaveY - rise - 0.85, 'roof covering')}
+        {label(1.2, eaveY - 0.85, insul)}
+        {label(0.1, eaveY + 1.6, resolveWallSide(spec, 'south').assembly.label)}
+        {label(-o - 1.4, eaveY - 0.3, 'eave')}
+        {dim(-o, eaveY + 1.1, 0, eaveY + 1.1, `${o.toFixed(1)}′`)}
+        {label(run - 3.4, eaveY - rise + 0.6, `pitch ≈ ${Math.round(pitch * 12)}:12 · sun ${Math.round(derived.sunWinterDeg)}°–${Math.round(derived.sunSummerDeg)}°`)}
+      </svg>
+    );
+  }
+
+  // opening: vertical section through a window/door in its wall
+  const profile = OPENING_TYPES[opening?.type] || OPENING_TYPES.window;
+  const r = resolveWallSide(spec, opening?.wall && opening.wall !== 'roof' ? opening.wall : 'south');
+  const t = r.thicknessFt;
+  const sill = profile.sill, head = profile.sill + profile.h;
+  const top = 0.4;
+  const scaleY = 5.6 / Math.max(head + 1.5, 8);
+  const y = (ft) => top + (Math.max(head + 1.5, 8) - ft) * scaleY;
+  return (
+    <svg viewBox={`-2.6 0 ${t + 8} 7.2`} className="jointSvg">
+      {/* wall above header and below sill */}
+      <rect x={0} y={y(head + 1.2)} width={t} height={y(head) - y(head + 1.2)} fill={hexOf(r.assembly.color)} stroke="var(--ink3)" strokeWidth={0.05} />
+      <rect x={0} y={y(sill)} width={t} height={y(0) - y(sill)} fill={hexOf(r.assembly.color)} stroke="var(--ink3)" strokeWidth={0.05} />
+      {/* header + buck + sill */}
+      <rect x={-0.1} y={y(head) - 0.3} width={t + 0.2} height={0.3} fill="#8a7458" />
+      <line x1={t * 0.35} y1={y(head)} x2={t * 0.35} y2={y(sill)} stroke="var(--ink2)" strokeWidth={0.1} />
+      <line x1={t * 0.45} y1={y(head)} x2={t * 0.45} y2={y(sill)} stroke="var(--ink2)" strokeWidth={0.1} />
+      <polygon points={`${-0.4},${y(sill) + 0.28} ${t * 0.6},${y(sill)} ${t * 0.6},${y(sill) + 0.22} ${-0.4},${y(sill) + 0.5}`} fill="#8a7458" />
+      {label(t + 0.5, y(head) - 0.4, `header over ${opening?.widthFt || profile.defaultW}′ ${profile.label.toLowerCase()}`)}
+      {label(t + 0.5, (y(head) + y(sill)) / 2, profile.glazed ? `glazing (${u.windowQuality} pane)` : 'leaf')}
+      {label(t + 0.5, y(sill) + 0.55, `sloped sill · ${Math.round(sill * 12)}″ above floor`)}
+      {label(t + 0.5, y(0) - 0.2, r.assembly.label)}
+    </svg>
+  );
+}
+
 const PLAN_CONTEXT_LABEL = {
   foundation: 'Foundation plan — drag the footprint corner to resize',
   shell: 'Footprint plan — drag the corner to resize',
@@ -3742,6 +3905,7 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
         floor: 0x8d8473,
         loft: 0x6f7f6a,
         tower: 0x7a5f49,
+        outbuilding: 0xa08a5f,
         custom: 0x8b786d
       };
 
@@ -3780,7 +3944,19 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
         east: resolveWallSide(spec, 'east'),
         west: resolveWallSide(spec, 'west')
       };
-      const wallMatFor = (side) => new THREE.MeshStandardMaterial({ color: wallResolved[side].assembly.color, roughness: 0.88, transparent: layers.xray, opacity: layers.xray ? 0.34 : 1 });
+      // Wall construction varies by storey: each side renders as a ground band
+      // plus (when storeys > 1) an upper band with the UPPER storey's assembly
+      // color/thickness and its own id (wall-side-u) so tapping it edits the
+      // upper wall. Shed east/west walls are raked — they stay one mesh in the
+      // ground assembly (their band split is geometric, noted honestly).
+      const wallUpper = {
+        north: resolveWallSide(spec, 'north', 2),
+        south: resolveWallSide(spec, 'south', 2),
+        east: resolveWallSide(spec, 'east', 2),
+        west: resolveWallSide(spec, 'west', 2)
+      };
+      const wallMatOf = (resolved) => new THREE.MeshStandardMaterial({ color: resolved.assembly.color, roughness: 0.88, transparent: layers.xray, opacity: layers.xray ? 0.34 : 1 });
+      const wallMatFor = (side) => wallMatOf(wallResolved[side]);
       const tN = wallResolved.north.thicknessFt;
       const tS = wallResolved.south.thicknessFt;
       const tE = wallResolved.east.thicknessFt;
@@ -3789,24 +3965,32 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       const hS = roofSpec.roofType === 'shed' ? southWallHeight : wallResolved.south.heightFt + storeyLift;
       const hE = wallResolved.east.heightFt + storeyLift;
       const hW = wallResolved.west.heightFt + storeyLift;
-      const wallMeshSpecs = roofSpec.roofType === 'shed'
-        ? [
-          { side: 'north', mesh: box(width, hN, tN, width / 2, hN / 2, tN / 2, wallMatFor('north')) },
-          { side: 'south', mesh: box(width, hS, tS, width / 2, hS / 2, depth - tS / 2, wallMatFor('south')) },
-          { side: 'west', mesh: makeShedSideWall(0, tW, depth, northWallHeight, southWallHeight, wallMatFor('west')) },
-          { side: 'east', mesh: makeShedSideWall(width - tE, tE, depth, northWallHeight, southWallHeight, wallMatFor('east')) }
-        ]
-        : [
-          { side: 'north', mesh: box(width, hN, tN, width / 2, hN / 2, tN / 2, wallMatFor('north')) },
-          { side: 'south', mesh: box(width, hS, tS, width / 2, hS / 2, depth - tS / 2, wallMatFor('south')) },
-          { side: 'west', mesh: box(tW, hW, depth, tW / 2, hW / 2, depth / 2, wallMatFor('west')) },
-          { side: 'east', mesh: box(tE, hE, depth, width - tE / 2, hE / 2, depth / 2, wallMatFor('east')) }
-        ];
-      wallMeshSpecs.forEach(({ side, mesh }) => {
+      const wallMeshSpecs = [];
+      const pushSideBoxes = (side, totalH, thickness, place) => {
+        const groundH = Math.max(1, totalH - storeyLift);
+        wallMeshSpecs.push({ side, storey: 'ground', mesh: place(thickness, groundH, 0) });
+        if (storeyLift > 0) {
+          const u = wallUpper[side];
+          wallMeshSpecs.push({ side, storey: 'upper', mesh: place(u.thicknessFt, storeyLift, groundH, wallMatOf(u)) });
+        }
+      };
+      if (roofSpec.roofType === 'shed') {
+        pushSideBoxes('north', hN, tN, (t, h, y0, mat) => box(width, h, t, width / 2, y0 + h / 2, t / 2, mat || wallMatFor('north')));
+        pushSideBoxes('south', hS, tS, (t, h, y0, mat) => box(width, h, t, width / 2, y0 + h / 2, depth - t / 2, mat || wallMatFor('south')));
+        wallMeshSpecs.push({ side: 'west', storey: 'ground', mesh: makeShedSideWall(0, tW, depth, northWallHeight, southWallHeight, wallMatFor('west')) });
+        wallMeshSpecs.push({ side: 'east', storey: 'ground', mesh: makeShedSideWall(width - tE, tE, depth, northWallHeight, southWallHeight, wallMatFor('east')) });
+      } else {
+        pushSideBoxes('north', hN, tN, (t, h, y0, mat) => box(width, h, t, width / 2, y0 + h / 2, t / 2, mat || wallMatFor('north')));
+        pushSideBoxes('south', hS, tS, (t, h, y0, mat) => box(width, h, t, width / 2, y0 + h / 2, depth - t / 2, mat || wallMatFor('south')));
+        pushSideBoxes('west', hW, tW, (t, h, y0, mat) => box(t, h, depth, t / 2, y0 + h / 2, depth / 2, mat || wallMatFor('west')));
+        pushSideBoxes('east', hE, tE, (t, h, y0, mat) => box(t, h, depth, width - t / 2, y0 + h / 2, depth / 2, mat || wallMatFor('east')));
+      }
+      wallMeshSpecs.forEach(({ side, storey, mesh }) => {
         if (omittedWalls.has(side) || wallResolved[side].omitted) return;
         if (!layers[`wall${titleCase(side)}`]) return;
-        mesh.name = `${titleCase(side)} Wall - ${wallResolved[side].assembly.label}`;
-        mesh.userData.roomId = `wall-${side}`;
+        const resolved = storey === 'upper' ? wallUpper[side] : wallResolved[side];
+        mesh.name = `${titleCase(side)} Wall${storey === 'upper' ? ' (upper)' : ''} - ${resolved.assembly.label}`;
+        mesh.userData.roomId = storey === 'upper' ? `wall-${side}-u` : `wall-${side}`;
         roomMeshes.push(mesh);
         group.add(mesh);
       });
@@ -4018,6 +4202,36 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       grid.name = `Fixed outdoor reference grid (${fixedGridSize}' x ${fixedGridSize}')`;
       grid.userData.generated = true;
       group.add(grid);
+      }
+
+      // Exploded view: pull the systems apart so their joints and layers read —
+      // roof lifts, walls slide outward by side, upper bands rise a little more,
+      // floor plates hover, the foundation drops. Everything stays clickable, so
+      // you can still select and edit any part while it's exploded.
+      if (layers.explode) {
+        const sideOut = { north: [0, 0, -6], south: [0, 0, 6], east: [6, 0, 0], west: [-6, 0, 0] };
+        group.traverse((node) => {
+          if (!node.isMesh) return;
+          const id = String(node.userData.roomId || '');
+          const name = String(node.name || '');
+          if (id === 'roof-main' || /roof/i.test(name)) { node.position.y += 9; return; }
+          if (id.startsWith('wall-')) {
+            const side = id.split('-')[1];
+            const off = sideOut[side];
+            if (off) { node.position.x += off[0]; node.position.z += off[2]; }
+            if (id.endsWith('-u')) node.position.y += 3;
+            return;
+          }
+          if (id.startsWith('opening-')) {
+            const opening = (spec.openings || [])[Number(id.replace('opening-', ''))];
+            if (opening?.wall === 'roof') { node.position.y += 9; return; }
+            const off = sideOut[opening?.wall];
+            if (off) { node.position.x += off[0]; node.position.z += off[2]; }
+            return;
+          }
+          if (/floor plate/i.test(name) || node.userData.category === 'floor') { node.position.y += 5; return; }
+          if (id === 'site-pad' || /stem wall/i.test(name)) { node.position.y -= 2.5; }
+        });
       }
 
       scene.add(group);
@@ -5203,16 +5417,16 @@ function App() {
   }
 
   // Per-wall edit: system / height / thickness / finish / omit, per N/S/E/W side.
-  function updateWallSide(side, field, rawValue) {
+  function updateWallSide(side, field, rawValue, level = 1) {
     let value = rawValue;
     if (field === 'heightFt') value = clamp(Number(rawValue), 7, 40);
     else if (field === 'thicknessFt') value = clamp(Number(rawValue), 0.2, 3.5);
     else if (field === 'omitted') value = Boolean(rawValue);
     void applyBackendOperations({
-      operations: [{ type: 'set_wall_side', wall: side, field, value }],
-      promptText: `Set ${side} wall ${field}`,
+      operations: [{ type: 'set_wall_side', wall: side, field, value, ...(level > 1 ? { level } : {}) }],
+      promptText: `Set ${level > 1 ? 'upper ' : ''}${side} wall ${field}`,
       logPrefix: 'Wall edit',
-      nextSelectedId: `wall-${side}`
+      nextSelectedId: level > 1 ? `wall-${side}-u` : `wall-${side}`
     });
   }
 
@@ -5220,10 +5434,10 @@ function App() {
   // four separate updateWallSide calls each apply to the same stale spec, so
   // only the last (west) would survive (the "goes to West no matter what" bug).
   // One plan with four ops applies them in sequence on the backend.
-  function setAllWallsAssembly(value) {
+  function setAllWallsAssembly(value, level = 1) {
     void applyBackendOperations({
-      operations: WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, field: 'assembly', value })),
-      promptText: `Set all walls to ${WALL_ASSEMBLIES[value]?.label || value}`,
+      operations: WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, field: 'assembly', value, ...(level > 1 ? { level } : {}) })),
+      promptText: `Set all ${level > 1 ? 'upper-storey ' : ''}walls to ${WALL_ASSEMBLIES[value]?.label || value}`,
       logPrefix: 'Wall edit'
     });
   }
@@ -5452,12 +5666,13 @@ function App() {
     }
     const wall = wallSections.find((item) => item.id === selectedRoom);
     if (wall) {
-      if (field === 'h') updateWallSide(wall.side, 'heightFt', value);
+      const lvl = wall.level || 1;
+      if (field === 'h' && lvl === 1) updateWallSide(wall.side, 'heightFt', value);
       else if (field === 'w') updateShell(wall.side === 'north' || wall.side === 'south' ? 'widthFt' : 'depthFt', value);
-      else if (field === 'thickness') updateWallSide(wall.side, 'thicknessFt', value);
-      else if (field === 'assembly') updateWallSide(wall.side, 'assembly', value);
-      else if (field === 'interiorFinish') updateWallSide(wall.side, 'interiorFinish', value);
-      else if (field === 'exteriorFinish') updateWallSide(wall.side, 'exteriorFinish', value);
+      else if (field === 'thickness') updateWallSide(wall.side, 'thicknessFt', value, lvl);
+      else if (field === 'assembly') updateWallSide(wall.side, 'assembly', value, lvl);
+      else if (field === 'interiorFinish') updateWallSide(wall.side, 'interiorFinish', value, lvl);
+      else if (field === 'exteriorFinish') updateWallSide(wall.side, 'exteriorFinish', value, lvl);
       return;
     }
     const object = spec.rooms.find((item) => item.id === selectedRoom) || (spec.elements || []).find((item) => item.id === selectedRoom);
@@ -5964,7 +6179,7 @@ function App() {
     return 'rooms';
   };
   const systemOfElementCategory = (cat) => {
-    const map = { water: 'water', thermal: 'heat', passive: 'heat', roof: 'roof', earthwork: 'foundation', floor: 'foundation', structure: 'walls', wall: 'walls', landscape: 'outdoors', garden: 'outdoors', animal: 'outdoors', loft: 'rooms', tower: 'rooms' };
+    const map = { water: 'water', thermal: 'heat', passive: 'heat', roof: 'roof', earthwork: 'foundation', floor: 'foundation', structure: 'walls', wall: 'walls', landscape: 'outdoors', garden: 'outdoors', animal: 'outdoors', outbuilding: 'site', loft: 'rooms', tower: 'rooms' };
     return map[String(cat || '').toLowerCase()] || 'outdoors';
   };
   const systemOfSpecialCategory = (cat) => {
@@ -6208,7 +6423,7 @@ function App() {
                 </label>
                 <p className="systemNote">While all sides share one height you can set it here; once a side differs, set its height by tapping that wall below. Width is the north/south wall length; Length is the east/west wall length.</p>
 
-                <div className="sectionHead">Each side</div>
+                <div className="sectionHead">{storeyInfo(spec.shell).storeys > 1 ? 'Ground storey — each side' : 'Each side'}</div>
                 <p className="systemNote">Tap a wall — here or in the model — to edit that side (system, height, thickness, finishes) in the Inspector below. Toggle a side open for no wall there.</p>
                 <div className="pickList">
                   {resolvedSides.map(({ side, r }) => (
@@ -6224,6 +6439,38 @@ function App() {
                     </div>
                   ))}
                 </div>
+
+                {storeyInfo(spec.shell).storeys > 1 && (() => {
+                  const upperSides = WALL_SIDES.map((side) => ({ side, r: resolveWallSide(spec, side, 2) })).filter(({ r }) => !r.omitted);
+                  const upperKeys = new Set(upperSides.map(({ r }) => r.assemblyKey));
+                  const upperGlobal = upperKeys.size === 1 ? upperSides[0]?.r.assemblyKey : '';
+                  return (
+                    <>
+                      <div className="sectionHead">Upper storey — each side</div>
+                      <div className="controlGrid">
+                        <label>Assembly (all upper sides)
+                          <select value={upperGlobal} onChange={(event) => setAllWallsAssembly(event.target.value, 2)}>
+                            {upperKeys.size > 1 && <option value="" disabled>Mixed — see per-side</option>}
+                            {Object.values(WALL_ASSEMBLIES).map((assembly) => (
+                              <option key={assembly.key} value={assembly.key}>{assembly.label} (R≈{assembly.rValue})</option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      <p className="systemNote">The upper storey can run a different construction — light straw-clay or framed infill over a cob or bale ground floor is a natural-building classic (lighter loads up high).</p>
+                      <div className="pickList">
+                        {upperSides.map(({ side, r }) => (
+                          <div key={`u-${side}`} className={`pickRow${selectedRoom === `wall-${side}-u` ? ' active' : ''}`}>
+                            <button type="button" className="pickRowMain" onClick={() => selectObject(`wall-${side}-u`)}>
+                              <strong>{WALL_SIDE_LABELS[side]} (upper)</strong>
+                              <small>{r.assembly.label} · {r.thicknessFt.toFixed(2)}′ thick</small>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             );
           })()}
@@ -6947,6 +7194,7 @@ function App() {
                 <div className="layersGroup"><span className="layersEyebrow">Display</span>
                   {check('labels', 'Labels')}
                   {check('xray', 'X-ray walls & roof')}
+                  {check('explode', 'Exploded view — pull the systems apart')}
                 </div>
               </div>
             );
@@ -7094,7 +7342,7 @@ function App() {
                   {!selectedIsWall && <label>{selectedIsOpening ? 'Along Wall' : 'X'}<input type="number" value={selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? selected.x : selected.y) || 0 : selected?.x || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom(selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? 'x' : 'y') : 'x', event.target.value)} /></label>}
                   {!selectedIsWall && !selectedIsOpening && <label>Y<input type="number" value={selected?.y || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom('y', event.target.value)} /></label>}
                   {!selectedIsWall && !selectedIsSpecial && !selectedIsElement && storeyInfo(spec.shell).storeys > 1 && <label>Level<input type="number" min="1" max={Math.ceil(storeyInfo(spec.shell).storeys)} value={Number(selected?.level || 1)} onChange={(event) => updateSelectedRoom('level', event.target.value)} /></label>}
-                  {(selectedIsElement || selectedIsWall || selectedIsRoof) && <label>Height<input type="number" value={selected?.h || 1.2} disabled={selectedIsOpening || selectedIsPad || selectedIsGrid || (selectedIsWall && spec.shell.roofType === 'shed' && (selected?.side === 'east' || selected?.side === 'west'))} title={selectedIsWall && spec.shell.roofType === 'shed' && (selected?.side === 'east' || selected?.side === 'west') ? 'Raked wall — its ends follow the north and south walls' : undefined} onChange={(event) => updateSelectedRoom('h', event.target.value)} /></label>}
+                  {(selectedIsElement || selectedIsWall || selectedIsRoof) && <label>Height<input type="number" value={selected?.h || 1.2} disabled={selectedIsOpening || selectedIsPad || selectedIsGrid || (selectedIsWall && selected?.storey === 'upper') || (selectedIsWall && spec.shell.roofType === 'shed' && (selected?.side === 'east' || selected?.side === 'west'))} title={selectedIsWall && selected?.storey === 'upper' ? 'Upper wall height comes from the Storeys setting on the Shell page' : selectedIsWall && spec.shell.roofType === 'shed' && (selected?.side === 'east' || selected?.side === 'west') ? 'Raked wall — its ends follow the north and south walls' : undefined} onChange={(event) => updateSelectedRoom('h', event.target.value)} /></label>}
                   {selectedIsOpening && <label>Wall
                     <select value={selected?.wall || 'south'} onChange={(event) => updateSelectedRoom('wall', event.target.value)}>
                       <option value="north">North</option>
@@ -7178,6 +7426,23 @@ function App() {
                     )}
                   </div>
                 </div>
+                {(selectedIsWall || selectedIsRoof || (selectedIsOpening && selected?.wall !== 'roof')) && (
+                  <details className="jointDetail" open>
+                    <summary>
+                      {selectedIsWall ? `Connection detail — ${selected?.name?.toLowerCase()} at the foundation (2D section)`
+                        : selectedIsRoof ? 'Connection detail — eave, where roof meets wall (2D section)'
+                        : 'Connection detail — this opening in its wall (2D section)'}
+                    </summary>
+                    <JointDetail
+                      spec={spec}
+                      derived={derived}
+                      kind={selectedIsWall ? 'wall' : selectedIsRoof ? 'roof' : 'opening'}
+                      side={selectedIsWall ? selected?.side : 'south'}
+                      opening={selectedIsOpening ? selected : null}
+                    />
+                    <p className="jointNote">Drawn from this design's real numbers — edit the fields above (or the pages on the left) and the joint redraws. For the whole-building version, flip on <b>Exploded view</b> in the model's Layers panel.</p>
+                  </details>
+                )}
               </div>
             )}
 

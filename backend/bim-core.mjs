@@ -96,7 +96,7 @@ export function wallAssemblyKeyFromText(text) {
 // Resolve the effective spec for one wall side, falling back from per-side
 // override -> global shell/envelope defaults. This is the single reader the
 // UI, the 3D build, the schedule, and the Blender bridge all go through.
-export function resolveWallSide(spec, side) {
+export function resolveWallSide(spec, side, level = 1) {
   const shell = spec.shell || {};
   const w = (spec.walls || {})[side] || {};
   const assemblyKey = w.assembly && WALL_ASSEMBLIES[w.assembly] ? w.assembly : wallAssemblyKeyFromText(shell && spec.systems ? spec.systems.envelope : '');
@@ -105,7 +105,7 @@ export function resolveWallSide(spec, side) {
     : side === 'north' ? Number(shell.northWallHeightFt || shell.wallHeightFt || 10)
       : Number(shell.wallHeightFt || 10);
   const omittedSet = new Set(shell.omittedWalls || []);
-  return {
+  const ground = {
     side,
     heightFt: Number(w.heightFt ?? defaultHeight),
     assemblyKey,
@@ -114,6 +114,22 @@ export function resolveWallSide(spec, side) {
     interiorFinish: w.interiorFinish || assembly.finish,
     exteriorFinish: w.exteriorFinish || 'rainscreen / lime render',
     omitted: Boolean(w.omitted) || omittedSet.has(side)
+  };
+  if (level <= 1) return ground;
+  // Upper storeys: per-side overrides in spec.wallsUpper fall back to the
+  // ground wall — so an upper storey can run a different construction
+  // (light straw-clay over cob, framed over bale) without re-stating everything.
+  const u = (spec.wallsUpper || {})[side] || {};
+  const upperKey = u.assembly && WALL_ASSEMBLIES[u.assembly] ? u.assembly : ground.assemblyKey;
+  const upperAssembly = WALL_ASSEMBLIES[upperKey] || ground.assembly;
+  return {
+    ...ground,
+    level,
+    assemblyKey: upperKey,
+    assembly: upperAssembly,
+    thicknessFt: Number(u.thicknessFt ?? (u.assembly ? upperAssembly.thicknessFt : ground.thicknessFt)),
+    interiorFinish: u.interiorFinish || ground.interiorFinish,
+    exteriorFinish: u.exteriorFinish || ground.exteriorFinish
   };
 }
 
@@ -486,6 +502,17 @@ export function applyBimOperations(currentSpec, plan) {
     if (operation.type === 'set_wall_side') {
       const side = WALL_SIDES.includes(operation.wall) ? operation.wall : 'south';
       const field = operation.field;
+      // Upper-storey walls keep their own overrides — construction can vary
+      // by storey. Height/omit stay ground-level concepts.
+      if (Number(operation.level) > 1) {
+        next.wallsUpper ||= {};
+        next.wallsUpper[side] ||= {};
+        if (field === 'assembly') next.wallsUpper[side].assembly = WALL_ASSEMBLIES[operation.value] ? operation.value : 'framed';
+        else if (field === 'thicknessFt') next.wallsUpper[side].thicknessFt = clamp(Number(operation.value), 0.2, 3.5);
+        else if (field === 'interiorFinish' || field === 'exteriorFinish') next.wallsUpper[side][field] = String(operation.value || '');
+        actions.push(`Set upper-storey ${side} wall ${field} to ${operation.value}.`);
+        continue;
+      }
       next.walls[side] ||= {};
       if (field === 'heightFt') {
         const h = clamp(Number(operation.value), 7, 40);
