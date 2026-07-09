@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { pushToBlender, exportIfcViaBlender } from './blenderBridge.js';
-import { OPENING_TYPES } from '../backend/bim-core.mjs';
+import { OPENING_TYPES, FRAME_TYPES, resolveFrameType } from '../backend/bim-core.mjs';
 import {
   AlertTriangle,
   Box,
@@ -698,7 +698,8 @@ const FIX_LABELS = {
   'well-septic': 'Set 100 ft separation',
   'deepen-overhang': 'Deepen overhangs to 2 ft',
   'reduce-south-overhang': 'Trim south overhang to 2.5 ft',
-  'thicken-bale-wall': 'Thicken the wall'
+  'thicken-bale-wall': 'Thicken the wall',
+  'set-stick-frame': 'Add a stick frame'
 };
 
 // Give a new room a non-colliding display name (Bedroom, Bedroom 2, ...).
@@ -1032,6 +1033,23 @@ function siteOf(spec) {
 function utilitiesOf(spec) {
   return { ...UTILITY_DEFAULTS, ...(spec.utilities || {}) };
 }
+
+function frameOf(spec) {
+  return { type: 'load-bearing', storeyTypes: {}, ...(spec.frame || {}) };
+}
+
+// Which material systems are marked reclaimed / salvaged. Reclaimed materials
+// cut cost and (especially) embodied carbon — reused stock carries no new
+// manufacturing burden.
+function reclaimedOf(spec) {
+  return { frame: false, walls: false, windows: false, roof: false, ...(spec.reclaimed || {}) };
+}
+const RECLAIMED_FACTORS = {
+  frame: { cost: 0.4, carbon: 0.15 },
+  walls: { cost: 0.65, carbon: 0.3 },
+  windows: { cost: 0.4, carbon: 0.35 },
+  roof: { cost: 0.6, carbon: 0.3 }
+};
 
 // Offline ZIP -> region estimate (the assistant/geocoder refines this later).
 function zipRegionInfo(zip) {
@@ -2444,6 +2462,16 @@ function detectIssues(spec) {
   if (spec.systems.envelope.toLowerCase().includes('natural') && !spec.systems.envelope.toLowerCase().includes('rainscreen')) {
     issues.push({ severity: 'warning', title: 'Natural wall lacks drying layer', owner: 'Natural Builder', system: 'walls', fix: 'Include rainscreen, generous roof overhangs, and capillary breaks.' });
   }
+  // Frame ↔ wall consistency: a framed (stud) wall assembly needs a structural
+  // frame; a load-bearing "frame" means the wall itself carries the load.
+  const frameKeyNow = resolveFrameType(spec, 1);
+  const hasFramedWall = WALL_SIDES.some((side) => {
+    const r = resolveWallSide(spec, side);
+    return !r.omitted && r.assemblyKey === 'framed';
+  });
+  if (frameKeyNow === 'load-bearing' && hasFramedWall) {
+    issues.push({ severity: 'warning', title: 'Framed wall has no frame to carry it', owner: 'Engineer', system: 'frame', fixId: 'set-stick-frame', fix: 'A framed (stud) wall is not load-bearing on its own — pick a frame on the Frame page (light stick frame matches), or switch that side to a load-bearing natural assembly.' });
+  }
   if (!spec.rooms.some((room) => /mud|laundry|service/i.test(room.name))) {
     issues.push({ severity: 'warning', title: 'Farm workflow has no dirty entry', owner: 'Homestead/Farm', system: 'rooms', fixId: 'add-mudroom', fix: 'Add a mud/laundry buffer between exterior work and clean living space.' });
   }
@@ -2535,7 +2563,7 @@ function deriveDesign(spec, wallSections) {
   const w = Number(spec.shell.widthFt) || 0;
   const d = Number(spec.shell.depthFt) || 0;
   const floor = w * d;
-  const { storeys, extraFt: storeyExtraFt } = storeyInfo(spec.shell);
+  const { storeys, extraFt: storeyExtraFt, baseWallFt } = storeyInfo(spec.shell);
   // Lofts, tower rooms, and planner floor plates are heated area too.
   const stackedArea = (spec.elements || [])
     .filter((element) => ['loft', 'tower', 'floor'].includes(element.category))
@@ -2630,13 +2658,30 @@ function deriveDesign(spec, wallSections) {
     ? floor * 8 + perimeterFt * stemwallHeightFt * 18
     : floor * (foundationCostPsf[utilities.foundationType] ?? 10);
   const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => sum + (outdoorItemPresent(spec, item) ? item.cost : 0), 0);
+
+  // Frame (structure): framing quantity ≈ perimeter × wall height, split ground
+  // vs. upper storeys so each can run a different frame. A load-bearing wall has
+  // no separate frame (cost 0). Reclaimed timber cuts cost + carbon sharply.
+  const reclaimed = reclaimedOf(spec);
+  const groundFrameKey = resolveFrameType(spec, 1);
+  const upperFrameKey = resolveFrameType(spec, 2);
+  const groundFrameArea = perimeterFt * baseWallFt;
+  const upperFrameArea = perimeterFt * storeyExtraFt;
+  const frameCostRaw = groundFrameArea * (FRAME_TYPES[groundFrameKey]?.costPsf ?? 0) + upperFrameArea * (FRAME_TYPES[upperFrameKey]?.costPsf ?? 0);
+  const frameCarbonRaw = groundFrameArea * (FRAME_TYPES[groundFrameKey]?.carbonPsf ?? 0) + upperFrameArea * (FRAME_TYPES[upperFrameKey]?.carbonPsf ?? 0);
+  const frameCost = frameCostRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.cost : 1);
+
+  const wallsCostRaw = wallsCost;
+  const windowsCostRaw = totalGlass * (utilities.windowQuality === 'triple' ? 70 : 45);
+  const roofCostRaw = roofArea * 10;
   const cost = {
     foundation: foundationCost,
+    frame: frameCost,
     upperFloors: (storeys - 1) * floor * 12 + stackedArea * 12,
     outdoors: outdoorCost,
-    walls: wallsCost,
-    windows: totalGlass * (utilities.windowQuality === 'triple' ? 70 : 45),
-    roof: roofArea * 10,
+    walls: wallsCostRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.cost : 1),
+    windows: windowsCostRaw * (reclaimed.windows ? RECLAIMED_FACTORS.windows.cost : 1),
+    roof: roofCostRaw * (reclaimed.roof ? RECLAIMED_FACTORS.roof.cost : 1),
     heat: heatCostBySource[utilities.heatSource] ?? 3000,
     water: (waterCostBySource[utilities.waterSource] ?? 5000) + (Number(utilities.tankGal) || 0) * 1.5,
     waste: wasteCostByMethod[utilities.wasteMethod] ?? 5000,
@@ -2649,19 +2694,37 @@ function deriveDesign(spec, wallSections) {
   const sweat = (utilities.diyWalls ? cost.walls * 0.8 : 0)
     + (utilities.diyRoof ? cost.roof * 0.55 : 0)
     + (utilities.diyHeat ? cost.heat * 0.45 : 0)
-    + (utilities.diyFoundation ? cost.foundation * 0.5 : 0);
+    + (utilities.diyFoundation ? cost.foundation * 0.5 : 0)
+    + (utilities.diyFrame ? cost.frame * 0.6 : 0);
   const total = totalBeforeSweat - sweat;
 
   // Embodied carbon (kg CO2e, directional/comparative — add-on coefficients).
   const foundationCarbonPsf = { rubble: 10, stemwall: 18, slab: 25 };
   const wallCarbonPsf = { 'straw-bale': 6, 'rammed-earth': 20, cob: 8, 'hemp-lime': 4, cordwood: 8, 'light-straw-clay': 7, framed: 8 };
-  const wallCarbon = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0);
+  const wallCarbonRaw = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0);
+  const wallCarbon = wallCarbonRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.carbon : 1);
+  const frameCarbon = frameCarbonRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.carbon : 1);
+  const roofCarbonRaw = roofArea * 12;
+  const roofCarbon = roofCarbonRaw * (reclaimed.roof ? RECLAIMED_FACTORS.roof.carbon : 1);
   const stemCarbonExtra = utilities.foundationType === 'stemwall' ? perimeterFt * Math.max(0, stemwallHeightFt - 1.5) * 40 : 0;
-  const carbonKg = floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra + wallCarbon + roofArea * 12 + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
+  const carbonKg = floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra + wallCarbon + frameCarbon + roofCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
+
+  // What the reclaimed choices saved vs. buying everything new.
+  const reclaimedSavings = {
+    cost: (reclaimed.frame ? frameCostRaw - frameCost : 0)
+      + (reclaimed.walls ? wallsCostRaw - cost.walls : 0)
+      + (reclaimed.windows ? windowsCostRaw - cost.windows : 0)
+      + (reclaimed.roof ? roofCostRaw - cost.roof : 0),
+    carbon: (reclaimed.frame ? frameCarbonRaw - frameCarbon : 0)
+      + (reclaimed.walls ? wallCarbonRaw - wallCarbon : 0)
+      + (reclaimed.roof ? roofCarbonRaw - roofCarbon : 0),
+    count: Object.values(reclaimed).filter(Boolean).length
+  };
 
   return {
-    site, utilities, floor, heatedFloor, storeys, roofArea, roofFootprint, overhangs, wallArea, wallR, southGlass, glassPct,
+    site, utilities, reclaimed, reclaimedSavings, floor, heatedFloor, storeys, roofArea, roofFootprint, overhangs, wallArea, wallR, southGlass, glassPct,
     skylightArea, totalGlass, glazingU, stemwallHeightFt,
+    frameGround: groundFrameKey, frameUpper: upperFrameKey, frameArea: groundFrameArea + upperFrameArea,
     heatLoadKbtu, bedrooms, people, waterGpd, catchmentGpd, supplyGpd, septicGpd,
     peakSunHrs, loadKwhDay, panels, panelRoom, batteryKwh,
     cost, totalBeforeSweat, sweat, total, carbonKg, pitch
@@ -2673,7 +2736,7 @@ const fmtNum = (value) => Math.round(value).toLocaleString();
 
 const SYSTEM_GROUPS = [
   { label: 'Land & program', keys: ['site', 'rooms'] },
-  { label: 'The building', keys: ['shell', 'foundation', 'walls', 'roof', 'windows'] },
+  { label: 'The building', keys: ['shell', 'foundation', 'frame', 'walls', 'roof', 'windows'] },
   { label: 'Systems', keys: ['heat', 'water', 'waste', 'power', 'outdoors'] }
 ];
 
@@ -2681,6 +2744,7 @@ const SYSTEM_GROUPS = [
 // to the page that drives it, so a big number is one tap from the controls.
 const COST_ROWS = [
   { key: 'foundation', label: 'Foundation', system: 'foundation' },
+  { key: 'frame', label: 'Frame', system: 'frame' },
   { key: 'walls', label: 'Walls', system: 'walls' },
   { key: 'roof', label: 'Roof', system: 'roof' },
   { key: 'windows', label: 'Windows & doors', system: 'windows' },
@@ -2729,6 +2793,17 @@ const SYSTEM_META = {
     reads: (dd) => [
       ['This system', fmtMoney(dd.cost.foundation), '', ''],
       ...(dd.utilities.diyFoundation ? [['You save', fmtMoney(dd.cost.foundation * 0.5), '', 'doing it yourself']] : [])
+    ]
+  },
+  frame: {
+    label: 'Frame',
+    why: 'The structural skeleton between the foundation and the walls. A timber or stick frame carries the roof so the walls can be insulation-only infill; load-bearing walls skip the frame and carry the load themselves.',
+    feeds: ['Walls', 'Cost'],
+    reads: (dd) => [
+      ['Ground frame', FRAME_TYPES[dd.frameGround]?.label.split(' (')[0] || dd.frameGround, '', ''],
+      ...(dd.storeys > 1 ? [['Upper frame', FRAME_TYPES[dd.frameUpper]?.label.split(' (')[0] || dd.frameUpper, '', `${dd.storeys} storeys`]] : []),
+      ['This system', fmtMoney(dd.cost.frame), '', dd.reclaimed.frame ? 'reclaimed timber' : ''],
+      ...(dd.utilities.diyFrame ? [['You save', fmtMoney(dd.cost.frame * 0.6), '', 'raising it yourself']] : [])
     ]
   },
   walls: {
@@ -5067,6 +5142,22 @@ function App() {
     });
   }
 
+  function updateFrame(value, level) {
+    void applyBackendOperations({
+      operations: [{ type: 'set_frame', value, ...(level ? { level } : {}) }],
+      promptText: `Set ${level > 1 ? `storey ${level} ` : ''}frame to ${FRAME_TYPES[value]?.label || value}`,
+      logPrefix: 'Frame'
+    });
+  }
+
+  function updateReclaimed(system, value) {
+    void applyBackendOperations({
+      operations: [{ type: 'set_reclaimed', system, value: Boolean(value) }],
+      promptText: `Mark ${system} as ${value ? 'reclaimed' : 'new'}`,
+      logPrefix: 'Reclaimed'
+    });
+  }
+
   async function runGeoSearch() {
     const query = geoQuery.trim();
     if (!query) return;
@@ -5506,6 +5597,8 @@ function App() {
         const target = issue.fixThicknessFt || 1.5;
         return void applyBackendOperations({ operations: [{ type: 'set_wall_side', wall: issue.side, field: 'thicknessFt', value: target }], promptText: `Thicken the ${issue.side} wall`, logPrefix: 'Fix', chatText: `Thickened the ${issue.side} bale wall to ${Math.round(target * 12)}″ to bring it within the 12:1 slenderness limit.` });
       }
+      case 'set-stick-frame':
+        return void applyBackendOperations({ operations: [{ type: 'set_frame', value: 'stick' }], promptText: 'Add a light stick frame', logPrefix: 'Fix', chatText: 'Added a light stick frame to carry the framed wall. Adjust it on the Frame page.' });
       default:
         return;
     }
@@ -6098,6 +6191,64 @@ function App() {
             </div>
           )}
 
+          {systemView === 'frame' && (() => {
+            const reclaimed = reclaimedOf(spec);
+            const storeyN = Math.ceil(storeyInfo(spec.shell).storeys);
+            const levels = Array.from({ length: storeyN }, (_, i) => i + 1);
+            const savings = derived.reclaimedSavings;
+            return (
+              <div className="systemPage">
+                <div className="sectionHead">Structural frame</div>
+                {storeyN <= 1 ? (
+                  <div className="controlGrid">
+                    <label>Frame type
+                      <select value={resolveFrameType(spec, 1)} onChange={(event) => updateFrame(event.target.value)}>
+                        {Object.entries(FRAME_TYPES).map(([key, f]) => <option key={key} value={key}>{f.label}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                ) : (
+                  <>
+                    <p className="systemNote">Each storey can frame differently — heavy timber below, light stick above, say.</p>
+                    <div className="controlGrid">
+                      {levels.map((lvl) => (
+                        <label key={lvl}>{lvl === 1 ? 'Ground' : floorLabel(spec, lvl)} frame
+                          <select value={resolveFrameType(spec, lvl)} onChange={(event) => updateFrame(event.target.value, lvl)}>
+                            {Object.entries(FRAME_TYPES).map(([key, f]) => <option key={key} value={key}>{f.label}</option>)}
+                          </select>
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+                <p className="systemNote">{FRAME_TYPES[resolveFrameType(spec, 1)]?.note} The frame carries the roof and floors; the <b>Walls</b> page sets what fills between it (straw bale, cob, framed insulation…).</p>
+
+                <label className="diyToggle">
+                  <input type="checkbox" checked={reclaimed.frame} onChange={(event) => updateReclaimed('frame', event.target.checked)} />
+                  <span>The frame timber is reclaimed / salvaged — cuts its cost and most of its embodied carbon</span>
+                </label>
+                <label className="diyToggle">
+                  <input type="checkbox" checked={utilitiesOf(spec).diyFrame} onChange={(event) => updateUtility('diyFrame', event.target.checked)} />
+                  <span>I'll raise the frame myself (sweat equity)</span>
+                </label>
+
+                <div className="sectionHead">Where materials are reclaimed</div>
+                <p className="systemNote">Mark each material system you're building from salvaged stock — it flows straight into cost and embodied carbon.</p>
+                <div className="reclaimedGrid">
+                  {[['frame', 'Frame timber'], ['walls', 'Wall materials'], ['windows', 'Windows & doors'], ['roof', 'Roofing']].map(([key, label]) => (
+                    <label key={key} className={reclaimed[key] ? 'reclaimedItem on' : 'reclaimedItem'}>
+                      <input type="checkbox" checked={reclaimed[key]} onChange={(event) => updateReclaimed(key, event.target.checked)} />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+                {savings.count > 0
+                  ? <p className="systemNote"><b>♺ Reclaimed materials are saving</b> about {fmtMoney(savings.cost)} and {(savings.carbon / 1000).toFixed(1)} t CO₂e versus buying everything new.</p>
+                  : <p className="systemNote">Nothing marked reclaimed yet. Salvaged windows, timber, and roofing are the biggest, cheapest carbon wins on a natural build.</p>}
+              </div>
+            );
+          })()}
+
           {systemView === 'windows' && (
             <div className="systemPage">
               <div className="sectionHead">All windows</div>
@@ -6436,6 +6587,9 @@ function App() {
                   );
                 })}
               </div>
+              {derived.reclaimedSavings.count > 0 && (
+                <p className="systemNote">♺ Reclaimed materials are already saving about {fmtMoney(derived.reclaimedSavings.cost)} and {(derived.reclaimedSavings.carbon / 1000).toFixed(1)} t CO₂e — mark more on the Frame page.</p>
+              )}
               <div className={overBy > 0 ? 'costCeiling over' : 'costCeiling under'}>
                 {overBy > 0
                   ? `${fmtMoney(overBy)} over the $324,700 owner-builder loan ceiling — trim the footprint, simplify systems, or take on more sweat equity.`

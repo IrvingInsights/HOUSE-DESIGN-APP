@@ -250,6 +250,8 @@ export function operationDescription(operation, spec) {
   if (op.type === 'set_assembly' || op.type === 'set_wall_assembly' || op.type === 'set_wall_segment_assembly') return `Updated ${op.field || op.wall || 'assembly'} to ${op.value}.`;
   if (op.type === 'set_wall_height') return `Set ${op.wall || 'wall'} height to ${op.h || op.value}'.`;
   if (op.type === 'set_wall_side') return `Set ${op.wall || 'wall'} wall ${op.field || 'property'} to ${op.value}.`;
+  if (op.type === 'set_frame') return `Set ${Number(op.level) > 1 ? `storey ${op.level} ` : ''}frame${op.value ? ` to ${op.value}` : ''}.`;
+  if (op.type === 'set_reclaimed') return `Marked ${op.system || 'materials'} as ${op.value ? 'reclaimed / salvaged' : 'new'}.`;
   if (op.type === 'set_shell' || op.type === 'add_pad_extension') return `Updated shell ${op.field || 'padExtensionFt'} to ${op.value || op.w}.`;
   if (op.type === 'add_opening') return `Added ${op.widthFt || 3}' ${op.openingType || 'opening'} on the ${op.wall} wall.`;
   if (op.type === 'add_opening_from_reference' || op.type === 'trace_image_request') return op.reason || 'Image tracing needs wall, type, width, and location before BIM openings can be placed.';
@@ -291,10 +293,37 @@ export const UTILITY_DEFAULTS = {
   diyWalls: false,
   diyRoof: false,
   diyHeat: false,
-  diyFoundation: false
+  diyFoundation: false,
+  diyFrame: false
 };
 
 export const SITE_DEFAULTS = { zip: '', placeName: '', latitudeDeg: 43, rainInYr: 38 };
+
+// Structural frame — the skeleton the roof and floors hang on. It sits BETWEEN
+// the foundation and the wall infill: a timber frame can carry straw-bale
+// infill, or a load-bearing wall can be its own structure (no separate frame).
+// costPsf / carbonPsf are per sf of framed wall area; reclaimed timber cuts both.
+export const FRAME_TYPES = {
+  'load-bearing': { label: 'Load-bearing walls (no separate frame)', costPsf: 0, carbonPsf: 0, structural: false, note: 'The wall itself carries the roof — classic for straw bale, cob, cordwood, and rammed earth.' },
+  timber: { label: 'Timber frame (heavy posts & beams)', costPsf: 15, carbonPsf: 6, structural: true, note: 'Mortise-and-tenon bents; the walls become infill. Beautiful and DIY-friendly with a jig.' },
+  'post-beam': { label: 'Post & beam', costPsf: 11, carbonPsf: 6, structural: true, note: 'Simpler bolted posts and beams with diagonal bracing.' },
+  stick: { label: 'Light stick frame (2× studs)', costPsf: 9, carbonPsf: 8, structural: true, note: 'Conventional dimensional-lumber framing — familiar and fast.' },
+  'double-stud': { label: 'Double-stud wall', costPsf: 13, carbonPsf: 10, structural: true, note: 'Two stud walls with a deep insulation cavity between them.' },
+  pole: { label: 'Round-wood / pole frame', costPsf: 7, carbonPsf: 3, structural: true, note: 'Debarked poles or small-diameter logs; very low embodied energy.' }
+};
+
+export const FRAME_DEFAULTS = { type: 'load-bearing', storeyTypes: {} };
+export const RECLAIMED_SYSTEMS = ['frame', 'walls', 'windows', 'roof'];
+export const RECLAIMED_DEFAULTS = { frame: false, walls: false, windows: false, roof: false };
+
+// The frame in effect on a given storey — a per-storey override falls back to
+// the base frame type. level 1 (or unset) is the ground/base.
+export function resolveFrameType(spec, level = 1) {
+  const frame = spec.frame || FRAME_DEFAULTS;
+  const perStorey = frame.storeyTypes || {};
+  const key = perStorey[String(level)];
+  return FRAME_TYPES[key] ? key : (FRAME_TYPES[frame.type] ? frame.type : 'load-bearing');
+}
 
 export function applyBimOperations(currentSpec, plan) {
   const next = structuredClone(currentSpec);
@@ -461,7 +490,7 @@ export function applyBimOperations(currentSpec, plan) {
       if (field === 'tankGal') next.utilities.tankGal = clamp(Number(operation.value) || 0, 0, 50000);
       else if (field === 'stemwallHeightFt') next.utilities.stemwallHeightFt = clamp(Number(operation.value) || 1.5, 0.5, 6);
       else if (field === 'wellSepticFt') next.utilities.wellSepticFt = clamp(Number(operation.value) || 0, 0, 2000);
-      else if (field === 'diyWalls' || field === 'diyRoof' || field === 'diyHeat' || field === 'diyFoundation') {
+      else if (field === 'diyWalls' || field === 'diyRoof' || field === 'diyHeat' || field === 'diyFoundation' || field === 'diyFrame') {
         next.utilities[field] = value === 'true' || operation.value === true || value === '1';
       } else if (allowed[field]) {
         next.utilities[field] = allowed[field].includes(value) ? value : next.utilities[field];
@@ -470,6 +499,27 @@ export function applyBimOperations(currentSpec, plan) {
         if (field === 'powerMode') next.systems.energy = { offgrid: 'off-grid solar + battery', hybrid: 'grid-tied solar with battery backup', gridtie: 'grid power' }[next.utilities.powerMode];
       }
       actions.push(`Set ${field} to ${operation.value}.`);
+      continue;
+    }
+
+    if (operation.type === 'set_frame') {
+      next.frame ||= { type: 'load-bearing', storeyTypes: {} };
+      next.frame.storeyTypes ||= {};
+      const value = FRAME_TYPES[operation.value] ? operation.value : 'load-bearing';
+      const level = Number(operation.level || 0);
+      if (level > 1) next.frame.storeyTypes[String(level)] = value;
+      else next.frame.type = value;
+      actions.push(`Set ${level > 1 ? `storey ${level} ` : ''}frame to ${FRAME_TYPES[value].label}.`);
+      continue;
+    }
+
+    if (operation.type === 'set_reclaimed') {
+      next.reclaimed ||= { ...RECLAIMED_DEFAULTS };
+      const system = RECLAIMED_SYSTEMS.includes(operation.system) ? operation.system : null;
+      if (system) {
+        next.reclaimed[system] = operation.value === true || operation.value === 'true' || operation.value === 1 || operation.value === '1';
+        actions.push(`Marked ${system} materials as ${next.reclaimed[system] ? 'reclaimed / salvaged' : 'new'}.`);
+      }
       continue;
     }
 

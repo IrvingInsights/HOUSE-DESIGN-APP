@@ -3692,6 +3692,16 @@ button.danger:hover,
 .statGrid div { border-radius: 10px; background: var(--ivory); border-color: var(--line); }
 .statGrid button:hover { border-color: var(--active-line); }
 
+/* ---- Reclaimed-materials toggles (Frame page) ---- */
+.reclaimedGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 6px 0 4px; }
+.reclaimedItem {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border: 1px solid var(--line2, #564A3F); border-radius: 8px;
+  background: var(--panel-2, #281F1A); font-size: 13px; font-weight: 600; cursor: pointer; color: var(--ink, #ECE4D6);
+}
+.reclaimedItem.on { border-color: var(--good, #93AE79); background: var(--good-bg, #2C3324); color: var(--good, #93AE79); }
+.reclaimedItem input { accent-color: var(--limesage, #7E8A6A); }
+
 /* ---- Warm accents on the new components ---- */
 .costBarFill { background: linear-gradient(90deg, var(--straw), var(--clay)); }
 .issueFix { background: var(--clay); border-color: var(--clay); color: #FBF3EA; }
