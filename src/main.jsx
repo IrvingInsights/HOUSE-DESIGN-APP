@@ -4793,6 +4793,16 @@ function App() {
   // stays the selector surface, the left bar the single control surface.
   const [inspectorDock, setInspectorDock] = useState(null);
   const [selMenuOpen, setSelMenuOpen] = useState(false);
+  // When the SELECTION changes (tap in the model, plan, chip, or a summary
+  // row), bring the docked editor into view — it sits below the system page in
+  // the left bar's general→specific sequence, so it may be off-screen.
+  const lastSelectedScrollRef = useRef(null);
+  useEffect(() => {
+    if (lastSelectedScrollRef.current === null) { lastSelectedScrollRef.current = selectedRoom; return; }
+    if (lastSelectedScrollRef.current === selectedRoom) return;
+    lastSelectedScrollRef.current = selectedRoom;
+    if (inspectorDock) inspectorDock.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [selectedRoom, inspectorDock]);
   const [dimensionPreview, setDimensionPreview] = useState(null);
   const [savedAt, setSavedAt] = useState(() => initialSaved?.savedAt || '');
   const [libraryActionMode, setLibraryActionMode] = useState(() => initialSaved?.libraryActionMode || 'apply');
@@ -6299,9 +6309,6 @@ function App() {
           );
         })()}
 
-        {/* The BIM inspector docks HERE (portal target) — selected-object controls
-            live in the same column as the system controls: one control surface. */}
-        {appMode === 'design' && consoleView === 'systems' && <div className="inspectorDock" ref={setInspectorDock} />}
 
         {appMode === 'design' && consoleView === 'systems' && <section className="panelBlock consolePanel systemsPanel">
           <nav className="systemNav" aria-label="Building systems">
@@ -6912,6 +6919,12 @@ function App() {
             );
           })()}
         </section>}
+
+        {/* The inspector docks BELOW the system page (portal target): the left
+            bar reads general → specific — verdict, mode, view, navigate, design
+            the system, then the selected object. Tapping anything in the model
+            scrolls this into view. */}
+        {appMode === 'design' && consoleView === 'systems' && <div className="inspectorDock" ref={setInspectorDock} />}
 
         {appMode === 'design' && consoleView === 'os' && <section className="panelBlock consolePanel projectOS">
             <div className="blockTitle"><ClipboardCheck size={16} /> Project Plan</div>
