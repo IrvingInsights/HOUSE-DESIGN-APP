@@ -32,6 +32,42 @@ moved his Stairwell (undone immediately; state verified back at rev 7). Orbit th
 camera only with real user input or by setting the camera in code, never synthetic
 canvas drags. Wheel-zoom via synthetic WheelEvent is safe.
 
+**Same day, second pass — the remaining gap list (basement, interior walls, stairs) all shipped:**
+1. **Basement as a real storey** (gap #3): `shell.basementHeightFt` (6–12′, 0 removes
+   and re-levels stranded rooms), basement rooms/elements at **level -1 — NEVER 0**
+   (zero-filled ops swallow 0; -1 passes every `level || 1` reader untouched).
+   Concrete perimeter walls w/ 0.55′ stem reveal + slab in 3D (terrain exposes the
+   downhill wall = walkout), Basement floor tab in Plan (quick-adds/fixtures land
+   there), engine: basement supersedes foundation cost/carbon, finished basement
+   rooms count toward heated sf; checks: basement-bedroom-egress (BOTH copies),
+   stair-required includes basement; Foundation-page Add/height/Remove UI; planner
+   vocab + the trace mandate now MODELS basements instead of warning them away.
+   GOTCHA fixed en route: `updateShell`'s generic clamp has an 18-ft MINIMUM (shell
+   dims) — it turned basement 8 into 18 and would have made remove (0) impossible;
+   basementHeightFt now has its own branch. Watch that clamp with any new shell field.
+2. **Interior partition walls** (gap #1): elements category `'partition'` —
+   PARTITION_TYPES (framed/cob/adobe) in bim-core; thin-axis auto-thickness;
+   full-height default; **door via the existing op fields** (widthFt=door width,
+   positionFt=along the run → element.doorWFt/doorAtFt) so the Gemini schema needed
+   NO new fields; min-dim clamps relaxed to 0.3′ for partitions (normalizeRooms +
+   resize_object would otherwise fatten them to 1′). 3D render = wall segments +
+   header over the doorway (invisible full-run drag handle); Plan renders partitions
+   SOLID (not dashed); Rooms page **“Draw walls between rooms”** = derivePartitionOps
+   (shared-edge detection per floor, 3′ doorway each, skips covered lines, ONE
+   batched dispatch); Inspector: construction + door width/position; cost/carbon ride
+   the walls line; planner vocab with a worked example.
+3. **Real stairs + stairwell void** (gap #6): any element named ~stair (not ladder)
+   renders treads+risers (7¾" risers from the real rise: basement height at level -1,
+   storey height above; invisible full-volume handle); the upper floor PLATE —
+   both the auto-plate and extent-plate elements — gets a real subtractRect VOID
+   where a level-below stair overlaps; council check: “stair too short for its climb”
+   (run vs 7¾"/10" needed run, only when it actually climbs somewhere); basement
+   stairs ghost on the Ground plan.
+Suites now 75 op + 41 geom + 12 trace, all green; everything verified LIVE in the
+browser on a throwaway mutation run, then **restored via POST /api/projects/current/restore
+{file} — the one-call alternative to N Undos; grab the snapshot filename from
+GET /designs BEFORE testing.** Daniel's design left at rev 7 exactly as found.
+
 ## Previous marathon session (2026-07-09/10)
 
 **The 2026-07-09/10 session shipped, in order (all committed, suites green):**
@@ -73,28 +109,21 @@ reference turns unless the prompt mentions the drawing.
 ## BUILDING-REALITY GAPS (Daniel's "what else am I missing" audit, 2026-07-10)
 Things a real build needs that the model can't yet say — the foundation-run
 class of gap, prioritized:
-1. **Interior partition walls as real objects** — rooms are floor zones; there
-   are no interior walls with thickness/structure, no doors BETWEEN rooms, no
-   per-wall interior assemblies. The greenhouse divider was pointed at this.
-   Biggest single modeling gap; medium-large build (wall elements exist as a
-   category — needs openings-in-partitions + room adjacency awareness).
+1. **Interior partition walls — DONE (second pick-ups pass).**
 2. **Glazed wall assembly — DONE (pick-ups session).**
-3. **Basement as a real storey** — trace sessions keep fighting this ("the
-   basement should be a storey"). With topography in, a walkout basement is
-   representable: shell.basement {heightFt, walkout} + rooms at level 0 +
-   terrain already cuts the downhill side. Medium.
+3. **Basement as a real storey — DONE (second pick-ups pass; level -1, not 0).**
 4. **Porch/covered-deck roofs — DONE (pick-ups session).**
 5. **Chimney through the roof — DONE (pick-ups session).**
-6. **Stairwell void + real stair runs** — stairs are boxes; no rise/run, no
-   hole in the upper plate. Medium-large (known since storeys shipped).
+6. **Stairwell void + real stair runs — DONE (second pick-ups pass).**
 7. **Dormers** — no roof dormers (post-MVP per geometry-pass scope).
 8. **Per-room ceiling heights / vaults** — one height per storey today.
 9. **Gutters → cistern link** — catchment math exists; no physical rainwater
    path (gutter/downspout/cistern placement). Cosmetic-ish.
 10. **Posts under deep overhangs / porch posts** — engine warns about nothing
     here; no posts render. Small visual + a check.
-Suggested order (2, 4, 5 done): 3 (basement) → 1 (interior walls) → 6 (stairs).
-Each is its own clean session-sized bite except 1 and 6.
+All of 1–6 are DONE. Remaining from this list: 7 (dormers, post-MVP), 8 (per-room
+ceiling heights), 9 (gutters→cistern), 10 (porch posts render under canopies now,
+but no deep-overhang post check yet).
 
 **State:** feature freeze mostly holds; it was bent once, on Daniel's order, for
 the **drawing→model fidelity pass** (commit `7e77b1d` + Team-consult upgrade):

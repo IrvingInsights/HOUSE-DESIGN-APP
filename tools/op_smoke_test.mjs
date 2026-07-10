@@ -8,7 +8,8 @@
 import {
   applyBimOperations, footprintPolygon, polygonArea, hasCustomFootprint,
   WALL_ASSEMBLIES, FRAME_TYPES, FLOORING_TYPES, SUBFLOOR_TYPES, OPENING_TYPES,
-  gradeElevationAt, maxFoundationExposureFt, resolveWallSide
+  gradeElevationAt, maxFoundationExposureFt, resolveWallSide,
+  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES
 } from '../backend/bim-core.mjs';
 
 function near(a, b, eps = 0.01) { return Math.abs(a - b) <= eps; }
@@ -187,6 +188,36 @@ ok(near(gradeElevationAt(r.spec, 0, 0), -1.5), 'grade at uphill edge = -gradeFt'
 ok(near(gradeElevationAt(r.spec, 0, 28), -10.5), 'grade at downhill edge = -(gradeFt+slope)', String(gradeElevationAt(r.spec, 0, 28)));
 ok(near(maxFoundationExposureFt(r.spec), 10.5), 'max exposure = grade + slope');
 ok(near(gradeElevationAt(freshSpec(), 5, 5), -1.5), 'flat site grade = -gradeFt everywhere');
+
+// --- basement (a real below-grade storey, level -1) ---------------------------
+r = apply(freshSpec(), [{ type: 'set_shell', field: 'basementHeightFt', value: '8' }]);
+ok(r.spec.shell.basementHeightFt === 8 && basementInfo(r.spec.shell).present, 'set_shell basementHeightFt');
+r = apply(freshSpec(), [{ type: 'set_shell', field: 'basementHeightFt', value: '20' }]);
+ok(r.spec.shell.basementHeightFt === 12, 'basement height clamps to 12');
+r = apply(freshSpec(), [
+  { type: 'set_shell', field: 'basementHeightFt', value: '8' },
+  { type: 'add_room', name: 'Root Cellar', category: 'storage', x: 2, y: 2, w: 10, d: 8, level: -1 }
+]);
+ok(r.spec.rooms.find((rm) => rm.name === 'Root Cellar')?.level === BASEMENT_LEVEL, 'add_room at basement level -1 (not swallowed by zero-fill)');
+r = apply(r.spec, [{ type: 'set_shell', field: 'basementHeightFt', value: '0' }]);
+ok(!r.spec.shell.basementHeightFt && r.spec.rooms.find((rm) => rm.name === 'Root Cellar')?.level === 1, 'removing basement re-levels stranded rooms to ground');
+r = apply(freshSpec(), [
+  { type: 'set_shell', field: 'basementHeightFt', value: '8' },
+  { type: 'add_room', name: 'Guest Bedroom', category: 'sleeping', x: 2, y: 2, w: 10, d: 10, level: -1 }
+]);
+ok(r.issues.some((issue) => /egress/i.test(issue.title)), 'basement bedroom flags egress');
+
+// --- interior partitions -------------------------------------------------------
+r = apply(freshSpec(), [{ type: 'add_element', name: 'Kitchen Wall', category: 'partition', x: 10, y: 14, w: 12, d: 0, widthFt: 3, positionFt: 4 }]);
+let part = r.spec.elements.find((el) => el.category === 'partition');
+ok(part && part.d === PARTITION_TYPES.framed.thicknessFt && part.construction === 'framed', 'partition defaults: framed thickness on the short axis', JSON.stringify(part));
+ok(part.doorWFt === 3 && part.doorAtFt === 4, 'partition door fields persist from widthFt/positionFt');
+ok(part.h >= 7, 'partition defaults to full height');
+r = apply(r.spec, [{ type: 'resize_object', targetId: part.id, w: 16, d: 0.45 }]);
+ok(r.spec.elements.find((el) => el.id === part.id)?.d === 0.45, 'partition stays thin through resize (no 1ft fattening)');
+r = apply(freshSpec(), [{ type: 'add_element', name: 'Cob Divider', category: 'partition', construction: 'cob', x: 4, y: 4, w: 0, d: 10 }]);
+part = r.spec.elements.find((el) => el.category === 'partition');
+ok(part && part.w === PARTITION_TYPES.cob.thicknessFt && part.doorWFt === 0, 'north-south cob partition: thickness on w, solid (no door)');
 
 // --- vocab sanity: shared tables exist for every consumer ---------------------
 ok(Object.keys(WALL_ASSEMBLIES).length === 8, 'WALL_ASSEMBLIES table');

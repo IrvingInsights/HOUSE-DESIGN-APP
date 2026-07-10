@@ -87,6 +87,25 @@ export const WALL_ASSEMBLIES = {
   'glazed':           { key: 'glazed',           label: 'Glazed (glass wall)', thicknessFt: 0.35, color: 0xaecfd8, rValue: 2,  finish: 'timber-framed glazing' }
 };
 
+// Interior partition walls — thin walls BETWEEN rooms, placed as elements
+// (category 'partition'). Distinct from the envelope: no weather duty, so
+// they price by face area of the chosen construction.
+export const PARTITION_TYPES = {
+  framed: { key: 'framed', label: 'Light framed (stud)', thicknessFt: 0.45, costPsf: 8,  carbonPsf: 3, color: 0xd9d5c8 },
+  cob:    { key: 'cob',    label: 'Cob (thermal mass)',  thicknessFt: 0.8,  costPsf: 14, carbonPsf: 6, color: 0xb9835e },
+  adobe:  { key: 'adobe',  label: 'Adobe brick',         thicknessFt: 0.7,  costPsf: 12, carbonPsf: 5, color: 0xa87f5e }
+};
+
+// Basement: a real below-grade storey. shell.basementHeightFt > 0 turns it on;
+// rooms live at level -1 (NOT 0 — ops and readers treat 0 as "unset", the same
+// zero-filled-op trap that bit storey plates and z-moves).
+export const BASEMENT_LEVEL = -1;
+export function basementInfo(shell = {}) {
+  const raw = Number(shell?.basementHeightFt || 0);
+  const heightFt = raw > 0 ? Math.min(12, Math.max(6, raw)) : 0;
+  return { heightFt, present: heightFt > 0 };
+}
+
 export function wallAssemblyKeyFromText(text) {
   const t = String(text || '').toLowerCase();
   if (/glazed|glass wall|curtain wall|glasshouse/.test(t)) return 'glazed';
@@ -589,10 +608,12 @@ function normalizeRooms(spec) {
   }));
   if (Array.isArray(spec.elements)) {
     spec.elements = spec.elements.map((element) => {
+      // Partitions are legitimately thin — don't fatten a 0.45' stud wall to 1'.
+      const minDim = element.category === 'partition' ? 0.3 : 1;
       const resized = {
         ...element,
-        w: clamp(Number(element.w) || 1, 1, spec.shell.widthFt + 48),
-        d: clamp(Number(element.d) || 1, 1, spec.shell.depthFt + 48)
+        w: clamp(Number(element.w) || 1, minDim, spec.shell.widthFt + 48),
+        d: clamp(Number(element.d) || 1, minDim, spec.shell.depthFt + 48)
       };
       return { ...resized, ...clampObjectPosition(spec, resized, resized.x || 0, resized.y || 0) };
     });
@@ -619,6 +640,8 @@ function detectIssues(spec) {
   if (spec.shell.wallHeightFt > 12) issues.push({ severity: 'warning', title: 'Tall walls need explicit lateral strategy', owner: 'Engineer', fix: 'Add shear wall schedule, hold-downs, and diaphragm notes.' });
   const glazedOffSouth = WALL_SIDES.filter((side) => { const r = resolveWallSide(spec, side); return !r.omitted && r.assemblyKey === 'glazed' && side !== 'south'; });
   if (naturalApproach && glazedOffSouth.length) issues.push({ severity: 'warning', title: `Glass wall faces ${glazedOffSouth.join(' + ')} — little solar gain, big heat leak`, owner: 'Natural Builder', fix: 'A glazed wall earns its keep facing south. Off-south glass loses heat all winter for little gain — face it south, or accept the heat cost knowingly.' });
+  const basementBedroom = basementInfo(spec.shell).present && spec.rooms.find((room) => Number(room.level || 1) === BASEMENT_LEVEL && room.type === 'sleeping');
+  if (basementBedroom) issues.push({ severity: 'critical', title: `${basementBedroom.name} is a basement bedroom — egress required`, owner: 'Engineer', fix: 'A below-grade sleeping room needs an egress window or a walkout door (min clear opening per code). Plan the well or walkout on the downhill side.' });
   if (String(spec.systems.envelope || '').toLowerCase().includes('natural') && !String(spec.systems.envelope || '').toLowerCase().includes('rainscreen')) issues.push({ severity: 'warning', title: 'Natural wall lacks drying layer', owner: 'Natural Builder', fix: 'Include rainscreen, generous roof overhangs, and capillary breaks.' });
   if (naturalApproach && !spec.rooms.some((room) => /mud|laundry|service/i.test(room.name))) issues.push({ severity: 'warning', title: 'Farm workflow has no dirty entry', owner: 'Homestead/Farm', fix: 'Add a mud/laundry buffer between exterior work and clean living space.' });
   if (issues.length === 0) issues.push({ severity: 'pass', title: 'Schematic passes current council checks', owner: 'Project Manager', fix: 'Ready for PE/architect review, structural sizing, jurisdictional code check, and stamped drawing development.' });
@@ -926,6 +949,16 @@ export function applyBimOperations(currentSpec, plan) {
       }
       else if (field === 'padExtensionFt') next.shell.padExtensionFt = clamp(numeric, 0, 240);
       else if (field === 'storeys') next.shell.storeys = clamp(numeric, 1, 3);
+      else if (field === 'basementHeightFt') {
+        // 0 removes the basement; rooms stranded at level -1 come back to ground.
+        const v = Math.max(0, numeric || 0);
+        if (v > 0) next.shell.basementHeightFt = clamp(v, 6, 12);
+        else {
+          delete next.shell.basementHeightFt;
+          next.rooms = next.rooms.map((room) => (Number(room.level || 1) === BASEMENT_LEVEL ? { ...room, level: 1 } : room));
+          next.elements = (next.elements || []).map((el) => (Number(el.level || 1) === BASEMENT_LEVEL ? { ...el, level: 1, z: 0 } : el));
+        }
+      }
       else if (field === 'overhangFt') {
         // Global overhang = one value all around: clear per-side overrides.
         next.shell.overhangFt = clamp(numeric, 0, 12);
@@ -1374,8 +1407,24 @@ export function applyBimOperations(currentSpec, plan) {
         level: Number(operation.level || 1),
         roofType: operation.roofType || '',
         construction: operation.construction || '',
+        // Partitions reuse the opening fields for their door: widthFt = door
+        // width (0 = solid wall), positionFt = distance along the wall run.
+        doorWFt: operation.category === 'partition' ? Number(operation.widthFt || 0) : 0,
+        doorAtFt: operation.category === 'partition' ? Number(operation.positionFt || 0) : 0,
         type: operation.category || 'custom'
       };
+      // A partition defaults to a full-height thin wall, not the 10x10x1.2
+      // generic element box: thickness from its construction, height from the
+      // storey it stands on.
+      if (element.category === 'partition') {
+        const pType = PARTITION_TYPES[element.construction] ? element.construction : 'framed';
+        element.construction = pType;
+        const thick = PARTITION_TYPES[pType].thicknessFt;
+        const longAxis = Number(operation.w || 0) >= Number(operation.d || 0) ? 'w' : 'd';
+        if (longAxis === 'w') { element.d = Number(operation.d) > 0 && Number(operation.d) <= 2 ? Number(operation.d) : thick; }
+        else { element.w = Number(operation.w) > 0 && Number(operation.w) <= 2 ? Number(operation.w) : thick; }
+        if (!Number(operation.h)) element.h = Math.max(7, Number(next.shell.wallHeightFt || 10) - 0.5);
+      }
       next.elements.push({ ...element, ...clampObjectPosition(next, element, element.x, element.y) });
       changedIds.push(id);
       actions.push(operationDescription(operation, next));
@@ -1405,8 +1454,9 @@ export function applyBimOperations(currentSpec, plan) {
       changedIds.push(target.id);
       actions.push(operationDescription({ ...operation, name: target.name }, next));
     } else if (operation.type === 'resize_object') {
-      target.w = Math.max(1, Number(operation.w || target.w));
-      target.d = Math.max(1, Number(operation.d || target.d));
+      const minDim = target.category === 'partition' ? 0.3 : 1;
+      target.w = Math.max(minDim, Number(operation.w || target.w));
+      target.d = Math.max(minDim, Number(operation.d || target.d));
       if (operation.h) target.h = Math.max(0.2, Number(operation.h));
       changedIds.push(target.id);
       actions.push(operationDescription({ ...operation, name: target.name }, next));

@@ -7,7 +7,7 @@ import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES, resolveInsulation,
   footprintPolygon, footprintEdges, hasCustomFootprint, polygonArea, polygonPerimeter, expandFootprint,
   decomposeFootprint, subtractRect, subtractRectFromFootprint, rectInFootprint, pointInFootprint, edgeForOpening,
-  gradeElevationAt, maxFoundationExposureFt
+  gradeElevationAt, maxFoundationExposureFt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES
 } from '../backend/bim-core.mjs';
 import {
   AlertTriangle,
@@ -623,6 +623,7 @@ function floorCount(spec) {
 }
 
 function floorLabel(spec, floor) {
+  if (floor === BASEMENT_LEVEL) return 'Basement';
   if (floor === 1) return 'Ground';
   if (floor === 2 && Number(spec.shell?.storeys) === 1.5) return 'Loft';
   const ord = { 2: '2nd', 3: '3rd', 4: '4th' };
@@ -925,6 +926,60 @@ function planNewRoomPlacements(spec, newRooms, level = 1) {
   if (shellW !== startW) growOps.push({ type: 'set_shell', field: 'widthFt', value: String(shellW) });
   if (shellD !== startD) growOps.push({ type: 'set_shell', field: 'depthFt', value: String(shellD) });
   return { ops: [...growOps, ...addOps], names, grew: growOps.length > 0, newW: shellW, newD: shellD };
+}
+
+// Interior partitions implied by the room layout: where two rooms on one floor
+// sit edge-to-edge, a thin wall belongs on the shared line — with a 3' doorway
+// so the plan stays walkable. Skips lines a partition already covers. Returns
+// add_element ops (ONE dispatch — never N calls on stale state).
+function derivePartitionOps(spec, level = 1) {
+  const rooms = (spec.rooms || []).filter((r) => Number(r.level || 1) === level);
+  const existing = (spec.elements || []).filter((e) => e.category === 'partition' && Number(e.level || 1) === level);
+  const bInfo = basementInfo(spec.shell);
+  const baseWallFt = Number(spec.shell.wallHeightFt || 10);
+  const wallH = level === BASEMENT_LEVEL ? Math.max(6, bInfo.heightFt - 0.3) : Math.max(7, baseWallFt - 0.5);
+  const z = level === BASEMENT_LEVEL ? -bInfo.heightFt + 0.1 : level > 1 ? (level - 1) * baseWallFt + 0.45 : 0;
+  const overlaps = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.d && a.y + a.d > b.y;
+  const ops = [];
+  const placedRects = [];
+  const shared = (a0, a1, b0, b1) => [Math.max(a0, b0), Math.min(a1, b1)];
+  for (let i = 0; i < rooms.length; i += 1) {
+    for (let j = i + 1; j < rooms.length; j += 1) {
+      const A = rooms[i];
+      const B = rooms[j];
+      let rect = null;
+      // Vertical shared line (east face of one meets west face of the other).
+      const vPairs = [[A.x + A.w, B.x], [B.x + B.w, A.x]];
+      for (const [edge, face] of vPairs) {
+        if (Math.abs(edge - face) <= 1.2) {
+          const [s0, s1] = shared(A.y, A.y + A.d, B.y, B.y + B.d);
+          if (s1 - s0 >= 4) rect = { x: (edge + face) / 2 - 0.225, y: s0 + 0.25, w: 0.45, d: (s1 - s0) - 0.5 };
+        }
+      }
+      // Horizontal shared line (south face meets north face).
+      const hPairs = [[A.y + A.d, B.y], [B.y + B.d, A.y]];
+      for (const [edge, face] of hPairs) {
+        if (!rect && Math.abs(edge - face) <= 1.2) {
+          const [s0, s1] = shared(A.x, A.x + A.w, B.x, B.x + B.w);
+          if (s1 - s0 >= 4) rect = { x: s0 + 0.25, y: (edge + face) / 2 - 0.225, w: (s1 - s0) - 0.5, d: 0.45 };
+        }
+      }
+      if (!rect) continue;
+      const probe = { x: rect.x - 0.5, y: rect.y - 0.5, w: rect.w + 1, d: rect.d + 1 };
+      if (existing.some((e) => overlaps(probe, e)) || placedRects.some((r) => overlaps(probe, r))) continue;
+      placedRects.push(rect);
+      const run = Math.max(rect.w, rect.d);
+      ops.push({
+        type: 'add_element', category: 'partition', name: `${A.name} / ${B.name} wall`,
+        x: Math.round(rect.x * 10) / 10, y: Math.round(rect.y * 10) / 10,
+        w: Math.round(rect.w * 10) / 10, d: Math.round(rect.d * 10) / 10,
+        h: wallH, z, level, construction: 'framed',
+        widthFt: 3, positionFt: Math.round(((run - 3) / 2) * 2) / 2,
+        reason: `Shared line between ${A.name} and ${B.name}.`
+      });
+    }
+  }
+  return ops;
 }
 
 // Build the operation list that tidies the current rooms into a plan and grows
@@ -2184,6 +2239,15 @@ function applyStructuredDesignPlan(currentSpec, plan) {
       else if (field === 'wallHeightFt') next.shell.wallHeightFt = clamp(numeric, 7, 32);
       else if (field === 'padExtensionFt') next.shell.padExtensionFt = clamp(numeric, 0, 240);
       else if (field === 'storeys') next.shell.storeys = clamp(numeric, 1, 3);
+      else if (field === 'basementHeightFt') {
+        const v = Math.max(0, numeric || 0);
+        if (v > 0) next.shell.basementHeightFt = clamp(v, 6, 12);
+        else {
+          delete next.shell.basementHeightFt;
+          next.rooms = next.rooms.map((room) => (Number(room.level || 1) === BASEMENT_LEVEL ? { ...room, level: 1 } : room));
+          next.elements = (next.elements || []).map((el) => (Number(el.level || 1) === BASEMENT_LEVEL ? { ...el, level: 1, z: 0 } : el));
+        }
+      }
       else if (field === 'overhangFt') {
         next.shell.overhangFt = clamp(numeric, 0, 12);
         delete next.shell.overhangs;
@@ -2362,8 +2426,20 @@ function applyStructuredDesignPlan(currentSpec, plan) {
         h: Math.max(0.2, Number(operation.h || 1.2)),
         level: Number(operation.level || 1),
         roofType: operation.roofType || '',
+        construction: operation.construction || '',
+        doorWFt: operation.category === 'partition' ? Number(operation.widthFt || 0) : 0,
+        doorAtFt: operation.category === 'partition' ? Number(operation.positionFt || 0) : 0,
         type: operation.category || 'custom'
       };
+      if (element.category === 'partition') {
+        const pType = PARTITION_TYPES[element.construction] ? element.construction : 'framed';
+        element.construction = pType;
+        const thick = PARTITION_TYPES[pType].thicknessFt;
+        const longAxis = Number(operation.w || 0) >= Number(operation.d || 0) ? 'w' : 'd';
+        if (longAxis === 'w') { element.d = Number(operation.d) > 0 && Number(operation.d) <= 2 ? Number(operation.d) : thick; }
+        else { element.w = Number(operation.w) > 0 && Number(operation.w) <= 2 ? Number(operation.w) : thick; }
+        if (!Number(operation.h)) element.h = Math.max(7, Number(next.shell.wallHeightFt || 10) - 0.5);
+      }
       next.elements.push({ ...element, ...clampObjectPosition(next, element, element.x, element.y) });
       changedIds.push(id);
       actions.push(operationDescription(operation, next));
@@ -2669,6 +2745,24 @@ function detectIssues(spec) {
   if (naturalApproach && glazedOffSouth.length) {
     issues.push({ severity: 'warning', title: `Glass wall faces ${glazedOffSouth.join(' + ')} — little solar gain, big heat leak`, owner: 'Natural Builder', system: 'walls', fix: 'A glazed wall earns its keep facing south. Off-south glass loses heat all winter for little gain — face it south, or accept the heat cost knowingly.' });
   }
+  const basementCheck = basementInfo(spec.shell);
+  const basementBedroom = basementCheck.present && spec.rooms.find((room) => Number(room.level || 1) === BASEMENT_LEVEL && room.type === 'sleeping');
+  if (basementBedroom) {
+    issues.push({ severity: 'critical', title: `${basementBedroom.name} is a basement bedroom — egress required`, owner: 'Engineer', system: 'rooms', fix: 'A below-grade sleeping room needs an egress window or a walkout door (minimum clear opening per code). Plan the well or walkout on the downhill side.' });
+  }
+  // A stair has real geometry now: enough run for its rise (7.75" risers,
+  // 10" treads). Only judged when it actually climbs somewhere.
+  for (const stairEl of (spec.elements || []).filter((el) => /stair/i.test(el.name || '') && !/ladder/i.test(el.name || ''))) {
+    const stairLevel = Number(stairEl.level || 1);
+    const climbs = stairLevel === BASEMENT_LEVEL ? basementCheck.present : Number(spec.shell.storeys || 1) > 1;
+    if (!climbs) continue;
+    const rise = stairLevel === BASEMENT_LEVEL ? basementCheck.heightFt : Number(spec.shell.wallHeightFt || 10);
+    const run = Math.max(Number(stairEl.w) || 0, Number(stairEl.d) || 0);
+    const neededRun = Math.round(rise / 0.646) * 0.833;
+    if (run < neededRun * 0.85) {
+      issues.push({ severity: 'warning', title: `${stairEl.name} is too short for its ${Math.round(rise)}′ climb`, owner: 'Architect', system: 'rooms', fix: `About ${Math.ceil(neededRun)}′ of run is needed at code-friendly 7¾" risers / 10" treads — stretch the stair in the Plan, or accept a steeper ship-ladder knowingly.` });
+    }
+  }
   if (spec.systems.envelope.toLowerCase().includes('natural') && !spec.systems.envelope.toLowerCase().includes('rainscreen')) {
     issues.push({ severity: 'warning', title: 'Natural wall lacks drying layer', owner: 'Natural Builder', system: 'walls', fix: 'Include rainscreen, generous roof overhangs, and capillary breaks.' });
   }
@@ -2686,7 +2780,8 @@ function detectIssues(spec) {
     issues.push({ severity: 'warning', title: 'Farm workflow has no dirty entry', owner: 'Homestead/Farm', system: 'rooms', fixId: 'add-mudroom', fix: 'Add a mud/laundry buffer between exterior work and clean living space.' });
   }
   const hasStackedSpace = Number(spec.shell.storeys || 1) > 1
-    || (spec.elements || []).some((element) => ['loft', 'tower'].includes(element.category));
+    || (spec.elements || []).some((element) => ['loft', 'tower'].includes(element.category))
+    || (basementCheck.present && spec.rooms.some((room) => Number(room.level || 1) === BASEMENT_LEVEL));
   if (hasStackedSpace
     && !spec.rooms.some((room) => /stair|ladder/i.test(room.name))
     && !(spec.elements || []).some((element) => /stair|ladder/i.test(element.name))) {
@@ -2838,7 +2933,13 @@ function deriveDesign(spec, wallSections) {
     upperFloorArea += (plate ? plate.w * plate.d : floor) * factorForLevel;
   }
   const stackedArea = loftTowerArea + upperFloorArea;
-  const heatedFloor = floor + upperFloorArea + loftTowerArea;
+  // Finished basement space counts what's actually built out (rooms at the
+  // basement level), not the whole slab.
+  const basement = basementInfo(spec.shell);
+  const basementRoomArea = basement.present
+    ? spec.rooms.filter((room) => Number(room.level || 1) === BASEMENT_LEVEL).reduce((sum, room) => sum + room.w * room.d, 0)
+    : 0;
+  const heatedFloor = floor + upperFloorArea + loftTowerArea + basementRoomArea;
   const pitch = Number(spec.shell.roofPitch || 0.32);
   const overhangs = resolveOverhangs(spec.shell);
   const roofFootprint = customFp
@@ -2884,7 +2985,18 @@ function deriveDesign(spec, wallSections) {
   const glazedSouthWallArea = wallSections.reduce((sum, wall) => sum + (wall.assemblyKey === 'glazed' && wall.side === 'south' ? wallFaceArea(wall) : 0), 0);
   const opaqueWallArea = Math.max(0, wallArea - glazedWallArea);
   const wallCostPsf = { 'straw-bale': 12, 'hemp-lime': 20, cob: 20, 'rammed-earth': 22, cordwood: 16, 'light-straw-clay': 15, framed: 18, glazed: utilities.windowQuality === 'triple' ? 70 : 45 };
-  const wallsCost = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCostPsf[wall.assemblyKey] ?? 16), 0);
+  // Interior partition walls price by face area of their construction and ride
+  // the walls cost line (they're walls, just without weather duty).
+  const partitionElements = (spec.elements || []).filter((element) => element.category === 'partition');
+  const partitionCost = partitionElements.reduce((sum, element) => {
+    const pType = PARTITION_TYPES[element.construction] || PARTITION_TYPES.framed;
+    return sum + Math.max(Number(element.w), Number(element.d)) * Math.max(2, Number(element.h) || 8) * pType.costPsf;
+  }, 0);
+  const partitionCarbon = partitionElements.reduce((sum, element) => {
+    const pType = PARTITION_TYPES[element.construction] || PARTITION_TYPES.framed;
+    return sum + Math.max(Number(element.w), Number(element.d)) * Math.max(2, Number(element.h) || 8) * pType.carbonPsf;
+  }, 0);
+  const wallsCost = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCostPsf[wall.assemblyKey] ?? 16), 0) + partitionCost;
   const wallR = opaqueWallArea
     ? wallSections.reduce((sum, wall) => sum + (wall.assemblyKey === 'glazed' ? 0 : wallFaceArea(wall) * (WALL_ASSEMBLIES[wall.assemblyKey]?.rValue ?? 20)), 0) / opaqueWallArea
     : 20;
@@ -2976,9 +3088,13 @@ function deriveDesign(spec, wallSections) {
   // 18" stem matches the old flat $12/sf).
   const foundationInsulation = utilities.foundationInsulation || 'perimeter';
   const foundationInsulationCost = foundationInsulation === 'full' ? floor * 3 : foundationInsulation === 'perimeter' ? perimeterFt * 6 : 0;
-  const foundationCostBase = (utilities.foundationType === 'stemwall'
-    ? floor * 8 + perimeterFt * stemwallHeightFt * 18
-    : floor * (foundationCostPsf[utilities.foundationType] ?? 10)) + foundationInsulationCost;
+  // A basement IS the foundation: concrete perimeter walls by face area plus
+  // a slab — it supersedes the rubble/stemwall/slab choice while present.
+  const foundationCostBase = (basement.present
+    ? perimeterFt * basement.heightFt * 24 + floor * 7 + basementRoomArea * 9
+    : (utilities.foundationType === 'stemwall'
+      ? floor * 8 + perimeterFt * stemwallHeightFt * 18
+      : floor * (foundationCostPsf[utilities.foundationType] ?? 10))) + foundationInsulationCost;
   const outbuildingCost = (spec.elements || []).filter((element) => element.category === 'outbuilding')
     .reduce((sum, element) => sum + (Number(element.w) * Number(element.d) || 0) * (OUTBUILDING_CONSTRUCTION[element.construction]?.costPsf ?? 60), 0);
   // Placed foundation RUNS (strips under specific interior walls) price by the
@@ -3056,14 +3172,19 @@ function deriveDesign(spec, wallSections) {
   // Embodied carbon (kg CO2e, directional/comparative — add-on coefficients).
   const foundationCarbonPsf = { rubble: 10, stemwall: 18, slab: 25 };
   const wallCarbonPsf = { 'straw-bale': 6, 'rammed-earth': 20, cob: 8, 'hemp-lime': 4, cordwood: 8, 'light-straw-clay': 7, framed: 8, glazed: 15 };
-  const wallCarbonRaw = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0);
+  const wallCarbonRaw = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0) + partitionCarbon;
   const wallCarbon = wallCarbonRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.carbon : 1);
   const frameCarbon = frameCarbonRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.carbon : 1);
   const roofCarbonRaw = roofArea * (12 + INSULATION_TYPES[roofInsulKey].carbonPsf);
   const roofCarbon = roofCarbonRaw * (reclaimed.roof ? RECLAIMED_FACTORS.roof.carbon : 1);
   const flooringCarbon = flooringCarbonRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.carbon : 1) + subfloorCarbon + floor * INSULATION_TYPES[floorInsulKey].carbonPsf;
   const stemCarbonExtra = utilities.foundationType === 'stemwall' ? perimeterFt * Math.max(0, stemwallHeightFt - 1.5) * 40 : 0;
-  const carbonKg = floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
+  // Basement concrete is carbon-heavy: wall face area + slab replace the
+  // regular foundation's coefficient while present.
+  const foundationCarbon = basement.present
+    ? perimeterFt * basement.heightFt * 16 + floor * 12
+    : floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra;
+  const carbonKg = foundationCarbon + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
   // What the reclaimed choices saved vs. buying everything new.
   const reclaimedSavings = {
@@ -3080,7 +3201,7 @@ function deriveDesign(spec, wallSections) {
   };
 
   return {
-    site, utilities, reclaimed, reclaimedSavings, floor, heatedFloor, storeys, roofArea, roofFootprint, overhangs, wallArea, glazedWallArea, wallR, southGlass, glassPct,
+    site, utilities, reclaimed, reclaimedSavings, floor, heatedFloor, storeys, basement, basementRoomArea, roofArea, roofFootprint, overhangs, wallArea, glazedWallArea, wallR, southGlass, glassPct,
     skylightArea, totalGlass, glazingU, stemwallHeightFt, azimuthDeg, solarFactor,
     sunWinterDeg, sunSummerDeg, winterShadeFrac, summerShadeFrac,
     frameGround: groundFrameKey, frameUpper: upperFrameKey, frameArea: groundFrameArea + upperFrameArea,
@@ -3694,7 +3815,8 @@ const PLAN_ELEMENT_HEX = {
   passive: '#b08b4f', thermal: '#9a5944', water: '#4c88a0', plant: '#6f9b61',
   homestead: '#8e7049', landscape: '#6d8c55', storage: '#8a7768', site: '#9a8f70',
   garden: '#5f8d49', animal: '#b0895b', floor: '#8d8473', loft: '#6f7f6a',
-  tower: '#7a5f49', outbuilding: '#a08a5f', foundation: '#8f8b80', custom: '#8b786d'
+  tower: '#7a5f49', outbuilding: '#a08a5f', foundation: '#8f8b80', partition: '#6b6257',
+  chimney: '#9a5944', deck: '#8e7049', custom: '#8b786d'
 };
 
 // Zone fill colors as hex strings for the 2D plan (mirrors the 3D zonePalette).
@@ -4098,7 +4220,8 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShel
             read as objects/fixtures rather than rooms; drag + resize like rooms */}
         {(spec.elements || []).filter((el) => (el.category === 'floor'
           ? (activeFloor > 1 && Number(el.level || 1) === activeFloor)
-          : (Number(el.level || 1) === activeFloor || (/stair|ladder/i.test(el.name || '') && Number(el.level || 1) === activeFloor - 1)))).map((raw) => {
+          : (Number(el.level || 1) === activeFloor || (/stair|ladder/i.test(el.name || '')
+            && Number(el.level || 1) === (activeFloor === 1 && basementInfo(spec.shell).present ? BASEMENT_LEVEL : activeFloor - 1))))).map((raw) => {
           const el = roomAt(raw);
           const isSel = raw.id === selectedRoom;
           const w = Number(el.w) || 4;
@@ -4108,10 +4231,10 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShel
               <rect
                 x={el.x} y={el.y} width={w} height={d}
                 fill={PLAN_ELEMENT_HEX[raw.category] || '#8a7768'}
-                fillOpacity={(isSel ? 0.92 : 0.7) * (buildingContext ? 0.25 : 1)}
+                fillOpacity={raw.category === 'partition' ? (isSel ? 1 : 0.95) : (isSel ? 0.92 : 0.7) * (buildingContext ? 0.25 : 1)}
                 stroke={isSel ? 'var(--active-line)' : '#5a5348'}
                 strokeWidth={isSel ? 0.4 : 0.22}
-                strokeDasharray="0.8 0.5"
+                strokeDasharray={raw.category === 'partition' ? undefined : '0.8 0.5'}
                 pointerEvents={buildingContext ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
               />
@@ -4328,6 +4451,7 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       const padRect = sitePadRect(spec);
       const roofSpec = roofProfile(spec.shell);
       const { extraFt: storeyLift, baseWallFt: baseStoreyFt, storeys } = storeyInfo(spec.shell);
+      const basementH = basementInfo(spec.shell).heightFt;
       const wallHeight = roofSpec.highWallHeightFt + storeyLift;
       const southWallHeight = (roofSpec.roofType === 'shed' ? roofSpec.southWallHeightFt : roofSpec.highWallHeightFt) + storeyLift;
       const northWallHeight = (roofSpec.roofType === 'shed' ? roofSpec.northWallHeightFt : roofSpec.highWallHeightFt) + storeyLift;
@@ -4377,6 +4501,9 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
         tower: 0x7a5f49,
         outbuilding: 0xa08a5f,
         foundation: 0x8f8b80,
+        partition: 0x6b6257,
+        chimney: 0x9a5944,
+        deck: 0x8e7049,
         custom: 0x8b786d
       };
 
@@ -4608,20 +4735,56 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
         });
       }
 
+      // Basement: a real below-grade storey. Concrete perimeter walls with a
+      // small stem reveal above grade, and a slab at the bottom. On a sloped
+      // site the terrain falls below 0 downhill, exposing the wall — that IS
+      // the walkout. Bounding-rect walls (same honest simplification as the
+      // Blender/permit exports on custom footprints).
+      if (basementH > 0) {
+        const bMat = new THREE.MeshStandardMaterial({ color: 0xa8a49a, roughness: 0.95, map: grainTexture('concrete') });
+        const bT = 0.8;
+        const reveal = 0.55;
+        const bWallH = basementH + reveal;
+        [
+          [width + bT * 2, bT, width / 2, -bT / 2],
+          [width + bT * 2, bT, width / 2, depth + bT / 2],
+          [bT, depth, -bT / 2, depth / 2],
+          [bT, depth, width + bT / 2, depth / 2]
+        ].forEach(([w, d, cx, cz], i) => {
+          const wallB = box(w, bWallH, d, cx, -basementH + bWallH / 2, cz, bMat);
+          wallB.name = `Basement wall ${['north', 'south', 'west', 'east'][i]}`;
+          wallB.userData.generated = true;
+          group.add(wallB);
+        });
+        const slabB = box(width, 0.4, depth, width / 2, -basementH - 0.2 + 0.2, depth / 2, bMat);
+        slabB.name = 'Basement slab';
+        slabB.userData.generated = true;
+        group.add(slabB);
+      }
+
       // Upper floor plate: only auto-drawn when the storey has no extent-plate
       // element (which renders — and drags — through the elements pass).
       if (storeys > 1 && layers.upperFloors && !upperPlateRect(spec, 2)) {
         const plateMat = new THREE.MeshStandardMaterial({ color: 0xb3a284, roughness: 0.85, transparent: true, opacity: 0.92 });
-        const plate = box(
-          Math.max(1, width - tE - tW), 0.4, Math.max(1, depth - tN - tS),
-          width / 2, baseStoreyFt + 0.2, depth / 2, plateMat
-        );
-        plate.name = `Upper floor plate (level 2, ${storeys === 1.5 ? 'loft' : 'full storey'})`;
-        group.add(plate);
+        // A stair below the plate punches a real stairwell void through it.
+        const stairCuts = (spec.elements || []).filter((el) => /stair/i.test(el.name || '') && !/ladder/i.test(el.name || '') && Number(el.level || 1) === 1);
+        let plateRects = [{ x: tW, y: tN, w: Math.max(1, width - tE - tW), d: Math.max(1, depth - tN - tS) }];
+        stairCuts.forEach((cut) => {
+          const cutRect = { x: cut.x - 0.2, y: cut.y - 0.2, w: cut.w + 0.4, d: cut.d + 0.4 };
+          plateRects = plateRects.flatMap((r) => subtractRect(r, cutRect));
+        });
+        plateRects.forEach((r) => {
+          const plate = box(r.w, 0.4, r.d, r.x + r.w / 2, baseStoreyFt + 0.2, r.y + r.d / 2, plateMat);
+          plate.name = `Upper floor plate (level 2, ${storeys === 1.5 ? 'loft' : 'full storey'})`;
+          group.add(plate);
+        });
       }
 
       if (layers.rooms) spec.rooms.forEach((room) => {
-        const roomLift = (Math.max(1, Number(room.level || 1)) - 1) * baseStoreyFt + (Number(room.level || 1) > 1 ? 0.42 : 0);
+        const roomLevel = Number(room.level || 1);
+        const roomLift = roomLevel === BASEMENT_LEVEL
+          ? -basementH + 0.12
+          : (Math.max(1, roomLevel) - 1) * baseStoreyFt + (roomLevel > 1 ? 0.42 : 0);
         const material = new THREE.MeshStandardMaterial({
           color: zonePalette[room.type] || 0x86a0a8,
           transparent: true,
@@ -4687,6 +4850,108 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
             elementHeight = 0.22;
           }
           elevation = 0;
+        } else if (element.category === 'partition') {
+          // An interior partition wall: a real thin wall between rooms, with an
+          // optional doorway (doorWFt/doorAtFt along the run). Segments and the
+          // header all carry the element's roomId so selection and explode move
+          // the wall as one; the raycast/drag handle is the full-run box.
+          const pType = PARTITION_TYPES[element.construction] ? element.construction : 'framed';
+          const pMat = new THREE.MeshStandardMaterial({ color: PARTITION_TYPES[pType].color, roughness: 0.9, map: grainTexture('plaster') });
+          const alongX = element.w >= element.d;
+          const runLen = alongX ? element.w : element.d;
+          const thick = alongX ? element.d : element.w;
+          const hWall = Math.max(2, Number(element.h) || 8);
+          elementHeight = hWall;
+          const segBox = (s0, s1, y0, y1) => {
+            const len = s1 - s0;
+            const m = alongX
+              ? box(len, y1 - y0, thick, element.x + s0 + len / 2, elevation + (y0 + y1) / 2, element.y + thick / 2, pMat)
+              : box(thick, y1 - y0, len, element.x + thick / 2, elevation + (y0 + y1) / 2, element.y + s0 + len / 2, pMat);
+            m.userData.roomId = element.id;
+            m.userData.generated = true;
+            group.add(m);
+            return m;
+          };
+          const doorW = Math.min(Number(element.doorWFt) || 0, Math.max(0, runLen - 1));
+          if (doorW > 0.5) {
+            const doorH = Math.min(6.8, hWall - 0.3);
+            const at = Math.min(Math.max(Number(element.doorAtFt) || (runLen - doorW) / 2, 0.2), runLen - doorW - 0.2);
+            if (at > 0.15) segBox(0, at, 0, hWall);
+            if (runLen - (at + doorW) > 0.15) segBox(at + doorW, runLen, 0, hWall);
+            segBox(at, at + doorW, doorH, hWall);
+            const handleMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.05, depthWrite: false });
+            mesh = alongX
+              ? box(element.w, hWall, thick, element.x + element.w / 2, elevation + hWall / 2, element.y + thick / 2, handleMat)
+              : box(thick, hWall, element.d, element.x + thick / 2, elevation + hWall / 2, element.y + element.d / 2, handleMat);
+          } else {
+            mesh = segBox(0, runLen, 0, hWall);
+          }
+        } else if (element.category === 'floor') {
+          // Storey extent plate — with a real stairwell VOID where a stair on
+          // the floor below comes up through it (subtractRect remainders).
+          // The full-extent invisible handle keeps drag/resize working.
+          const plateLevel = Number(element.level || 1);
+          const cuts = (spec.elements || []).filter((el) => el.id !== element.id
+            && /stair/i.test(el.name || '') && !/ladder/i.test(el.name || '')
+            && Number(el.level || 1) === plateLevel - 1
+            && el.x < element.x + element.w && el.x + el.w > element.x
+            && el.y < element.y + element.d && el.y + el.d > element.y);
+          const plateMat2 = new THREE.MeshStandardMaterial({
+            color: elementPalette.floor,
+            transparent: true,
+            opacity: element.id === selectedRoom ? 0.9 : 0.72,
+            roughness: 0.85
+          });
+          if (!cuts.length) {
+            mesh = box(element.w, elementHeight, element.d, element.x + element.w / 2, elevation + elementHeight / 2, element.y + element.d / 2, plateMat2);
+          } else {
+            let rects = [{ x: element.x, y: element.y, w: element.w, d: element.d }];
+            cuts.forEach((cut) => {
+              const cutRect = { x: cut.x - 0.2, y: cut.y - 0.2, w: cut.w + 0.4, d: cut.d + 0.4 };
+              rects = rects.flatMap((r) => subtractRect(r, cutRect));
+            });
+            rects.forEach((r) => {
+              const m = box(r.w, elementHeight, r.d, r.x + r.w / 2, elevation + elementHeight / 2, r.y + r.d / 2, plateMat2);
+              m.userData.roomId = element.id;
+              m.userData.generated = true;
+              group.add(m);
+            });
+            const plateHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
+            mesh = box(element.w, elementHeight, element.d, element.x + element.w / 2, elevation + elementHeight / 2, element.y + element.d / 2, plateHandle);
+          }
+        } else if (/stair/i.test(element.name || '') && !/ladder/i.test(element.name || '')) {
+          // A real stair run: treads and risers climbing the storey (or out of
+          // the basement), not a floating box. The invisible full-volume box
+          // stays as the drag/select handle.
+          const alongX = element.w >= element.d;
+          const runLen = Math.max(3, alongX ? element.w : element.d);
+          const stairWide = Math.max(2, alongX ? element.d : element.w);
+          const lvlS = Number(element.level || 1);
+          const rise = lvlS === BASEMENT_LEVEL
+            ? Math.max(4, basementH)
+            : (storeys > 1 ? baseStoreyFt + 0.45 : Math.max(4, Number(element.h) || 8));
+          elementHeight = rise;
+          const treadMat = new THREE.MeshStandardMaterial({ color: 0x8a6f4e, roughness: 0.8, map: grainTexture('wood') });
+          const steps = Math.max(3, Math.round(rise / 0.646));
+          const treadD = runLen / steps;
+          const stepH = rise / steps;
+          for (let s = 0; s < steps; s += 1) {
+            const topY = elevation + (s + 1) * stepH;
+            const tread = alongX
+              ? box(treadD, 0.22, stairWide, element.x + s * treadD + treadD / 2, topY - 0.11, element.y + stairWide / 2, treadMat)
+              : box(stairWide, 0.22, treadD, element.x + stairWide / 2, topY - 0.11, element.y + s * treadD + treadD / 2, treadMat);
+            tread.userData.roomId = element.id;
+            tread.userData.generated = true;
+            group.add(tread);
+            const riser = alongX
+              ? box(0.16, stepH, stairWide, element.x + s * treadD + 0.1, topY - stepH / 2, element.y + stairWide / 2, treadMat)
+              : box(stairWide, stepH, 0.16, element.x + stairWide / 2, topY - stepH / 2, element.y + s * treadD + 0.1, treadMat);
+            riser.userData.roomId = element.id;
+            riser.userData.generated = true;
+            group.add(riser);
+          }
+          const stairHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.05, depthWrite: false });
+          mesh = box(element.w, rise, element.d, element.x + element.w / 2, elevation + rise / 2, element.y + element.d / 2, stairHandle);
         } else {
         const material = new THREE.MeshStandardMaterial({
           color: elementPalette[element.category] || 0x8a7768,
@@ -6099,6 +6364,7 @@ function App() {
 
   useEffect(() => {
     if (activeFloor > floorCount(spec)) setActiveFloor(1);
+    if (activeFloor === BASEMENT_LEVEL && !basementInfo(spec.shell).present) setActiveFloor(1);
   }, [spec, activeFloor]);
 
   useEffect(() => {
@@ -6540,6 +6806,9 @@ function App() {
       }
     } else if (field === 'designApproach') {
       operations.push({ type: 'set_shell', field: 'designApproach', value });
+    } else if (field === 'basementHeightFt') {
+      // 0 removes the basement — it must NOT hit the generic 18-min shell clamp.
+      operations.push({ type: 'set_shell', field, value: String(numeric > 0 ? clamp(numeric, 6, 12) : 0) });
     } else if (field === 'southWallHeightFt' || field === 'northWallHeightFt') {
       operations.push({ type: 'set_wall_height', wall: field === 'southWallHeightFt' ? 'south' : 'north', h: clamp(numeric, 7, 24) });
     } else {
@@ -6829,7 +7098,10 @@ function App() {
     if (field === 'x' || field === 'y') {
       operations.push({ type: 'move_object', targetId: selectedRoom, name: object.name, x: field === 'x' ? Number(value) : Number(object.x || 0), y: field === 'y' ? Number(value) : Number(object.y || 0) });
     } else if (field === 'level') {
-      operations.push({ type: 'update_object', targetId: selectedRoom, name: object.name, field: 'level', value: String(clamp(Math.round(Number(value) || 1), 1, 3)) });
+      // Level -1 is the basement; 0 is not a floor (ops treat 0 as unset).
+      const rawLevel = Math.round(Number(value) || 1);
+      const nextLevel = rawLevel <= BASEMENT_LEVEL && basementInfo(spec.shell).present ? BASEMENT_LEVEL : clamp(Math.max(1, rawLevel), 1, 3);
+      operations.push({ type: 'update_object', targetId: selectedRoom, name: object.name, field: 'level', value: String(nextLevel) });
     } else if (field === 'w' || field === 'd' || field === 'h') {
       operations.push({ type: 'resize_object', targetId: selectedRoom, name: object.name, w: field === 'w' ? Number(value) : Number(object.w || 1), d: field === 'd' ? Number(value) : Number(object.d || 1), h: field === 'h' ? Number(value) : Number(object.h || 1.2) });
     } else {
@@ -7018,8 +7290,9 @@ function App() {
     while (taken.has(name)) { name = `${fixture.name} ${n}`; n += 1; }
     // Fixtures land on the floor you're LOOKING AT — placing a tub while on
     // the 2nd-floor plan puts it upstairs, colliding only with what's up there.
-    const lvl = Math.max(1, activeFloor);
+    const lvl = activeFloor === BASEMENT_LEVEL ? BASEMENT_LEVEL : Math.max(1, activeFloor);
     const { baseWallFt } = storeyInfo(spec.shell);
+    const basementDrop = basementInfo(spec.shell).heightFt;
     const existing = (spec.rooms || []).concat((spec.elements || []).filter((e) => e.category !== 'floor'))
       .filter((o) => Number(o.level || 1) === lvl)
       .map((o) => ({ x: Number(o.x), y: Number(o.y), w: Number(o.w), d: Number(o.d) }));
@@ -7027,9 +7300,26 @@ function App() {
       || { x: 2, y: 2 };
     const where = lvl > 1 ? ` on the ${floorLabel(spec, lvl).toLowerCase()}` : '';
     void applyBackendOperations({
-      operations: [{ type: 'add_element', name, category: fixture.category, x: spot.x, y: spot.y, z: lvl > 1 ? (lvl - 1) * baseWallFt + 0.45 : 0, w: fixture.w, d: fixture.d, h: fixture.h, level: lvl, reason: 'Interior fixture placed from the plan.' }],
+      operations: [{ type: 'add_element', name, category: fixture.category, x: spot.x, y: spot.y, z: lvl === BASEMENT_LEVEL ? -basementDrop + 0.05 : lvl > 1 ? (lvl - 1) * baseWallFt + 0.45 : 0, w: fixture.w, d: fixture.d, h: fixture.h, level: lvl, reason: 'Interior fixture placed from the plan.' }],
       promptText: `Place ${name}${where}`,
       logPrefix: 'Fixture'
+    });
+  }
+
+  // One click drops partition walls on every shared room edge on the floor
+  // you're looking at — a single batched dispatch, skipping covered lines.
+  function drawPartitions() {
+    const lvl = activeFloor === BASEMENT_LEVEL ? BASEMENT_LEVEL : Math.max(1, activeFloor);
+    const ops = derivePartitionOps(spec, lvl);
+    if (!ops.length) {
+      setChatMessages((current) => [...current, { role: 'studio', speaker: 'Studio', text: 'No new interior walls to draw — every shared room edge on this floor already has a partition (or no rooms touch). Drag rooms edge-to-edge first, or add one wall by hand: “add a wall between the kitchen and the living room.”' }]);
+      return;
+    }
+    void applyBackendOperations({
+      operations: ops,
+      promptText: `Draw ${ops.length} interior wall${ops.length === 1 ? '' : 's'}`,
+      logPrefix: 'Partitions',
+      chatText: `Drew ${ops.length} interior wall${ops.length === 1 ? '' : 's'} on shared room edges, each with a 3′ doorway. Tap one to set its construction or move its door; delete any you don't want.`
     });
   }
 
@@ -7476,7 +7766,7 @@ function App() {
     return 'rooms';
   };
   const systemOfElementCategory = (cat) => {
-    const map = { water: 'water', thermal: 'heat', passive: 'heat', roof: 'roof', earthwork: 'foundation', floor: 'foundation', foundation: 'foundation', structure: 'walls', wall: 'walls', landscape: 'outdoors', garden: 'outdoors', animal: 'outdoors', outbuilding: 'site', loft: 'rooms', tower: 'rooms' };
+    const map = { water: 'water', thermal: 'heat', passive: 'heat', roof: 'roof', earthwork: 'foundation', floor: 'foundation', foundation: 'foundation', structure: 'walls', wall: 'walls', partition: 'rooms', chimney: 'heat', deck: 'outdoors', landscape: 'outdoors', garden: 'outdoors', animal: 'outdoors', outbuilding: 'site', loft: 'rooms', tower: 'rooms' };
     return map[String(cat || '').toLowerCase()] || 'outdoors';
   };
   const systemOfSpecialCategory = (cat) => {
@@ -7688,6 +7978,14 @@ function App() {
                 ))}
               </div>
               <p className="systemNote">Heaters, tanks, stairs, counters — placed as objects you can drag in the 2D plan and see in 3D. The heater matches your Heat page choice.</p>
+
+              {spec.rooms.length > 1 && (
+                <>
+                  <div className="sectionHead">Interior walls</div>
+                  <button className="secondary" onClick={drawPartitions}>⌗ Draw walls between rooms</button>
+                  <p className="systemNote">Where two rooms share an edge, this drops a real partition wall on the line — with a 3′ doorway so the plan stays walkable. Tap a wall to change its construction (framed / cob / adobe), door width, or door position; drag it in the Plan like anything else. Chat works too: “add a cob wall between the kitchen and the living room.”</p>
+                </>
+              )}
 
               {spec.rooms.length > 0 && (
                 <>
@@ -7930,6 +8228,23 @@ function App() {
                 <span>I'll dig and place it myself (sweat equity)</span>
               </label>
               <p className="systemNote">Rubble trench is the natural-building favorite: half the concrete of a slab, and the biggest single carbon saving on the whole build.</p>
+
+              <div className="sectionHead">Basement</div>
+              {!basementInfo(spec.shell).present ? (
+                <>
+                  <button className="secondary" onClick={() => updateShell('basementHeightFt', 8)}>+ Add a basement (8′)</button>
+                  <p className="systemNote">A real below-grade storey: concrete perimeter walls and a slab replace the foundation type above. On a sloped site the downhill wall comes out of the ground on its own — that's your walkout.</p>
+                </>
+              ) : (
+                <>
+                  <div className="controlGrid">
+                    <label>Ceiling height (ft)<input type="number" step="0.5" min="6" max="12" value={basementInfo(spec.shell).heightFt} onChange={(event) => updateShell('basementHeightFt', event.target.value)} /></label>
+                    <label>Finished space<input value={`${Math.round(derived.basementRoomArea)} sf of rooms`} readOnly /></label>
+                  </div>
+                  <p className="systemNote">Switch the plan to the <b>Basement</b> tab (top-left of the preview) to lay out rooms down there — they count toward heated space and need a stair. A basement bedroom flags for egress.{Number(siteOf(spec).slopeFt) > 0 ? ' Your site slopes — the downhill side is a natural walkout.' : ''}</p>
+                  <button className="danger" onClick={() => updateShell('basementHeightFt', 0)}>− Remove basement (rooms come up to ground)</button>
+                </>
+              )}
 
               <div className="sectionHead">Foundation runs — under specific walls</div>
               <p className="systemNote">The perimeter above carries the outside walls. Heavy INTERIOR lines need their own strip — the wall between the house and an attached greenhouse, a mass heater, a bearing partition. Drop a run, then drag and stretch it under the wall it carries in the <b>Plan</b> view.</p>
@@ -8617,8 +8932,8 @@ function App() {
             <button className={viewMode === 'plan' ? 'active' : ''} onClick={() => setViewMode('plan')}>Plan</button>
             <button className={viewMode === 'detail' ? 'active' : ''} title="Connection details — how the selected part is built" onClick={() => setViewMode('detail')}>Detail</button>
           </div>
-          {viewMode !== 'detail' && (viewMode === 'plan' || floorCount(spec) > 1) && <div className="floorTabs">
-            {Array.from({ length: floorCount(spec) }, (_, i) => i + 1).map((floor) => (
+          {viewMode !== 'detail' && (viewMode === 'plan' || floorCount(spec) > 1 || basementInfo(spec.shell).present) && <div className="floorTabs">
+            {[...(basementInfo(spec.shell).present ? [BASEMENT_LEVEL] : []), ...Array.from({ length: floorCount(spec) }, (_, i) => i + 1)].map((floor) => (
               <button key={floor} className={activeFloor === floor ? 'active' : ''} onClick={() => setActiveFloor(floor)} title={`${floorLabel(spec, floor)} — view & edit this floor`}>{floor === 1 ? 'Ground' : floorLabel(spec, floor).replace(' floor', '')}</button>
             ))}
             {floorCount(spec) < 3 && <button className="addFloor" onClick={addStorey} title="Add a storey">+ Floor</button>}
@@ -8866,7 +9181,7 @@ function App() {
                   )}
                   {!selectedIsWall && <label>{selectedIsOpening ? 'Along Wall' : 'X'}<input type="number" value={selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? selected.x : selected.y) || 0 : selected?.x || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom(selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? 'x' : 'y') : 'x', event.target.value)} /></label>}
                   {!selectedIsWall && !selectedIsOpening && <label>Y<input type="number" value={selected?.y || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom('y', event.target.value)} /></label>}
-                  {!selectedIsWall && !selectedIsSpecial && !selectedIsElement && storeyInfo(spec.shell).storeys > 1 && <label>Level<input type="number" min="1" max={Math.ceil(storeyInfo(spec.shell).storeys)} value={Number(selected?.level || 1)} onChange={(event) => updateSelectedRoom('level', event.target.value)} /></label>}
+                  {!selectedIsWall && !selectedIsSpecial && !selectedIsElement && (storeyInfo(spec.shell).storeys > 1 || basementInfo(spec.shell).present) && <label>Level ({basementInfo(spec.shell).present ? '-1 = basement' : 'floor'})<input type="number" min={basementInfo(spec.shell).present ? -1 : 1} max={Math.ceil(storeyInfo(spec.shell).storeys)} value={Number(selected?.level || 1)} onChange={(event) => updateSelectedRoom('level', event.target.value)} /></label>}
                   {(selectedIsElement || selectedIsWall || selectedIsRoof) && <label>Height<input type="number" value={selected?.h || 1.2} disabled={selectedIsOpening || selectedIsPad || selectedIsGrid || (selectedIsWall && selected?.storey === 'upper') || (selectedIsWall && spec.shell.roofType === 'shed' && (selected?.side === 'east' || selected?.side === 'west'))} title={selectedIsWall && selected?.storey === 'upper' ? 'Upper wall height comes from the Storeys setting on the Shell page' : selectedIsWall && spec.shell.roofType === 'shed' && (selected?.side === 'east' || selected?.side === 'west') ? 'Raked wall — its ends follow the north and south walls' : undefined} onChange={(event) => updateSelectedRoom('h', event.target.value)} /></label>}
                   {selectedIsOpening && <label>Wall
                     <select value={selected?.wall || 'south'} onChange={(event) => updateSelectedRoom('wall', event.target.value)}>
@@ -8896,13 +9211,22 @@ function App() {
                       {Object.entries(FOUNDATION_RUN_TYPES).map(([key, c]) => <option key={key} value={key}>{c.label}</option>)}
                     </select>
                   </label>}
-                  {selectedIsElement && selected?.category !== 'foundation' && selected?.category !== 'floor' && <label>Canopy roof
+                  {selectedIsElement && !['foundation', 'floor', 'partition'].includes(selected?.category) && <label>Canopy roof
                     <select value={selected?.roofType || ''} onChange={(event) => updateSelectedRoom('roofType', event.target.value)}>
                       <option value="">None (open)</option>
                       <option value="shed">Shed canopy</option>
                       <option value="gable">Gable canopy</option>
                     </select>
                   </label>}
+                  {selectedIsElement && selected?.category === 'partition' && <>
+                    <label>Construction
+                      <select value={PARTITION_TYPES[selected?.construction] ? selected.construction : 'framed'} onChange={(event) => updateSelectedRoom('construction', event.target.value)}>
+                        {Object.entries(PARTITION_TYPES).map(([key, p]) => <option key={key} value={key}>{p.label}</option>)}
+                      </select>
+                    </label>
+                    <label>Door width (ft, 0 = solid)<input type="number" step="0.5" min="0" max="8" value={Number(selected?.doorWFt || 0)} onChange={(event) => updateSelectedRoom('doorWFt', event.target.value)} /></label>
+                    {Number(selected?.doorWFt || 0) > 0 && <label>Door position along wall (ft)<input type="number" step="0.5" min="0" value={Number(selected?.doorAtFt || 0)} onChange={(event) => updateSelectedRoom('doorAtFt', event.target.value)} /></label>}
+                  </>}
                   {!selectedIsWall && !selectedIsSpecial && <label>{selectedIsElement ? 'Category' : 'Type'}
                     <select value={selectedIsElement ? selected?.category || 'storage' : selected?.type || 'living'} onChange={(event) => updateSelectedRoom(selectedIsElement ? 'category' : 'type', event.target.value)}>
                       {selectedIsElement && <option value="wall">wall</option>}
