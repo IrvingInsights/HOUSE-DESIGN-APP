@@ -8,7 +8,7 @@
 import {
   applyBimOperations, footprintPolygon, polygonArea, hasCustomFootprint,
   WALL_ASSEMBLIES, FRAME_TYPES, FLOORING_TYPES, SUBFLOOR_TYPES, OPENING_TYPES,
-  gradeElevationAt, maxFoundationExposureFt
+  gradeElevationAt, maxFoundationExposureFt, resolveWallSide
 } from '../backend/bim-core.mjs';
 
 function near(a, b, eps = 0.01) { return Math.abs(a - b) <= eps; }
@@ -74,6 +74,8 @@ r = apply(freshSpec(), [{ type: 'set_wall_side', wall: 'south', field: 'assembly
 ok(r.spec.wallsUpper.south.assembly === 'framed', 'set_wall_side upper storey');
 r = apply(freshSpec(), ['north', 'south', 'east', 'west'].map((wall) => ({ type: 'set_wall_side', wall, field: 'assembly', value: 'hemp-lime' })));
 ok(['north', 'south', 'east', 'west'].every((s) => r.spec.walls[s].assembly === 'hemp-lime'), 'batched all-sides assembly (one dispatch)');
+r = apply(freshSpec(), [{ type: 'set_wall_side', wall: 'south', field: 'assembly', value: 'glazed' }]);
+ok(r.spec.walls.south.assembly === 'glazed' && resolveWallSide(r.spec, 'south').assembly.rValue === 2, 'set_wall_side glazed glass wall resolves');
 
 // --- site / utilities / systems ---------------------------------------------
 r = apply(freshSpec(), [{ type: 'set_site', field: 'zip', value: '12147' }, { type: 'set_site', field: 'latitudeDeg', value: 42.6 }, { type: 'set_site', field: 'azimuthDeg', value: -20 }]);
@@ -187,7 +189,8 @@ ok(near(maxFoundationExposureFt(r.spec), 10.5), 'max exposure = grade + slope');
 ok(near(gradeElevationAt(freshSpec(), 5, 5), -1.5), 'flat site grade = -gradeFt everywhere');
 
 // --- vocab sanity: shared tables exist for every consumer ---------------------
-ok(Object.keys(WALL_ASSEMBLIES).length === 7, 'WALL_ASSEMBLIES table');
+ok(Object.keys(WALL_ASSEMBLIES).length === 8, 'WALL_ASSEMBLIES table');
+ok(WALL_ASSEMBLIES.glazed && WALL_ASSEMBLIES.glazed.rValue === 2, 'glazed glass-wall assembly present');
 ok(Object.keys(FRAME_TYPES).length === 6, 'FRAME_TYPES table');
 ok(Object.keys(FLOORING_TYPES).length === 6 && Object.keys(SUBFLOOR_TYPES).length === 4, 'floor tables');
 ok(Object.keys(OPENING_TYPES).length === 11, 'OPENING_TYPES table');

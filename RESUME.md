@@ -1,6 +1,38 @@
 # Resume / Handoff — Natural Building GC app (house-bim-app)
 
-## FRESH SESSION — START HERE (updated 2026-07-10, end of the marathon session)
+## FRESH SESSION — START HERE (updated 2026-07-10, pick-ups session)
+
+**The 2026-07-10 pick-ups session shipped (one commit, suites 65+41+12 green, server restarted, verified live):**
+1. **Reference-turn PDF speedup** (planner.mjs): attachments now ride to Gemini ONLY on
+   a fresh trace or when the prompt mentions the drawing/pdf/plan/etc (`sendAttachments`).
+   Follow-up edits no longer re-send an 11-page PDF every turn (was 2–3 min/reply).
+2. **Rename-box debounce**: the Design Name input edits a local draft, commits on
+   blur/Enter — no more one-revision-per-keystroke "Tom's Hous" stubs.
+3. **Glazed wall assembly** (gap #2): 'glazed' in WALL_ASSEMBLIES (BOTH copies), R2 /
+   0.35' / glass render (translucent, no plaster grain); engine treats glazed face area
+   as glass (85% glass fraction: south → southGlass/solar, all → glazing-U heat leak,
+   walls costed at the windowQuality glazing rate, carbon 15); wallR averages
+   opaque walls only; council check (both detectIssues copies): off-south glass wall =
+   warning; planner vocab updated; op suite covers it.
+4. **Porch/deck canopies** (gap #4): element.roofType now RENDERS — 4 corner posts +
+   shed panel (tilts down away from the house) or gable ridge; Inspector gained a
+   "Canopy roof" select (None/Shed/Gable) for any non-floor/foundation element;
+   $14/sf folded into cost.outdoors; planner told (add_element roofType / update_object).
+   Verified live on Daniel's North Porch via set→verify→Undo. NOTE: only a rough
+   visual check (camera was awkward) — eyeball a canopy from a clean angle next session.
+5. **Chimney through the roof** (gap #5): thermal/chimney elements (category 'thermal'
+   w/ heater-ish name, category 'chimney', or name ~ /chimney|flue/) get a 1.4'
+   masonry flue + cap rising ~2.5' past the roof plane (shed/gable/flat aware,
+   short stack if outside the footprint). Verified live: Daniel's real "Masonry
+   Chimney" (category 'chimney' — planner-invented category, hence the name match)
+   draws its flue.
+**Browser-test lesson (new, real):** programmatic PointerEvent drags on the CANVAS
+grab and MOVE Daniel's rooms (that's how room-drag works) — a camera-orbit attempt
+moved his Stairwell (undone immediately; state verified back at rev 7). Orbit the
+camera only with real user input or by setting the camera in code, never synthetic
+canvas drags. Wheel-zoom via synthetic WheelEvent is safe.
+
+## Previous marathon session (2026-07-09/10)
 
 **The 2026-07-09/10 session shipped, in order (all committed, suites green):**
 1. **Geometry pass DONE** (`33e63dd`→`ea5fb66`): footprint polygon (L/T/U),
@@ -35,9 +67,8 @@ perimeter) — he works in it between sessions; ALWAYS snapshot
 (POST /api/projects/current/save with current state) before UI tests and
 restore after. persist:false for op tests.
 
-**Known follow-up speedup:** reference-mode chat turns still re-send the PDF
-to Gemini (2–3 min). Fix: drop attachment parts when NOT freshTrace (planner
-already knows the flag) — small, safe, high-value.
+**Known follow-up speedup: DONE (pick-ups session)** — attachments dropped on
+reference turns unless the prompt mentions the drawing.
 
 ## BUILDING-REALITY GAPS (Daniel's "what else am I missing" audit, 2026-07-10)
 Things a real build needs that the model can't yet say — the foundation-run
@@ -47,19 +78,13 @@ class of gap, prioritized:
    per-wall interior assemblies. The greenhouse divider was pointed at this.
    Biggest single modeling gap; medium-large build (wall elements exist as a
    category — needs openings-in-partitions + room adjacency awareness).
-2. **Glazed wall assembly** — a greenhouse's south face is a GLASS WALL, not
-   windows in a wall. Add a 'glazed' WALL_ASSEMBLY (thin, R≈2, glass render,
-   costed at glazing rate, counts toward south solar gain). SMALL and the
-   natural next step after foundation runs.
+2. **Glazed wall assembly — DONE (pick-ups session).**
 3. **Basement as a real storey** — trace sessions keep fighting this ("the
    basement should be a storey"). With topography in, a walkout basement is
    representable: shell.basement {heightFt, walkout} + rooms at level 0 +
    terrain already cuts the downhill side. Medium.
-4. **Porch/covered-deck roofs** — porch elements have no roof; add_element
-   carries roofType but nothing renders it. Small-medium.
-5. **Chimney through the roof** — thermal elements render as boxes; a chimney
-   should rise past the roof plane (visual pass-through is easy; roof
-   hole-cutting is not needed at this scale). Small.
+4. **Porch/covered-deck roofs — DONE (pick-ups session).**
+5. **Chimney through the roof — DONE (pick-ups session).**
 6. **Stairwell void + real stair runs** — stairs are boxes; no rise/run, no
    hole in the upper plate. Medium-large (known since storeys shipped).
 7. **Dormers** — no roof dormers (post-MVP per geometry-pass scope).
@@ -68,9 +93,8 @@ class of gap, prioritized:
    path (gutter/downspout/cistern placement). Cosmetic-ish.
 10. **Posts under deep overhangs / porch posts** — engine warns about nothing
     here; no posts render. Small visual + a check.
-Suggested order: 2 (glazed wall) → 4+5 (porch roof, chimney) → 3 (basement)
-→ 1 (interior walls) → 6 (stairs). Each is its own clean session-sized bite
-except 1 and 6.
+Suggested order (2, 4, 5 done): 3 (basement) → 1 (interior walls) → 6 (stairs).
+Each is its own clean session-sized bite except 1 and 6.
 
 **State:** feature freeze mostly holds; it was bent once, on Daniel's order, for
 the **drawing→model fidelity pass** (commit `7e77b1d` + Team-consult upgrade):
@@ -116,8 +140,7 @@ container (chat toggle refits the model).
 - Trace fidelity: layouts vary slightly run-to-run (schematic level) — fine;
   consider a "re-trace page N" affordance later. Basements are warned, not
   modeled. `storeys` from traces sometimes unset — harmless (defaults 1).
-- Rename-box autosaves once per keystroke → snapshot spam (the designs list
-  collapses the stubs; a debounce on projectName saves would fix the source).
+- Rename-box snapshot spam — FIXED (pick-ups session: commit on blur/Enter).
 - Housekeeping: rotate the Gemini key in `.env.local`.
 
 **Discipline (hard-won):** backend .mjs edits need a server restart; read

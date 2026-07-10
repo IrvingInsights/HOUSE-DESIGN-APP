@@ -1692,11 +1692,17 @@ const WALL_ASSEMBLIES = {
   'rammed-earth':     { key: 'rammed-earth',     label: 'Rammed Earth',        thicknessFt: 1.35, color: 0x9d7456, rValue: 12, finish: 'sealed / waxed earth' },
   'cordwood':         { key: 'cordwood',         label: 'Cordwood',            thicknessFt: 1.25, color: 0x9b7652, rValue: 18, finish: 'lime mortar joints' },
   'light-straw-clay': { key: 'light-straw-clay', label: 'Light Straw-Clay',    thicknessFt: 1.0,  color: 0xc6b077, rValue: 20, finish: 'clay plaster' },
-  'framed':           { key: 'framed',           label: 'Framed (vapor-open)', thicknessFt: 0.55, color: 0xd9d5c8, rValue: 23, finish: 'plaster / cladding' }
+  'framed':           { key: 'framed',           label: 'Framed (vapor-open)', thicknessFt: 0.55, color: 0xd9d5c8, rValue: 23, finish: 'plaster / cladding' },
+  // A GLASS WALL — the whole face is glazing in a timber frame (an attached
+  // greenhouse's south face), not windows punched into an opaque wall. The
+  // engine treats its face area as glass: solar gain, glazing heat loss,
+  // glazing-rate cost.
+  'glazed':           { key: 'glazed',           label: 'Glazed (glass wall)', thicknessFt: 0.35, color: 0xaecfd8, rValue: 2,  finish: 'timber-framed glazing' }
 };
 
 function wallAssemblyKeyFromText(text) {
   const t = String(text || '').toLowerCase();
+  if (/glazed|glass wall|curtain wall|glasshouse/.test(t)) return 'glazed';
   if (/light straw|straw.?clay/.test(t)) return 'light-straw-clay';
   if (/straw bale|strawbale|straw/.test(t)) return 'straw-bale';
   if (/hemp/.test(t)) return 'hemp-lime';
@@ -2659,6 +2665,10 @@ function detectIssues(spec) {
   if (spec.shell.wallHeightFt > 12) {
     issues.push({ severity: 'warning', title: 'Tall walls need explicit lateral strategy', owner: 'Engineer', system: 'walls', fix: 'Add shear wall schedule, hold-downs, and diaphragm notes.' });
   }
+  const glazedOffSouth = WALL_SIDES.filter((side) => { const r = resolveWallSide(spec, side); return !r.omitted && r.assemblyKey === 'glazed' && side !== 'south'; });
+  if (naturalApproach && glazedOffSouth.length) {
+    issues.push({ severity: 'warning', title: `Glass wall faces ${glazedOffSouth.join(' + ')} — little solar gain, big heat leak`, owner: 'Natural Builder', system: 'walls', fix: 'A glazed wall earns its keep facing south. Off-south glass loses heat all winter for little gain — face it south, or accept the heat cost knowingly.' });
+  }
   if (spec.systems.envelope.toLowerCase().includes('natural') && !spec.systems.envelope.toLowerCase().includes('rainscreen')) {
     issues.push({ severity: 'warning', title: 'Natural wall lacks drying layer', owner: 'Natural Builder', system: 'walls', fix: 'Include rainscreen, generous roof overhangs, and capillary breaks.' });
   }
@@ -2866,19 +2876,27 @@ function deriveDesign(spec, wallSections) {
     return area;
   };
   const wallArea = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall), 0);
-  const wallCostPsf = { 'straw-bale': 12, 'hemp-lime': 20, cob: 20, 'rammed-earth': 22, cordwood: 16, 'light-straw-clay': 15, framed: 18 };
+  // A glazed assembly is a GLASS WALL (a greenhouse's south face): its face is
+  // glazing, not opaque envelope. It leaves the wall R/cost math and joins the
+  // glass — ~85% of the face is glass, the rest is its timber frame.
+  const GLAZED_WALL_GLASS_FRAC = 0.85;
+  const glazedWallArea = wallSections.reduce((sum, wall) => sum + (wall.assemblyKey === 'glazed' ? wallFaceArea(wall) : 0), 0);
+  const glazedSouthWallArea = wallSections.reduce((sum, wall) => sum + (wall.assemblyKey === 'glazed' && wall.side === 'south' ? wallFaceArea(wall) : 0), 0);
+  const opaqueWallArea = Math.max(0, wallArea - glazedWallArea);
+  const wallCostPsf = { 'straw-bale': 12, 'hemp-lime': 20, cob: 20, 'rammed-earth': 22, cordwood: 16, 'light-straw-clay': 15, framed: 18, glazed: utilities.windowQuality === 'triple' ? 70 : 45 };
   const wallsCost = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCostPsf[wall.assemblyKey] ?? 16), 0);
-  const wallR = wallArea
-    ? wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (WALL_ASSEMBLIES[wall.assemblyKey]?.rValue ?? 20), 0) / wallArea
+  const wallR = opaqueWallArea
+    ? wallSections.reduce((sum, wall) => sum + (wall.assemblyKey === 'glazed' ? 0 : wallFaceArea(wall) * (WALL_ASSEMBLIES[wall.assemblyKey]?.rValue ?? 20)), 0) / opaqueWallArea
     : 20;
   // Glazed openings on the south wall — windows, picture, clerestory, and
   // glazed doors (french, sliders) all count toward passive-solar glass.
   // A bay window's wrapped faces gather ~25% more glass than its plan width.
-  const southGlass = (spec.openings || []).filter((opening) => opening.wall === 'south' && (OPENING_TYPES[opening.type] || OPENING_TYPES.window).glazed)
+  const southOpeningGlass = (spec.openings || []).filter((opening) => opening.wall === 'south' && (OPENING_TYPES[opening.type] || OPENING_TYPES.window).glazed)
     .reduce((sum, opening) => {
       const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
       return sum + (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1);
     }, 0);
+  const southGlass = southOpeningGlass + glazedSouthWallArea * GLAZED_WALL_GLASS_FRAC;
   // House orientation: how far the south face is rotated off true south. Solar
   // gain falls with the cosine of that angle, so a house aimed SE/SW harvests
   // less winter sun from the same glass.
@@ -2917,10 +2935,10 @@ function deriveDesign(spec, wallSections) {
   const floorR = INSULATION_TYPES[floorInsulKey].r;
   // Ground-coupled floors lose less than their full area — a 0.5 factor.
   const floorLoss = (floor / Math.max(floorR, 3)) * 0.5;
-  const heatUA = Math.max(0, wallArea - southGlass) / Math.max(wallR, 1)
+  const heatUA = Math.max(0, opaqueWallArea - southOpeningGlass) / Math.max(wallR, 1)
     + Math.max(0, roofArea - skylightArea) / roofR
     + floorLoss
-    + (southGlass + skylightArea) * glazingU;
+    + (southGlass + skylightArea + (glazedWallArea - glazedSouthWallArea) * GLAZED_WALL_GLASS_FRAC) * glazingU;
   const heatLoadKbtu = (heatUA * 70) / 1000;
 
   const bedrooms = Math.max(1, spec.rooms.filter((room) => room.type === 'sleeping').length);
@@ -2975,7 +2993,11 @@ function deriveDesign(spec, wallSections) {
     const runType = FOUNDATION_RUN_TYPES[element.construction] || FOUNDATION_RUN_TYPES.rubble;
     return sum + Math.max(Number(element.w) || 0, Number(element.d) || 0) * runType.carbonLf;
   }, 0);
-  const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => sum + (outdoorItemPresent(spec, item) ? item.cost : 0), 0) + outbuildingCost;
+  // A porch/deck canopy (element.roofType) is a light roof on posts: framing,
+  // decking, and metal over the covered footprint, ~$14/sf.
+  const canopyCost = (spec.elements || []).filter((element) => element.roofType && element.category !== 'foundation' && element.category !== 'floor')
+    .reduce((sum, element) => sum + (Number(element.w) * Number(element.d) || 0) * 14, 0);
+  const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => sum + (outdoorItemPresent(spec, item) ? item.cost : 0), 0) + outbuildingCost + canopyCost;
 
   // Floor assembly = finished floor over the whole heated area + the structural
   // subfloor deck under the ground floor (a slab foundation is its own deck, so
@@ -3033,7 +3055,7 @@ function deriveDesign(spec, wallSections) {
 
   // Embodied carbon (kg CO2e, directional/comparative — add-on coefficients).
   const foundationCarbonPsf = { rubble: 10, stemwall: 18, slab: 25 };
-  const wallCarbonPsf = { 'straw-bale': 6, 'rammed-earth': 20, cob: 8, 'hemp-lime': 4, cordwood: 8, 'light-straw-clay': 7, framed: 8 };
+  const wallCarbonPsf = { 'straw-bale': 6, 'rammed-earth': 20, cob: 8, 'hemp-lime': 4, cordwood: 8, 'light-straw-clay': 7, framed: 8, glazed: 15 };
   const wallCarbonRaw = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0);
   const wallCarbon = wallCarbonRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.carbon : 1);
   const frameCarbon = frameCarbonRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.carbon : 1);
@@ -3058,7 +3080,7 @@ function deriveDesign(spec, wallSections) {
   };
 
   return {
-    site, utilities, reclaimed, reclaimedSavings, floor, heatedFloor, storeys, roofArea, roofFootprint, overhangs, wallArea, wallR, southGlass, glassPct,
+    site, utilities, reclaimed, reclaimedSavings, floor, heatedFloor, storeys, roofArea, roofFootprint, overhangs, wallArea, glazedWallArea, wallR, southGlass, glassPct,
     skylightArea, totalGlass, glazingU, stemwallHeightFt, azimuthDeg, solarFactor,
     sunWinterDeg, sunSummerDeg, winterShadeFrac, summerShadeFrac,
     frameGround: groundFrameKey, frameUpper: upperFrameKey, frameArea: groundFrameArea + upperFrameArea,
@@ -4410,7 +4432,10 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       };
       // X-ray AND exploded views both need see-through walls — exploded pulls
       // the shell apart, translucency lets the interior read through it.
-      const wallMatOf = (resolved) => new THREE.MeshStandardMaterial({ color: resolved.assembly.color, roughness: 0.88, map: grainTexture('plaster'), transparent: layers.xray || layers.explode, opacity: layers.xray ? 0.34 : layers.explode ? 0.55 : 1 });
+      // A glazed assembly renders as glass — translucent, smooth, no plaster grain.
+      const wallMatOf = (resolved) => resolved.assemblyKey === 'glazed'
+        ? new THREE.MeshStandardMaterial({ color: 0xcfe5ea, roughness: 0.12, metalness: 0.05, transparent: true, opacity: layers.xray ? 0.22 : 0.38 })
+        : new THREE.MeshStandardMaterial({ color: resolved.assembly.color, roughness: 0.88, map: grainTexture('plaster'), transparent: layers.xray || layers.explode, opacity: layers.xray ? 0.34 : layers.explode ? 0.55 : 1 });
       const wallMatFor = (side) => wallMatOf(wallResolved[side]);
       const tN = wallResolved.north.thicknessFt;
       const tS = wallResolved.south.thicknessFt;
@@ -4684,6 +4709,79 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
           parts.halo = halo;
           group.add(halo);
           addResizeHandles(group, parts, element.id, element.x, element.y, element.w, element.d, elevation + elementHeight + 0.65);
+        }
+
+        // A covered porch / deck / carport: the element carries roofType but
+        // nothing ever rendered it. A canopy now draws on four corner posts —
+        // gable gets a small ridge, anything else a shed panel tilted down
+        // away from the house. All parts carry the element's roomId so
+        // selection glow and explode move the assembly as one.
+        if (element.roofType && element.category !== 'foundation' && element.category !== 'floor') {
+          const deckTop = elevation + elementHeight;
+          const eave = deckTop + 6.8;
+          const canopyPart = (m) => { m.userData.roomId = element.id; m.userData.generated = true; group.add(m); };
+          [[element.x + 0.4, element.y + 0.4], [element.x + element.w - 0.4, element.y + 0.4],
+            [element.x + 0.4, element.y + element.d - 0.4], [element.x + element.w - 0.4, element.y + element.d - 0.4]]
+            .forEach(([pxp, pzp]) => canopyPart(box(0.42, eave - deckTop, 0.42, pxp, deckTop + (eave - deckTop) / 2, pzp, frameMat)));
+          const cxm = element.x + element.w / 2;
+          const czm = element.y + element.d / 2;
+          const ow = 0.9;
+          if (element.roofType === 'gable') {
+            const alongX = element.w >= element.d;
+            const span = (alongX ? element.d : element.w) / 2 + ow;
+            const rise = Math.max(0.9, span * 0.3);
+            const panelLen = Math.hypot(span, rise);
+            for (const dir of [-1, 1]) {
+              const panel = alongX
+                ? box(element.w + ow * 2, 0.16, panelLen, cxm, eave + rise / 2, czm + dir * span / 2, roofMat)
+                : box(panelLen, 0.16, element.d + ow * 2, cxm + dir * span / 2, eave + rise / 2, czm, roofMat);
+              if (alongX) panel.rotation.x = dir * Math.atan2(rise, span);
+              else panel.rotation.z = -dir * Math.atan2(rise, span);
+              canopyPart(panel);
+            }
+          } else {
+            const spanW = element.w + ow * 2;
+            const spanD = element.d + ow * 2;
+            const towardX = Math.abs(cxm - width / 2) > Math.abs(czm - depth / 2);
+            const rise = Math.max(0.8, (towardX ? spanW : spanD) * 0.12);
+            const panel = box(spanW, 0.16, spanD, cxm, eave + rise / 2, czm, roofMat);
+            if (towardX) panel.rotation.z = (cxm >= width / 2 ? -1 : 1) * Math.atan2(rise, spanW);
+            else panel.rotation.x = (czm >= depth / 2 ? 1 : -1) * Math.atan2(rise, spanD);
+            canopyPart(panel);
+          }
+        }
+
+        // A chimney rises past the roof plane instead of dying inside its box:
+        // masonry heaters / wood stoves inside the footprint get a flue that
+        // clears the roof by ~2.5' (roof height approximated at the stack's
+        // plan position — stepped/L roofs use the main-roof math, honest-ish).
+        // Category is planner-chosen and varies ('thermal', 'chimney', ...) —
+        // match by name too so a traced "Masonry Chimney" gets its flue.
+        if ((element.category === 'thermal' && /chimney|masonry|stove|heater|rocket/i.test(element.name || ''))
+          || element.category === 'chimney' || /\b(chimney|flue)\b/i.test(element.name || '')) {
+          const cxm = element.x + element.w / 2;
+          const czm = element.y + element.d / 2;
+          const inside = cxm >= 0 && cxm <= width && czm >= 0 && czm <= depth;
+          const gRise = depth * Number(spec.shell.roofPitch || 0.32);
+          let flueTop;
+          if (!inside) flueTop = elevation + elementHeight + 6;
+          else if (roofSpec.roofType === 'shed') flueTop = northWallHeight + (southWallHeight - northWallHeight) * Math.min(1, Math.max(0, czm / depth)) + 2.5;
+          else if (roofSpec.roofType === 'flat') flueTop = wallHeight + 3;
+          else flueTop = wallHeight + Math.max(0, gRise - 0.25) * (1 - Math.min(1, Math.abs(cxm - width / 2) / (width / 2 || 1))) + 2.5;
+          const flueBase = elevation + Math.max(0.5, elementHeight - 0.5);
+          if (flueTop > flueBase + 0.5) {
+            const flueMat = new THREE.MeshStandardMaterial({ color: 0x8d6b5a, roughness: 0.9, map: grainTexture('concrete') });
+            const flue = box(1.4, flueTop - flueBase, 1.4, cxm, flueBase + (flueTop - flueBase) / 2, czm, flueMat);
+            flue.name = `${element.name} flue`;
+            flue.userData.roomId = element.id;
+            flue.userData.generated = true;
+            roomMeshes.push(flue);
+            group.add(flue);
+            const cap = box(2, 0.25, 2, cxm, flueTop + 0.12, czm, flueMat);
+            cap.userData.roomId = element.id;
+            cap.userData.generated = true;
+            group.add(cap);
+          }
         }
 
         if (layers.labels) {
@@ -6646,6 +6744,18 @@ function App() {
     });
   }
 
+  // The rename box edits a LOCAL draft and commits on blur/Enter. Writing
+  // spec.projectName per keystroke autosaved a revision snapshot per letter,
+  // littering the designs list with "Tom's Hous"-style stubs.
+  const [nameDraft, setNameDraft] = useState(null);
+  function commitProjectName() {
+    if (nameDraft === null) return;
+    const value = nameDraft.trim();
+    setNameDraft(null);
+    if (!value || value === spec.projectName) return;
+    updateProjectName(value);
+  }
+
   // Selecting an object anywhere — the model, a plan, or a system-page summary
   // row — routes it to the ONE editor: the Inspector below the model. This is
   // what makes "click a thing, edit it in a single place" hold across the app.
@@ -8415,7 +8525,12 @@ function App() {
           <div className="projectIdentity">
             <label>
               <span>Design Name</span>
-              <input value={spec.projectName} onChange={(event) => updateProjectName(event.target.value)} />
+              <input
+                value={nameDraft ?? spec.projectName}
+                onChange={(event) => setNameDraft(event.target.value)}
+                onBlur={commitProjectName}
+                onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+              />
             </label>
             <p>Revision {spec.revision} · {spec.shell.widthFt}' x {spec.shell.depthFt}' · Blender/IFC export ready</p>
             {savedAt && <p className="saveStatus">Saved in app: {savedAt}</p>}
@@ -8779,6 +8894,13 @@ function App() {
                   {selectedIsElement && selected?.category === 'foundation' && <label>Construction
                     <select value={FOUNDATION_RUN_TYPES[selected?.construction] ? selected.construction : 'rubble'} onChange={(event) => updateSelectedRoom('construction', event.target.value)}>
                       {Object.entries(FOUNDATION_RUN_TYPES).map(([key, c]) => <option key={key} value={key}>{c.label}</option>)}
+                    </select>
+                  </label>}
+                  {selectedIsElement && selected?.category !== 'foundation' && selected?.category !== 'floor' && <label>Canopy roof
+                    <select value={selected?.roofType || ''} onChange={(event) => updateSelectedRoom('roofType', event.target.value)}>
+                      <option value="">None (open)</option>
+                      <option value="shed">Shed canopy</option>
+                      <option value="gable">Gable canopy</option>
                     </select>
                   </label>}
                   {!selectedIsWall && !selectedIsSpecial && <label>{selectedIsElement ? 'Category' : 'Type'}

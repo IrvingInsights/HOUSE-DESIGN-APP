@@ -470,14 +470,19 @@ A DRAWING OR DOCUMENT IS ATTACHED. Your job is a COMPLETE takeoff, not a summary
 2. ONE add_room PER ROOM visible on the floor plan — every single one — with its real name and x/y/w/d in feet. Plan coordinates: origin at the northwest corner of the shell, x increases east, y increases south. Rooms on an upper floor get level 2 (or 3). If the CURRENT BIM STATE below already lists some rooms, KEEP them and ADD every remaining room from the drawing — never stop just because a few rooms already exist.
 2b. STOREYS: count the above-grade floors from the elevations and sections. A story-and-a-half or two-storey house (windows up in the gable, a second row of windows, two occupied levels in the section) gets set_shell field:'storeys' value:'2', with the upper rooms on level 2. A basement is below grade — do NOT count it as a storey.
 3. ONE add_opening PER WINDOW AND DOOR with wall (north/south/east/west), openingType, widthFt, and positionFt along that wall. A real floor plan ALWAYS has at least a front door plus several windows — never return zero openings.
-4. Porches, decks, garages, and outbuildings: add_element with a fitting category and real dimensions.
+4. Porches, decks, garages, and outbuildings: add_element with a fitting category and real dimensions. A COVERED porch/deck/carport also gets roofType 'shed' or 'gable' on the add_element so its canopy is drawn.
 RULES: If the plan shows 11 rooms, emit 11 add_room operations. NEVER write "noted for future refinement" or defer anything — emit the operation instead. Basements/below-grade storeys are NOT modeled: put their contents in warnings, model only above-grade storeys. In the summary, report counts: "Traced: shell WxD, N rooms, M openings." If a page is illegible, say which page in warnings and keep going with the rest.
 MODEL WHAT THE DRAWING SHOWS — many documents are EXISTING conventional houses being modified, not natural builds. A framed house gets framed walls (set_wall_side field=assembly value=framed, or set_assembly), a slab stays a slab (set_utility foundationType), standard storeys stay standard, AND emit set_shell field:'designApproach' value:'standard' so the app's natural-building checks stand down for this design. Do NOT convert the building to natural systems unless the user asks. Mine EVERY page for usable data: dimension strings, room and door/window schedules, elevation heights (wall heights, storeys), roof type and pitch, site plans (lot, setbacks, orientation -> set_site), and existing-condition notes (put constraints the model can't express into warnings/assumptions so nothing is lost).
 ` : '';
 
   // Follow-up turns with a drawing attached: the drawing is a REFERENCE for
   // the requested edit, not a takeoff order. Change ONLY what the user asks.
-  const referenceNote = hasAttachments && !freshTrace ? `
+  // Re-sending an 11-page PDF on every reference turn cost 2-3 minutes per
+  // reply, so the file only rides along when the turn actually needs eyes on
+  // it: a fresh trace, or a prompt that talks about the drawing itself.
+  const mentionsDrawing = /\b(drawings?|pdf|plans?|sheets?|pages?|elevations?|sections?|blueprints?|documents?|attach(?:ed|ment)?|images?|photos?|schedules?)\b/i.test(promptText);
+  const sendAttachments = hasAttachments && (freshTrace || mentionsDrawing);
+  const referenceNote = sendAttachments && !freshTrace ? `
 THE ATTACHED DRAWING IS REFERENCE MATERIAL — the model is ALREADY BUILT (state below). Do NOT re-trace it.
 - Make ONLY the specific change the user asks for. Do NOT re-add rooms or openings that already exist in the state.
 - To fix something, prefer update_object / move_object / resize_object / remove_object on existing ids over adding new objects.
@@ -499,9 +504,9 @@ THE ATTACHED DRAWING IS REFERENCE MATERIAL — the model is ALREADY BUILT (state
 Return only structured operations. Do not invent dimensions from drawings unless visible and reasonably inferable.
 ${approachNote}
 ${traceMandate}${referenceNote}
-Prefer real model changes over prose. If the user asks for floors, lofts, towers, site objects, unusual natural-building forms, or arbitrary elements, create add_level or add_element operations.
+Prefer real model changes over prose. If the user asks for floors, lofts, towers, site objects, unusual natural-building forms, or arbitrary elements, create add_level or add_element operations. A covered porch, veranda, or carport is add_element with roofType 'shed' or 'gable' (its canopy renders on posts); to cover an EXISTING element use update_object with field 'roofType'.
 Stacking: for localized requests like "a loft above the kitchen" or "a tower above that", look up the base room's x/y/w/d in the BIM state and REUSE that footprint. Use add_loft (category loft) or add_tower (category tower) as VOLUMES: set z to the top of whatever it sits on (ground rooms top out at shell.wallHeightFt; a stacked element's top is its z + h) and give a real h (a loft 7-8 ft, a tower room 8-10 ft per storey). Chain them: the second element's z = the first element's z + its h. Reserve add_level for a full new storey across the whole footprint.
-For wall system changes, use set_assembly. For roofs, use set_roof. For openings, use add_opening with wall/type/width/position; openingType may be window, picture, awning, clerestory, door, french (french doors), slider, dutch, barn, bay (bay window), or skylight (wall "roof", place with x and y plan coordinates).
+For wall system changes, use set_assembly. Per-side wall systems use set_wall_side with wall and field 'assembly'; assembly values include straw-bale, hemp-lime, cob, rammed-earth, cordwood, light-straw-clay, framed, and glazed — 'glazed' is a GLASS WALL (a whole face of glazing, e.g. an attached greenhouse or sunspace south face), not windows in a wall. For roofs, use set_roof. For openings, use add_opening with wall/type/width/position; openingType may be window, picture, awning, clerestory, door, french (french doors), slider, dutch, barn, bay (bay window), or skylight (wall "roof", place with x and y plan coordinates).
 For water/waste/power/heat choices use set_utility with field one of waterSource (well|spring|catchment|town), wasteMethod (septic|composting|reedbed), powerMode (offgrid|hybrid|gridtie), heatSource (rocket_mass|masonry|wood_stove|minisplit), foundationType (rubble|stemwall|slab), tankGal, wellSepticFt, stemwallHeightFt (feet, for stem wall foundations), diyWalls/diyRoof/diyHeat/diyFoundation. For location use set_site with field zip, latitudeDeg, or rainInYr. For TOPOGRAPHY (sloped sites — read contour lines / spot elevations on a site plan or survey): set_site field:'slopeFt' value = total fall in feet across the building footprint, field:'slopeDir' value = downhill direction (north|south|east|west), field:'gradeFt' value = feet the finish floor sits above grade at the uphill side. A steep fall exposes the downhill foundation as a walkout basement — model it, don't flatten the site.
 For roof overhangs use set_overhang with wall (north|south|east|west|all) and value in feet.
 FOUNDATION RUNS: a strip of foundation under a SPECIFIC line (a load-bearing interior wall, the wall between the house and an attached greenhouse, a mass heater) = add_element with category 'foundation', construction one of rubble | rubble-stem (trench + stem wall, the natural detail) | stemwall | thickened (grade beam), x/y/w/d as the strip's plan rectangle in feet (length along w or d), h = stem height above floor. The perimeter foundation stays a separate global choice (set_utility foundationType).
@@ -519,9 +524,11 @@ ${payload.prompt}`
     }
   ];
 
-  for (const image of (payload.attachedImages || []).slice(0, OPENAI_IMAGE_MAX)) {
-    if (/^data:(image\/|application\/pdf|text\/)/.test(image.src || '')) {
-      content.push({ type: 'input_image', image_url: image.src });
+  if (sendAttachments) {
+    for (const image of (payload.attachedImages || []).slice(0, OPENAI_IMAGE_MAX)) {
+      if (/^data:(image\/|application\/pdf|text\/)/.test(image.src || '')) {
+        content.push({ type: 'input_image', image_url: image.src });
+      }
     }
   }
 

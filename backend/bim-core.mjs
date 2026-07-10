@@ -79,11 +79,17 @@ export const WALL_ASSEMBLIES = {
   'rammed-earth':     { key: 'rammed-earth',     label: 'Rammed Earth',        thicknessFt: 1.35, color: 0x9d7456, rValue: 12, finish: 'sealed / waxed earth' },
   'cordwood':         { key: 'cordwood',         label: 'Cordwood',            thicknessFt: 1.25, color: 0x9b7652, rValue: 18, finish: 'lime mortar joints' },
   'light-straw-clay': { key: 'light-straw-clay', label: 'Light Straw-Clay',    thicknessFt: 1.0,  color: 0xc6b077, rValue: 20, finish: 'clay plaster' },
-  'framed':           { key: 'framed',           label: 'Framed (vapor-open)', thicknessFt: 0.55, color: 0xd9d5c8, rValue: 23, finish: 'plaster / cladding' }
+  'framed':           { key: 'framed',           label: 'Framed (vapor-open)', thicknessFt: 0.55, color: 0xd9d5c8, rValue: 23, finish: 'plaster / cladding' },
+  // A GLASS WALL — the whole face is glazing in a timber frame (an attached
+  // greenhouse's south face), not windows punched into an opaque wall. The
+  // engine treats its face area as glass: solar gain, glazing heat loss,
+  // glazing-rate cost.
+  'glazed':           { key: 'glazed',           label: 'Glazed (glass wall)', thicknessFt: 0.35, color: 0xaecfd8, rValue: 2,  finish: 'timber-framed glazing' }
 };
 
 export function wallAssemblyKeyFromText(text) {
   const t = String(text || '').toLowerCase();
+  if (/glazed|glass wall|curtain wall|glasshouse/.test(t)) return 'glazed';
   if (/light straw|straw.?clay/.test(t)) return 'light-straw-clay';
   if (/straw bale|strawbale|straw/.test(t)) return 'straw-bale';
   if (/hemp/.test(t)) return 'hemp-lime';
@@ -611,6 +617,8 @@ function detectIssues(spec) {
   if (naturalApproach && !spec.openings.some((item) => item.type === 'door' && item.wall === 'south')) issues.push({ severity: 'warning', title: 'Primary entry lacks clear solar-side approach', owner: 'Designer', fix: 'Add or move the main entry to a legible approach with weather protection.' });
   if (naturalApproach && !spec.openings.some((item) => item.type === 'window' && item.wall === 'south')) issues.push({ severity: 'warning', title: 'Insufficient south-facing daylight strategy', owner: 'Permaculture', fix: 'Add balanced south glazing with summer shading and winter solar gain.' });
   if (spec.shell.wallHeightFt > 12) issues.push({ severity: 'warning', title: 'Tall walls need explicit lateral strategy', owner: 'Engineer', fix: 'Add shear wall schedule, hold-downs, and diaphragm notes.' });
+  const glazedOffSouth = WALL_SIDES.filter((side) => { const r = resolveWallSide(spec, side); return !r.omitted && r.assemblyKey === 'glazed' && side !== 'south'; });
+  if (naturalApproach && glazedOffSouth.length) issues.push({ severity: 'warning', title: `Glass wall faces ${glazedOffSouth.join(' + ')} — little solar gain, big heat leak`, owner: 'Natural Builder', fix: 'A glazed wall earns its keep facing south. Off-south glass loses heat all winter for little gain — face it south, or accept the heat cost knowingly.' });
   if (String(spec.systems.envelope || '').toLowerCase().includes('natural') && !String(spec.systems.envelope || '').toLowerCase().includes('rainscreen')) issues.push({ severity: 'warning', title: 'Natural wall lacks drying layer', owner: 'Natural Builder', fix: 'Include rainscreen, generous roof overhangs, and capillary breaks.' });
   if (naturalApproach && !spec.rooms.some((room) => /mud|laundry|service/i.test(room.name))) issues.push({ severity: 'warning', title: 'Farm workflow has no dirty entry', owner: 'Homestead/Farm', fix: 'Add a mud/laundry buffer between exterior work and clean living space.' });
   if (issues.length === 0) issues.push({ severity: 'pass', title: 'Schematic passes current council checks', owner: 'Project Manager', fix: 'Ready for PE/architect review, structural sizing, jurisdictional code check, and stamped drawing development.' });
