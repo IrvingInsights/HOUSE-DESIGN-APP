@@ -676,6 +676,24 @@ const OUTDOOR_ITEMS = [
 // Outbuildings — sizable, constructable structures placed on the site (distinct
 // from the fixed Outdoors homestead items). Each drops a real element you resize
 // in the plan/model and cost by its construction.
+// Foundation RUNS: strips of foundation placed under a SPECIFIC line — a
+// load-bearing interior wall (the classic: the wall between the house and an
+// attached greenhouse), a mass heater, a future addition. Placed like
+// fixtures (elements, category 'foundation'), dragged into position on the
+// plan, costed by the foot. Independent of the perimeter foundation type.
+const FOUNDATION_RUN_TYPES = {
+  rubble: { label: 'Rubble trench', costLf: 22, stemCostLfFt: 0, carbonLf: 6, note: 'Drained gravel trench — carries a wall with almost no concrete.' },
+  'rubble-stem': { label: 'Rubble trench + stem wall', costLf: 26, stemCostLfFt: 18, carbonLf: 10, note: 'The full natural detail: drained trench below, masonry stem above splash height. What a bale or cob wall wants.' },
+  stemwall: { label: 'Stem wall on footing', costLf: 20, stemCostLfFt: 18, carbonLf: 18, note: 'Concrete footing and stem — conventional and strong.' },
+  thickened: { label: 'Thickened slab edge / grade beam', costLf: 24, stemCostLfFt: 0, carbonLf: 22, note: 'For slab foundations: a deepened, reinforced strip under the load.' }
+};
+const FOUNDATION_RUN_PRESETS = [
+  { name: 'Rubble trench run', construction: 'rubble', w: 12, d: 1.5, h: 0.3 },
+  { name: 'Trench + stem run', construction: 'rubble-stem', w: 12, d: 1.5, h: 1.5 },
+  { name: 'Stem wall run', construction: 'stemwall', w: 12, d: 1.5, h: 1.5 },
+  { name: 'Grade beam run', construction: 'thickened', w: 12, d: 1.5, h: 0.2 }
+];
+
 const OUTBUILDING_CONSTRUCTION = {
   shed: { label: 'Simple shed frame', costPsf: 45 },
   pole: { label: 'Pole barn', costPsf: 40 },
@@ -2940,11 +2958,23 @@ function deriveDesign(spec, wallSections) {
   // 18" stem matches the old flat $12/sf).
   const foundationInsulation = utilities.foundationInsulation || 'perimeter';
   const foundationInsulationCost = foundationInsulation === 'full' ? floor * 3 : foundationInsulation === 'perimeter' ? perimeterFt * 6 : 0;
-  const foundationCost = (utilities.foundationType === 'stemwall'
+  const foundationCostBase = (utilities.foundationType === 'stemwall'
     ? floor * 8 + perimeterFt * stemwallHeightFt * 18
     : floor * (foundationCostPsf[utilities.foundationType] ?? 10)) + foundationInsulationCost;
   const outbuildingCost = (spec.elements || []).filter((element) => element.category === 'outbuilding')
     .reduce((sum, element) => sum + (Number(element.w) * Number(element.d) || 0) * (OUTBUILDING_CONSTRUCTION[element.construction]?.costPsf ?? 60), 0);
+  // Placed foundation RUNS (strips under specific interior walls) price by the
+  // foot; a stem type adds its height component. Folded into the foundation line.
+  const foundationRuns = (spec.elements || []).filter((element) => element.category === 'foundation');
+  const foundationRunCost = foundationRuns.reduce((sum, element) => {
+    const runType = FOUNDATION_RUN_TYPES[element.construction] || FOUNDATION_RUN_TYPES.rubble;
+    const lengthFt = Math.max(Number(element.w) || 0, Number(element.d) || 0);
+    return sum + lengthFt * (runType.costLf + runType.stemCostLfFt * (Number(element.h) || 0));
+  }, 0);
+  const foundationRunCarbon = foundationRuns.reduce((sum, element) => {
+    const runType = FOUNDATION_RUN_TYPES[element.construction] || FOUNDATION_RUN_TYPES.rubble;
+    return sum + Math.max(Number(element.w) || 0, Number(element.d) || 0) * runType.carbonLf;
+  }, 0);
   const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => sum + (outdoorItemPresent(spec, item) ? item.cost : 0), 0) + outbuildingCost;
 
   // Floor assembly = finished floor over the whole heated area + the structural
@@ -2977,7 +3007,7 @@ function deriveDesign(spec, wallSections) {
   const floorInsulCost = floor * INSULATION_TYPES[floorInsulKey].costPsf;
   const roofCostRaw = roofArea * 10 + roofInsulCost;
   const cost = {
-    foundation: foundationCost,
+    foundation: foundationCostBase + foundationRunCost,
     frame: frameCost,
     flooring: flooringCostRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.cost : 1) + subfloorCost + floorInsulCost,
     upperFloors: (upperFloorArea + loftTowerArea) * 12,
@@ -3011,7 +3041,7 @@ function deriveDesign(spec, wallSections) {
   const roofCarbon = roofCarbonRaw * (reclaimed.roof ? RECLAIMED_FACTORS.roof.carbon : 1);
   const flooringCarbon = flooringCarbonRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.carbon : 1) + subfloorCarbon + floor * INSULATION_TYPES[floorInsulKey].carbonPsf;
   const stemCarbonExtra = utilities.foundationType === 'stemwall' ? perimeterFt * Math.max(0, stemwallHeightFt - 1.5) * 40 : 0;
-  const carbonKg = floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
+  const carbonKg = floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
   // What the reclaimed choices saved vs. buying everything new.
   const reclaimedSavings = {
@@ -3642,7 +3672,7 @@ const PLAN_ELEMENT_HEX = {
   passive: '#b08b4f', thermal: '#9a5944', water: '#4c88a0', plant: '#6f9b61',
   homestead: '#8e7049', landscape: '#6d8c55', storage: '#8a7768', site: '#9a8f70',
   garden: '#5f8d49', animal: '#b0895b', floor: '#8d8473', loft: '#6f7f6a',
-  tower: '#7a5f49', outbuilding: '#a08a5f', custom: '#8b786d'
+  tower: '#7a5f49', outbuilding: '#a08a5f', foundation: '#8f8b80', custom: '#8b786d'
 };
 
 // Zone fill colors as hex strings for the 2D plan (mirrors the 3D zonePalette).
@@ -4324,6 +4354,7 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
         loft: 0x6f7f6a,
         tower: 0x7a5f49,
         outbuilding: 0xa08a5f,
+        foundation: 0x8f8b80,
         custom: 0x8b786d
       };
 
@@ -4598,15 +4629,48 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
 
       (spec.elements || []).forEach((element) => {
         if (!layers.elements || (layers.hiddenCats || []).includes(element.category || 'custom')) return;
-        const elementHeight = element.h || 1.2;
-        const elevation = Number(element.z || 0);
+        let elementHeight = element.h || 1.2;
+        let elevation = Number(element.z || 0);
+        let mesh;
+        if (element.category === 'foundation') {
+          // A foundation RUN under a specific wall line: gravel trench below
+          // grade, and (per its construction) a concrete stem standing proud —
+          // the greenhouse-divider detail. The stem (or the ground-level cap)
+          // is the drag/select handle; the trench rides along on commit.
+          const construction = FOUNDATION_RUN_TYPES[element.construction] ? element.construction : 'rubble';
+          const stemH = Math.max(0.25, Number(element.h) || 0.3);
+          const cx = element.x + element.w / 2;
+          const cz = element.y + element.d / 2;
+          const gravelMat = new THREE.MeshStandardMaterial({ color: 0x77725f, roughness: 1, map: grainTexture('concrete'), transparent: true, opacity: element.id === selectedRoom ? 0.95 : 0.75 });
+          const stemMatRun = new THREE.MeshStandardMaterial({ color: 0xaaa79b, roughness: 0.95, map: grainTexture('concrete'), transparent: true, opacity: element.id === selectedRoom ? 0.98 : 0.9 });
+          if (construction === 'rubble' || construction === 'rubble-stem') {
+            const trench = box(element.w, 1.2, element.d, cx, -0.75, cz, gravelMat);
+            trench.name = `${element.name} (rubble trench)`;
+            trench.userData.roomId = element.id;
+            roomMeshes.push(trench);
+            group.add(trench);
+          }
+          if (construction === 'rubble-stem' || construction === 'stemwall') {
+            mesh = box(element.w, stemH + 0.1, element.d, cx, (stemH + 0.1) / 2 - 0.05, cz, stemMatRun);
+            elementHeight = stemH;
+          } else if (construction === 'thickened') {
+            mesh = box(element.w, 1.1, element.d, cx, -0.45, cz, stemMatRun);
+            elementHeight = 0.2;
+          } else {
+            // rubble-only: a thin gravel cap at grade so it stays visible/clickable
+            mesh = box(element.w, 0.22, element.d, cx, 0.02, cz, gravelMat);
+            elementHeight = 0.22;
+          }
+          elevation = 0;
+        } else {
         const material = new THREE.MeshStandardMaterial({
           color: elementPalette[element.category] || 0x8a7768,
           transparent: true,
           opacity: element.id === selectedRoom ? 0.9 : 0.66,
           roughness: 0.85
         });
-        const mesh = box(element.w, elementHeight, element.d, element.x + element.w / 2, elevation + elementHeight / 2, element.y + element.d / 2, material);
+        mesh = box(element.w, elementHeight, element.d, element.x + element.w / 2, elevation + elementHeight / 2, element.y + element.d / 2, material);
+        }
         mesh.name = element.name;
         mesh.userData.roomId = element.id;
         mesh.userData.footprint = { w: element.w, d: element.d };
@@ -6874,6 +6938,23 @@ function App() {
     });
   }
 
+  // Drop a foundation run near the middle of the plan — the user drags and
+  // stretches it under the wall it carries (greenhouse divider, mass heater).
+  function placeFoundationRun(preset) {
+    const taken = new Set((spec.elements || []).map((e) => e.name));
+    let name = preset.name;
+    let n = 2;
+    while (taken.has(name)) { name = `${preset.name} ${n}`; n += 1; }
+    const x = Math.max(1, Number(spec.shell.widthFt) / 2 - preset.w / 2);
+    const y = Math.max(1, Number(spec.shell.depthFt) / 2 - preset.d / 2);
+    void applyBackendOperations({
+      operations: [{ type: 'add_element', name, category: 'foundation', construction: preset.construction, x, y, w: preset.w, d: preset.d, h: preset.h, reason: 'Foundation run under a specific wall line.' }],
+      promptText: `Add ${FOUNDATION_RUN_TYPES[preset.construction].label.toLowerCase()}`,
+      logPrefix: 'Foundation',
+      chatText: `Dropped a ${FOUNDATION_RUN_TYPES[preset.construction].label.toLowerCase()} mid-plan — drag it under the wall it carries in the Plan view and stretch it to length. It prices by the foot on the Foundation page and in Costs.`
+    });
+  }
+
   async function addRoomPreset(preset) {
     const plan = planNewRoomPlacements(spec, [preset], activeFloor);
     const where = activeFloor > 1 ? ` on the ${floorLabel(spec, activeFloor).toLowerCase()}` : '';
@@ -7285,7 +7366,7 @@ function App() {
     return 'rooms';
   };
   const systemOfElementCategory = (cat) => {
-    const map = { water: 'water', thermal: 'heat', passive: 'heat', roof: 'roof', earthwork: 'foundation', floor: 'foundation', structure: 'walls', wall: 'walls', landscape: 'outdoors', garden: 'outdoors', animal: 'outdoors', outbuilding: 'site', loft: 'rooms', tower: 'rooms' };
+    const map = { water: 'water', thermal: 'heat', passive: 'heat', roof: 'roof', earthwork: 'foundation', floor: 'foundation', foundation: 'foundation', structure: 'walls', wall: 'walls', landscape: 'outdoors', garden: 'outdoors', animal: 'outdoors', outbuilding: 'site', loft: 'rooms', tower: 'rooms' };
     return map[String(cat || '').toLowerCase()] || 'outdoors';
   };
   const systemOfSpecialCategory = (cat) => {
@@ -7739,6 +7820,38 @@ function App() {
                 <span>I'll dig and place it myself (sweat equity)</span>
               </label>
               <p className="systemNote">Rubble trench is the natural-building favorite: half the concrete of a slab, and the biggest single carbon saving on the whole build.</p>
+
+              <div className="sectionHead">Foundation runs — under specific walls</div>
+              <p className="systemNote">The perimeter above carries the outside walls. Heavy INTERIOR lines need their own strip — the wall between the house and an attached greenhouse, a mass heater, a bearing partition. Drop a run, then drag and stretch it under the wall it carries in the <b>Plan</b> view.</p>
+              <div className="roomAddGrid">
+                {FOUNDATION_RUN_PRESETS.map((preset) => (
+                  <button key={preset.construction} className="roomAddChip" onClick={() => placeFoundationRun(preset)}>
+                    <b>{FOUNDATION_RUN_TYPES[preset.construction].label}</b>
+                    <small>{fmtMoney(FOUNDATION_RUN_TYPES[preset.construction].costLf + FOUNDATION_RUN_TYPES[preset.construction].stemCostLfFt * preset.h)}/ft</small>
+                  </button>
+                ))}
+              </div>
+              {(() => {
+                const runs = (spec.elements || []).filter((element) => element.category === 'foundation');
+                if (!runs.length) return <p className="systemNote">No runs placed yet. The greenhouse detail: a <b>trench + stem</b> run under the shared wall keeps the bales dry on the house side and gives the glazing a curb to sit on.</p>;
+                return (
+                  <div className="pickList">
+                    {runs.map((element) => {
+                      const runType = FOUNDATION_RUN_TYPES[element.construction] || FOUNDATION_RUN_TYPES.rubble;
+                      const lengthFt = Math.max(Number(element.w) || 0, Number(element.d) || 0);
+                      const runCost = lengthFt * (runType.costLf + runType.stemCostLfFt * (Number(element.h) || 0));
+                      return (
+                        <div key={element.id} className={`pickRow${selectedRoom === element.id ? ' active' : ''}`}>
+                          <button type="button" className="pickRowMain" onClick={() => selectObject(element.id)}>
+                            <strong>{element.name}</strong>
+                            <small>{runType.label} · {lengthFt}′ long · {fmtMoney(runCost)}</small>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -8661,6 +8774,11 @@ function App() {
                   {selectedIsElement && selected?.category === 'outbuilding' && <label>Construction
                     <select value={OUTBUILDING_CONSTRUCTION[selected?.construction] ? selected.construction : 'stick'} onChange={(event) => updateSelectedRoom('construction', event.target.value)}>
                       {Object.entries(OUTBUILDING_CONSTRUCTION).map(([key, c]) => <option key={key} value={key}>{c.label}</option>)}
+                    </select>
+                  </label>}
+                  {selectedIsElement && selected?.category === 'foundation' && <label>Construction
+                    <select value={FOUNDATION_RUN_TYPES[selected?.construction] ? selected.construction : 'rubble'} onChange={(event) => updateSelectedRoom('construction', event.target.value)}>
+                      {Object.entries(FOUNDATION_RUN_TYPES).map(([key, c]) => <option key={key} value={key}>{c.label}</option>)}
                     </select>
                   </label>}
                   {!selectedIsWall && !selectedIsSpecial && <label>{selectedIsElement ? 'Category' : 'Type'}
