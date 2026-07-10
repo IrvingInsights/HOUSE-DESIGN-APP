@@ -1110,7 +1110,10 @@ export const LAYER_PRESETS = {
   structure: { ...DEFAULT_MODEL_LAYERS, rooms: false, openings: false, elements: false, labels: false },
   plan: { ...DEFAULT_MODEL_LAYERS, roof: false, upperFloors: false, wallNorth: false, wallSouth: false, wallEast: false, wallWest: false, openings: false },
   interior: { ...DEFAULT_MODEL_LAYERS, roof: false, xray: true },
-  site: { ...DEFAULT_MODEL_LAYERS, roof: true, rooms: false, openings: false, labels: false }
+  site: { ...DEFAULT_MODEL_LAYERS, roof: true, rooms: false, openings: false, labels: false },
+  // The raising view: skeleton solid, walls ghosted, skin off — what the
+  // frame crew sees the morning the bents go up.
+  frame: { ...DEFAULT_MODEL_LAYERS, xray: true, roof: false, rooms: false, openings: false, elements: false, labels: false }
 };
 
 // Mirror of bim-core SITE_DEFAULTS — keep in sync (topography fields included).

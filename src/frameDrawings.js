@@ -25,7 +25,7 @@ const FAINT = '#8b94a0';
 // drawn member width in feet; spacingFt = post/stud bay; rafterOCFt = rafter
 // centers. Values echo common practice for each system — schematic, not
 // stamped engineering.
-const FRAME_MEMBERS = {
+export const FRAME_MEMBERS = {
   timber: {
     label: 'Timber frame', post: '8×8″ Post', postW: 0.67, sill: '8×8″ Sills (build-up)', sillH: 0.67,
     plate: '8×8″ Plate Beam', plateH: 0.67, cross: '8×8″ Crossbeam', crossH: 0.67,

@@ -3168,7 +3168,7 @@ function App() {
             return (
               <div className="layersPanel">
                 <div className="layersPresets">
-                  {Object.entries({ all: 'All', structure: 'Structure', plan: 'Plan', interior: 'Interior', site: 'Site' }).map(([key, label]) => (
+                  {Object.entries({ all: 'All', structure: 'Structure', frame: 'Frame', plan: 'Plan', interior: 'Interior', site: 'Site' }).map(([key, label]) => (
                     <button key={key} onClick={() => setModelLayers({ ...LAYER_PRESETS[key] })}>{label}</button>
                   ))}
                 </div>

@@ -1,6 +1,7 @@
 // 3D viewport: ThreeScene (moved verbatim from main.jsx, JOB 0 split).
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { FRAME_MEMBERS } from './frameDrawings.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
   OPENING_TYPES, resolveFrameType, footprintPolygon, footprintEdges, hasCustomFootprint, polygonArea, decomposeFootprint, subtractRect,
@@ -477,14 +478,18 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         });
       }
 
-      // The structural FRAME is a real, selectable object: posts at bay
-      // spacing along each wall (inside face) with a plate beam on top — tap
-      // any member to work its numbers (system, bay spacing). Load-bearing
-      // walls have no separate frame; custom outlines come later (v1 rect).
+      // The structural FRAME is a REAL skeleton now — the same members the
+      // frame drawings (F-sheets) document, so what you raise is what prints:
+      // BENTS across the span (posts + tie beam + knee braces), plate beams
+      // running the two bearing walls, rafters at o.c. following the roof,
+      // and loft joists on the ties when there's an upper storey. Stud frames
+      // draw their studs at o.c. instead of bents. Every member carries
+      // roomId 'frame-main' (one selectable object; the Frame layer preset is
+      // the raising view). Load-bearing walls have no separate frame; custom
+      // outlines come later (v1 rect).
       const frameKey3d = resolveFrameType(spec, 1);
       if (!customFp && frameKey3d !== 'load-bearing') {
-        const bay = clamp(Number(spec.frame?.baySpacingFt) || 8, 4, 16);
-        const postT = frameKey3d === 'timber' || frameKey3d === 'post-beam' ? 0.66 : 0.4;
+        const fm = FRAME_MEMBERS[frameKey3d] || FRAME_MEMBERS['post-beam'];
         const framePart = (m) => {
           m.userData.roomId = 'frame-main';
           m.userData.generated = true;
@@ -492,25 +497,99 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           group.add(m);
           return m;
         };
-        [
-          { side: 'north', horiz: true, line: tN + postT / 2 + 0.08, h: hN },
-          { side: 'south', horiz: true, line: depth - tS - postT / 2 - 0.08, h: hS },
-          { side: 'west', horiz: false, line: tW + postT / 2 + 0.08, h: hW },
-          { side: 'east', horiz: false, line: width - tE - postT / 2 - 0.08, h: hE }
-        ].forEach(({ side, horiz, line, h }) => {
-          if (omittedWalls.has(side) || wallResolved[side].omitted) return;
-          const run = horiz ? width : depth;
-          const bays = Math.max(1, Math.round(run / bay));
-          for (let i = 0; i <= bays; i += 1) {
-            const along = clamp((run * i) / bays, postT, run - postT);
-            framePart(horiz
-              ? box(postT, Math.max(1, h - 0.4), postT, along, Math.max(1, h - 0.4) / 2, line, frameMat)
-              : box(postT, Math.max(1, h - 0.4), postT, line, Math.max(1, h - 0.4) / 2, along, frameMat));
-          }
-          framePart(horiz
-            ? box(run - postT, 0.45, postT, width / 2, h - 0.2, line, frameMat)
-            : box(postT, 0.45, run - postT, line, h - 0.2, depth / 2, frameMat));
+        // A member along a slope in the span plane: a box rotated to follow
+        // the run from (a0,y0) to (a1,y1), where `a` is the span coordinate.
+        // spanIsZ: shed bents span north-south (z); gable bents span east-west (x).
+        const spanIsZ = roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat';
+        const slopeMember = (a0, y0, a1, y1, at, thickAcross, thickDeep) => {
+          const len = Math.hypot(a1 - a0, y1 - y0);
+          const ang = Math.atan2(y1 - y0, a1 - a0);
+          const m = spanIsZ
+            ? box(thickAcross, thickDeep, len, at, (y0 + y1) / 2, (a0 + a1) / 2, frameMat)
+            : box(len, thickDeep, thickAcross, (a0 + a1) / 2, (y0 + y1) / 2, at, frameMat);
+          if (spanIsZ) m.rotation.x = -ang; else m.rotation.z = ang;
+          return framePart(m);
+        };
+        const straight = (a0, a1, y, at, w, h) => framePart(spanIsZ
+          ? box(w, h, a1 - a0, at, y, (a0 + a1) / 2, frameMat)
+          : box(a1 - a0, h, w, (a0 + a1) / 2, y, at, frameMat));
+        const postAt = (a, at, h, pw) => framePart(spanIsZ
+          ? box(pw, h, pw, at, h / 2, a, frameMat)
+          : box(pw, h, pw, a, h / 2, at, frameMat));
+
+        const span = spanIsZ ? depth : width;
+        const bayRun = spanIsZ ? width : depth;
+        // Span-end wall thicknesses (posts stand just inside them).
+        const tLead = spanIsZ ? tN : tW;
+        const tTail = spanIsZ ? tS : tE;
+        const aLead = tLead + fm.postW / 2 + 0.08;
+        const aTail = span - tTail - fm.postW / 2 - 0.08;
+        const oAllF = resolveOverhangs(spec.shell);
+        const oLead = spanIsZ ? oAllF.north : oAllF.west;
+        const oTail = spanIsZ ? oAllF.south : oAllF.east;
+        // Eave heights at the two span ends (storey lift already included).
+        const hLead = spanIsZ ? northWallHeight : wallHeight;
+        const hTail = spanIsZ ? southWallHeight : wallHeight;
+        const gRise = roofSpec.roofType === 'gable' ? depth * Number(spec.shell.roofPitch || 0.32) : 0;
+        const baseWallFt = Number(spec.shell.wallHeightFt || 10);
+        const hasBents = !fm.studs && fm.postW > 0;
+        const bay = hasBents
+          ? clamp(Number(spec.frame?.baySpacingFt) || fm.spacingFt || 8, 4, 16)
+          : Math.max(1, fm.spacingFt || 16 / 12);
+        const bays = Math.max(1, hasBents ? Math.ceil(bayRun / bay) : Math.round(bayRun / bay));
+        const stations = [];
+        for (let i = 0; i <= bays; i += 1) stations.push(clamp((bayRun * i) / bays, fm.postW, bayRun - fm.postW));
+
+        // Posts (bents) or studs at each station along BOTH bearing walls.
+        const postH = (h) => Math.max(1, h - fm.plateH);
+        stations.forEach((at) => {
+          postAt(aLead, at, postH(hLead), fm.postW);
+          postAt(aTail, at, postH(hTail), fm.postW);
         });
+        // Plate beams along the two bearing walls (full bay run).
+        straight(fm.postW / 2, bayRun - fm.postW / 2, postH(hLead) + fm.plateH / 2, aLead, fm.postW + 0.1, fm.plateH);
+        straight(fm.postW / 2, bayRun - fm.postW / 2, postH(hTail) + fm.plateH / 2, aTail, fm.postW + 0.1, fm.plateH);
+
+        // Tie / crossbeam per bent + knee braces + loft joists — timber types.
+        const tieH = storeyLift > 0 ? baseWallFt : (roofSpec.roofType !== 'shed' && hasBents ? Math.min(hLead, hTail) - fm.plateH : 0);
+        if (hasBents && tieH > 2) {
+          stations.forEach((at) => {
+            framePart(spanIsZ
+              ? box(fm.postW, fm.crossH, aTail - aLead - fm.postW, at, tieH - fm.crossH / 2, (aLead + aTail) / 2, frameMat)
+              : box(aTail - aLead - fm.postW, fm.crossH, fm.postW, (aLead + aTail) / 2, tieH - fm.crossH / 2, at, frameMat));
+            if (fm.braceW > 0) {
+              const rise = Math.min(3, tieH - 1.5);
+              slopeMember(aLead + fm.postW / 2, tieH - fm.crossH - rise, aLead + rise + fm.postW / 2, tieH - fm.crossH, at, fm.braceW, fm.braceW);
+              slopeMember(aTail - rise - fm.postW / 2, tieH - fm.crossH, aTail - fm.postW / 2, tieH - fm.crossH - rise, at, fm.braceW, fm.braceW);
+            }
+          });
+          if (storeyLift > 0) {
+            // loft joists ride the ties, running the bay direction
+            const jCount = Math.max(2, Math.floor((aTail - aLead) / 4));
+            for (let j = 1; j < jCount; j += 1) {
+              const at = aLead + ((aTail - aLead) * j) / jCount;
+              straight(fm.postW / 2, bayRun - fm.postW / 2, tieH + 0.28, at, 0.34, 0.55);
+            }
+          }
+        }
+
+        // Rafters at o.c. following the roof plane, plumb ends past the walls.
+        const rOC = Math.max(1, fm.rafterOCFt || 2);
+        const rCount = Math.max(1, Math.round(bayRun / rOC));
+        for (let i = 0; i <= rCount; i += 1) {
+          const at = clamp((bayRun * i) / rCount, fm.rafterW, bayRun - fm.rafterW);
+          if (roofSpec.roofType === 'gable') {
+            const peakY = wallHeight + Math.max(0.3, gRise - 0.25) - fm.rafterH / 2;
+            const eaveY = wallHeight + 0.25 - fm.rafterH / 2;
+            slopeMember(-oLead, eaveY, span / 2, peakY, at, fm.rafterW, fm.rafterH);
+            slopeMember(span / 2, peakY, span + oTail, eaveY, at, fm.rafterW, fm.rafterH);
+          } else {
+            const y0 = hLead + 0.12 - fm.rafterH / 2;
+            const y1 = hTail + 0.12 - fm.rafterH / 2;
+            const slope = (y1 - y0) / Math.max(0.01, span);
+            slopeMember(-oLead, y0 - slope * oLead, span + oTail, y1 + slope * oTail, at, fm.rafterW, fm.rafterH);
+          }
+        }
       }
 
       // (The old floating assembly-summary chip is gone — that information
