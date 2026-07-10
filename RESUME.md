@@ -136,6 +136,12 @@ One line each; details in the sections below and in Claude memory:
 10. Model overlay rows: badge | 3D-Plan-Detail | Layers | N-compass (row 1),
     floorTabs (row 2, top:56), selection chip (row 3, top:98) — keep new
     overlays out of these lanes.
+11. **GitHub remote is live** (origin = github.com/IrvingInsights/HOUSE-DESIGN-APP,
+    public). This PC is the source of truth. START every session with
+    `git fetch` + check origin/main for commits you don't have (Codespace or
+    collaborator edits) and pull before working; END every session with
+    `git push`. Daniel may file feedback as GitHub Issues from his phone —
+    check them when he says "work through my issues".
 
 ### How to run
 `node server.mjs` with cwd = this dir (`.env.local` must load). App at
