@@ -596,7 +596,11 @@ function roofProfile(shell = {}) {
 function storeyInfo(shell = {}) {
   const storeys = Math.min(3, Math.max(1, Number(shell.storeys || 1)));
   const baseWallFt = Number(shell.wallHeightFt || 10);
-  return { storeys, baseWallFt, extraFt: (storeys - 1) * baseWallFt };
+  // Upper storeys carry their OWN height (shell.upperStoreyHeightFt) — a 10'
+  // ground floor under an 8' second storey is normal construction. Absent =
+  // same as the ground (legacy designs unchanged).
+  const upperFt = Math.min(14, Math.max(6, Number(shell.upperStoreyHeightFt || baseWallFt)));
+  return { storeys, baseWallFt, upperFt, extraFt: (storeys - 1) * upperFt };
 }
 
 // The extent of an upper storey: a 'floor' plate element at that level defines
@@ -2267,6 +2271,11 @@ function applyStructuredDesignPlan(currentSpec, plan) {
         }
       }
       else if (field === 'basementHeated') next.shell.basementHeated = String(operation.value) === 'true' || operation.value === true;
+      else if (field === 'upperStoreyHeightFt') {
+        const v = Number(operation.value) || 0;
+        if (v > 0) next.shell.upperStoreyHeightFt = clamp(v, 6, 14);
+        else delete next.shell.upperStoreyHeightFt;
+      }
       else if (field === 'overhangFt') {
         next.shell.overhangFt = clamp(numeric, 0, 12);
         delete next.shell.overhangs;
@@ -6958,6 +6967,8 @@ function App() {
       operations.push({ type: 'set_shell', field, value: String(numeric > 0 ? clamp(numeric, 6, 12) : 0) });
     } else if (field === 'basementHeated') {
       operations.push({ type: 'set_shell', field, value: value === true || value === 'true' ? 'true' : 'false' });
+    } else if (field === 'upperStoreyHeightFt') {
+      operations.push({ type: 'set_shell', field, value: String(numeric > 0 ? clamp(numeric, 6, 14) : 0) });
     } else if (field === 'southWallHeightFt' || field === 'northWallHeightFt') {
       operations.push({ type: 'set_wall_height', wall: field === 'southWallHeightFt' ? 'south' : 'north', h: clamp(numeric, 2, 24) });
     } else {
@@ -8168,13 +8179,30 @@ function App() {
                   </div>
                 </label>
               </div>
+              {basementInfo(spec.shell).present && (
+                <div>
+                  <div className="sectionHead">Basement — its own controls</div>
+                  <div className="controlGrid">
+                    <label>Ceiling height (ft)<input type="number" step="0.5" min="6" max="12" value={basementInfo(spec.shell).heightFt} onChange={(event) => updateShell('basementHeightFt', event.target.value)} /></label>
+                    <label className="diyToggle"><input type="checkbox" checked={spec.shell.basementHeated !== false} onChange={(event) => updateShell('basementHeated', event.target.checked)} /><span>Heated space</span></label>
+                  </div>
+                  <p className="systemNote">The basement spans the whole footprint (it IS the foundation) — lay out its rooms on the <b>Basement</b> Plan tab. More on the Foundation page.</p>
+                </div>
+              )}
+              {floorCount(spec) > 1 && (
+                <div>
+                  <div className="sectionHead">Ground floor</div>
+                  <p className="systemNote">The ground storey is the shell itself: Width / Length / Wall height above are its controls, and each side can differ on the <b>Walls</b> page.</p>
+                </div>
+              )}
               {(spec.elements || []).filter((el) => el.category === 'floor' && Number(el.level || 1) > 1).map((plateEl) => {
                 const plateDispatch = (ops, label) => applyBackendOperations({ operations: ops, promptText: label, logPrefix: 'Storey', nextSelectedId: plateEl.id });
                 const num = (v) => Number(v) || 0;
                 return (
                   <div key={plateEl.id}>
-                    <div className="sectionHead">{floorLabel(spec, Number(plateEl.level))} — where it sits over the ground floor</div>
+                    <div className="sectionHead">{floorLabel(spec, Number(plateEl.level))} — its own size, position, and height</div>
                     <div className="controlGrid">
+                      <label>Ceiling height (ft)<input type="number" step="0.5" min="6" max="14" value={storeyInfo(spec.shell).upperFt} onChange={(event) => updateShell('upperStoreyHeightFt', event.target.value)} /></label>
                       <label>From west wall (ft)<input type="number" step="0.5" value={num(plateEl.x)} onChange={(event) => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: num(event.target.value), y: num(plateEl.y) }], 'Move the upper storey')} /></label>
                       <label>From north wall (ft)<input type="number" step="0.5" value={num(plateEl.y)} onChange={(event) => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: num(plateEl.x), y: num(event.target.value) }], 'Move the upper storey')} /></label>
                       <label>Width (ft)<input type="number" step="0.5" min="6" value={num(plateEl.w)} onChange={(event) => plateDispatch([{ type: 'resize_object', targetId: plateEl.id, w: Math.max(6, num(event.target.value)), d: num(plateEl.d) }], 'Resize the upper storey')} /></label>
@@ -8184,7 +8212,7 @@ function App() {
                       <button type="button" className="secondary" title="Cover the whole ground floor" onClick={() => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: 0.01, y: 0.01 }, { type: 'resize_object', targetId: plateEl.id, w: Number(spec.shell.widthFt), d: Number(spec.shell.depthFt) }], 'Match the storey to the ground floor')}>Match ground floor</button>
                       <button type="button" className="secondary" title="Center the storey over the plan" onClick={() => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: Math.max(0.01, (Number(spec.shell.widthFt) - num(plateEl.w)) / 2), y: Math.max(0.01, (Number(spec.shell.depthFt) - num(plateEl.d)) / 2) }], 'Center the upper storey')}>Center it</button>
                     </div>
-                    <p className="systemNote">The upper storey covers only this rectangle — walls ring it and the roof steps down over the rest. It's also draggable on the <b>{floorLabel(spec, Number(plateEl.level))}</b> Plan tab, and lives in the selector under that floor.</p>
+                    <p className="systemNote">The upper storey covers only this rectangle — walls ring it and the roof steps down over the rest. Its wall construction has its own section on the <b>Walls</b> page; its frame on the <b>Frame</b> page. Also draggable on the <b>{floorLabel(spec, Number(plateEl.level))}</b> Plan tab.</p>
                   </div>
                 );
               })}
