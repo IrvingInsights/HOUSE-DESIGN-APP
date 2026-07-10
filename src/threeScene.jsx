@@ -1,6 +1,7 @@
 // 3D viewport: ThreeScene (moved verbatim from main.jsx, JOB 0 split).
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { FRAME_MEMBERS } from './frameDrawings.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
@@ -81,6 +82,13 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     sun.shadow.radius = 4;
     scene.add(sun);
 
+    // A neutral indoor environment map, applied ONLY to glass and metal
+    // materials (per-material envMap, not scene.environment) — reflections
+    // where they belong without brightening the whole model and washing the
+    // zone colors (the ACES-exposure lesson).
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     const roomMeshes = [];
@@ -141,6 +149,19 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           g.fillStyle = `rgba(96,66,38,${0.05 + Math.random() * 0.10})`;
           g.fillRect(0, y, 256, 1 + Math.random() * 2);
         }
+        // board joints + the odd knot, so lumber reads board by board
+        for (let y = 0; y < 256; y += 32) {
+          g.fillStyle = 'rgba(60,40,22,0.28)';
+          g.fillRect(0, y, 256, 1.6);
+        }
+        for (let i = 0; i < 7; i += 1) {
+          const kx = Math.random() * 256, ky = Math.random() * 256;
+          g.strokeStyle = 'rgba(70,45,24,0.35)';
+          g.lineWidth = 1.2;
+          g.beginPath();
+          g.ellipse(kx, ky, 2.5 + Math.random() * 3, 1.5 + Math.random() * 2, 0, 0, Math.PI * 2);
+          g.stroke();
+        }
         speckle(500, 0.05, 1.4);
       }
       const texture = new THREE.CanvasTexture(c);
@@ -148,6 +169,73 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       texture.wrapT = THREE.RepeatWrapping;
       texture.repeat.set(3, 3);
       grainCache.set(kind, texture);
+      return texture;
+    }
+
+    // Grayscale HEIGHT maps (bumpMap) — the relief under the grain: trowel
+    // sweeps in plaster, bale bulges under render, standing-seam ridges,
+    // board steps. Mid-gray base so bumps go both ways; repeat matches the
+    // color maps (metal seams share the same 21px rhythm).
+    const bumpCache = new Map();
+    function bumpTexture(kind) {
+      if (bumpCache.has(kind)) return bumpCache.get(kind);
+      const c = document.createElement('canvas');
+      c.width = 256; c.height = 256;
+      const g = c.getContext('2d');
+      g.fillStyle = '#808080';
+      g.fillRect(0, 0, 256, 256);
+      const blob = (count, rMin, rMax, aMax) => {
+        for (let i = 0; i < count; i += 1) {
+          const r = rMin + Math.random() * (rMax - rMin);
+          const x = Math.random() * 256, y = Math.random() * 256;
+          const grad = g.createRadialGradient(x, y, 0, x, y, r);
+          const lift = Math.random() < 0.5;
+          grad.addColorStop(0, `rgba(${lift ? 255 : 0},${lift ? 255 : 0},${lift ? 255 : 0},${Math.random() * aMax})`);
+          grad.addColorStop(1, 'rgba(128,128,128,0)');
+          g.fillStyle = grad;
+          g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+        }
+      };
+      if (kind === 'plaster') {
+        blob(140, 6, 22, 0.16);
+        // trowel arcs — shallow curved sweeps a hand leaves in lime plaster
+        for (let i = 0; i < 26; i += 1) {
+          g.strokeStyle = Math.random() < 0.5 ? `rgba(255,255,255,${0.04 + Math.random() * 0.05})` : `rgba(0,0,0,${0.04 + Math.random() * 0.05})`;
+          g.lineWidth = 3 + Math.random() * 6;
+          g.beginPath();
+          const cx = Math.random() * 256, cy = Math.random() * 256, r = 26 + Math.random() * 60;
+          const a0 = Math.random() * Math.PI * 2;
+          g.arc(cx, cy, r, a0, a0 + 0.7 + Math.random() * 0.9);
+          g.stroke();
+        }
+      } else if (kind === 'lumpy') {
+        // bale bulges under render: big soft mounds + plaster micro-relief
+        blob(26, 26, 52, 0.5);
+        blob(120, 6, 18, 0.14);
+      } else if (kind === 'metal') {
+        for (let x = 0; x < 256; x += 21) {
+          g.fillStyle = 'rgba(255,255,255,0.9)';
+          g.fillRect(x, 0, 2.4, 256);
+          g.fillStyle = 'rgba(0,0,0,0.35)';
+          g.fillRect(x + 2.4, 0, 1.2, 256);
+        }
+      } else if (kind === 'wood') {
+        for (let y = 0; y < 256; y += 3) {
+          g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)';
+          g.fillRect(0, y, 256, 1 + Math.random() * 2);
+        }
+        for (let y = 0; y < 256; y += 32) {
+          g.fillStyle = 'rgba(0,0,0,0.55)';
+          g.fillRect(0, y, 256, 2);
+        }
+      } else if (kind === 'concrete' || kind === 'earth') {
+        blob(kind === 'earth' ? 220 : 320, 2, kind === 'earth' ? 12 : 7, 0.2);
+      }
+      const texture = new THREE.CanvasTexture(c);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(3, 3);
+      bumpCache.set(kind, texture);
       return texture;
     }
 
@@ -172,12 +260,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const wallProfile = wallAssemblyProfile(spec.systems.envelope);
       const wallT = wallProfile.thicknessFt;
 
-      const slabMat = new THREE.MeshStandardMaterial({ color: 0xc0b49b, roughness: 0.92, map: grainTexture('earth') });
-      const wallMat = new THREE.MeshStandardMaterial({ color: wallProfile.color, roughness: 0.88, map: grainTexture('plaster') });
-      const roofMat = new THREE.MeshStandardMaterial({ color: 0x8a938f, roughness: 0.5, metalness: 0.22, map: grainTexture('metal'), side: THREE.DoubleSide });
-      const glassMat = new THREE.MeshStandardMaterial({ color: 0x9cc3d8, transparent: true, opacity: 0.5, roughness: 0.06, metalness: 0.25 });
-      const frameMat = new THREE.MeshStandardMaterial({ color: 0x7a5c3e, roughness: 0.7, map: grainTexture('wood') });
-      const doorMatWood = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.72, map: grainTexture('wood') });
+      const slabMat = new THREE.MeshStandardMaterial({ color: 0xc0b49b, roughness: 0.92, map: grainTexture('earth'), bumpMap: bumpTexture('earth'), bumpScale: 0.2 });
+      const wallMat = new THREE.MeshStandardMaterial({ color: wallProfile.color, roughness: 0.88, map: grainTexture('plaster'), bumpMap: bumpTexture('plaster'), bumpScale: 0.12 });
+      const roofMat = new THREE.MeshStandardMaterial({ color: 0x8a938f, roughness: 0.5, metalness: 0.22, map: grainTexture('metal'), bumpMap: bumpTexture('metal'), bumpScale: 0.16, envMap: envTex, envMapIntensity: 0.35, side: THREE.DoubleSide });
+      const glassMat = new THREE.MeshStandardMaterial({ color: 0x9cc3d8, transparent: true, opacity: 0.5, roughness: 0.06, metalness: 0.25, envMap: envTex, envMapIntensity: 0.85 });
+      const frameMat = new THREE.MeshStandardMaterial({ color: 0x7a5c3e, roughness: 0.7, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
+      const doorMatWood = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.72, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
       const zonePalette = {
         living: 0x79a7a8,
         service: 0xbe9b6f,
@@ -277,12 +365,16 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // material (wood lap, shingle, metal, stone…); 'render' shows the
       // assembly's plaster face.
       const wallMatOf = (resolved) => {
-        if (resolved.assemblyKey === 'glazed') return new THREE.MeshStandardMaterial({ color: 0xcfe5ea, roughness: 0.12, metalness: 0.05, transparent: true, opacity: layers.xray ? 0.22 : 0.38 });
+        if (resolved.assemblyKey === 'glazed') return new THREE.MeshStandardMaterial({ color: 0xcfe5ea, roughness: 0.12, metalness: 0.05, transparent: true, opacity: layers.xray ? 0.22 : 0.38, envMap: envTex, envMapIntensity: 0.85 });
         const clad = CLADDING_TYPES[resolved.cladding];
         if (clad && resolved.cladding !== 'render') {
-          return new THREE.MeshStandardMaterial({ color: clad.color, roughness: clad.texture === 'metal' ? 0.45 : 0.85, metalness: clad.texture === 'metal' ? 0.25 : 0, map: grainTexture(clad.texture), transparent: layers.xray || layers.explode, opacity: layers.xray ? 0.34 : layers.explode ? 0.55 : 1 });
+          const metalClad = clad.texture === 'metal';
+          return new THREE.MeshStandardMaterial({ color: clad.color, roughness: metalClad ? 0.45 : 0.85, metalness: metalClad ? 0.25 : 0, map: grainTexture(clad.texture), bumpMap: bumpTexture(['metal', 'wood', 'plaster', 'concrete', 'earth'].includes(clad.texture) ? clad.texture : 'plaster'), bumpScale: metalClad ? 0.16 : 0.1, envMap: metalClad ? envTex : null, envMapIntensity: 0.35, transparent: layers.xray || layers.explode, opacity: layers.xray ? 0.34 : layers.explode ? 0.55 : 1 });
         }
-        return new THREE.MeshStandardMaterial({ color: resolved.assembly.color, roughness: 0.88, map: grainTexture('plaster'), transparent: layers.xray || layers.explode, opacity: layers.xray ? 0.34 : layers.explode ? 0.55 : 1 });
+        // Hand-formed assemblies read LUMPY under their render — bale bulges,
+        // cob curves; crisp systems keep the flat troweled plaster.
+        const lumpy = ['straw-bale', 'cob', 'light-straw-clay'].includes(resolved.assemblyKey);
+        return new THREE.MeshStandardMaterial({ color: resolved.assembly.color, roughness: 0.88, map: grainTexture('plaster'), bumpMap: bumpTexture(lumpy ? 'lumpy' : 'plaster'), bumpScale: lumpy ? 0.45 : 0.12, transparent: layers.xray || layers.explode, opacity: layers.xray ? 0.34 : layers.explode ? 0.55 : 1 });
       };
       const wallMatFor = (side) => wallMatOf(wallResolved[side]);
       const tN = wallResolved.north.thicknessFt;
@@ -458,7 +550,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const slantLen = gapH / Math.cos(tiltRad);
           const inset = gapH * Math.tan(tiltRad);
           const runLen = (side === 'north' || side === 'south' ? width : depth) - 1;
-          const bandGlassMat = new THREE.MeshStandardMaterial({ color: 0xcfe5ea, roughness: 0.1, metalness: 0.05, transparent: true, opacity: 0.36, side: THREE.DoubleSide });
+          const bandGlassMat = new THREE.MeshStandardMaterial({ color: 0xcfe5ea, roughness: 0.1, metalness: 0.05, transparent: true, opacity: 0.36, side: THREE.DoubleSide, envMap: envTex, envMapIntensity: 0.85 });
           const bandPart = (m) => { m.userData.roomId = `wall-${side}`; m.userData.wallSide = side; m.userData.generated = true; group.add(m); return m; };
           const midY = kneeH + gapH / 2;
           const place = (thick, isBatten, along = 0) => {
@@ -598,7 +690,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // Stem wall foundation: a visible concrete plinth ring under the walls.
       if (utilitiesOf(spec).foundationType === 'stemwall') {
         const stemH = Math.min(6, Math.max(0.5, Number(utilitiesOf(spec).stemwallHeightFt) || 1.5));
-        const stemMat = new THREE.MeshStandardMaterial({ color: 0xaaa79b, roughness: 0.95, map: grainTexture('concrete') });
+        const stemMat = new THREE.MeshStandardMaterial({ color: 0xaaa79b, roughness: 0.95, map: grainTexture('concrete'), bumpMap: bumpTexture('concrete'), bumpScale: 0.15 });
         const lip = 0.25;
         const ring = customFp
           // Custom footprint: the plinth follows every polygon edge.
@@ -1924,6 +2016,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       window.removeEventListener('resize', resize);
       mountObserver?.disconnect();
       mount.removeChild(renderer.domElement);
+      pmrem.dispose();
       renderer.dispose();
     };
   }, [spec, selectedRoom, layers]);
