@@ -17,7 +17,40 @@ modules with NO behavior change (pure moves + imports):
 Verify: all three suites + Vite transform + a browser smoke. This is a
 one-session mechanical job that makes every later session cheaper.
 
-### The two jobs Daniel explicitly queued for the next session
+### JOB — BLENDER-GRADE 3D VIEWPORT (Daniel's headline ask, 2026-07-10)
+Daniel's words: "replacing the model view with one more like what I see in
+Blender. Such finer detail. Planning in 2D is great but when we switch to 3D
+it should be much richer like in Blender." Do JOB 0 (split main.jsx) FIRST —
+this work lives in the extracted threeScene module. The Salvetti frame
+(JOB 1 below) is a natural part of this pass. Scope it as layered upgrades,
+each shippable alone; propose the order to Daniel with AskUserQuestion:
+1. **True geometry**: openings CUT real holes (build each wall as segments
+   around its openings — same technique as the partition door gaps; no CSG
+   library needed), wall returns/jambs visible in the reveal, roof thickness
+   with fascia + soffit, floor slabs with edge thickness, beveled corners.
+2. **Real frame inside** (JOB 1): bents/ties/braces/rafters from
+   frameDrawings.js member math; "Frame" layer preset = raising view.
+3. **PBR materials**: upgrade grainTexture to richer procedural maps
+   (color + roughness + normal via canvas), per-assembly (plaster trowel
+   texture, bale lumps under render, wood grain w/ boards, standing-seam
+   ridges, glass w/ reflections via envMap).
+4. **Lighting/render**: three.js EffectComposer — SSAO (ambient occlusion is
+   the single biggest "Blender look" win), soft contact shadows, subtle
+   outline pass on selection (replaces emissive glow), RoomEnvironment
+   envMap for glass/metal, tuned ACES exposure (careful: >0.92 washed out
+   zone colors before — see memory).
+5. **Viewport feel**: view gizmo (top/front/right/iso buttons), orbit-around-
+   selection, optional walk-through mode, section-cut slider (clip plane).
+Constraints: three.js is already the renderer (examples/jsm addons are fine
+to import via Vite); keep spec→mesh regeneration architecture (rebuild on
+change) but meshes get richer; keep every userData.roomId contract (selection,
+drag, explode, layers all key on it); performance budget — his design is
+small, but rebuild happens per edit, so cache textures/materials at module
+level (grainTexture already caches). Verify visually in the browser (own
+snapshot/restore discipline) — this job is EXACTLY the one where screenshots
+are worth the tokens.
+
+### The two jobs Daniel queued earlier (JOB 1 folds into the viewport job)
 
 **JOB 1 — Salvetti-grade 3D timber frame.** Daniel: "When I click frame, I
 should see a frame like the ones from David Salvetti rendered in the 3D."
