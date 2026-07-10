@@ -1,5 +1,23 @@
 # Resume / Handoff — Natural Building GC app (house-bim-app)
 
+## STATUS UPDATE (2026-07-10 afternoon, commits 58b2914 → b3f2ee5)
+JOB 0 is DONE: main.jsx is split into src/engine.js (spec logic + tables +
+backend fetchers), src/docExports.js (IFC summary + permit set), src/planView.jsx
+(JointDetail/PlanView/PlanMoveBoard), src/threeScene.jsx (the 3D viewport) —
+main.jsx keeps App (~3.8k lines). Viewport work lives in threeScene.jsx now.
+BLENDER-GRADE VIEWPORT layers 1–2 are DONE:
+- Layer 1 (fedd151): openings cut REAL holes (wallRunMeshes pieces; reveal
+  liners; pane mid-wall; raked shed walls + custom edges included; walls render
+  solid when the Openings layer is off); roofs are SLABS (slabTris, fascia edge
+  + soffit underside, 0.3ft) for shed/flat/hip/wings/gable segments.
+- Layer 2 (b3f2ee5): real timber frame from FRAME_MEMBERS (bents = posts +
+  ties + knee braces, plates, rafters @ o.c., loft joists; studs for stick
+  types) + 'Frame' LAYER_PRESET raising view (Layers panel button).
+STILL QUEUED from the viewport brief below: layer 3 (richer PBR-ish procedural
+materials), layer 4 (EffectComposer SSAO/outline/envMap — the big Blender-look
+win), layer 5 (view gizmo, orbit-around-selection, section-cut slider).
+Daniel has GitHub Desktop now and pulls the repo himself — push after every job.
+
 ## FRESH SESSION — START HERE (handoff written 2026-07-10 end of day, at commit f91510a)
 
 Daniel asked for FRESH EYES. Read this section, then the invariants, then go.
