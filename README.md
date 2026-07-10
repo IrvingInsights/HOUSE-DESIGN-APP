@@ -1,41 +1,46 @@
-# Natural Building Design Dashboard
+# Natural Building — a house design studio
 
-A local 3D schematic design app for professional house concepts. It uses an interactive Three.js model for fast exploration and exports BIM-oriented JSON plus a FreeCAD Python generator that creates a grouped `.FCStd` schematic model.
+Design a real house — straw bale, cob, timber frame, or fully conventional — and watch a live 3D model keep track of the cost, the code checks, and the carbon while you work. Draw the floor plan in 2D, flip to 3D, ask the built-in assistant for changes in plain English, and export permit-style drawings, frame drawings, or a BIM (IFC) model at the end.
 
-## Run
+**You don't need to know anything about coding to use this.** Follow the three steps below.
 
-```powershell
-npm install
-npm run dev
+## Get it running (about 5 minutes, one time)
+
+**Step 1 — Install Node** (the free program that runs the app):
+Go to [nodejs.org](https://nodejs.org), click the big green **LTS** download button, open the file it gives you, and click Next through the installer. Default settings are fine.
+
+**Step 2 — Get the app:**
+On this page, click the green **`<> Code`** button near the top, choose **Download ZIP**, then unzip the downloaded file anywhere you like (right-click → Extract All on Windows).
+
+**Step 3 — Start it:**
+Open the unzipped folder and double-click **`start.bat`** (Windows) or **`start.sh`** (Mac). A black window will open — that's the app running; leave it open. Then open your web browser and go to:
+
+```
+http://localhost:5184
 ```
 
-Open the local URL shown by Vite.
+That's it. The welcome card walks you through the rest. To stop the app, close the black window. To start it again later, double-click `start.bat` again.
 
-This build includes a local planner server. By default it runs on:
+## Using it — the short version
 
-```powershell
-http://127.0.0.1:5184/
-```
+- **Start a design** from the welcome card: empty land, the sample homestead, or **a photo/PDF of a floor plan** — the assistant reads the drawing and builds the model from it.
+- **Everything is tappable.** Tap a wall, a room, a window — in the 3D model or the 2D plan — and its controls open on the left. Drag things to move them.
+- **Design by system.** The left side is organized like a real build: Site, Foundation, Frame, Walls, Roof, Windows, Water, Power… Each page leads with plain numbers. A 🌿 leaf marks the natural/green options; standard options always sit right beside them.
+- **Ask for the big moves in chat** (right side): "add two bedrooms and a bathroom", "make the shed roof drain north", "clad the west wall in cedar shingles."
+- **Review** flags anything that doesn't add up — most flags have a one-tap Fix button.
+- **Export** (top right): permit drawing sheets, timber-frame drawings, a build plan with materials, or an IFC model for BIM tools.
 
-For model-backed planning and image understanding, set `OPENAI_API_KEY` before starting the app. Without an API key, the app uses its structured local fallback planner so it can still add/edit BIM objects, roofs, levels, lofts, towers, site elements, openings, and assemblies from common plain-language commands.
+Your designs save automatically on your own computer. Nothing you design is uploaded anywhere.
 
-## BIM Path
+## Optional extras
 
-- Units are feet in the interface and millimeters in FreeCAD exports.
-- The exported FreeCAD script creates `Site > Building > Level_01` groups, slab, walls, roof, openings, and room zones.
-- Use `C:\Program Files\FreeCAD 1.1\bin\freecadcmd.exe generated-script.py` to produce the `.FCStd` model.
+- **Smarter assistant:** the chat works out of the box, but it gets much smarter with a free Google Gemini key. Get one at [aistudio.google.com](https://aistudio.google.com/apikey), then create a file named `.env.local` in the app folder containing one line: `GEMINI_API_KEY=your-key-here`, and restart the app.
+- **Blender** is only needed for IFC export. Everything else works without it.
 
-## Design Workflow
+## Found a problem? Have an idea?
 
-- Use **Studio Chat** on the left to choose **Design**, **Team**, or a specific expert, then either make model changes or ask for plain-language advice in the same conversation.
-- Add drawings, sketches, or handwriting directly inside the left chat panel.
-- Use **Natural Building Elements** to add historic, ancient, and natural-building components such as straw bale walls, rammed earth, cob, timber frame bays, masonry heaters, earth berms, cisterns, root cellars, greenhouses, food forest edges, dogtrots, and courtyard patterns.
-- Select a room in the 3D model or space schedule, then edit name, width, depth, position, type, and shell dimensions live.
-- Select added natural-building elements in the BIM schedule or 3D model, edit their dimensions and category, and consult experts about them.
-- Use **Back** in the top bar to restore the previous saved revision after design chat, council, attachment, add/remove, or live-edit changes.
-- In **Council of Professionals**, click an expert to target them in the left Studio Chat without changing the design.
-- Run **Council Loop** after edits to check conflicts and resolve schematic blockers.
+Click **Issues** at the top of this GitHub page → **New issue** → describe what happened in your own words (a screenshot helps). No technical language needed — "I tried to move the greenhouse wall and nothing happened" is a perfect bug report.
 
-## Stamp Track
+## For AI coding sessions and developers
 
-The app creates schematic BIM artifacts and quality-gate notes. PE/architect stamp readiness still requires licensed structural calculations, local code review, MEP coordination, construction detailing, and jurisdiction-specific drawing sheets.
+The technical handoff lives in [RESUME.md](RESUME.md) (state, queued jobs, hard-won invariants). Tester notes and known limitations: [TESTING.md](TESTING.md). Test suites: `node tools/op_smoke_test.mjs`, `tools/geom_core_test.mjs`, `tools/trace_repair_test.mjs`.
