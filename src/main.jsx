@@ -7253,6 +7253,21 @@ function App() {
     if (wall) {
       const lvl = wall.level || 1;
       if (field === 'h' && lvl === 1) updateWallSide(wall.side, 'heightFt', value);
+      else if (field === 'w' && lvl > 1) {
+        // An upper wall's length IS its storey extent — resize the plate
+        // (N/S walls set its width, E/W its depth). No plate = the storey
+        // spans the whole footprint, so length follows the shell dimension.
+        const plate = upperPlateRect(spec, lvl);
+        const horiz = wall.side === 'north' || wall.side === 'south';
+        if (plate) {
+          void applyBackendOperations({
+            operations: [{ type: 'resize_object', targetId: plate.id, w: horiz ? Math.max(6, Number(value) || plate.w) : plate.w, d: horiz ? plate.d : Math.max(6, Number(value) || plate.d) }],
+            promptText: `Resize the ${floorLabel(spec, lvl).toLowerCase()} to ${value}′ ${horiz ? 'wide' : 'deep'}`,
+            logPrefix: 'Storey',
+            nextSelectedId: selectedRoom
+          });
+        } else updateShell(horiz ? 'widthFt' : 'depthFt', value);
+      }
       else if (field === 'w' && wall.edgeKey) {
         // An edge SEGMENT's length is its own — the jog corners slide along
         // the wall line (the whole side still comes from the shell dims).
@@ -9236,18 +9251,34 @@ function App() {
                     </button>
                     {selMenuOpen && (
                       <div className="selMenu" onMouseLeave={() => setSelMenuOpen(false)}>
-                        {[
-                          ['Rooms', (spec.rooms || []).map((room) => ({ id: room.id, label: room.name, sub: `${room.w}×${room.d}′` }))],
-                          ['Walls', wallSections.map((wall) => ({ id: wall.id, label: wall.name, sub: wall.assembly }))],
-                          ['Openings', (spec.openings || []).map((opening, index) => ({ id: `opening-${index}`, label: opening.label || `${titleCase(opening.wall)} ${titleCase(opening.type)}`, sub: `${opening.widthFt}′` }))],
-                          ['Structure & site', [
-                            { id: 'roof-main', label: 'Roof', sub: spec.shell.roofType || 'gable' },
-                            ...(resolveFrameType(spec, 1) !== 'load-bearing' ? [{ id: 'frame-main', label: 'Frame', sub: `${FRAME_TYPES[resolveFrameType(spec, 1)]?.label || ''} · ${Number(spec.frame?.baySpacingFt) || 8}′ bays` }] : []),
-                            { id: 'site-pad', label: 'Site pad', sub: '' },
-                            ...(spec.elements || []).filter((element) => element.category === 'floor').map((element) => ({ id: element.id, label: element.name || 'Storey extent', sub: `${element.w}×${element.d}′` }))
-                          ]],
-                          ['Elements', (spec.elements || []).filter((element) => element.category !== 'floor').map((element) => ({ id: element.id, label: element.name, sub: titleCase(element.category || '') }))]
-                        ].filter(([, items]) => items.length > 0).map(([groupLabel, items]) => (
+                        {(() => {
+                          // Organized BY STOREY (basement / ground / upper),
+                          // then the building shell, then the site — so a
+                          // 2nd-floor wall or room is found under its floor.
+                          const floors = [...(basementInfo(spec.shell).present ? [BASEMENT_LEVEL] : []), ...Array.from({ length: floorCount(spec) }, (_, i) => i + 1)];
+                          const siteCats = new Set(['outbuilding', 'site', 'landscape', 'garden', 'animal', 'earthwork']);
+                          return [
+                            ...floors.map((floor) => [
+                              floor === 1 ? 'Ground floor' : floorLabel(spec, floor),
+                              [
+                                ...(spec.rooms || []).filter((room) => Number(room.level || 1) === floor).map((room) => ({ id: room.id, label: room.name, sub: `${room.w}×${room.d}′` })),
+                                ...(spec.elements || []).filter((el) => el.category !== 'floor' && !siteCats.has(el.category) && Number(el.level || 1) === floor).map((el) => ({ id: el.id, label: el.name, sub: titleCase(el.category || '') })),
+                                ...(floor > 1 ? (spec.elements || []).filter((el) => el.category === 'floor' && Number(el.level || 1) === floor).map((el) => ({ id: el.id, label: el.name || 'Storey extent', sub: `${el.w}×${el.d}′ — the storey's footprint` })) : []),
+                                ...wallSections.filter((wall) => (wall.level || 1) === floor && (floor > 1 || false)).map((wall) => ({ id: wall.id, label: wall.name, sub: wall.assembly })),
+                                ...(floor === 1 ? (spec.openings || []).map((opening, index) => ({ id: `opening-${index}`, label: opening.label || `${titleCase(opening.wall)} ${titleCase(opening.type)}`, sub: `${opening.widthFt}′ · ${titleCase(opening.wall)}` })) : [])
+                              ]
+                            ]),
+                            ['The building', [
+                              ...wallSections.filter((wall) => (wall.level || 1) === 1).map((wall) => ({ id: wall.id, label: wall.name, sub: wall.assembly })),
+                              { id: 'roof-main', label: 'Roof', sub: spec.shell.roofType || 'gable' },
+                              ...(resolveFrameType(spec, 1) !== 'load-bearing' ? [{ id: 'frame-main', label: 'Frame', sub: `${FRAME_TYPES[resolveFrameType(spec, 1)]?.label || ''} · ${Number(spec.frame?.baySpacingFt) || 8}′ bays` }] : [])
+                            ]],
+                            ['Site & outdoors', [
+                              { id: 'site-pad', label: 'Site pad', sub: '' },
+                              ...(spec.elements || []).filter((el) => siteCats.has(el.category)).map((el) => ({ id: el.id, label: el.name, sub: titleCase(el.category || '') }))
+                            ]]
+                          ];
+                        })().filter(([, items]) => items.length > 0).map(([groupLabel, items]) => (
                           <div className="selMenuGroup" key={groupLabel}>
                             <span className="selMenuEyebrow">{groupLabel}</span>
                             {items.map((item) => (

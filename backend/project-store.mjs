@@ -81,10 +81,27 @@ export async function saveProjectState(incomingState, options = {}) {
   // Atomic write: temp file + rename. A process killed mid-write (or two
   // servers racing) can then never leave a half-written live pointer —
   // exactly the corruption that once took the whole server down.
+  // Windows quirk: rename over a file someone has open throws EPERM —
+  // retry once, then fall back to a direct copy (not atomic, but the
+  // corrupt-read set-aside above still protects the worst case).
   const statePath = projectStatePath(projectId);
   const tmpPath = `${statePath}.tmp-${process.pid}`;
   await fs.writeFile(tmpPath, JSON.stringify(nextState, null, 2), 'utf8');
-  await fs.rename(tmpPath, statePath);
+  try {
+    await fs.rename(tmpPath, statePath);
+  } catch (error) {
+    if (error?.code === 'EPERM' || error?.code === 'EACCES' || error?.code === 'EEXIST' || error?.code === 'EBUSY') {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      try {
+        await fs.rename(tmpPath, statePath);
+      } catch {
+        await fs.copyFile(tmpPath, statePath);
+        await fs.unlink(tmpPath).catch(() => {});
+      }
+    } else {
+      throw error;
+    }
+  }
 
   const revision = Number(nextState?.spec?.revision || 1);
   const snapshotName = `${now.replace(/[:.]/g, '-')}-rev-${revision}.json`;

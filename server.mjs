@@ -19,8 +19,16 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (pathname.startsWith('/api/')) {
-    const handled = await handleApiRoute(req, res, pathname);
-    if (!handled) sendJson(res, 404, { error: 'Not found' });
+    // A route error must NEVER take the whole server down — the app is
+    // someone's live design session. Answer 500 and keep serving.
+    try {
+      const handled = await handleApiRoute(req, res, pathname);
+      if (!handled) sendJson(res, 404, { error: 'Not found' });
+    } catch (error) {
+      console.error(`API ${pathname} failed:`, error);
+      if (!res.headersSent) sendJson(res, 500, { error: String(error?.message || error) });
+      else try { res.end(); } catch { /* connection already gone */ }
+    }
     return;
   }
   vite.middlewares(req, res);
