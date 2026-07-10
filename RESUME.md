@@ -1,6 +1,76 @@
 # Resume / Handoff — Natural Building GC app (house-bim-app)
 
-## FRESH SESSION — START HERE (updated 2026-07-09, end of the fidelity session)
+## FRESH SESSION — START HERE (updated 2026-07-10, end of the marathon session)
+
+**The 2026-07-09/10 session shipped, in order (all committed, suites green):**
+1. **Geometry pass DONE** (`33e63dd`→`ea5fb66`): footprint polygon (L/T/U),
+   move-a-wall (plan edge drag + inspector Move/Split), stepped roofs over
+   partial storeys. `tools/op_smoke_test.mjs` + `geom_core_test.mjs` are the
+   durable suites (63 + 41 checks) — run after ANY bim-core edit.
+2. **Frame drawings** (`dbe4d6a`, `661faa5`): Export ▾ → Frame drawings —
+   elevations, frame plan, Typical Bent section, member schedule.
+3. **Trace verify-and-repair** (`7e80d7a`) + **trace discipline** (`87052b2`):
+   full takeoff only on FRESH trace; follow-ups treat the PDF as reference
+   (proven 10/10 on the real Columbia PDF: follow-up turns = exactly 1 op).
+   Slim Gemini schema + 32k tokens + retry killed the unreadable-JSON turns.
+4. **Topography** (`87052b2`): site.slopeFt/slopeDir/gradeFt →
+   sloped terrain w/ contours, foundation steps to grade (walkout), Site page
+   controls, `gradeElevationAt()` in bim-core is the single grade source.
+5. **Approach switch + council opt-in** (`87052b2`): shell.designApproach
+   natural|standard (Shell page) gates the passive-solar/homestead checks +
+   planner bias; council flags only via the Council Loop button / Review tab.
+   Selector chip lives in the BIM Inspector header now (left panel).
+6. **Built-the-other-way compare** (`28859ef`): Costs tab prices the same
+   design in the opposite construction (convertSpecApproach).
+7. **De-clip-art pass** (`e260dba`): procedural grain materials, fill light,
+   real window/door assemblies (frames, muntins, sills, knobs).
+8. **Plan-first** (`d23323d`): fixtures land on the active floor; openings
+   drag along walls in Plan (disabled in building/site contexts + upper floors).
+9. **Foundation runs** (`5a94f13`): rubble trench / trench+stem / stem /
+   grade-beam strips placed under specific wall lines (the greenhouse
+   divider detail), priced per LF, drawn with trench + stem in 3D.
+
+**Daniel's live design:** "My Natural Home" (40.5×28, 6 rooms, stem-wall
+perimeter) — he works in it between sessions; ALWAYS snapshot
+(POST /api/projects/current/save with current state) before UI tests and
+restore after. persist:false for op tests.
+
+**Known follow-up speedup:** reference-mode chat turns still re-send the PDF
+to Gemini (2–3 min). Fix: drop attachment parts when NOT freshTrace (planner
+already knows the flag) — small, safe, high-value.
+
+## BUILDING-REALITY GAPS (Daniel's "what else am I missing" audit, 2026-07-10)
+Things a real build needs that the model can't yet say — the foundation-run
+class of gap, prioritized:
+1. **Interior partition walls as real objects** — rooms are floor zones; there
+   are no interior walls with thickness/structure, no doors BETWEEN rooms, no
+   per-wall interior assemblies. The greenhouse divider was pointed at this.
+   Biggest single modeling gap; medium-large build (wall elements exist as a
+   category — needs openings-in-partitions + room adjacency awareness).
+2. **Glazed wall assembly** — a greenhouse's south face is a GLASS WALL, not
+   windows in a wall. Add a 'glazed' WALL_ASSEMBLY (thin, R≈2, glass render,
+   costed at glazing rate, counts toward south solar gain). SMALL and the
+   natural next step after foundation runs.
+3. **Basement as a real storey** — trace sessions keep fighting this ("the
+   basement should be a storey"). With topography in, a walkout basement is
+   representable: shell.basement {heightFt, walkout} + rooms at level 0 +
+   terrain already cuts the downhill side. Medium.
+4. **Porch/covered-deck roofs** — porch elements have no roof; add_element
+   carries roofType but nothing renders it. Small-medium.
+5. **Chimney through the roof** — thermal elements render as boxes; a chimney
+   should rise past the roof plane (visual pass-through is easy; roof
+   hole-cutting is not needed at this scale). Small.
+6. **Stairwell void + real stair runs** — stairs are boxes; no rise/run, no
+   hole in the upper plate. Medium-large (known since storeys shipped).
+7. **Dormers** — no roof dormers (post-MVP per geometry-pass scope).
+8. **Per-room ceiling heights / vaults** — one height per storey today.
+9. **Gutters → cistern link** — catchment math exists; no physical rainwater
+   path (gutter/downspout/cistern placement). Cosmetic-ish.
+10. **Posts under deep overhangs / porch posts** — engine warns about nothing
+    here; no posts render. Small visual + a check.
+Suggested order: 2 (glazed wall) → 4+5 (porch roof, chimney) → 3 (basement)
+→ 1 (interior walls) → 6 (stairs). Each is its own clean session-sized bite
+except 1 and 6.
 
 **State:** feature freeze mostly holds; it was bent once, on Daniel's order, for
 the **drawing→model fidelity pass** (commit `7e77b1d` + Team-consult upgrade):
