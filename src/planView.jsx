@@ -1,0 +1,602 @@
+// 2D surfaces: JointDetail, PlanView, PlanMoveBoard (moved verbatim from main.jsx, JOB 0 split).
+import React, { useRef, useState } from 'react';
+import {
+  OPENING_TYPES, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES, resolveInsulation, footprintPolygon,
+  footprintEdges, hasCustomFootprint, edgeForOpening, basementInfo, BASEMENT_LEVEL
+} from '../backend/bim-core.mjs';
+import { Grid3X3, Plus } from 'lucide-react';
+import {
+  clamp, floorCount, floorLabel, resolveOverhangs, utilitiesOf, resolveWallSide, PLAN_ELEMENT_HEX, planLabelInk,
+  PLAN_ZONE_HEX, hexOf
+} from './engine.js';
+
+export function JointDetail({ spec, derived, kind, side = 'south', opening = null }) {
+  const u = utilitiesOf(spec);
+  const label = (x, y, text, anchor = 'start') => (
+    <text x={x} y={y} fontSize={0.52} fill="var(--ink2)" textAnchor={anchor}>{text}</text>
+  );
+  const dim = (x1, y1, x2, y2, text) => (
+    <g stroke="var(--ink3)" strokeWidth={0.04}>
+      <line x1={x1} y1={y1} x2={x2} y2={y2} />
+      <line x1={x1} y1={y1 - 0.2} x2={x1} y2={y1 + 0.2} />
+      <line x1={x2} y1={y2 - 0.2} x2={x2} y2={y2 + 0.2} />
+      <text x={(x1 + x2) / 2} y={y1 - 0.25} fontSize={0.5} fill="var(--ink3)" textAnchor="middle" stroke="none">{text}</text>
+    </g>
+  );
+
+  if (kind === 'wall') {
+    const r = resolveWallSide(spec, side);
+    const t = r.thicknessFt;
+    // Draw what's actually designed: a stem wall's real height, a slab's edge,
+    // or a rubble trench's low plinth. Straw bale must ride ≥12″ above grade —
+    // if this wall doesn't, the drawing says so in red (and Review flags it).
+    const stemH = u.foundationType === 'stemwall' ? Math.min(6, Math.max(0.5, Number(u.stemwallHeightFt) || 1.5)) : u.foundationType === 'slab' ? 0.5 : 0.3;
+    const baleAtRisk = r.assemblyKey === 'straw-bale' && stemH < 1;
+    const wallTop = 0, wallBot = 3.2, grade = wallBot + stemH;
+    const finish = FLOORING_TYPES[resolveFlooring(spec)]?.label || 'finish floor';
+    const insul = INSULATION_TYPES[resolveInsulation(u.floorInsulation, 'cellulose')]?.label || 'insulation';
+    const deck = SUBFLOOR_TYPES[resolveSubfloor(spec)]?.label.split(' —')[0] || 'deck';
+    return (
+      <svg viewBox="-3.4 -0.9 13.4 8.6" className="jointSvg">
+        {/* wall leaf + plasters */}
+        <rect x={0} y={wallTop} width={t} height={wallBot} fill={hexOf(r.assembly.color)} stroke="var(--ink3)" strokeWidth={0.05} />
+        <line x1={-0.12} y1={wallTop} x2={-0.12} y2={wallBot} stroke="var(--straw, #C9A24B)" strokeWidth={0.1} />
+        <line x1={t + 0.12} y1={wallTop} x2={t + 0.12} y2={wallBot} stroke="var(--ink2)" strokeWidth={0.08} />
+        {/* foundation / stem + footing */}
+        <rect x={-0.35} y={wallBot} width={t + 0.7} height={stemH} fill="#9a958b" stroke="var(--ink3)" strokeWidth={0.05} />
+        <rect x={-0.8} y={grade} width={t + 1.6} height={1.1} fill="none" stroke="var(--ink3)" strokeWidth={0.05} strokeDasharray="0.25 0.18" />
+        {/* grade line + hatch */}
+        <line x1={-3.2} y1={grade} x2={-0.35} y2={grade} stroke="var(--ink2)" strokeWidth={0.09} />
+        {[-2.9, -2.3, -1.7, -1.1].map((gx) => <line key={gx} x1={gx} y1={grade} x2={gx - 0.4} y2={grade + 0.4} stroke="var(--ink3)" strokeWidth={0.05} />)}
+        {/* interior floor assembly bands */}
+        <rect x={t + 0.35} y={wallBot - 0.16} width={4.6} height={0.16} fill="var(--straw, #C9A24B)" />
+        <rect x={t + 0.35} y={wallBot + 0.0} width={4.6} height={0.42} fill="var(--limesage, #7E8A6A)" opacity={0.8} />
+        <rect x={t + 0.35} y={wallBot + 0.42} width={4.6} height={0.24} fill="#8a7458" />
+        {label(t + 0.5, wallBot - 0.32, finish)}
+        {label(t + 0.5, wallBot + 0.3, insul)}
+        {label(t + 0.5, wallBot + 0.62, deck)}
+        {label(-3.2, wallTop + 0.5, 'exterior')}
+        {label(-0.4, wallBot - 0.4, `${r.assembly.label}`, 'end')}
+        {label(t + 1.1, grade + 0.8, `${u.foundationType} foundation`)}
+        {dim(0, -0.45, t, -0.45, `${t.toFixed(2)}′`)}
+        {u.foundationType === 'stemwall' && dim(-1.6, wallBot, -1.6, grade, '')}
+        {u.foundationType === 'stemwall' && label(-3.2, wallBot + stemH / 2 + 0.2, `${Math.round(stemH * 12)}″ stem wall`)}
+        {baleAtRisk && (
+          <g>
+            {/* the stem wall this bale wall REQUIRES but doesn't have */}
+            <rect x={-0.35} y={wallBot - 1 + stemH} width={t + 0.7} height={1} fill="none" stroke="#AE452F" strokeWidth={0.09} strokeDasharray="0.3 0.2" />
+            <text x={t + 0.6} y={wallBot - 1.5} fontSize={0.5} fill="#AE452F" fontWeight="700">⚠ bales need a ≥12″ stem wall</text>
+            <text x={t + 0.6} y={wallBot - 0.85} fontSize={0.42} fill="#AE452F">splash + damp rot the bottom course — see Review</text>
+          </g>
+        )}
+      </svg>
+    );
+  }
+
+  if (kind === 'roof') {
+    const o = resolveOverhangs(spec.shell).south;
+    const pitch = Number(spec.shell.roofPitch || 0.32);
+    const t = resolveWallSide(spec, 'south').thicknessFt;
+    const insul = INSULATION_TYPES[resolveInsulation(u.roofInsulation, 'cellulose')]?.label || 'insulation';
+    const eaveY = 2.4, run = 5;
+    const rise = run * pitch;
+    return (
+      <svg viewBox={`${-o - 1.6} -2.4 ${o + run + 3.4} 7.6`} className="jointSvg">
+        {/* wall top + plate */}
+        <rect x={0} y={eaveY} width={t} height={2.6} fill={hexOf(resolveWallSide(spec, 'south').assembly.color)} stroke="var(--ink3)" strokeWidth={0.05} />
+        <rect x={-0.05} y={eaveY - 0.22} width={t + 0.1} height={0.22} fill="#8a7458" />
+        {/* rafter from overhang tip up the slope */}
+        <line x1={-o} y1={eaveY} x2={run} y2={eaveY - rise} stroke="#8a7458" strokeWidth={0.28} />
+        <line x1={-o} y1={eaveY - 0.5} x2={run} y2={eaveY - rise - 0.5} stroke="var(--ink2)" strokeWidth={0.12} />
+        {/* insulation band between rafter and covering */}
+        <line x1={0.4} y1={eaveY - 0.38} x2={run} y2={eaveY - rise - 0.28} stroke="var(--limesage, #7E8A6A)" strokeWidth={0.3} opacity={0.85} />
+        {label(-o, eaveY + 0.6, `${o.toFixed(1)}′ overhang`)}
+        {label(run - 3.4, eaveY - rise - 0.85, 'roof covering')}
+        {label(1.2, eaveY - 0.85, insul)}
+        {label(0.1, eaveY + 1.6, resolveWallSide(spec, 'south').assembly.label)}
+        {label(-o - 1.4, eaveY - 0.3, 'eave')}
+        {dim(-o, eaveY + 1.1, 0, eaveY + 1.1, `${o.toFixed(1)}′`)}
+        {label(run - 3.4, eaveY - rise + 0.6, `pitch ≈ ${Math.round(pitch * 12)}:12 · sun ${Math.round(derived.sunWinterDeg)}°–${Math.round(derived.sunSummerDeg)}°`)}
+      </svg>
+    );
+  }
+
+  // opening: vertical section through a window/door in its wall
+  const profile = OPENING_TYPES[opening?.type] || OPENING_TYPES.window;
+  const r = resolveWallSide(spec, opening?.wall && opening.wall !== 'roof' ? opening.wall : 'south');
+  const t = r.thicknessFt;
+  const sill = profile.sill, head = profile.sill + profile.h;
+  const top = 0.4;
+  const scaleY = 5.6 / Math.max(head + 1.5, 8);
+  const y = (ft) => top + (Math.max(head + 1.5, 8) - ft) * scaleY;
+  return (
+    <svg viewBox={`-2.6 0 ${t + 8} 7.2`} className="jointSvg">
+      {/* wall above header and below sill */}
+      <rect x={0} y={y(head + 1.2)} width={t} height={y(head) - y(head + 1.2)} fill={hexOf(r.assembly.color)} stroke="var(--ink3)" strokeWidth={0.05} />
+      <rect x={0} y={y(sill)} width={t} height={y(0) - y(sill)} fill={hexOf(r.assembly.color)} stroke="var(--ink3)" strokeWidth={0.05} />
+      {/* header + buck + sill */}
+      <rect x={-0.1} y={y(head) - 0.3} width={t + 0.2} height={0.3} fill="#8a7458" />
+      <line x1={t * 0.35} y1={y(head)} x2={t * 0.35} y2={y(sill)} stroke="var(--ink2)" strokeWidth={0.1} />
+      <line x1={t * 0.45} y1={y(head)} x2={t * 0.45} y2={y(sill)} stroke="var(--ink2)" strokeWidth={0.1} />
+      <polygon points={`${-0.4},${y(sill) + 0.28} ${t * 0.6},${y(sill)} ${t * 0.6},${y(sill) + 0.22} ${-0.4},${y(sill) + 0.5}`} fill="#8a7458" />
+      {label(t + 0.5, y(head) - 0.4, `header over ${opening?.widthFt || profile.defaultW}′ ${profile.label.toLowerCase()}`)}
+      {label(t + 0.5, (y(head) + y(sill)) / 2, profile.glazed ? `glazing (${u.windowQuality} pane)` : 'leaf')}
+      {label(t + 0.5, y(sill) + 0.55, `sloped sill · ${Math.round(sill * 12)}″ above floor`)}
+      {label(t + 0.5, y(0) - 0.2, r.assembly.label)}
+    </svg>
+  );
+}
+
+export const PLAN_CONTEXT_LABEL = {
+  foundation: 'Foundation plan — drag the footprint corner to resize',
+  shell: 'Footprint plan — drag the corner to resize',
+  frame: 'Frame plan — the footprint the frame carries',
+  flooring: 'Floor plan — the footprint the floor covers',
+  walls: 'Wall plan — tap a wall in the model to edit it',
+  roof: 'Roof plan — footprint the roof covers',
+  site: 'Site plan — place and drag outbuildings',
+  outdoors: 'Site plan — place and drag outbuildings',
+  rooms: 'Room plan — drag to move, corners to resize',
+  windows: 'Openings plan — white gaps mark windows & doors'
+};
+export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShell, onMoveEdge, onMoveOpening, context = null, activeFloor = 1 }) {
+  const svgRef = useRef(null);
+  const [drag, setDrag] = useState(null);
+  const [shellGhost, setShellGhost] = useState(null);
+  const [edgeDrag, setEdgeDrag] = useState(null);
+  const [openingDrag, setOpeningDrag] = useState(null);
+  const W = Number(spec.shell.widthFt) || 36;
+  const D = Number(spec.shell.depthFt) || 28;
+  const pad = Math.max(6, Math.round(Math.max(W, D) * 0.14));
+  const snap = (v) => Math.round(v * 2) / 2;
+  const buildingContext = ['foundation', 'shell', 'frame', 'flooring', 'roof'].includes(context);
+  const siteContext = context === 'site' || context === 'outdoors';
+  const fpCustom = hasCustomFootprint(spec);
+  const fpPoly = footprintPolygon(spec);
+  const fpEdgesList = footprintEdges(spec);
+  // In a building context the footprint is the subject; dim the room fill so it
+  // recedes. In a site context the outbuildings are the subject; dim the house.
+  const roomsDim = buildingContext ? 0.18 : siteContext ? 0.28 : 1;
+
+  function clientToFeet(event) {
+    const svg = svgRef.current;
+    if (!svg) return { fx: 0, fy: 0 };
+    const point = svg.createSVGPoint();
+    point.x = event.clientX;
+    point.y = event.clientY;
+    const user = point.matrixTransform(svg.getScreenCTM().inverse());
+    return { fx: user.x, fy: user.y };
+  }
+
+  function startDrag(event, room, mode) {
+    event.stopPropagation();
+    event.preventDefault();
+    // Capture the pointer to the SVG so move/up keep firing even if the cursor
+    // outruns the small handle or leaves a room rect mid-drag.
+    try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
+    const { fx, fy } = clientToFeet(event);
+    setDrag({ id: room.id, mode, startFx: fx, startFy: fy, orig: { x: Number(room.x), y: Number(room.y), w: Number(room.w), d: Number(room.d) }, ghost: { x: Number(room.x), y: Number(room.y), w: Number(room.w), d: Number(room.d) } });
+    onSelect(room.id);
+  }
+
+  function onPointerMove(event) {
+    if (!drag) return;
+    const { fx, fy } = clientToFeet(event);
+    const dx = fx - drag.startFx;
+    const dy = fy - drag.startFy;
+    const o = drag.orig;
+    let ghost;
+    if (drag.mode === 'move') {
+      ghost = { x: clamp(snap(o.x + dx), -pad, W + pad - o.w), y: clamp(snap(o.y + dy), -pad, D + pad - o.d), w: o.w, d: o.d };
+    } else {
+      // corner resize keeps the opposite corner fixed
+      let { x, y, w, d } = o;
+      const right = o.x + o.w;
+      const bottom = o.y + o.d;
+      if (drag.mode.includes('w')) { x = clamp(snap(o.x + dx), right - 60, right - 3); w = right - x; } else if (drag.mode.includes('e')) { w = clamp(snap(o.w + dx), 3, 60); }
+      if (drag.mode.includes('n')) { y = clamp(snap(o.y + dy), bottom - 60, bottom - 3); d = bottom - y; } else if (drag.mode.includes('s')) { d = clamp(snap(o.d + dy), 3, 60); }
+      ghost = { x, y, w, d };
+    }
+    setDrag((current) => current && { ...current, ghost });
+  }
+
+  function endDrag() {
+    if (!drag) return;
+    const g = drag.ghost;
+    const o = drag.orig;
+    if (drag.mode === 'move') {
+      if (g.x !== o.x || g.y !== o.y) onMove(drag.id, g.x, g.y);
+    } else if (g.w !== o.w || g.d !== o.d || g.x !== o.x || g.y !== o.y) {
+      onResize(drag.id, g.x, g.y, g.w, g.d);
+    }
+    setDrag(null);
+  }
+
+  // Drag a wall EDGE perpendicular to itself — "move a wall" / make an L.
+  function startEdgeDrag(event, edge) {
+    event.stopPropagation();
+    event.preventDefault();
+    try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
+    const { fx, fy } = clientToFeet(event);
+    setEdgeDrag({ index: edge.index, edge, startFx: fx, startFy: fy, offset: 0 });
+    onSelect?.(`wall-${edge.key}`);
+  }
+  function onEdgeMove(event) {
+    if (!edgeDrag) return;
+    const { fx, fy } = clientToFeet(event);
+    // outward component of the pointer delta along the edge normal
+    const raw = (fx - edgeDrag.startFx) * edgeDrag.edge.nx + (fy - edgeDrag.startFy) * edgeDrag.edge.ny;
+    setEdgeDrag((current) => current && { ...current, offset: clamp(snap(raw), -48, 48) });
+  }
+  function endEdgeDrag() {
+    if (!edgeDrag) return;
+    if (Math.abs(edgeDrag.offset) >= 0.5 && onMoveEdge) onMoveEdge(edgeDrag.index, edgeDrag.offset);
+    setEdgeDrag(null);
+  }
+
+  // Drag an opening ALONG its wall — windows and doors find their real spot
+  // on the plan, the natural home for that decision.
+  function startOpeningDrag(event, index, opening) {
+    if (!onMoveOpening) return;
+    event.stopPropagation();
+    event.preventDefault();
+    try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
+    const { fx, fy } = clientToFeet(event);
+    const horizontal = opening.wall === 'north' || opening.wall === 'south';
+    const along0 = Number(horizontal ? opening.x : opening.y) || 0;
+    setOpeningDrag({ index, horizontal, start: horizontal ? fx : fy, along0, along: along0, width: Number(opening.widthFt) || 3 });
+    onSelect?.(`opening-${index}`);
+  }
+  function onOpeningMove(event) {
+    if (!openingDrag) return;
+    const { fx, fy } = clientToFeet(event);
+    const cur = openingDrag.horizontal ? fx : fy;
+    const maxAlong = Math.max(0, (openingDrag.horizontal ? W : D) - openingDrag.width);
+    setOpeningDrag((current) => current && { ...current, along: clamp(snap(current.along0 + (cur - current.start)), 0, maxAlong) });
+  }
+  function endOpeningDrag() {
+    if (!openingDrag) return;
+    if (Math.abs(openingDrag.along - openingDrag.along0) >= 0.25) onMoveOpening(openingDrag.index, openingDrag.along);
+    setOpeningDrag(null);
+  }
+
+  function startShellDrag(event) {
+    event.stopPropagation();
+    event.preventDefault();
+    try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
+    setShellGhost({ ghostW: W, ghostD: D });
+  }
+  function onShellMove(event) {
+    if (!shellGhost) return;
+    const { fx, fy } = clientToFeet(event);
+    setShellGhost((current) => current && { ...current, ghostW: clamp(snap(fx), 12, 96), ghostD: clamp(snap(fy), 12, 80) });
+  }
+  function endShellDrag() {
+    if (!shellGhost) return;
+    const w = shellGhost.ghostW ?? W;
+    const d = shellGhost.ghostD ?? D;
+    if ((w !== W || d !== D) && onResizeShell) onResizeShell(w, d);
+    setShellGhost(null);
+  }
+  const shellW = shellGhost?.ghostW ?? W;
+  const shellD = shellGhost?.ghostD ?? D;
+
+  const roomAt = (room) => (drag && drag.id === room.id ? { ...room, ...drag.ghost } : room);
+  const gridStep = W > 60 ? 10 : 5;
+  const gridLines = [];
+  for (let gx = 0; gx <= W + 0.01; gx += gridStep) gridLines.push(<line key={`gx${gx}`} x1={gx} y1={0} x2={gx} y2={D} stroke="var(--line)" strokeWidth={0.06} opacity={0.5} />);
+  for (let gy = 0; gy <= D + 0.01; gy += gridStep) gridLines.push(<line key={`gy${gy}`} x1={0} y1={gy} x2={W} y2={gy} stroke="var(--line)" strokeWidth={0.06} opacity={0.5} />);
+
+  const openings = (spec.openings || []).filter((o) => o.wall !== 'roof');
+
+  return (
+    <div className="planWrap">
+      <svg
+        ref={svgRef}
+        className="planSvg"
+        viewBox={`${-pad} ${-pad} ${W + pad * 2} ${D + pad * 2}`}
+        preserveAspectRatio="xMidYMid meet"
+        onPointerMove={(event) => { onPointerMove(event); onShellMove(event); onEdgeMove(event); onOpeningMove(event); }}
+        onPointerUp={(event) => { endDrag(); endShellDrag(event); endEdgeDrag(); endOpeningDrag(); }}
+        onPointerLeave={(event) => { endDrag(); endShellDrag(event); endEdgeDrag(); endOpeningDrag(); }}
+        onClick={() => {}}
+      >
+        {/* site around the house */}
+        <rect x={-pad} y={-pad} width={W + pad * 2} height={D + pad * 2} fill="var(--canvas)" />
+        {gridLines}
+        {/* shell / exterior wall — the footprint (editable in a building context) */}
+        {fpCustom ? (
+          <>
+            <polygon points={fpPoly.map(([px, py]) => `${px},${py}`).join(' ')} fill={buildingContext ? 'var(--active-line)' : 'none'} fillOpacity={buildingContext ? 0.08 : 0} stroke={buildingContext ? 'var(--active-line)' : 'var(--ink3)'} strokeWidth={buildingContext ? 0.5 : 1} />
+            {shellGhost && <rect x={0} y={0} width={shellW} height={shellD} fill="none" stroke="var(--active-line)" strokeWidth={0.2} strokeDasharray="1 0.6" pointerEvents="none" />}
+          </>
+        ) : (
+          <>
+            <rect x={0} y={0} width={shellW} height={shellD} fill={buildingContext ? 'var(--active-line)' : 'none'} fillOpacity={buildingContext ? 0.08 : 0} stroke={buildingContext ? 'var(--active-line)' : 'var(--ink3)'} strokeWidth={buildingContext ? 0.5 : 1} />
+            <rect x={0.7} y={0.7} width={Math.max(0, shellW - 1.4)} height={Math.max(0, shellD - 1.4)} fill="none" stroke="var(--line2)" strokeWidth={0.12} />
+          </>
+        )}
+        {buildingContext && onResizeShell && (
+          <>
+            <circle cx={shellW} cy={shellD} r={1.1} fill="var(--active-line)" stroke="#fff" strokeWidth={0.18} style={{ cursor: 'se-resize' }} onPointerDown={startShellDrag} />
+            {shellGhost && <text x={shellW / 2} y={shellD / 2} textAnchor="middle" fontSize={2.4} fill="var(--active-line)" fontWeight="700" pointerEvents="none">{shellW}′ × {shellD}′</text>}
+          </>
+        )}
+        {/* wall edges: grab-and-slide in a building context ("move a wall") */}
+        {buildingContext && onMoveEdge && fpEdgesList.map((edge) => {
+          const active = edgeDrag && edgeDrag.index === edge.index;
+          const gx = active ? edge.nx * edgeDrag.offset : 0;
+          const gy = active ? edge.ny * edgeDrag.offset : 0;
+          return (
+            <g key={edge.key}>
+              {active && (
+                <>
+                  <line x1={edge.x0 + gx} y1={edge.y0 + gy} x2={edge.x1 + gx} y2={edge.y1 + gy} stroke="var(--active-line)" strokeWidth={0.6} strokeDasharray="1 0.6" pointerEvents="none" />
+                  <line x1={edge.x0} y1={edge.y0} x2={edge.x0 + gx} y2={edge.y0 + gy} stroke="var(--active-line)" strokeWidth={0.15} strokeDasharray="0.5 0.5" pointerEvents="none" />
+                  <line x1={edge.x1} y1={edge.y1} x2={edge.x1 + gx} y2={edge.y1 + gy} stroke="var(--active-line)" strokeWidth={0.15} strokeDasharray="0.5 0.5" pointerEvents="none" />
+                  <text x={(edge.x0 + edge.x1) / 2 + gx + edge.nx * 2.2} y={(edge.y0 + edge.y1) / 2 + gy + edge.ny * 2.2} textAnchor="middle" fontSize={2.2} fill="var(--active-line)" fontWeight="700" pointerEvents="none">
+                    {edgeDrag.offset > 0 ? '+' : ''}{edgeDrag.offset}′
+                  </text>
+                </>
+              )}
+              <line
+                x1={edge.x0} y1={edge.y0} x2={edge.x1} y2={edge.y1}
+                stroke="var(--active-line)" strokeWidth={1.6} strokeOpacity={active ? 0.35 : 0.001}
+                style={{ cursor: edge.horizontal ? 'ns-resize' : 'ew-resize' }}
+                onPointerDown={(event) => startEdgeDrag(event, edge)}
+              />
+            </g>
+          );
+        })}
+        {/* the plan reflects the selection: a selected wall's edge glows */}
+        {(() => {
+          const em = /^wall-e(\d+)/.exec(String(selectedRoom || ''));
+          if (em) {
+            const edge = fpEdgesList[Number(em[1])];
+            if (!edge) return null;
+            return <line x1={edge.x0} y1={edge.y0} x2={edge.x1} y2={edge.y1} stroke="var(--active-line)" strokeWidth={0.7} opacity={0.9} pointerEvents="none" />;
+          }
+          const m = /^wall-(north|south|east|west)/.exec(String(selectedRoom || ''));
+          if (!m) return null;
+          const s = m[1];
+          const pts = s === 'north' ? [0, 0, W, 0] : s === 'south' ? [0, D, W, D] : s === 'east' ? [W, 0, W, D] : [0, 0, 0, D];
+          return <line x1={pts[0]} y1={pts[1]} x2={pts[2]} y2={pts[3]} stroke="var(--active-line)" strokeWidth={0.7} opacity={0.9} pointerEvents="none" />;
+        })()}
+        {/* rooms */}
+        {(spec.rooms || []).map((raw) => {
+          const onFloor = Number(raw.level || 1) === activeFloor;
+          if (!onFloor) {
+            // other floors: faint ghost for context, not interactive
+            return <rect key={raw.id} x={raw.x} y={raw.y} width={raw.w} height={raw.d} fill="var(--ink3)" fillOpacity={0.1} stroke="var(--line)" strokeWidth={0.1} strokeDasharray="0.5 0.5" pointerEvents="none" />;
+          }
+          const room = roomAt(raw);
+          const isSel = raw.id === selectedRoom;
+          return (
+            <g key={raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
+              <rect
+                x={room.x} y={room.y} width={room.w} height={room.d}
+                fill={PLAN_ZONE_HEX[raw.type] || '#86a0a8'}
+                fillOpacity={(isSel ? 0.9 : 0.66) * roomsDim}
+                stroke={isSel ? 'var(--active-line)' : 'var(--line)'}
+                strokeWidth={isSel ? 0.4 : 0.18}
+                pointerEvents={buildingContext || siteContext ? 'none' : undefined}
+                onPointerDown={(event) => startDrag(event, raw, 'move')}
+              />
+              <text x={room.x + room.w / 2} y={room.y + room.d / 2 - 0.3} textAnchor="middle" fontSize={Math.min(2, room.w / 5)} fill={planLabelInk(PLAN_ZONE_HEX[raw.type] || '#79a7a8')} fontWeight="600" pointerEvents="none">{raw.name}</text>
+              <text x={room.x + room.w / 2} y={room.y + room.d / 2 + 1.5} textAnchor="middle" fontSize={Math.min(1.6, room.w / 6)} fill="#2a302d" opacity={0.75} pointerEvents="none">{raw.w}×{raw.d}′</text>
+              {isSel && ['nw', 'ne', 'sw', 'se'].map((corner) => {
+                const cx = room.x + (corner.includes('e') ? room.w : 0);
+                const cy = room.y + (corner.includes('s') ? room.d : 0);
+                return <circle key={corner} cx={cx} cy={cy} r={0.9} fill="var(--active-line)" stroke="#fff" strokeWidth={0.15} style={{ cursor: `${corner}-resize` }} onPointerDown={(event) => startDrag(event, raw, corner)} />;
+              })}
+            </g>
+          );
+        })}
+        {/* placed elements (heater, tank, garden, coop, stairs…) — dashed to
+            read as objects/fixtures rather than rooms; drag + resize like rooms */}
+        {(spec.elements || []).filter((el) => (el.category === 'floor'
+          ? (activeFloor > 1 && Number(el.level || 1) === activeFloor)
+          : (Number(el.level || 1) === activeFloor || (/stair|ladder/i.test(el.name || '')
+            && Number(el.level || 1) === (activeFloor === 1 && basementInfo(spec.shell).present ? BASEMENT_LEVEL : activeFloor - 1))))).map((raw) => {
+          const el = roomAt(raw);
+          const isSel = raw.id === selectedRoom;
+          const w = Number(el.w) || 4;
+          const d = Number(el.d) || 4;
+          return (
+            <g key={raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
+              <rect
+                x={el.x} y={el.y} width={w} height={d}
+                fill={PLAN_ELEMENT_HEX[raw.category] || '#8a7768'}
+                fillOpacity={raw.category === 'partition' ? (isSel ? 1 : 0.95) : (isSel ? 0.92 : 0.7) * (buildingContext && raw.category !== 'floor' ? 0.25 : 1)}
+                stroke={isSel ? 'var(--active-line)' : '#5a5348'}
+                strokeWidth={isSel ? 0.4 : 0.22}
+                strokeDasharray={raw.category === 'partition' ? undefined : '0.8 0.5'}
+                pointerEvents={buildingContext && raw.category !== 'floor' ? 'none' : undefined}
+                onPointerDown={(event) => startDrag(event, raw, 'move')}
+              />
+              <text x={el.x + w / 2} y={el.y + d / 2 + 0.5} textAnchor="middle" fontSize={Math.min(1.5, Math.max(w, d) / 5)} fill={planLabelInk(PLAN_ELEMENT_HEX[raw.category] || '#8a7768')} fontWeight="600" pointerEvents="none">{raw.name}</text>
+              {isSel && ['nw', 'ne', 'sw', 'se'].map((corner) => {
+                const cx = el.x + (corner.includes('e') ? w : 0);
+                const cy = el.y + (corner.includes('s') ? d : 0);
+                return <circle key={corner} cx={cx} cy={cy} r={0.8} fill="var(--active-line)" stroke="#fff" strokeWidth={0.15} style={{ cursor: `${corner}-resize` }} onPointerDown={(event) => startDrag(event, raw, corner)} />;
+              })}
+            </g>
+          );
+        })}
+        {/* openings as white gaps on the walls — DRAGGABLE along their wall
+            (windows and doors find their spot on the plan). On a custom
+            footprint each gap draws on the opening's actual polygon edge. */}
+        {openings.map((o) => {
+          const index = (spec.openings || []).indexOf(o);
+          const wide = Number(o.widthFt) || 3;
+          const horizontal = o.wall === 'north' || o.wall === 'south';
+          const oEdge = fpCustom ? edgeForOpening(spec, o) : null;
+          const lineC = horizontal
+            ? (oEdge && oEdge.horizontal ? oEdge.y0 : (o.wall === 'north' ? 0 : D))
+            : (oEdge && !oEdge.horizontal ? oEdge.x0 : (o.wall === 'east' ? W : 0));
+          const dragging = openingDrag && openingDrag.index === index;
+          const along = dragging ? openingDrag.along : (Number(horizontal ? o.x : o.y) || 0);
+          const isSel = String(selectedRoom || '') === `opening-${index}`;
+          const stroke = dragging || isSel ? 'var(--active-line)' : '#e8e6dd';
+          const sw = dragging || isSel ? 1.5 : 1.1;
+          const x1 = horizontal ? along : lineC;
+          const y1 = horizontal ? lineC : along;
+          const x2 = horizontal ? along + wide : lineC;
+          const y2 = horizontal ? lineC : along + wide;
+          const draggable = Boolean(onMoveOpening) && activeFloor === 1 && !buildingContext && !siteContext;
+          return (
+            <g key={index}>
+              <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={stroke} strokeWidth={sw} />
+              {dragging && (
+                <text
+                  x={horizontal ? along + wide / 2 : lineC + (o.wall === 'east' ? -2.6 : 2.6)}
+                  y={horizontal ? lineC + (o.wall === 'north' ? 2.8 : -1.6) : along + wide / 2}
+                  textAnchor="middle" fontSize={2.2} fill="var(--active-line)" fontWeight="700" pointerEvents="none"
+                >{along}′</text>
+              )}
+              {draggable && (
+                <line
+                  x1={x1} y1={y1} x2={x2} y2={y2}
+                  stroke="var(--active-line)" strokeWidth={2.4} strokeOpacity={0.001}
+                  style={{ cursor: horizontal ? 'ew-resize' : 'ns-resize' }}
+                  onPointerDown={(event) => startOpeningDrag(event, index, o)}
+                />
+              )}
+            </g>
+          );
+        })}
+        {/* dimensions */}
+        <text x={W / 2} y={-pad + 1.6} textAnchor="middle" fontSize={2} fill="var(--ink2)">{W}′</text>
+        <text x={-pad + 1.6} y={D / 2} textAnchor="middle" fontSize={2} fill="var(--ink2)" transform={`rotate(-90 ${-pad + 1.6} ${D / 2})`}>{D}′</text>
+      </svg>
+      <div className="planNorth">▲ N</div>
+      <div className="planHint">{buildingContext && onMoveEdge ? `${PLAN_CONTEXT_LABEL[context] || 'Footprint'} · drag a wall edge to move that wall · corner dot resizes the whole plan` : PLAN_CONTEXT_LABEL[context] || `${floorLabel(spec, activeFloor)} plan · drag to move, drag corners to resize (½ ft snap)`}{floorCount(spec) > 1 ? ' · switch floors top-left' : ''}</div>
+    </div>
+  );
+}
+
+export function PlanMoveBoard({ spec, selectedRoom, selectedObject, onSelectRoom, onRename, onMoveStart, onMove, onMoveEnd, onResize, onResizeEnd, onQuickMove, onNudge, onAddRoom }) {
+  const boardRef = useRef(null);
+  const dragRef = useRef(null);
+  const shellW = spec.shell.widthFt;
+  const shellD = spec.shell.depthFt;
+
+  function pointToFeet(event) {
+    const rect = boardRef.current.getBoundingClientRect();
+    return {
+      x: clamp(((event.clientX - rect.left) / rect.width) * shellW, 0, shellW),
+      y: clamp(((event.clientY - rect.top) / rect.height) * shellD, 0, shellD)
+    };
+  }
+
+  function startDrag(event, room) {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const point = pointToFeet(event);
+    dragRef.current = {
+      id: room.id,
+      pointerId: event.pointerId,
+      offsetX: point.x - room.x,
+      offsetY: point.y - room.y
+    };
+    onSelectRoom(room.id);
+    onMoveStart();
+  }
+
+  function startResize(event, room) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      mode: 'resize',
+      id: room.id,
+      pointerId: event.pointerId
+    };
+    onSelectRoom(room.id);
+    onMoveStart();
+  }
+
+  function dragMove(event) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const room = spec.rooms.find((item) => item.id === drag.id);
+    if (!room) return;
+    const point = pointToFeet(event);
+    if (drag.mode === 'resize') {
+      const nextW = clamp(Math.round((point.x - room.x) * 2) / 2, 4, Math.max(4, shellW - room.x));
+      const nextD = clamp(Math.round((point.y - room.y) * 2) / 2, 4, Math.max(4, shellD - room.y));
+      dragRef.current = { ...drag, w: nextW, d: nextD };
+      onResize(room.id, nextW, nextD, false);
+      return;
+    }
+    const nextX = clamp(Math.round((point.x - drag.offsetX) * 2) / 2, 0, Math.max(0, shellW - room.w));
+    const nextY = clamp(Math.round((point.y - drag.offsetY) * 2) / 2, 0, Math.max(0, shellD - room.d));
+    dragRef.current = { ...drag, x: nextX, y: nextY };
+    onMove(room.id, nextX, nextY, false);
+  }
+
+  function endDrag(event) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const room = spec.rooms.find((item) => item.id === drag.id);
+    dragRef.current = null;
+    if (room && drag.mode === 'resize') {
+      onResizeEnd(room.id, drag.w ?? room.w, drag.d ?? room.d);
+      return;
+    }
+    if (room) onMoveEnd(room.id, drag.x ?? room.x, drag.y ?? room.y);
+  }
+
+  return (
+    <div className="planMove">
+      <div className="sectionHead"><Grid3X3 size={17} /> Plan Move Board</div>
+      <label className="planNameEdit">
+        <span>Name</span>
+        <input value={selectedObject?.name || ''} onChange={(event) => onRename(event.target.value)} />
+      </label>
+      <div className="planBoard" ref={boardRef} aria-label="Drag rooms on plan">
+        <span className="planNorth">N</span>
+        {spec.rooms.map((room) => (
+          <button
+            key={room.id}
+            className={room.id === selectedRoom ? `planRoom ${room.type} active` : `planRoom ${room.type}`}
+            style={{
+              left: `${(room.x / shellW) * 100}%`,
+              top: `${(room.y / shellD) * 100}%`,
+              width: `${(room.w / shellW) * 100}%`,
+              height: `${(room.d / shellD) * 100}%`
+            }}
+            onClick={() => onSelectRoom(room.id)}
+            onPointerDown={(event) => startDrag(event, room)}
+            onPointerMove={dragMove}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+          >
+            <span>{room.name}</span>
+            <i
+              className="resizeHandle"
+              aria-hidden="true"
+              onPointerDown={(event) => startResize(event, room)}
+              onPointerMove={dragMove}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+            />
+          </button>
+        ))}
+      </div>
+      <div className="moveControls">
+        <button className="secondary addPlanRoom" onClick={onAddRoom}><Plus size={14} /> Add Room</button>
+        {['NW', 'N', 'NE', 'W', 'Center', 'E', 'SW', 'S', 'SE'].map((target) => (
+          <button key={target} className="ghost" onClick={() => onQuickMove(target)}>{target}</button>
+        ))}
+      </div>
+      <div className="nudgeControls">
+        <button className="ghost" onClick={() => onNudge(0, -1)}>Nudge N</button>
+        <button className="ghost" onClick={() => onNudge(-1, 0)}>W</button>
+        <button className="ghost" onClick={() => onNudge(1, 0)}>E</button>
+        <button className="ghost" onClick={() => onNudge(0, 1)}>Nudge S</button>
+      </div>
+    </div>
+  );
+}
+
