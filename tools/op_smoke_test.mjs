@@ -251,6 +251,12 @@ r = apply(r.spec, [{ type: 'resize_wall_segment', field: 'e3', value: 10, positi
 r = apply(freshSpec(), [{ type: 'resize_wall_segment', wall: 'south', value: 10 }]);
 ok(r.warnings.some((warning) => /custom outline|Split into 3/i.test(warning)), 'segment resize on a plain rectangle explains itself');
 
+// --- exterior cladding ----------------------------------------------------------
+r = apply(freshSpec(), [{ type: 'set_wall_side', wall: 'south', field: 'cladding', value: 'lap' }]);
+ok(r.spec.walls.south.cladding === 'lap' && resolveWallSide(r.spec, 'south').cladding === 'lap', 'set_wall_side cladding round-trips');
+r = apply(freshSpec(), [{ type: 'set_wall_side', wall: 'south', field: 'cladding', value: 'vinyl-nonsense' }]);
+ok(r.spec.walls.south.cladding === 'render', 'unknown cladding falls back to render');
+
 // --- flat shed flags -----------------------------------------------------------
 r = apply(freshSpec(), [{ type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: 10, northWallHeightFt: 10 }]);
 ok(r.issues.some((issue) => /flat/i.test(issue.title) && /drain/i.test(issue.title)), 'flat shed roof flags for drainage');

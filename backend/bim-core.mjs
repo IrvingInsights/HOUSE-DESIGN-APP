@@ -87,6 +87,21 @@ export const WALL_ASSEMBLIES = {
   'glazed':           { key: 'glazed',           label: 'Glazed (glass wall)', thicknessFt: 0.35, color: 0xaecfd8, rValue: 2,  finish: 'timber-framed glazing' }
 };
 
+// Exterior cladding — the weather face over the wall assembly. 'render' means
+// the assembly's own face (lime render / plaster, already in the wall price);
+// everything else is a rainscreen layer priced per face sf and drawn with its
+// own material in the model.
+export const CLADDING_TYPES = {
+  render:      { key: 'render',      label: 'Lime render / plaster (assembly face)', costPsf: 0,   carbonPsf: 0,  color: 0,        texture: 'plaster' },
+  lap:         { key: 'lap',         label: 'Wood lap siding',                       costPsf: 7,   carbonPsf: 2,  color: 0x9a7a52, texture: 'wood' },
+  boardbatten: { key: 'boardbatten', label: 'Board & batten',                        costPsf: 6.5, carbonPsf: 2,  color: 0x8a6f4e, texture: 'wood' },
+  shingle:     { key: 'shingle',     label: 'Cedar shingles',                        costPsf: 9,   carbonPsf: 2,  color: 0x8d7355, texture: 'wood' },
+  metal:       { key: 'metal',       label: 'Metal panel / standing seam',           costPsf: 8,   carbonPsf: 6,  color: 0x9aa0a0, texture: 'metal' },
+  stucco:      { key: 'stucco',      label: 'Lime stucco on mesh',                   costPsf: 5,   carbonPsf: 3,  color: 0xd8d2c0, texture: 'plaster' },
+  stone:       { key: 'stone',       label: 'Stone veneer',                          costPsf: 14,  carbonPsf: 10, color: 0x8f8b80, texture: 'concrete' },
+  brick:       { key: 'brick',       label: 'Brick veneer',                          costPsf: 12,  carbonPsf: 9,  color: 0x9c5f4a, texture: 'concrete' }
+};
+
 // Interior partition walls — thin walls BETWEEN rooms, placed as elements
 // (category 'partition'). Distinct from the envelope: no weather duty, so
 // they price by face area of the chosen construction.
@@ -142,6 +157,7 @@ export function resolveWallSide(spec, side, level = 1) {
     // eave at sunGlazingTiltDeg from vertical, carried by the frame).
     sunGlazing: Boolean(w.sunGlazing),
     sunGlazingTiltDeg: Number(w.sunGlazingTiltDeg ?? 30),
+    cladding: CLADDING_TYPES[w.cladding] ? w.cladding : 'render',
     omitted: Boolean(w.omitted) || omittedSet.has(side)
   };
   if (level <= 1) return ground;
@@ -158,7 +174,8 @@ export function resolveWallSide(spec, side, level = 1) {
     assembly: upperAssembly,
     thicknessFt: Number(u.thicknessFt ?? (u.assembly ? upperAssembly.thicknessFt : ground.thicknessFt)),
     interiorFinish: u.interiorFinish || ground.interiorFinish,
-    exteriorFinish: u.exteriorFinish || ground.exteriorFinish
+    exteriorFinish: u.exteriorFinish || ground.exteriorFinish,
+    cladding: CLADDING_TYPES[u.cladding] ? u.cladding : ground.cladding
   };
 }
 
@@ -1050,6 +1067,7 @@ export function applyBimOperations(currentSpec, plan) {
         next.wallsUpper[side] ||= {};
         if (field === 'assembly') next.wallsUpper[side].assembly = WALL_ASSEMBLIES[operation.value] ? operation.value : 'framed';
         else if (field === 'thicknessFt') next.wallsUpper[side].thicknessFt = clamp(Number(operation.value), 0.2, 3.5);
+        else if (field === 'cladding') next.wallsUpper[side].cladding = CLADDING_TYPES[operation.value] ? operation.value : 'render';
         else if (field === 'interiorFinish' || field === 'exteriorFinish') next.wallsUpper[side][field] = String(operation.value || '');
         actions.push(`Set upper-storey ${side} wall ${field} to ${operation.value}.`);
         continue;
@@ -1070,6 +1088,9 @@ export function applyBimOperations(currentSpec, plan) {
         next.walls[side].sunGlazing = operation.value === true || String(operation.value) === 'true' || operation.value === 1 || operation.value === '1';
       } else if (field === 'sunGlazingTiltDeg') {
         next.walls[side].sunGlazingTiltDeg = clamp(Number(operation.value) || 0, 0, 45);
+      } else if (field === 'cladding') {
+        next.walls[side].cladding = CLADDING_TYPES[operation.value] ? operation.value : 'render';
+        next.walls[side].exteriorFinish = CLADDING_TYPES[next.walls[side].cladding].label;
       } else if (field === 'assembly') {
         next.walls[side].assembly = WALL_ASSEMBLIES[operation.value] ? operation.value : 'framed';
       } else if (field === 'thicknessFt') {

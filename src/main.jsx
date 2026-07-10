@@ -7,7 +7,7 @@ import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES, resolveInsulation,
   footprintPolygon, footprintEdges, hasCustomFootprint, polygonArea, polygonPerimeter, expandFootprint,
   decomposeFootprint, subtractRect, subtractRectFromFootprint, rectInFootprint, pointInFootprint, edgeForOpening,
-  gradeElevationAt, maxFoundationExposureFt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES
+  gradeElevationAt, maxFoundationExposureFt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES
 } from '../backend/bim-core.mjs';
 import {
   AlertTriangle,
@@ -1806,6 +1806,7 @@ function resolveWallSide(spec, side, level = 1) {
     // eave at sunGlazingTiltDeg from vertical, carried by the frame).
     sunGlazing: Boolean(w.sunGlazing),
     sunGlazingTiltDeg: Number(w.sunGlazingTiltDeg ?? 30),
+    cladding: CLADDING_TYPES[w.cladding] ? w.cladding : 'render',
     omitted: Boolean(w.omitted) || omittedSet.has(side)
   };
   if (level <= 1) return ground;
@@ -1821,7 +1822,8 @@ function resolveWallSide(spec, side, level = 1) {
     assembly: upperAssembly,
     thicknessFt: Number(u.thicknessFt ?? (u.assembly ? upperAssembly.thicknessFt : ground.thicknessFt)),
     interiorFinish: u.interiorFinish || ground.interiorFinish,
-    exteriorFinish: u.exteriorFinish || ground.exteriorFinish
+    exteriorFinish: u.exteriorFinish || ground.exteriorFinish,
+    cladding: CLADDING_TYPES[u.cladding] ? u.cladding : ground.cladding
   };
 }
 
@@ -3041,7 +3043,17 @@ function deriveDesign(spec, wallSections) {
     const pType = PARTITION_TYPES[element.construction] || PARTITION_TYPES.framed;
     return sum + Math.max(Number(element.w), Number(element.d)) * Math.max(2, Number(element.h) || 8) * pType.carbonPsf;
   }, 0);
-  const wallsCost = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCostPsf[wall.assemblyKey] ?? 16), 0) + partitionCost;
+  // Cladding is a layer over the assembly, priced per face sf ('render' = 0,
+  // the assembly's own plaster face is already in the wall rate).
+  const claddingCost = wallSections.reduce((sum, wall) => {
+    const clad = CLADDING_TYPES[resolveWallSide(spec, wall.side, wall.level || 1).cladding] || CLADDING_TYPES.render;
+    return sum + wallFaceArea(wall) * clad.costPsf;
+  }, 0);
+  const claddingCarbon = wallSections.reduce((sum, wall) => {
+    const clad = CLADDING_TYPES[resolveWallSide(spec, wall.side, wall.level || 1).cladding] || CLADDING_TYPES.render;
+    return sum + wallFaceArea(wall) * clad.carbonPsf;
+  }, 0);
+  const wallsCost = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCostPsf[wall.assemblyKey] ?? 16), 0) + partitionCost + claddingCost;
   const wallR = opaqueWallArea
     ? wallSections.reduce((sum, wall) => sum + (wall.assemblyKey === 'glazed' ? 0 : wallFaceArea(wall) * (WALL_ASSEMBLIES[wall.assemblyKey]?.rValue ?? 20)), 0) / opaqueWallArea
     : 20;
@@ -3235,7 +3247,7 @@ function deriveDesign(spec, wallSections) {
   // Embodied carbon (kg CO2e, directional/comparative — add-on coefficients).
   const foundationCarbonPsf = { rubble: 10, stemwall: 18, slab: 25 };
   const wallCarbonPsf = { 'straw-bale': 6, 'rammed-earth': 20, cob: 8, 'hemp-lime': 4, cordwood: 8, 'light-straw-clay': 7, framed: 8, glazed: 15 };
-  const wallCarbonRaw = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0) + partitionCarbon;
+  const wallCarbonRaw = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0) + partitionCarbon + claddingCarbon;
   const wallCarbon = wallCarbonRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.carbon : 1);
   const frameCarbon = frameCarbonRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.carbon : 1);
   const roofCarbonRaw = roofArea * (12 + INSULATION_TYPES[roofInsulKey].carbonPsf);
@@ -4630,10 +4642,17 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       };
       // X-ray AND exploded views both need see-through walls — exploded pulls
       // the shell apart, translucency lets the interior read through it.
-      // A glazed assembly renders as glass — translucent, smooth, no plaster grain.
-      const wallMatOf = (resolved) => resolved.assemblyKey === 'glazed'
-        ? new THREE.MeshStandardMaterial({ color: 0xcfe5ea, roughness: 0.12, metalness: 0.05, transparent: true, opacity: layers.xray ? 0.22 : 0.38 })
-        : new THREE.MeshStandardMaterial({ color: resolved.assembly.color, roughness: 0.88, map: grainTexture('plaster'), transparent: layers.xray || layers.explode, opacity: layers.xray ? 0.34 : layers.explode ? 0.55 : 1 });
+      // A glazed assembly renders as glass; a chosen CLADDING wears its own
+      // material (wood lap, shingle, metal, stone…); 'render' shows the
+      // assembly's plaster face.
+      const wallMatOf = (resolved) => {
+        if (resolved.assemblyKey === 'glazed') return new THREE.MeshStandardMaterial({ color: 0xcfe5ea, roughness: 0.12, metalness: 0.05, transparent: true, opacity: layers.xray ? 0.22 : 0.38 });
+        const clad = CLADDING_TYPES[resolved.cladding];
+        if (clad && resolved.cladding !== 'render') {
+          return new THREE.MeshStandardMaterial({ color: clad.color, roughness: clad.texture === 'metal' ? 0.45 : 0.85, metalness: clad.texture === 'metal' ? 0.25 : 0, map: grainTexture(clad.texture), transparent: layers.xray || layers.explode, opacity: layers.xray ? 0.34 : layers.explode ? 0.55 : 1 });
+        }
+        return new THREE.MeshStandardMaterial({ color: resolved.assembly.color, roughness: 0.88, map: grainTexture('plaster'), transparent: layers.xray || layers.explode, opacity: layers.xray ? 0.34 : layers.explode ? 0.55 : 1 });
+      };
       const wallMatFor = (side) => wallMatOf(wallResolved[side]);
       const tN = wallResolved.north.thicknessFt;
       const tS = wallResolved.south.thicknessFt;
@@ -7088,6 +7107,14 @@ function App() {
     });
   }
 
+  function setAllWallsCladding(value) {
+    void applyBackendOperations({
+      operations: WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, field: 'cladding', value })),
+      promptText: `Clad all walls in ${CLADDING_TYPES[value]?.label || value}`,
+      logPrefix: 'Wall edit'
+    });
+  }
+
   function updateSite(field, value) {
     void applyBackendOperations({
       operations: [{ type: 'set_site', field, value: String(value) }],
@@ -7374,6 +7401,7 @@ function App() {
       else if (field === 'w') updateShell(wall.side === 'north' || wall.side === 'south' ? 'widthFt' : 'depthFt', value);
       else if (field === 'thickness') updateWallSide(wall.side, 'thicknessFt', value, lvl);
       else if (field === 'assembly') updateWallSide(wall.side, 'assembly', value, lvl);
+      else if (field === 'cladding') updateWallSide(wall.side, 'cladding', value, lvl);
       else if (field === 'sunGlazing') updateWallSide(wall.side, 'sunGlazing', value, lvl);
       else if (field === 'sunGlazingTiltDeg') updateWallSide(wall.side, 'sunGlazingTiltDeg', value, lvl);
       else if (field === 'interiorFinish') updateWallSide(wall.side, 'interiorFinish', value, lvl);
@@ -8404,6 +8432,18 @@ function App() {
                       ))}
                     </select>
                   </label>
+                  {(() => {
+                    const clads = WALL_SIDES.map((side) => resolveWallSide(spec, side).cladding);
+                    const cladsMixed = new Set(clads).size > 1;
+                    return (
+                      <label>Cladding (all sides)
+                        <select value={cladsMixed ? '' : clads[0]} onChange={(event) => setAllWallsCladding(event.target.value)}>
+                          {cladsMixed && <option value="" disabled>Mixed — tap a wall to set per side</option>}
+                          {Object.entries(CLADDING_TYPES).map(([key, c]) => <option key={key} value={key}>{c.label}{c.costPsf ? ` (+$${c.costPsf}/sf)` : ''}</option>)}
+                        </select>
+                      </label>
+                    );
+                  })()}
                   {heightsMixed ? (
                     <label>Height
                       <div className="mixedField">
@@ -9601,7 +9641,11 @@ function App() {
                     </select>
                   </label>}
                   {selectedIsWall && <label>Interior finish<input type="text" value={selected?.interiorFinish || ''} onChange={(event) => updateSelectedRoom('interiorFinish', event.target.value)} /></label>}
-                  {selectedIsWall && <label>Exterior finish<input type="text" value={selected?.exteriorFinish || ''} onChange={(event) => updateSelectedRoom('exteriorFinish', event.target.value)} /></label>}
+                  {selectedIsWall && <label>Exterior cladding
+                    <select value={resolveWallSide(spec, selected.side, selected.level || 1).cladding} onChange={(event) => updateSelectedRoom('cladding', event.target.value)}>
+                      {Object.entries(CLADDING_TYPES).map(([key, c]) => <option key={key} value={key}>{c.label}{c.costPsf ? ` (+$${c.costPsf}/sf)` : ''}</option>)}
+                    </select>
+                  </label>}
                   {selectedIsWall && (selected?.level || 1) === 1 && (
                     <label>Move in/out (ft)
                       <span className="wallMoveRow">
