@@ -638,6 +638,12 @@ function detectIssues(spec) {
   // valuable when chosen, noise when modeling a conventional house as-built.
   const naturalApproach = (spec.shell?.designApproach || 'natural') !== 'standard';
   if (conditionedArea > shellArea * 1.08) issues.push({ severity: 'critical', title: 'Room program exceeds shell area', owner: 'Architect', fix: 'Reduce room footprints or enlarge the shell before issuing drawings.' });
+  if (!custom) {
+    const outdoorish = new Set(['outdoor', 'site', 'garden', 'animal', 'paddock', 'run', 'landscape', 'homestead']);
+    const strayCount = spec.rooms.filter((room) => Number(room.level || 1) === 1 && !outdoorish.has(room.type)
+      && (room.x < -0.5 || room.y < -0.5 || room.x + room.w > spec.shell.widthFt + 0.5 || room.y + room.d > spec.shell.depthFt + 0.5)).length;
+    if (strayCount) issues.push({ severity: 'critical', title: `${strayCount} ground-floor room${strayCount === 1 ? '' : 's'} sit${strayCount === 1 ? 's' : ''} outside the walls`, owner: 'Architect', fix: 'Grow the shell to enclose the whole ground floor; an upper storey can still cover just the core via its extent plate.' });
+  }
   if (!spec.rooms.some((room) => room.type === 'wet')) issues.push({ severity: 'critical', title: 'No wet core defined', owner: 'Engineer', fix: 'Add a bathroom/mechanical wet core and align plumbing walls.' });
   if (naturalApproach && !spec.openings.some((item) => item.type === 'door' && item.wall === 'south')) issues.push({ severity: 'warning', title: 'Primary entry lacks clear solar-side approach', owner: 'Designer', fix: 'Add or move the main entry to a legible approach with weather protection.' });
   if (naturalApproach && !spec.openings.some((item) => item.type === 'window' && item.wall === 'south')) issues.push({ severity: 'warning', title: 'Insufficient south-facing daylight strategy', owner: 'Permaculture', fix: 'Add balanced south glazing with summer shading and winter solar gain.' });

@@ -752,6 +752,7 @@ const ROOM_PRESETS = [
 // Button label for each one-click flag fix (keyed by issue.fixId). Absence of a
 // fixId means the flag needs human judgment and shows prose guidance only.
 const FIX_LABELS = {
+  'enclose-rooms': 'Grow the walls to enclose them',
   'add-wet-core': 'Add a bathroom',
   'add-mudroom': 'Add a mudroom',
   'add-south-entry': 'Add a south door',
@@ -2739,6 +2740,15 @@ function detectIssues(spec) {
       && !rectInFootprint(fpPolyCheck, { x: room.x, y: room.y, w: room.w, d: room.d }));
     if (strayRoom) {
       issues.push({ severity: 'warning', title: `${strayRoom.name} sits outside the building outline`, owner: 'Architect', system: 'rooms', fix: 'The footprint is not a plain rectangle — drag the room fully inside the outline in the Plan view, or move a wall edge out to enclose it.' });
+    }
+  } else {
+    // A rectangle shell that only covers PART of the ground floor: indoor
+    // rooms left standing outside the walls (a chat/trace often sets the
+    // shell to the two-storey core and strands the single-storey spaces).
+    const strays = spec.rooms.filter((room) => Number(room.level || 1) === 1 && !OUTDOOR_SPACE_TYPES.has(room.type)
+      && (room.x < -0.5 || room.y < -0.5 || room.x + room.w > spec.shell.widthFt + 0.5 || room.y + room.d > spec.shell.depthFt + 0.5));
+    if (strays.length) {
+      issues.push({ severity: 'critical', title: strays.length === 1 ? `${strays[0].name} sits outside the walls` : `${strays.length} ground-floor rooms sit outside the walls`, owner: 'Architect', system: 'shell', fixId: 'enclose-rooms', fix: 'The shell only covers part of the ground floor. Grow the walls to take these rooms in — an upper storey can still cover just the core: resize its Storey extent (2nd-floor group in the selector, or drag it on the 2nd-floor Plan), and the roof steps down over the rest.' });
     }
   }
 
@@ -7577,6 +7587,27 @@ function App() {
   function fixIssue(issue) {
     const preset = (name) => ROOM_PRESETS.find((item) => item.name === name);
     switch (issue.fixId) {
+      case 'enclose-rooms': {
+        // Grow the shell to take in every indoor ground room left outside the
+        // walls; rooms on the negative side slide in first. ONE dispatch.
+        const strays = spec.rooms.filter((room) => Number(room.level || 1) === 1 && !OUTDOOR_SPACE_TYPES.has(room.type)
+          && (room.x < -0.5 || room.y < -0.5 || room.x + room.w > spec.shell.widthFt + 0.5 || room.y + room.d > spec.shell.depthFt + 0.5));
+        if (!strays.length) return;
+        const moveOps = strays.filter((room) => room.x < 0 || room.y < 0)
+          .map((room) => ({ type: 'move_object', targetId: room.id, name: room.name, x: Math.max(0.5, room.x), y: Math.max(0.5, room.y) }));
+        const needW = Math.ceil(Math.max(Number(spec.shell.widthFt), ...strays.map((room) => Math.max(0.5, room.x) + room.w + 1)));
+        const needD = Math.ceil(Math.max(Number(spec.shell.depthFt), ...strays.map((room) => Math.max(0.5, room.y) + room.d + 1)));
+        return void applyBackendOperations({
+          operations: [
+            ...moveOps,
+            { type: 'set_shell', field: 'widthFt', value: String(clamp(needW, 18, 120)) },
+            { type: 'set_shell', field: 'depthFt', value: String(clamp(needD, 18, 120)) }
+          ],
+          promptText: 'Enclose the outside rooms',
+          logPrefix: 'Fix',
+          chatText: `Grew the walls to ${clamp(needW, 18, 120)} × ${clamp(needD, 18, 120)} ft so every ground room is inside. The upper storey still covers only its Storey extent — resize or drag that on the 2nd-floor Plan tab, and the roof steps down over the single-storey part.`
+        });
+      }
       case 'add-wet-core':
         return void addRoomPreset(preset('Bathroom'));
       case 'add-mudroom':

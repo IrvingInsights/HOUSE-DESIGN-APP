@@ -251,6 +251,12 @@ r = apply(r.spec, [{ type: 'resize_wall_segment', field: 'e3', value: 10, positi
 r = apply(freshSpec(), [{ type: 'resize_wall_segment', wall: 'south', value: 10 }]);
 ok(r.warnings.some((warning) => /custom outline|Split into 3/i.test(warning)), 'segment resize on a plain rectangle explains itself');
 
+// --- shell must enclose the ground floor ---------------------------------------
+r = apply(freshSpec(), [{ type: 'add_room', name: 'Carport', category: 'service', x: 40, y: 4, w: 12, d: 20 }]);
+ok(r.issues.some((issue) => /outside the walls/i.test(issue.title)), 'indoor room outside the shell flags');
+r = apply(freshSpec(), [{ type: 'add_room', name: 'Kitchen Garden', category: 'garden', x: 40, y: 4, w: 12, d: 20 }]);
+ok(!r.issues.some((issue) => /outside the walls/i.test(issue.title)), 'outdoor spaces outside the shell stay quiet');
+
 // --- vocab sanity: shared tables exist for every consumer ---------------------
 ok(Object.keys(WALL_ASSEMBLIES).length === 8, 'WALL_ASSEMBLIES table');
 ok(WALL_ASSEMBLIES.glazed && WALL_ASSEMBLIES.glazed.rValue === 2, 'glazed glass-wall assembly present');
