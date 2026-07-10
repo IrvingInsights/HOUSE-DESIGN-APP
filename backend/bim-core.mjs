@@ -955,10 +955,12 @@ export function applyBimOperations(currentSpec, plan) {
         if (v > 0) next.shell.basementHeightFt = clamp(v, 6, 12);
         else {
           delete next.shell.basementHeightFt;
+          delete next.shell.basementHeated;
           next.rooms = next.rooms.map((room) => (Number(room.level || 1) === BASEMENT_LEVEL ? { ...room, level: 1 } : room));
           next.elements = (next.elements || []).map((el) => (Number(el.level || 1) === BASEMENT_LEVEL ? { ...el, level: 1, z: 0 } : el));
         }
       }
+      else if (field === 'basementHeated') next.shell.basementHeated = String(operation.value) === 'true' || operation.value === true;
       else if (field === 'overhangFt') {
         // Global overhang = one value all around: clear per-side overrides.
         next.shell.overhangFt = clamp(numeric, 0, 12);
@@ -1200,6 +1202,13 @@ export function applyBimOperations(currentSpec, plan) {
         windowQuality: ['double', 'triple']
       };
       if (field === 'tankGal') next.utilities.tankGal = clamp(Number(operation.value) || 0, 0, 50000);
+      else if (field === 'foundationType' && value === 'basement') {
+        // "Basement" as a foundation choice IS the basement storey — alias to
+        // the real control so the planner's natural phrasing just works.
+        next.shell.basementHeightFt = basementInfo(next.shell).present ? next.shell.basementHeightFt : 8;
+        actions.push('Set foundation to basement (a full storey below grade).');
+        continue;
+      }
       else if (field === 'stemwallHeightFt') next.utilities.stemwallHeightFt = clamp(Number(operation.value) || 1.5, 0.5, 6);
       else if (field === 'wellSepticFt') next.utilities.wellSepticFt = clamp(Number(operation.value) || 0, 0, 2000);
       else if (field === 'roofRValue') next.utilities.roofRValue = clamp(Number(operation.value) || 38, 10, 100);

@@ -3958,8 +3958,9 @@ button.danger:hover,
 .welcomeFile { grid-column: 1 / -1; cursor: pointer; }
 .welcomeFile input { display: none; }
 
-/* Opening card: wide, two columns, everything visible at once —
-   left = what this is / how it works, right = the ways in. */
+/* Opening card: wide, everything visible at once —
+   col 1 = what this is / how it works, col 2 = start a design,
+   col 3 (when there is anything to resume) = continue / previous designs. */
 .welcomeCard {
   width: min(1000px, calc(100vw - 48px));
   max-height: calc(100vh - 40px);
@@ -3969,11 +3970,23 @@ button.danger:hover,
   gap: 8px 34px;
   align-items: start;
 }
+.welcomeCard.threeCol {
+  width: min(1240px, calc(100vw - 48px));
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr) minmax(0, 0.85fr);
+  gap: 8px 30px;
+}
 .welcomeSide { min-width: 0; }
 .welcomeActions { min-width: 0; }
+.welcomeResume { min-width: 0; }
 .welcomeActions .welcomeDivider:first-child { margin-top: 4px; }
+.welcomeResume .welcomeDivider:first-child { margin-top: 4px; }
+@media (max-width: 1100px) {
+  .welcomeCard.threeCol { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .welcomeCard.threeCol .welcomeSide { grid-column: 1 / -1; }
+}
 @media (max-width: 900px) {
-  .welcomeCard { grid-template-columns: 1fr; max-height: calc(100vh - 32px); }
+  .welcomeCard, .welcomeCard.threeCol { grid-template-columns: 1fr; max-height: calc(100vh - 32px); }
+  .welcomeCard.threeCol .welcomeSide { grid-column: auto; }
 }
 
 /* Start-choice cards carry their own material colors: earth-green for empty

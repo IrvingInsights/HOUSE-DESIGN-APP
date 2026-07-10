@@ -345,7 +345,16 @@ export function traceLooksIncomplete(plan, sourceSpec) {
   // material warning like "chimney not fully modeled".
   const deferral = /(room|layout|opening|window|door|space|floor plan)s?[^.]{0,60}(future refinement|refined later|to be (?:added|placed|detailed|refined|modeled|drawn)|not (?:yet )?(?:fully )?(?:placed|added|detailed|drawn)|placeholder|later)/i;
   const deferred = deferral.test(text);
-  return { incomplete: deferred || addOpenings === 0 || totalRooms < 2, addRooms, addOpenings, totalRooms, deferred };
+  // A multi-storey (or basement) plan ALWAYS draws a stair — a takeoff without
+  // one is missing something the drawing shows.
+  const impliesUpper = ops.some((o) => o.type === 'set_shell' && o.field === 'storeys' && Number(o.value) > 1)
+    || Number(sourceSpec.shell?.storeys || 1) > 1
+    || ops.some((o) => o.type === 'set_shell' && o.field === 'basementHeightFt' && Number(o.value) > 0)
+    || Number(sourceSpec.shell?.basementHeightFt || 0) > 0;
+  const hasStair = ops.some((o) => o.type === 'add_element' && /stair/i.test(o.name || ''))
+    || (sourceSpec.elements || []).some((el) => /stair/i.test(el.name || ''));
+  const noStair = impliesUpper && !hasStair;
+  return { incomplete: deferred || addOpenings === 0 || totalRooms < 2 || noStair, addRooms, addOpenings, totalRooms, deferred, noStair };
 }
 
 // Rewrite a summary that still brags about deferral so the user never sees the
@@ -378,9 +387,11 @@ async function repairTraceIfNeeded(plan, { attachmentParts, sourceSpec }) {
 Rooms already in the model: ${already.length ? already.join(', ') : '(none)'}.
 Openings placed so far: ${check.addOpenings}.
 Emit ONLY the operations still MISSING to complete the takeoff:
-- one add_room for EVERY room on the floor plan(s) not already listed above (do not repeat those names); real name + x/y/w/d in feet, origin NW corner, x east, y south. Upper-floor rooms get level 2.
+- one add_room for EVERY room on the floor plan(s) not already listed above (do not repeat those names); real name + x/y/w/d in feet, origin NW corner, x east, y south. Upper-floor rooms get level 2, basement rooms level -1.
 - one add_opening for EVERY exterior window and door (wall north/south/east/west, openingType, widthFt, positionFt).
-- if the elevations or sections show an upper floor (gable windows, a second row of windows, two levels in section), set_shell field:'storeys' value:'2'.
+- if the elevations or sections show an upper floor (gable windows, a second row of windows, two levels in section), set_shell field:'storeys' value:'2'. A basement in the section = set_shell field:'basementHeightFt'.
+- if the plan has two storeys or a basement and no stair exists yet, add_element named 'Stairs' (category 'structure') at its drawn plan position and size, level = the floor it climbs FROM (1 ground, -1 basement).
+- interior walls drawn between rooms that are still missing: add_element category:'partition' per wall run, widthFt/positionFt for its doorway.
 Do NOT restate the shell or footprint unless the earlier value is wrong. NEVER defer, summarize, or write "future refinement" — emit the operations. Report final counts in summary.`
   };
 
@@ -408,8 +419,8 @@ export function mergeTracePlans(plan, extra, sourceSpec, alreadyNames) {
       return true;
     }
     if (op.type === 'add_opening' || op.type === 'add_element') return true;
-    // storeys is the only shell field the repair may set.
-    if (op.type === 'set_shell' && op.field === 'storeys') return true;
+    // storeys and the basement are the only shell fields the repair may set.
+    if (op.type === 'set_shell' && (op.field === 'storeys' || op.field === 'basementHeightFt')) return true;
     return false;
   });
 
@@ -471,6 +482,9 @@ A DRAWING OR DOCUMENT IS ATTACHED. Your job is a COMPLETE takeoff, not a summary
 2b. STOREYS: count the above-grade floors from the elevations and sections. A story-and-a-half or two-storey house (windows up in the gable, a second row of windows, two occupied levels in the section) gets set_shell field:'storeys' value:'2', with the upper rooms on level 2. A basement is below grade — do NOT count it as a storey.
 3. ONE add_opening PER WINDOW AND DOOR with wall (north/south/east/west), openingType, widthFt, and positionFt along that wall. A real floor plan ALWAYS has at least a front door plus several windows — never return zero openings.
 4. Porches, decks, garages, and outbuildings: add_element with a fitting category and real dimensions. A COVERED porch/deck/carport also gets roofType 'shed' or 'gable' on the add_element so its canopy is drawn.
+5. STAIRS: a plan with two storeys or a basement ALWAYS shows a stair — ONE add_element named 'Stairs' (category 'structure') at its real plan position and size, level = the floor it climbs FROM (1 for ground up, -1 for basement up). Never skip it.
+6. INTERIOR WALLS: the wall lines between rooms are drawn on the plan — add_element category:'partition' for each interior wall RUN as drawn (x/y plus the run as w x d; thickness comes from construction). Where the plan shows a doorway between two rooms, put it on the partition with widthFt (door width) and positionFt (along the run) — interior doors belong to partitions, add_opening is ONLY for exterior walls. An open-concept plan legitimately has few partitions.
+7. A chimney or fireplace symbol: add_element category:'chimney' at its plan position (its flue is drawn through the roof automatically).
 RULES: If the plan shows 11 rooms, emit 11 add_room operations. NEVER write "noted for future refinement" or defer anything — emit the operation instead. BASEMENTS ARE MODELED: a below-grade storey = set_shell field:'basementHeightFt' value:'8' (read the real height from the section if drawn) plus ONE add_room with level:-1 per basement room. A basement still does NOT count toward field:'storeys' (that's above-grade only). In the summary, report counts: "Traced: shell WxD, N rooms, M openings." If a page is illegible, say which page in warnings and keep going with the rest.
 MODEL WHAT THE DRAWING SHOWS — many documents are EXISTING conventional houses being modified, not natural builds. A framed house gets framed walls (set_wall_side field=assembly value=framed, or set_assembly), a slab stays a slab (set_utility foundationType), standard storeys stay standard, AND emit set_shell field:'designApproach' value:'standard' so the app's natural-building checks stand down for this design. Do NOT convert the building to natural systems unless the user asks. Mine EVERY page for usable data: dimension strings, room and door/window schedules, elevation heights (wall heights, storeys), roof type and pitch, site plans (lot, setbacks, orientation -> set_site), and existing-condition notes (put constraints the model can't express into warnings/assumptions so nothing is lost).
 ` : '';
@@ -509,7 +523,7 @@ Stacking: for localized requests like "a loft above the kitchen" or "a tower abo
 For wall system changes, use set_assembly. Per-side wall systems use set_wall_side with wall and field 'assembly'; assembly values include straw-bale, hemp-lime, cob, rammed-earth, cordwood, light-straw-clay, framed, and glazed — 'glazed' is a GLASS WALL (a whole face of glazing, e.g. an attached greenhouse or sunspace south face), not windows in a wall. For roofs, use set_roof. For openings, use add_opening with wall/type/width/position; openingType may be window, picture, awning, clerestory, door, french (french doors), slider, dutch, barn, bay (bay window), or skylight (wall "roof", place with x and y plan coordinates).
 For water/waste/power/heat choices use set_utility with field one of waterSource (well|spring|catchment|town), wasteMethod (septic|composting|reedbed), powerMode (offgrid|hybrid|gridtie), heatSource (rocket_mass|masonry|wood_stove|minisplit), foundationType (rubble|stemwall|slab), tankGal, wellSepticFt, stemwallHeightFt (feet, for stem wall foundations), diyWalls/diyRoof/diyHeat/diyFoundation. For location use set_site with field zip, latitudeDeg, or rainInYr. For TOPOGRAPHY (sloped sites — read contour lines / spot elevations on a site plan or survey): set_site field:'slopeFt' value = total fall in feet across the building footprint, field:'slopeDir' value = downhill direction (north|south|east|west), field:'gradeFt' value = feet the finish floor sits above grade at the uphill side. A steep fall exposes the downhill foundation as a walkout basement — model it, don't flatten the site.
 For roof overhangs use set_overhang with wall (north|south|east|west|all) and value in feet.
-BASEMENT: a real below-grade storey = set_shell field:'basementHeightFt' value in feet (6-12; value 0 removes it). Basement rooms are add_room with level:-1 (never level 0). On a sloped site the downhill wall becomes a walkout automatically. A basement does not count toward storeys.
+BASEMENT: one of the four foundation choices AND a storey at once. Create it with set_shell field:'basementHeightFt' value in feet (6-12; value 0 removes it) — set_utility foundationType 'basement' also works. Basement rooms are add_room with level:-1 (never level 0). set_shell field:'basementHeated' value 'true'|'false' says whether it is conditioned space (counts toward heated floor area). On a sloped site the downhill wall becomes a walkout automatically. A basement does not count toward storeys.
 INTERIOR WALLS: a wall BETWEEN rooms = add_element category:'partition' with x/y and the wall run as w×d (the long side is the run; thickness comes from construction: framed | cob | adobe). A doorway in it: widthFt = door width (0 = solid wall) and positionFt = distance along the run. Example — a 12' framed partition running east-west at x:10,y:14 with a 3' door 4' in: add_element category:'partition' x:10 y:14 w:12 d:0.45 widthFt:3 positionFt:4.
 FOUNDATION RUNS: a strip of foundation under a SPECIFIC line (a load-bearing interior wall, the wall between the house and an attached greenhouse, a mass heater) = add_element with category 'foundation', construction one of rubble | rubble-stem (trench + stem wall, the natural detail) | stemwall | thickened (grade beam), x/y/w/d as the strip's plan rectangle in feet (length along w or d), h = stem height above floor. The perimeter foundation stays a separate global choice (set_utility foundationType).
 FOOTPRINT SHAPE: the building outline may be a rectilinear polygon (shell.footprint = ordered [x,y] corners in feet, axis-aligned edges; absent = plain widthFt x depthFt rectangle). To move a whole wall in/out use move_wall_edge with wall (north|south|east|west) or field "e<index>" for a specific polygon edge, and value = offset in feet (positive = outward). To make an L-shape or notch, use split_wall_edge (wall or field "e<index>"; optional x/y = split points in feet along the wall; optional value = feet to push the middle segment, negative = inward notch). For a whole custom outline (L, T, U) emit set_footprint with value = JSON string of the corner list, e.g. "[[0,0],[40,0],[40,15],[24,15],[24,28],[0,28]]". If a traced drawing shows a non-rectangular plan, emit set_footprint from its outline INSTEAD of a plain set_shell (still list every room and opening).

@@ -206,6 +206,12 @@ r = apply(freshSpec(), [
   { type: 'add_room', name: 'Guest Bedroom', category: 'sleeping', x: 2, y: 2, w: 10, d: 10, level: -1 }
 ]);
 ok(r.issues.some((issue) => /egress/i.test(issue.title)), 'basement bedroom flags egress');
+r = apply(freshSpec(), [{ type: 'set_utility', field: 'foundationType', value: 'basement' }]);
+ok(r.spec.shell.basementHeightFt === 8, 'foundationType basement aliases to the basement storey');
+r = apply(r.spec, [{ type: 'set_shell', field: 'basementHeated', value: 'false' }]);
+ok(r.spec.shell.basementHeated === false, 'basementHeated stores a real boolean');
+r = apply(r.spec, [{ type: 'set_shell', field: 'basementHeightFt', value: '0' }]);
+ok(!('basementHeated' in r.spec.shell), 'removing the basement clears basementHeated');
 
 // --- interior partitions -------------------------------------------------------
 r = apply(freshSpec(), [{ type: 'add_element', name: 'Kitchen Wall', category: 'partition', x: 10, y: 14, w: 12, d: 0, widthFt: 3, positionFt: 4 }]);

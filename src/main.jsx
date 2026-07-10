@@ -2244,10 +2244,12 @@ function applyStructuredDesignPlan(currentSpec, plan) {
         if (v > 0) next.shell.basementHeightFt = clamp(v, 6, 12);
         else {
           delete next.shell.basementHeightFt;
+          delete next.shell.basementHeated;
           next.rooms = next.rooms.map((room) => (Number(room.level || 1) === BASEMENT_LEVEL ? { ...room, level: 1 } : room));
           next.elements = (next.elements || []).map((el) => (Number(el.level || 1) === BASEMENT_LEVEL ? { ...el, level: 1, z: 0 } : el));
         }
       }
+      else if (field === 'basementHeated') next.shell.basementHeated = String(operation.value) === 'true' || operation.value === true;
       else if (field === 'overhangFt') {
         next.shell.overhangFt = clamp(numeric, 0, 12);
         delete next.shell.overhangs;
@@ -2934,12 +2936,14 @@ function deriveDesign(spec, wallSections) {
   }
   const stackedArea = loftTowerArea + upperFloorArea;
   // Finished basement space counts what's actually built out (rooms at the
-  // basement level), not the whole slab.
+  // basement level), not the whole slab — and only when the user says the
+  // basement is HEATED (an unheated basement is cold storage, not living area).
   const basement = basementInfo(spec.shell);
+  const basementHeated = basement.present && spec.shell.basementHeated !== false;
   const basementRoomArea = basement.present
     ? spec.rooms.filter((room) => Number(room.level || 1) === BASEMENT_LEVEL).reduce((sum, room) => sum + room.w * room.d, 0)
     : 0;
-  const heatedFloor = floor + upperFloorArea + loftTowerArea + basementRoomArea;
+  const heatedFloor = floor + upperFloorArea + loftTowerArea + (basementHeated ? basementRoomArea : 0);
   const pitch = Number(spec.shell.roofPitch || 0.32);
   const overhangs = resolveOverhangs(spec.shell);
   const roofFootprint = customFp
@@ -3201,7 +3205,7 @@ function deriveDesign(spec, wallSections) {
   };
 
   return {
-    site, utilities, reclaimed, reclaimedSavings, floor, heatedFloor, storeys, basement, basementRoomArea, roofArea, roofFootprint, overhangs, wallArea, glazedWallArea, wallR, southGlass, glassPct,
+    site, utilities, reclaimed, reclaimedSavings, floor, heatedFloor, storeys, basement, basementRoomArea, basementHeated, roofArea, roofFootprint, overhangs, wallArea, glazedWallArea, wallR, southGlass, glassPct,
     skylightArea, totalGlass, glazingU, stemwallHeightFt, azimuthDeg, solarFactor,
     sunWinterDeg, sunSummerDeg, winterShadeFrac, summerShadeFrac,
     frameGround: groundFrameKey, frameUpper: upperFrameKey, frameArea: groundFrameArea + upperFrameArea,
@@ -6809,12 +6813,33 @@ function App() {
     } else if (field === 'basementHeightFt') {
       // 0 removes the basement — it must NOT hit the generic 18-min shell clamp.
       operations.push({ type: 'set_shell', field, value: String(numeric > 0 ? clamp(numeric, 6, 12) : 0) });
+    } else if (field === 'basementHeated') {
+      operations.push({ type: 'set_shell', field, value: value === true || value === 'true' ? 'true' : 'false' });
     } else if (field === 'southWallHeightFt' || field === 'northWallHeightFt') {
       operations.push({ type: 'set_wall_height', wall: field === 'southWallHeightFt' ? 'south' : 'north', h: clamp(numeric, 7, 24) });
     } else {
       operations.push({ type: 'set_shell', field, value: String(field === 'roofPitch' ? clamp(numeric, 0.08, 0.75) : field === 'wallHeightFt' ? clamp(numeric, 7, 40) : field === 'storeys' ? clamp(numeric, 1, 3) : clamp(numeric, 18, field === 'depthFt' ? 80 : field === 'widthFt' ? 96 : field === 'padExtensionFt' ? 200 : 24)) });
     }
     void applyBackendOperations({ operations, promptText: `Update shell ${field}`, logPrefix: 'Shell edit' });
+  }
+
+  // Foundation Type is ONE choice with four answers — the fourth (basement) is
+  // also a storey. Switching in creates it; switching away removes it and sets
+  // the picked type, in a single dispatch (never two racing calls).
+  function setFoundationChoice(value) {
+    const hasBasement = basementInfo(spec.shell).present;
+    if (value === 'basement') {
+      if (!hasBasement) updateShell('basementHeightFt', 8);
+      return;
+    }
+    const operations = [{ type: 'set_utility', field: 'foundationType', value }];
+    if (hasBasement) operations.unshift({ type: 'set_shell', field: 'basementHeightFt', value: '0' });
+    void applyBackendOperations({
+      operations,
+      promptText: `Set foundation to ${value}`,
+      logPrefix: 'Foundation',
+      chatText: hasBasement ? 'Removed the basement — its rooms came up to the ground floor — and set the new foundation type.' : undefined
+    });
   }
 
   // Per-wall edit: system / height / thickness / finish / omit, per N/S/E/W side.
@@ -8206,13 +8231,14 @@ function App() {
               <div className="sectionHead">What the house sits on</div>
               <div className="controlGrid">
                 <label>Type
-                  <select value={utilitiesOf(spec).foundationType} onChange={(event) => updateUtility('foundationType', event.target.value)}>
+                  <select value={basementInfo(spec.shell).present ? 'basement' : utilitiesOf(spec).foundationType} onChange={(event) => setFoundationChoice(event.target.value)}>
                     <option value="rubble">Rubble trench — drained gravel, low cost, low carbon</option>
                     <option value="stemwall">Stem wall — perimeter wall on footing</option>
                     <option value="slab">Insulated slab — simple, the most concrete</option>
+                    <option value="basement">Basement — a full storey below grade</option>
                   </select>
                 </label>
-                {utilitiesOf(spec).foundationType === 'stemwall' && (
+                {!basementInfo(spec.shell).present && utilitiesOf(spec).foundationType === 'stemwall' && (
                   <label>Stem wall height (ft)<input type="number" step="0.25" min="0.5" max="6" value={utilitiesOf(spec).stemwallHeightFt ?? 1.5} onChange={(event) => updateUtility('stemwallHeightFt', event.target.value)} /></label>
                 )}
                 <label>Insulation
@@ -8229,20 +8255,18 @@ function App() {
               </label>
               <p className="systemNote">Rubble trench is the natural-building favorite: half the concrete of a slab, and the biggest single carbon saving on the whole build.</p>
 
-              <div className="sectionHead">Basement</div>
-              {!basementInfo(spec.shell).present ? (
+              {basementInfo(spec.shell).present && (
                 <>
-                  <button className="secondary" onClick={() => updateShell('basementHeightFt', 8)}>+ Add a basement (8′)</button>
-                  <p className="systemNote">A real below-grade storey: concrete perimeter walls and a slab replace the foundation type above. On a sloped site the downhill wall comes out of the ground on its own — that's your walkout.</p>
-                </>
-              ) : (
-                <>
+                  <div className="sectionHead">Basement — foundation and storey in one</div>
                   <div className="controlGrid">
                     <label>Ceiling height (ft)<input type="number" step="0.5" min="6" max="12" value={basementInfo(spec.shell).heightFt} onChange={(event) => updateShell('basementHeightFt', event.target.value)} /></label>
                     <label>Finished space<input value={`${Math.round(derived.basementRoomArea)} sf of rooms`} readOnly /></label>
                   </div>
-                  <p className="systemNote">Switch the plan to the <b>Basement</b> tab (top-left of the preview) to lay out rooms down there — they count toward heated space and need a stair. A basement bedroom flags for egress.{Number(siteOf(spec).slopeFt) > 0 ? ' Your site slopes — the downhill side is a natural walkout.' : ''}</p>
-                  <button className="danger" onClick={() => updateShell('basementHeightFt', 0)}>− Remove basement (rooms come up to ground)</button>
+                  <label className="diyToggle">
+                    <input type="checkbox" checked={spec.shell.basementHeated !== false} onChange={(event) => updateShell('basementHeated', event.target.checked)} />
+                    <span>Heated (conditioned) space — basement rooms count toward heated floor area</span>
+                  </label>
+                  <p className="systemNote">The basement plays both roles at once: down here it's the <b>foundation</b> (these concrete walls carry the house — priced and carboned on this line), and in the plan it's a <b>storey</b> — switch the preview to the <b>Basement</b> tab to lay out rooms, and give them a stair. A basement bedroom flags for egress.{Number(siteOf(spec).slopeFt) > 0 ? ' Your site slopes — the downhill side is a natural walkout.' : ''} Switching Type above to rubble / stem wall / slab removes the basement and brings its rooms up to ground.</p>
                 </>
               )}
 
@@ -9344,7 +9368,7 @@ function App() {
 
       {welcomeOpen && (
         <div className="welcomeOverlay">
-          <div className="welcomeCard">
+          <div className={`welcomeCard${(!welcomeIsFirstRun || previousDesigns.length > 0) ? ' threeCol' : ''}`}>
             <div className="welcomeSide">
             <div className="welcomeMark" aria-hidden="true"><span className="brandGable" /></div>
             <h2>Natural Building</h2>
@@ -9387,31 +9411,35 @@ function App() {
                 <span>Starting new replaces the design that's open now.</span>
               </div>
             )}
-            {!welcomeIsFirstRun && (
-              <>
-                <div className="welcomeDivider">or continue</div>
-                <button className="welcomeContinue" onClick={() => { setWelcomeName(''); setWelcomeOpen(false); }}>
-                  <b>Continue where you left off</b>
-                  <small>{spec.projectName} · revision {spec.revision}</small>
-                </button>
-              </>
-            )}
-            {(() => {
-              const others = previousDesigns.filter((design) => design.projectName !== spec.projectName);
-              if (!others.length) return null;
-              return (
-                <div className="welcomePrevious">
-                  <div className="welcomeDivider">or open a previous design</div>
-                  {others.slice(0, 5).map((design) => (
-                    <button key={design.file} className="welcomePrevRow" onClick={() => restorePreviousDesign(design)}>
-                      <b>{design.projectName}</b>
-                      <small>rev {design.revision} · {design.shell}′ · {design.roomCount} room{design.roomCount === 1 ? '' : 's'}{design.savedAt ? ` · ${design.savedAt}` : ''}</small>
-                    </button>
-                  ))}
-                </div>
-              );
-            })()}
             </div>
+            {(!welcomeIsFirstRun || previousDesigns.length > 0) && (
+              <div className="welcomeResume">
+                {!welcomeIsFirstRun && (
+                  <>
+                    <div className="welcomeDivider">or continue</div>
+                    <button className="welcomeContinue" onClick={() => { setWelcomeName(''); setWelcomeOpen(false); }}>
+                      <b>Continue where you left off</b>
+                      <small>{spec.projectName} · revision {spec.revision}</small>
+                    </button>
+                  </>
+                )}
+                {(() => {
+                  const others = previousDesigns.filter((design) => design.projectName !== spec.projectName);
+                  if (!others.length) return null;
+                  return (
+                    <div className="welcomePrevious">
+                      <div className="welcomeDivider">or open a previous design</div>
+                      {others.slice(0, 5).map((design) => (
+                        <button key={design.file} className="welcomePrevRow" onClick={() => restorePreviousDesign(design)}>
+                          <b>{design.projectName}</b>
+                          <small>rev {design.revision} · {design.shell}′ · {design.roomCount} room{design.roomCount === 1 ? '' : 's'}{design.savedAt ? ` · ${design.savedAt}` : ''}</small>
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
           </div>
         </div>
       )}

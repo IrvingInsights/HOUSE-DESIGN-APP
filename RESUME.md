@@ -68,6 +68,31 @@ browser on a throwaway mutation run, then **restored via POST /api/projects/curr
 {file} — the one-call alternative to N Undos; grab the snapshot filename from
 GET /designs BEFORE testing.** Daniel's design left at rev 7 exactly as found.
 
+**Third pass same day (Daniel's five follow-ups):**
+1. **Basement IS a foundation option**: the Foundation Type select has four answers
+   (rubble / stem wall / slab / basement); picking basement creates the storey,
+   picking anything else removes it + sets the type in ONE dispatch
+   (`setFoundationChoice`). `set_utility foundationType 'basement'` is aliased in
+   bim-core to the real control so the planner's natural phrasing works. The
+   Foundation page's basement block explains the dual role in plain words.
+2. **Heated is a user option**: `shell.basementHeated` (default true; checkbox on
+   the Foundation page; set_shell field 'basementHeated'; cleared when the
+   basement is removed). Unheated basement rooms stop counting toward heated sf.
+3. **Storey+foundation duality** is one source of truth — `shell.basementHeightFt`
+   feeds both readings; there is no second flag to fall out of sync.
+4. **Opening card is 3 columns**: intro | Start a design | **or continue**
+   (continue button + previous designs). `.welcomeCard.threeCol` (only when
+   something exists to resume; responsive collapse at 1100/900px).
+5. **First-try trace fidelity**: the trace mandate now REQUIRES stairs (any
+   multi-storey/basement plan), interior partitions (with their doorways —
+   interior doors belong to partitions, add_opening is exterior-only), chimney
+   elements, and basement modeling; `traceLooksIncomplete` flags a multi-storey
+   takeoff with no stair → the repair pass asks for what's missing (repair may
+   now also set basementHeightFt). Rationale: the dozens-of-turns rebuild was
+   the user hand-adding objects the vocabulary couldn't SAY — now the drawing's
+   own content (walls/stairs/chimney/basement) is in the op vocabulary, so the
+   first pass can land it. Suites 78+41+12 green.
+
 ## Previous marathon session (2026-07-09/10)
 
 **The 2026-07-09/10 session shipped, in order (all committed, suites green):**
