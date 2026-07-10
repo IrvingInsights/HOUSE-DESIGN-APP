@@ -19,12 +19,26 @@ import {
   WALL_SIDES, resolveWallSide
 } from './engine.js';
 
-export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview }) {
+// The section-cut clip plane: keeps everything north of the cut line
+// (z ≤ cutZ). Slider 1 = whole model, sliding down slices from the south.
+function cutPlanes(spec, cut) {
+  if (cut == null || cut >= 0.999) return [];
+  const depth = Number(spec?.shell?.depthFt) || 28;
+  const cutZ = -8 + (depth + 16) * Math.max(0, cut);
+  return [new THREE.Plane(new THREE.Vector3(0, 0, -1), cutZ)];
+}
+
+export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, viewRequest = null, sectionCut = 1, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview }) {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraStateRef = useRef(null);
   const selectedRoomRef = useRef(selectedRoom);
   const callbacksRef = useRef({ onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview });
+  // Camera flights (view buttons, orbit-around-selection) and the section cut
+  // ride REFS, not effect deps — the scene must never rebuild for a camera move.
+  const tweenRef = useRef(null);
+  const focusIdRef = useRef(null);
+  const sectionCutRef = useRef(1);
 
   useEffect(() => {
     selectedRoomRef.current = selectedRoom;
@@ -33,6 +47,30 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
   useEffect(() => {
     callbacksRef.current = { onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview };
   }, [onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview]);
+
+  // View preset buttons: fly the camera to top / front (south) / side (east) /
+  // iso at the CURRENT orbit distance, keeping the current target.
+  useEffect(() => {
+    const live = sceneRef.current;
+    if (!viewRequest || !live?.camera || !live?.controls) return;
+    const { camera, controls } = live;
+    const target = controls.target.clone();
+    const dist = Math.max(12, camera.position.distanceTo(target));
+    const pos = viewRequest.mode === 'top' ? new THREE.Vector3(target.x, target.y + dist, target.z + 0.02)
+      : viewRequest.mode === 'front' ? new THREE.Vector3(target.x, target.y + dist * 0.12, target.z + dist)
+      : viewRequest.mode === 'side' ? new THREE.Vector3(target.x + dist, target.y + dist * 0.12, target.z)
+      : new THREE.Vector3(target.x + dist * 0.62, target.y + dist * 0.6, target.z + dist * 0.62);
+    tweenRef.current = { fromPos: camera.position.clone(), fromTarget: controls.target.clone(), pos, target, t: 0 };
+  }, [viewRequest]);
+
+  // Section cut: one global vertical clip plane sliding north→south. Applied
+  // live to the renderer here AND re-applied on every scene rebuild (below).
+  useEffect(() => {
+    sectionCutRef.current = sectionCut;
+    const r = sceneRef.current?.renderer;
+    if (!r) return;
+    r.clippingPlanes = cutPlanes(spec, sectionCut);
+  }, [sectionCut, spec]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -57,8 +95,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     renderer.toneMappingExposure = 0.92;
     mount.appendChild(renderer.domElement);
 
+    renderer.clippingPlanes = cutPlanes(spec, sectionCutRef.current);
+
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
+    // Grabbing the view cancels any camera flight in progress.
+    controls.addEventListener('start', () => { tweenRef.current = null; });
     if (cameraStateRef.current?.target) {
       controls.target.copy(cameraStateRef.current.target);
     } else {
@@ -2032,9 +2074,17 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     }
 
     function animate() {
+      const tween = tweenRef.current;
+      if (tween) {
+        tween.t = Math.min(1, tween.t + 0.06);
+        const eased = 1 - Math.pow(1 - tween.t, 3);
+        camera.position.lerpVectors(tween.fromPos, tween.pos, eased);
+        controls.target.lerpVectors(tween.fromTarget, tween.target, eased);
+        if (tween.t >= 1) tweenRef.current = null;
+      }
       controls.update();
       composer.render();
-      sceneRef.current = { renderer, scene, camera };
+      sceneRef.current = { renderer, scene, camera, controls };
       requestAnimationFrame(animate);
     }
 
@@ -2046,6 +2096,27 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     }
 
     renderModel();
+    // Orbit around what you picked: on a NEW selection, glide the orbit pivot
+    // to the object's center (camera stays put, so it reads as a gentle pan).
+    // Same-selection rebuilds (spec edits) leave the camera alone.
+    if (selectedRoom && focusIdRef.current !== selectedRoom) {
+      focusIdRef.current = selectedRoom;
+      const bounds = new THREE.Box3();
+      let found = false;
+      scene.traverse((node) => {
+        if (node.isMesh && String(node.userData.roomId || '') === String(selectedRoom)) {
+          bounds.expandByObject(node);
+          found = true;
+        }
+      });
+      if (found && !bounds.isEmpty()) {
+        const center = bounds.getCenter(new THREE.Vector3());
+        if (center.distanceTo(controls.target) > 2) {
+          tweenRef.current = { fromPos: camera.position.clone(), fromTarget: controls.target.clone(), pos: camera.position.clone(), target: center, t: 0 };
+        }
+      }
+    }
+    if (!selectedRoom) focusIdRef.current = null;
     animate();
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
     renderer.domElement.addEventListener('pointermove', onPointerMove);

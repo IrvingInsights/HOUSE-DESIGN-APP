@@ -71,6 +71,10 @@ function App() {
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [appMode, setAppMode] = useState('design');
   const [viewMode, setViewMode] = useState('3d');
+  // Camera flight requests + the section-cut slider — deliberately plain
+  // state (not persisted): a fresh open always starts whole and unsliced.
+  const [viewRequest, setViewRequest] = useState(null);
+  const [sectionCut, setSectionCut] = useState(1);
   const [activeFloor, setActiveFloor] = useState(1);
   const [buildProgress, setBuildProgress] = useState(() => initialSaved?.buildProgress || {});
   const [inspectorView, setInspectorView] = useState('inspect');
@@ -3139,12 +3143,25 @@ function App() {
               spec={spec}
               selectedRoom={selectedRoom}
               layers={modelLayers}
+              viewRequest={viewRequest}
+              sectionCut={sectionCut}
               onSelectRoom={selectObject}
               onMoveStart={beginPlanMove}
               onMoveEnd={finishPlanMove}
               onResizeEnd={finishPlanResize}
               onDimensionPreview={setDimensionPreview}
             />
+          )}
+          {viewMode === '3d' && (
+            <div className="viewGizmo">
+              {[['iso', 'Iso'], ['top', 'Top'], ['front', 'Front'], ['side', 'Side']].map(([mode, label]) => (
+                <button key={mode} title={`Look at the model from the ${mode === 'iso' ? 'corner' : mode}`} onClick={() => setViewRequest({ mode, n: Date.now() })}>{label}</button>
+              ))}
+              <label className="cutSlider" title="Slice the model open — slide to cut away the south side">
+                <span>Slice</span>
+                <input type="range" min="8" max="100" value={Math.round(sectionCut * 100)} onChange={(event) => setSectionCut(Number(event.target.value) / 100)} />
+              </label>
+            </div>
           )}
           <div className="viewModeToggle">
             <button className={viewMode === '3d' ? 'active' : ''} onClick={() => setViewMode('3d')}>3D</button>

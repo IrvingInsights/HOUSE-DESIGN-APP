@@ -4165,3 +4165,23 @@ button.danger:hover,
 .compareCell small.better { color: var(--good, #7FA05B); }
 .compareCell small.worse { color: var(--bad, #C96A4A); }
 .compareFine { opacity: 0.85; }
+
+/* View gizmo + section-cut slider — bottom-right of the model. Floats on the
+   bright 3D scene, so it pins its own PAPER-LIGHT palette (two-scope rule). */
+.viewGizmo {
+  position: absolute; right: 12px; bottom: 12px; z-index: 6;
+  display: flex; align-items: center; gap: 4px;
+  background: rgba(251, 250, 246, 0.94); border: 1px solid #CAC8BB;
+  border-radius: 12px; padding: 4px 8px; box-shadow: 0 8px 20px rgba(34, 37, 31, 0.12);
+}
+.viewGizmo button {
+  min-height: 24px; padding: 2px 10px; font-size: 11.5px; font-weight: 700;
+  border-radius: 9px; background: transparent; border: none; color: #565A4F; box-shadow: none;
+}
+.viewGizmo button:hover { background: #E2ECEE; color: #22251F; }
+.viewGizmo .cutSlider {
+  display: flex; align-items: center; gap: 6px; padding-left: 8px; margin-left: 4px;
+  border-left: 1px solid #DDD9CC;
+}
+.viewGizmo .cutSlider span { font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #77715F; }
+.viewGizmo .cutSlider input[type='range'] { width: 92px; accent-color: #3C6472; }
