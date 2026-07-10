@@ -7,7 +7,12 @@ import { handleApiRoute } from './backend/routes.mjs';
 const vite = await createViteServer({
   server: {
     middlewareMode: true,
-    hmr: { port: PORT + 20000 }
+    hmr: { port: PORT + 20000 },
+    // The app is reviewed/shared through forwarded HTTPS URLs (GitHub
+    // Codespaces ports, tunnels). Vite 6.0.9+ host-checks dev requests and
+    // would answer "Blocked request. This host is not allowed." — the server
+    // already binds 127.0.0.1, so forwarding is an explicit, deliberate act.
+    allowedHosts: true
   },
   appType: 'spa'
 });
