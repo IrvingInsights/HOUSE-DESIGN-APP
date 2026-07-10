@@ -377,8 +377,10 @@ export function traceLooksIncomplete(plan, sourceSpec) {
 
 // Deterministic tower rescue: when a takeoff says storeys > 1 but leaves the
 // tower/lookout room on the ground floor with no storey-extent plate, the
-// model would grow a FULL second storey — not the drawn tower. Lift the
-// tower room to level 2 and give the storey an extent plate over its bay.
+// model would grow a FULL second storey — not the drawn tower. A tower with
+// a LOFT beneath it is a three-level stack: loft level 2, tower level 3 (the
+// tower shaft is what gives the loft its headroom). Lift the rooms to their
+// levels and give each upper storey an extent plate over its bay.
 // Exported for unit tests.
 export function repairTowerStorey(plan, sourceSpec) {
   const ops = plan.operations || [];
@@ -388,42 +390,61 @@ export function repairTowerStorey(plan, sourceSpec) {
   if (storeys < 2) return plan;
   let upperRooms = ops.filter((o) => o.type === 'add_room' && Number(o.level) >= 2);
   if (!upperRooms.length) {
-    const towerRoom = ops.find((o) => o.type === 'add_room' && (!o.level || Number(o.level) <= 1)
-      && /tower|lookout|crow'?s ?nest|widow'?s ?walk|studio above|loft/i.test(o.name || ''));
-    if (!towerRoom) return plan;
-    towerRoom.level = 2;
-    upperRooms = [towerRoom];
-    plan.warnings = [...(plan.warnings || []), `${towerRoom.name} modeled as the upper storey (it is drawn above the main roof).`];
+    const grounded = (re) => ops.find((o) => o.type === 'add_room' && (!o.level || Number(o.level) <= 1) && re.test(o.name || ''));
+    const towerRoom = grounded(/tower|lookout|crow'?s ?nest|widow'?s ?walk|studio above/i);
+    const loftRoom = grounded(/\bloft\b|mezzanine/i);
+    if (!towerRoom && !loftRoom) return plan;
+    if (towerRoom && loftRoom && towerRoom !== loftRoom) {
+      // tower over loft: a 3rd floor — the tower absorbs the loft's headroom
+      loftRoom.level = 2;
+      towerRoom.level = 3;
+      upperRooms = [loftRoom, towerRoom];
+      if (storeysOp && Number(storeysOp.value) < 3) storeysOp.value = 3;
+      else if (!storeysOp && storeys < 3) plan.operations = ops.concat([{ type: 'set_shell', field: 'storeys', value: 3 }]);
+      plan.warnings = [...(plan.warnings || []), `${loftRoom.name} modeled as level 2 with ${towerRoom.name} as level 3 above it.`];
+    } else {
+      const room = towerRoom || loftRoom;
+      room.level = 2;
+      upperRooms = [room];
+      plan.warnings = [...(plan.warnings || []), `${room.name} modeled as the upper storey (it is drawn above the main roof).`];
+    }
   }
-  // Normalize plates the AI emitted itself: an extent plate without level 2
-  // (or without its elevation) is invisible to the roof/wall step logic.
-  let baseWallFtForPlates = num(sourceSpec?.shell?.wallHeightFt) || 10;
-  const wallHOp = ops.find((o) => o.type === 'set_shell' && o.field === 'wallHeightFt' && num(o.value));
-  if (wallHOp) baseWallFtForPlates = num(wallHOp.value);
-  for (const op of ops) {
+  // Normalize plates the AI emitted itself: an extent plate without its level
+  // (or elevation) is invisible to the roof/wall step logic.
+  const allOps = plan.operations;
+  let baseWallFt = num(sourceSpec?.shell?.wallHeightFt) || 10;
+  const wallHOp = allOps.find((o) => o.type === 'set_shell' && o.field === 'wallHeightFt' && num(o.value));
+  if (wallHOp) baseWallFt = num(wallHOp.value);
+  for (const op of allOps) {
     if (op.type !== 'add_element') continue;
     const isPlate = op.category === 'floor' || /storey \d+ extent/i.test(op.name || '');
     if (!isPlate) continue;
     const n = (op.name || '').match(/storey (\d+)/i);
     const lvl = n ? Number(n[1]) : 2;
     if (!op.level || Number(op.level) < 2) op.level = lvl;
-    if (!num(op.z)) op.z = baseWallFtForPlates * (lvl - 1);
+    if (!num(op.z)) op.z = baseWallFt * (lvl - 1);
   }
-  const hasPlate = ops.some((o) => o.type === 'add_element' && (o.category === 'floor' || /storey \d+ extent/i.test(o.name || '')))
-    || (sourceSpec?.elements || []).some((el) => el.category === 'floor');
-  if (!hasPlate) {
-    const minX = Math.min(...upperRooms.map((o) => num(o.x)));
-    const minY = Math.min(...upperRooms.map((o) => num(o.y)));
-    const maxX = Math.max(...upperRooms.map((o) => num(o.x) + Math.max(1, num(o.w))));
-    const maxY = Math.max(...upperRooms.map((o) => num(o.y) + Math.max(1, num(o.d))));
-    let baseWallFt = num(sourceSpec?.shell?.wallHeightFt) || 10;
-    const wallOp = ops.find((o) => o.type === 'set_shell' && o.field === 'wallHeightFt' && num(o.value));
-    if (wallOp) baseWallFt = num(wallOp.value);
-    plan.operations = [...ops, {
-      type: 'add_element', category: 'floor', name: 'Storey 2 extent', level: 2,
-      x: minX, y: minY, w: Math.max(4, maxX - minX), d: Math.max(4, maxY - minY), h: 0.35, z: baseWallFt
-    }];
-    plan.warnings = [...(plan.warnings || []), 'The upper storey covers only its drawn bay — the roof steps down around it.'];
+  // One extent plate per upper level, sized to that level's rooms.
+  const levels = [...new Set(upperRooms.map((o) => Number(o.level)))].sort();
+  const added = [];
+  for (const lvl of levels) {
+    const hasPlate = allOps.some((o) => o.type === 'add_element' && Number(o.level) === lvl && (o.category === 'floor' || /storey \d+ extent/i.test(o.name || '')))
+      || (sourceSpec?.elements || []).some((el) => el.category === 'floor' && Number(el.level) === lvl);
+    if (hasPlate) continue;
+    const roomsAt = upperRooms.filter((o) => Number(o.level) === lvl);
+    if (!roomsAt.length) continue;
+    const minX = Math.min(...roomsAt.map((o) => num(o.x)));
+    const minY = Math.min(...roomsAt.map((o) => num(o.y)));
+    const maxX = Math.max(...roomsAt.map((o) => num(o.x) + Math.max(1, num(o.w))));
+    const maxY = Math.max(...roomsAt.map((o) => num(o.y) + Math.max(1, num(o.d))));
+    added.push({
+      type: 'add_element', category: 'floor', name: `Storey ${lvl} extent`, level: lvl,
+      x: minX, y: minY, w: Math.max(4, maxX - minX), d: Math.max(4, maxY - minY), h: 0.35, z: baseWallFt * (lvl - 1)
+    });
+  }
+  if (added.length) {
+    plan.operations = [...allOps, ...added];
+    plan.warnings = [...(plan.warnings || []), 'Each upper storey covers only its drawn bay — the roof steps down around it.'];
   }
   return plan;
 }
@@ -636,7 +657,7 @@ A DRAWING OR DOCUMENT IS ATTACHED. Your job is a COMPLETE takeoff, not a summary
 1. set_shell from the overall plan dimensions: ONE op carrying BOTH numbers — w AND d (e.g. w:40.5, d:23, field:'', value:''). Never set only one dimension. Read dimension strings; if none, scale from a labeled element like a 3'-0" door and record that in assumptions. If the drawing shows multiple above-grade storeys, also set_shell field:'storeys'.
 2. ONE add_room PER ROOM visible on the floor plan — every single one — with its real name and x/y/w/d in feet. Plan coordinates: origin at the northwest corner of the shell, x increases east, y increases south. Rooms on an upper floor get level 2 (or 3). If the CURRENT BIM STATE below already lists some rooms, KEEP them and ADD every remaining room from the drawing — never stop just because a few rooms already exist.
 2b. STOREYS: count the above-grade floors from the elevations and sections. A story-and-a-half or two-storey house (windows up in the gable, a second row of windows, two occupied levels in the section) gets set_shell field:'storeys' value:'2', with the upper rooms on level 2. A basement is below grade — do NOT count it as a storey.
-2c. A TOWER / lookout / studio ABOVE part of the plan (a dashed "above" rectangle on the floor plan, a small box rising past the main roof in section): model it as a PARTIAL upper storey — set_shell field:'storeys' one more than the main house, add_element category:'floor' named 'Storey 2 extent' (or 'Storey 3 extent') level:2 with the tower bay's exact x/y/w/d from the plan, and the tower's room as add_room at that level with the same footprint. If the tower's own eave heights are dimensioned in section, set_shell field:'upperStoreyHeightFt' with its wall height. The main roof steps down around the tower automatically. A roof deck / perch on the lower roof cannot be modeled yet — record it in warnings so nothing is lost.
+2c. A TOWER / lookout / studio ABOVE part of the plan (a dashed "above" rectangle on the floor plan, a small box rising past the main roof in section): model it as a PARTIAL upper storey — set_shell field:'storeys' one more than the main house, add_element category:'floor' named 'Storey 2 extent' (or 'Storey 3 extent') level:2 with the tower bay's exact x/y/w/d from the plan, and the tower's room as add_room at that level with the same footprint. A LOFT or mezzanine BENEATH the tower is its own level: loft rooms level 2, the tower room level 3, storeys 3, one extent plate per upper level over its bay (the tower shaft is what gives the loft its headroom). If the tower's own eave heights are dimensioned in section, set_shell field:'upperStoreyHeightFt' with its wall height. The main roof steps down around the tower automatically. A roof deck / perch on the lower roof cannot be modeled yet — record it in warnings so nothing is lost.
 3. ONE add_opening PER WINDOW AND DOOR with wall (north/south/east/west), openingType, widthFt, and positionFt along that wall. A real floor plan ALWAYS has at least a front door plus several windows — never return zero openings.
 4. Porches, decks, garages, and outbuildings: add_element with a fitting category and real dimensions. A COVERED porch/deck/carport also gets roofType 'shed' or 'gable' on the add_element so its canopy is drawn.
 5. STAIRS: a plan with two storeys or a basement ALWAYS shows a stair — ONE add_element named 'Stairs' (category 'structure') at its real plan position and size, level = the floor it climbs FROM (1 for ground up, -1 for basement up). Never skip it.

@@ -119,6 +119,22 @@ const oneStorey = repairTowerStorey({ summary: 'x', warnings: [], assumptions: [
   operations: [{ type: 'add_room', name: 'Tower Studio', x: 1, y: 1, w: 8, d: 8 }] }, { shell: { storeys: 1 }, elements: [] });
 ok(!oneStorey.operations.some((o) => o.name === 'Storey 2 extent'), 'single-storey plan: tower rescue stands down');
 
+// tower ABOVE a loft = a three-level stack: loft level 2, tower level 3
+const stacked = repairTowerStorey({ summary: 'x', warnings: [], assumptions: [],
+  operations: [
+    { type: 'set_shell', field: 'storeys', value: '2' },
+    { type: 'add_room', name: 'Loft', x: 14, y: 12, w: 10, d: 9 },
+    { type: 'add_room', name: 'Tower Studio', x: 14, y: 13, w: 10, d: 8 }
+  ] }, { shell: { wallHeightFt: 10 }, elements: [] });
+const loftOut = stacked.operations.find((o) => o.name === 'Loft');
+const towerOut = stacked.operations.find((o) => o.name === 'Tower Studio');
+const p2 = stacked.operations.find((o) => o.name === 'Storey 2 extent');
+const p3 = stacked.operations.find((o) => o.name === 'Storey 3 extent');
+const storeys3 = stacked.operations.find((o) => o.type === 'set_shell' && o.field === 'storeys');
+ok(loftOut.level === 2 && towerOut.level === 3, 'loft lifts to level 2, tower to level 3');
+ok(Number(storeys3.value) === 3, 'storeys bumped to 3 for the stack');
+ok(p2 && p2.level === 2 && p2.z === 10 && p3 && p3.level === 3 && p3.z === 20, 'one extent plate per upper level at its elevation');
+
 // AI-emitted plate missing its level/elevation gets normalized, not duplicated
 const aiPlate = repairTowerStorey({ summary: 'x', warnings: [], assumptions: [],
   operations: [
