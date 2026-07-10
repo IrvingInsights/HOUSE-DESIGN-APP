@@ -279,7 +279,9 @@ r = apply(freshSpec(), [{ type: 'add_room', name: 'Kitchen Garden', category: 'g
 ok(!r.issues.some((issue) => /outside the walls/i.test(issue.title)), 'outdoor spaces outside the shell stay quiet');
 
 // --- vocab sanity: shared tables exist for every consumer ---------------------
-ok(Object.keys(WALL_ASSEMBLIES).length === 8, 'WALL_ASSEMBLIES table');
+ok(Object.keys(WALL_ASSEMBLIES).length === 11, 'WALL_ASSEMBLIES table (natural + standard + glazed)');
+ok(WALL_ASSEMBLIES['ply-insulated'] && WALL_ASSEMBLIES.sips && WALL_ASSEMBLIES.icf, 'standard assemblies present');
+ok(WALL_ASSEMBLIES['straw-bale'].green === true && !WALL_ASSEMBLIES.sips.green, 'green flags mark natural methods');
 ok(WALL_ASSEMBLIES.glazed && WALL_ASSEMBLIES.glazed.rValue === 2, 'glazed glass-wall assembly present');
 ok(Object.keys(FRAME_TYPES).length === 6, 'FRAME_TYPES table');
 ok(Object.keys(FLOORING_TYPES).length === 6 && Object.keys(SUBFLOOR_TYPES).length === 4, 'floor tables');

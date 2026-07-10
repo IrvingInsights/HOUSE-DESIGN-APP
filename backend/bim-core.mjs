@@ -73,13 +73,20 @@ function wallAssemblyProfile(envelopeText = '') {
 export const WALL_SIDES = ['north', 'south', 'east', 'west'];
 
 export const WALL_ASSEMBLIES = {
-  'straw-bale':       { key: 'straw-bale',       label: 'Straw Bale',          thicknessFt: 1.6,  color: 0xd8bf79, rValue: 33, finish: 'lime / clay plaster' },
-  'hemp-lime':        { key: 'hemp-lime',        label: 'Hemp-Lime',           thicknessFt: 1.25, color: 0xb9c49b, rValue: 22, finish: 'vapor-open plaster' },
-  'cob':              { key: 'cob',              label: 'Cob',                 thicknessFt: 1.8,  color: 0xb9835e, rValue: 14, finish: 'earthen plaster' },
-  'rammed-earth':     { key: 'rammed-earth',     label: 'Rammed Earth',        thicknessFt: 1.35, color: 0x9d7456, rValue: 12, finish: 'sealed / waxed earth' },
-  'cordwood':         { key: 'cordwood',         label: 'Cordwood',            thicknessFt: 1.25, color: 0x9b7652, rValue: 18, finish: 'lime mortar joints' },
-  'light-straw-clay': { key: 'light-straw-clay', label: 'Light Straw-Clay',    thicknessFt: 1.0,  color: 0xc6b077, rValue: 20, finish: 'clay plaster' },
+  // green: true marks natural / low-carbon methods — the UI shows them with a
+  // leaf. Standard options sit alongside: every system offers both.
+  'straw-bale':       { key: 'straw-bale',       label: 'Straw Bale',          thicknessFt: 1.6,  color: 0xd8bf79, rValue: 33, finish: 'lime / clay plaster', green: true },
+  'hemp-lime':        { key: 'hemp-lime',        label: 'Hemp-Lime',           thicknessFt: 1.25, color: 0xb9c49b, rValue: 22, finish: 'vapor-open plaster', green: true },
+  'cob':              { key: 'cob',              label: 'Cob',                 thicknessFt: 1.8,  color: 0xb9835e, rValue: 14, finish: 'earthen plaster', green: true },
+  'rammed-earth':     { key: 'rammed-earth',     label: 'Rammed Earth',        thicknessFt: 1.35, color: 0x9d7456, rValue: 12, finish: 'sealed / waxed earth', green: true },
+  'cordwood':         { key: 'cordwood',         label: 'Cordwood',            thicknessFt: 1.25, color: 0x9b7652, rValue: 18, finish: 'lime mortar joints', green: true },
+  'light-straw-clay': { key: 'light-straw-clay', label: 'Light Straw-Clay',    thicknessFt: 1.0,  color: 0xc6b077, rValue: 20, finish: 'clay plaster', green: true },
   'framed':           { key: 'framed',           label: 'Framed (vapor-open)', thicknessFt: 0.55, color: 0xd9d5c8, rValue: 23, finish: 'plaster / cladding' },
+  // Standard/panelized options — light, predictable, fast at height (upper
+  // storeys over a natural ground floor are a legitimate hybrid).
+  'sips':             { key: 'sips',             label: 'SIPs panel (fast, standard)',            thicknessFt: 0.6, color: 0xd8d5cf, rValue: 24, finish: 'drywall / cladding' },
+  'ply-insulated':    { key: 'ply-insulated',    label: 'Marine ply + rigid insulation (panelized)', thicknessFt: 0.5, color: 0xc9b58f, rValue: 18, finish: 'sealed ply / cladding' },
+  'icf':              { key: 'icf',              label: 'ICF concrete (standard)',                thicknessFt: 1.0, color: 0xb5b2a8, rValue: 23, finish: 'drywall / parge' },
   // A GLASS WALL — the whole face is glazing in a timber frame (an attached
   // greenhouse's south face), not windows punched into an opaque wall. The
   // engine treats its face area as glass: solar gain, glazing heat loss,
@@ -93,11 +100,11 @@ export const WALL_ASSEMBLIES = {
 // own material in the model.
 export const CLADDING_TYPES = {
   render:      { key: 'render',      label: 'Lime render / plaster (assembly face)', costPsf: 0,   carbonPsf: 0,  color: 0,        texture: 'plaster' },
-  lap:         { key: 'lap',         label: 'Wood lap siding',                       costPsf: 7,   carbonPsf: 2,  color: 0x9a7a52, texture: 'wood' },
-  boardbatten: { key: 'boardbatten', label: 'Board & batten',                        costPsf: 6.5, carbonPsf: 2,  color: 0x8a6f4e, texture: 'wood' },
-  shingle:     { key: 'shingle',     label: 'Cedar shingles',                        costPsf: 9,   carbonPsf: 2,  color: 0x8d7355, texture: 'wood' },
+  lap:         { key: 'lap',         label: 'Wood lap siding',                       costPsf: 7,   carbonPsf: 2,  color: 0x9a7a52, texture: 'wood', green: true },
+  boardbatten: { key: 'boardbatten', label: 'Board & batten',                        costPsf: 6.5, carbonPsf: 2,  color: 0x8a6f4e, texture: 'wood', green: true },
+  shingle:     { key: 'shingle',     label: 'Cedar shingles',                        costPsf: 9,   carbonPsf: 2,  color: 0x8d7355, texture: 'wood', green: true },
   metal:       { key: 'metal',       label: 'Metal panel / standing seam',           costPsf: 8,   carbonPsf: 6,  color: 0x9aa0a0, texture: 'metal' },
-  stucco:      { key: 'stucco',      label: 'Lime stucco on mesh',                   costPsf: 5,   carbonPsf: 3,  color: 0xd8d2c0, texture: 'plaster' },
+  stucco:      { key: 'stucco',      label: 'Lime stucco on mesh',                   costPsf: 5,   carbonPsf: 3,  color: 0xd8d2c0, texture: 'plaster', green: true },
   stone:       { key: 'stone',       label: 'Stone veneer',                          costPsf: 14,  carbonPsf: 10, color: 0x8f8b80, texture: 'concrete' },
   brick:       { key: 'brick',       label: 'Brick veneer',                          costPsf: 12,  carbonPsf: 9,  color: 0x9c5f4a, texture: 'concrete' }
 };
@@ -107,8 +114,8 @@ export const CLADDING_TYPES = {
 // they price by face area of the chosen construction.
 export const PARTITION_TYPES = {
   framed: { key: 'framed', label: 'Light framed (stud)', thicknessFt: 0.45, costPsf: 8,  carbonPsf: 3, color: 0xd9d5c8 },
-  cob:    { key: 'cob',    label: 'Cob (thermal mass)',  thicknessFt: 0.8,  costPsf: 14, carbonPsf: 6, color: 0xb9835e },
-  adobe:  { key: 'adobe',  label: 'Adobe brick',         thicknessFt: 0.7,  costPsf: 12, carbonPsf: 5, color: 0xa87f5e }
+  cob:    { key: 'cob',    label: 'Cob (thermal mass)',  thicknessFt: 0.8,  costPsf: 14, carbonPsf: 6, color: 0xb9835e, green: true },
+  adobe:  { key: 'adobe',  label: 'Adobe brick',         thicknessFt: 0.7,  costPsf: 12, carbonPsf: 5, color: 0xa87f5e, green: true }
 };
 
 // Basement: a real below-grade storey. shell.basementHeightFt > 0 turns it on;
@@ -839,12 +846,12 @@ export function maxFoundationExposureFt(spec) {
 // infill, or a load-bearing wall can be its own structure (no separate frame).
 // costPsf / carbonPsf are per sf of framed wall area; reclaimed timber cuts both.
 export const FRAME_TYPES = {
-  'load-bearing': { label: 'Load-bearing walls (no separate frame)', costPsf: 0, carbonPsf: 0, structural: false, note: 'The wall itself carries the roof — classic for straw bale, cob, cordwood, and rammed earth.' },
-  timber: { label: 'Timber frame (heavy posts & beams)', costPsf: 15, carbonPsf: 6, structural: true, note: 'Mortise-and-tenon bents; the walls become infill. Beautiful and DIY-friendly with a jig.' },
+  'load-bearing': { label: 'Load-bearing walls (no separate frame)', costPsf: 0, carbonPsf: 0, structural: false, note: 'The wall itself carries the roof — classic for straw bale, cob, cordwood, and rammed earth.', green: true },
+  timber: { label: 'Timber frame (heavy posts & beams)', costPsf: 15, carbonPsf: 6, structural: true, note: 'Mortise-and-tenon bents; the walls become infill. Beautiful and DIY-friendly with a jig.', green: true },
   'post-beam': { label: 'Post & beam', costPsf: 11, carbonPsf: 6, structural: true, note: 'Simpler bolted posts and beams with diagonal bracing.' },
   stick: { label: 'Light stick frame (2× studs)', costPsf: 9, carbonPsf: 8, structural: true, note: 'Conventional dimensional-lumber framing — familiar and fast.' },
   'double-stud': { label: 'Double-stud wall', costPsf: 13, carbonPsf: 10, structural: true, note: 'Two stud walls with a deep insulation cavity between them.' },
-  pole: { label: 'Round-wood / pole frame', costPsf: 7, carbonPsf: 3, structural: true, note: 'Debarked poles or small-diameter logs; very low embodied energy.' }
+  pole: { label: 'Round-wood / pole frame', costPsf: 7, carbonPsf: 3, structural: true, note: 'Debarked poles or small-diameter logs; very low embodied energy.', green: true }
 };
 
 export const FRAME_DEFAULTS = { type: 'load-bearing', storeyTypes: {} };
@@ -853,12 +860,12 @@ export const FRAME_DEFAULTS = { type: 'load-bearing', storeyTypes: {} };
 // heated floor. Earthen and stone lean on thermal mass; wood/cork are warmer
 // underfoot. A per-room override (room.floor free text) can still differ.
 export const FLOORING_TYPES = {
-  earthen: { label: 'Earthen / lime slab', costPsf: 4, carbonPsf: 2, note: 'Poured earth or lime; high thermal mass, very low carbon, DIY-friendly.' },
+  earthen: { label: 'Earthen / lime slab', costPsf: 4, carbonPsf: 2, note: 'Poured earth or lime; high thermal mass, very low carbon, DIY-friendly.', green: true },
   concrete: { label: 'Polished concrete', costPsf: 9, carbonPsf: 14, note: 'Durable mass floor, but the most embodied carbon of the floors.' },
   wood: { label: 'Wood boards', costPsf: 10, carbonPsf: 4, note: 'Warm underfoot; reclaimed boards cut cost and carbon sharply.' },
-  cork: { label: 'Cork', costPsf: 8, carbonPsf: 2, note: 'Soft, warm, renewable; good over radiant.' },
+  cork: { label: 'Cork', costPsf: 8, carbonPsf: 2, note: 'Soft, warm, renewable; good over radiant.', green: true },
   tile: { label: 'Tile / stone', costPsf: 12, carbonPsf: 6, note: 'Hard-wearing mass floor, good in wet cores and sun-tempered rooms.' },
-  bamboo: { label: 'Bamboo', costPsf: 7, carbonPsf: 3, note: 'Fast-renewable and hard; a warm low-carbon choice.' }
+  bamboo: { label: 'Bamboo', costPsf: 7, carbonPsf: 3, note: 'Fast-renewable and hard; a warm low-carbon choice.', green: true }
 };
 export const FLOORING_DEFAULTS = { type: 'earthen' };
 export function resolveFlooring(spec) {
@@ -890,10 +897,10 @@ export function resolveSubfloor(spec) {
 // rigid foam insulates hard but carries the most embodied carbon.
 export const INSULATION_TYPES = {
   none: { label: 'None', r: 3, costPsf: 0, carbonPsf: 0 },
-  cellulose: { label: 'Dense-pack cellulose', r: 38, costPsf: 1.6, carbonPsf: 0.3 },
-  wool: { label: 'Sheep wool', r: 34, costPsf: 3.2, carbonPsf: 0.4 },
-  strawclay: { label: 'Straw / light clay', r: 24, costPsf: 0.8, carbonPsf: 0.2 },
-  woodfiber: { label: 'Wood fiber board', r: 32, costPsf: 2.6, carbonPsf: 0.5 },
+  cellulose: { label: 'Dense-pack cellulose', r: 38, costPsf: 1.6, carbonPsf: 0.3, green: true },
+  wool: { label: 'Sheep wool', r: 34, costPsf: 3.2, carbonPsf: 0.4, green: true },
+  strawclay: { label: 'Straw / light clay', r: 24, costPsf: 0.8, carbonPsf: 0.2, green: true },
+  woodfiber: { label: 'Wood fiber board', r: 32, costPsf: 2.6, carbonPsf: 0.5, green: true },
   mineralwool: { label: 'Mineral wool', r: 40, costPsf: 2.0, carbonPsf: 1.0 },
   rigid: { label: 'Rigid foam board', r: 45, costPsf: 2.4, carbonPsf: 3.5 }
 };

@@ -2576,8 +2576,9 @@ textarea,
 /* Model-view layers panel */
 .layersToggle {
   position: absolute;
-  top: 14px;
-  right: 12px;
+  top: 18px;
+  /* Row 1 right side: Layers sits LEFT of the north compass (42px + gap). */
+  right: 70px;
   z-index: 6;
   min-height: 30px;
   padding: 0 11px;

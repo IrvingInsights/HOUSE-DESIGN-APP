@@ -25,7 +25,11 @@ const operationSchema = {
               'set_roof_profile', 'add_opening_from_reference', 'add_site_element', 'add_pad_extension',
               'add_loft', 'add_tower', 'add_floor', 'edit_level', 'trace_image_request', 'request_clarification',
               'set_site', 'set_utility', 'set_overhang',
-              'set_footprint', 'move_wall_edge', 'split_wall_edge', 'dedupe_openings'
+              'set_footprint', 'move_wall_edge', 'split_wall_edge', 'dedupe_openings',
+              // Ops the prompt teaches MUST be in this enum or Gemini cannot
+              // emit them — per-side walls/cladding, frame, flooring, segments
+              // were being silently dropped from traces and chat plans.
+              'set_wall_side', 'set_frame', 'set_reclaimed', 'set_flooring', 'resize_wall_segment'
             ]
           },
           id: { type: 'string' },
@@ -521,7 +525,7 @@ ${traceMandate}${referenceNote}
 Prefer real model changes over prose. If the user asks for floors, lofts, towers, site objects, unusual natural-building forms, or arbitrary elements, create add_level or add_element operations. A covered porch, veranda, or carport is add_element with roofType 'shed' or 'gable' (its canopy renders on posts); to cover an EXISTING element use update_object with field 'roofType'.
 THE SHELL ENCLOSES THE WHOLE GROUND FLOOR: every indoor level-1 room must lie inside set_shell w x d (or the footprint outline). A two-storey CORE over a larger ground floor is NOT a small shell with rooms outside it — the shell covers the FULL ground floor, and the storey-2 extent plate (the 'floor'-category element addStorey creates, level 2) is resized/positioned over just the core with resize_object/move_object; the roof steps down over the single-storey part automatically.
 Stacking: for localized requests like "a loft above the kitchen" or "a tower above that", look up the base room's x/y/w/d in the BIM state and REUSE that footprint. Use add_loft (category loft) or add_tower (category tower) as VOLUMES: set z to the top of whatever it sits on (ground rooms top out at shell.wallHeightFt; a stacked element's top is its z + h) and give a real h (a loft 7-8 ft, a tower room 8-10 ft per storey). Chain them: the second element's z = the first element's z + its h. Reserve add_level for a full new storey across the whole footprint.
-For wall system changes, use set_assembly. Per-side wall systems use set_wall_side with wall and field 'assembly'; assembly values include straw-bale, hemp-lime, cob, rammed-earth, cordwood, light-straw-clay, framed, and glazed — 'glazed' is a GLASS WALL (a whole face of glazing, e.g. an attached greenhouse or sunspace south face), not windows in a wall.
+For wall system changes, use set_assembly. Per-side wall systems use set_wall_side with wall and field 'assembly'; assembly values include straw-bale, hemp-lime, cob, rammed-earth, cordwood, light-straw-clay, framed, sips (fast standard panel), ply-insulated (marine ply + rigid insulation — light and quick for upper storeys), icf, and glazed — 'glazed' is a GLASS WALL (a whole face of glazing, e.g. an attached greenhouse or sunspace south face), not windows in a wall.
 EXTERIOR CLADDING: set_wall_side field 'cladding' with render (plaster, the default) | lap (wood lap siding) | boardbatten | shingle (cedar) | metal (standing seam) | stucco | stone | brick — per wall side, priced per face sf and drawn with its own material.
 ATTACHED SOLAR GREENHOUSE FACE (kneewall + angled glazing): per-side heights go down to 2' — set_wall_side field 'heightFt' value 3 makes a bale kneewall; then set_wall_side field 'sunGlazing' value 'true' (+ optional field 'sunGlazingTiltDeg', 0-45 from vertical, default 30) draws angled glazing from the kneewall top to the eave, carried by the structural frame and counted in solar gain.
 WALL SEGMENTS: on a custom outline, resize_wall_segment with field 'e<index>' sets one segment's length (value, ft) and/or its start along the wall (positionFt, ft; 0 = keep). The jog corners slide with it.

@@ -1759,13 +1759,20 @@ const WALL_SIDES = ['north', 'south', 'east', 'west'];
 const WALL_SIDE_LABELS = { north: 'North', south: 'South', east: 'East', west: 'West' };
 
 const WALL_ASSEMBLIES = {
-  'straw-bale':       { key: 'straw-bale',       label: 'Straw Bale',          thicknessFt: 1.6,  color: 0xd8bf79, rValue: 33, finish: 'lime / clay plaster' },
-  'hemp-lime':        { key: 'hemp-lime',        label: 'Hemp-Lime',           thicknessFt: 1.25, color: 0xb9c49b, rValue: 22, finish: 'vapor-open plaster' },
-  'cob':              { key: 'cob',              label: 'Cob',                 thicknessFt: 1.8,  color: 0xb9835e, rValue: 14, finish: 'earthen plaster' },
-  'rammed-earth':     { key: 'rammed-earth',     label: 'Rammed Earth',        thicknessFt: 1.35, color: 0x9d7456, rValue: 12, finish: 'sealed / waxed earth' },
-  'cordwood':         { key: 'cordwood',         label: 'Cordwood',            thicknessFt: 1.25, color: 0x9b7652, rValue: 18, finish: 'lime mortar joints' },
-  'light-straw-clay': { key: 'light-straw-clay', label: 'Light Straw-Clay',    thicknessFt: 1.0,  color: 0xc6b077, rValue: 20, finish: 'clay plaster' },
+  // green: true marks natural / low-carbon methods — the UI shows them with a
+  // leaf. Standard options sit alongside: every system offers both.
+  'straw-bale':       { key: 'straw-bale',       label: 'Straw Bale',          thicknessFt: 1.6,  color: 0xd8bf79, rValue: 33, finish: 'lime / clay plaster', green: true },
+  'hemp-lime':        { key: 'hemp-lime',        label: 'Hemp-Lime',           thicknessFt: 1.25, color: 0xb9c49b, rValue: 22, finish: 'vapor-open plaster', green: true },
+  'cob':              { key: 'cob',              label: 'Cob',                 thicknessFt: 1.8,  color: 0xb9835e, rValue: 14, finish: 'earthen plaster', green: true },
+  'rammed-earth':     { key: 'rammed-earth',     label: 'Rammed Earth',        thicknessFt: 1.35, color: 0x9d7456, rValue: 12, finish: 'sealed / waxed earth', green: true },
+  'cordwood':         { key: 'cordwood',         label: 'Cordwood',            thicknessFt: 1.25, color: 0x9b7652, rValue: 18, finish: 'lime mortar joints', green: true },
+  'light-straw-clay': { key: 'light-straw-clay', label: 'Light Straw-Clay',    thicknessFt: 1.0,  color: 0xc6b077, rValue: 20, finish: 'clay plaster', green: true },
   'framed':           { key: 'framed',           label: 'Framed (vapor-open)', thicknessFt: 0.55, color: 0xd9d5c8, rValue: 23, finish: 'plaster / cladding' },
+  // Standard/panelized options — light, predictable, fast at height (upper
+  // storeys over a natural ground floor are a legitimate hybrid).
+  'sips':             { key: 'sips',             label: 'SIPs panel (fast, standard)',            thicknessFt: 0.6, color: 0xd8d5cf, rValue: 24, finish: 'drywall / cladding' },
+  'ply-insulated':    { key: 'ply-insulated',    label: 'Marine ply + rigid insulation (panelized)', thicknessFt: 0.5, color: 0xc9b58f, rValue: 18, finish: 'sealed ply / cladding' },
+  'icf':              { key: 'icf',              label: 'ICF concrete (standard)',                thicknessFt: 1.0, color: 0xb5b2a8, rValue: 23, finish: 'drywall / parge' },
   // A GLASS WALL — the whole face is glazing in a timber frame (an attached
   // greenhouse's south face), not windows punched into an opaque wall. The
   // engine treats its face area as glass: solar gain, glazing heat loss,
@@ -3031,7 +3038,7 @@ function deriveDesign(spec, wallSections) {
   const glazedWallArea = wallSections.reduce((sum, wall) => sum + (wall.assemblyKey === 'glazed' ? wallFaceArea(wall) : 0), 0);
   const glazedSouthWallArea = wallSections.reduce((sum, wall) => sum + (wall.assemblyKey === 'glazed' && wall.side === 'south' ? wallFaceArea(wall) : 0), 0);
   const opaqueWallArea = Math.max(0, wallArea - glazedWallArea);
-  const wallCostPsf = { 'straw-bale': 12, 'hemp-lime': 20, cob: 20, 'rammed-earth': 22, cordwood: 16, 'light-straw-clay': 15, framed: 18, glazed: utilities.windowQuality === 'triple' ? 70 : 45 };
+  const wallCostPsf = { 'straw-bale': 12, 'hemp-lime': 20, cob: 20, 'rammed-earth': 22, cordwood: 16, 'light-straw-clay': 15, framed: 18, sips: 22, 'ply-insulated': 16, icf: 24, glazed: utilities.windowQuality === 'triple' ? 70 : 45 };
   // Interior partition walls price by face area of their construction and ride
   // the walls cost line (they're walls, just without weather duty).
   const partitionElements = (spec.elements || []).filter((element) => element.category === 'partition');
@@ -3246,7 +3253,7 @@ function deriveDesign(spec, wallSections) {
 
   // Embodied carbon (kg CO2e, directional/comparative — add-on coefficients).
   const foundationCarbonPsf = { rubble: 10, stemwall: 18, slab: 25 };
-  const wallCarbonPsf = { 'straw-bale': 6, 'rammed-earth': 20, cob: 8, 'hemp-lime': 4, cordwood: 8, 'light-straw-clay': 7, framed: 8, glazed: 15 };
+  const wallCarbonPsf = { 'straw-bale': 6, 'rammed-earth': 20, cob: 8, 'hemp-lime': 4, cordwood: 8, 'light-straw-clay': 7, framed: 8, sips: 14, 'ply-insulated': 9, icf: 26, glazed: 15 };
   const wallCarbonRaw = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0) + partitionCarbon + claddingCarbon;
   const wallCarbon = wallCarbonRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.carbon : 1);
   const frameCarbon = frameCarbonRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.carbon : 1);
@@ -3893,6 +3900,12 @@ const PLAN_ELEMENT_HEX = {
   tower: '#7a5f49', outbuilding: '#a08a5f', foundation: '#8f8b80', partition: '#6b6257',
   chimney: '#9a5944', deck: '#8e7049', custom: '#8b786d'
 };
+
+// 🌿 marks green/natural methods and materials in every options list, with a
+// green tint where the control allows it. Standard options sit unmarked
+// alongside — both are always offered.
+const greenLeaf = (item) => (item?.green ? '🌿 ' : '');
+const greenOptStyle = (item) => (item?.green ? { color: '#2f7d46' } : undefined);
 
 // Label ink by fill luminance — dark ink on light fills, paper ink on dark
 // fills (slab plates, partitions, chimneys were unreadable with dark-on-dark).
@@ -8428,7 +8441,7 @@ function App() {
                     <select value={mixed ? '' : globalKey} onChange={(event) => setAllWallsAssembly(event.target.value)}>
                       {mixed && <option value="" disabled>Mixed — see per-side</option>}
                       {Object.values(WALL_ASSEMBLIES).map((assembly) => (
-                        <option key={assembly.key} value={assembly.key}>{assembly.label} (R≈{assembly.rValue})</option>
+                        <option key={assembly.key} value={assembly.key} style={greenOptStyle(assembly)}>{greenLeaf(assembly)}{assembly.label} (R≈{assembly.rValue})</option>
                       ))}
                     </select>
                   </label>
@@ -8439,7 +8452,7 @@ function App() {
                       <label>Cladding (all sides)
                         <select value={cladsMixed ? '' : clads[0]} onChange={(event) => setAllWallsCladding(event.target.value)}>
                           {cladsMixed && <option value="" disabled>Mixed — tap a wall to set per side</option>}
-                          {Object.entries(CLADDING_TYPES).map(([key, c]) => <option key={key} value={key}>{c.label}{c.costPsf ? ` (+$${c.costPsf}/sf)` : ''}</option>)}
+                          {Object.entries(CLADDING_TYPES).map(([key, c]) => <option key={key} value={key} style={greenOptStyle(c)}>{greenLeaf(c)}{c.label}{c.costPsf ? ` (+$${c.costPsf}/sf)` : ''}</option>)}
                         </select>
                       </label>
                     );
@@ -8502,7 +8515,7 @@ function App() {
                           <select value={upperGlobal} onChange={(event) => setAllWallsAssembly(event.target.value, 2)}>
                             {upperKeys.size > 1 && <option value="" disabled>Mixed — see per-side</option>}
                             {Object.values(WALL_ASSEMBLIES).map((assembly) => (
-                              <option key={assembly.key} value={assembly.key}>{assembly.label} (R≈{assembly.rValue})</option>
+                              <option key={assembly.key} value={assembly.key} style={greenOptStyle(assembly)}>{greenLeaf(assembly)}{assembly.label} (R≈{assembly.rValue})</option>
                             ))}
                           </select>
                         </label>
@@ -8622,7 +8635,7 @@ function App() {
               <div className="controlGrid">
                 <label>Type
                   <select value={basementInfo(spec.shell).present ? 'basement' : utilitiesOf(spec).foundationType} onChange={(event) => setFoundationChoice(event.target.value)}>
-                    <option value="rubble">Rubble trench — drained gravel, low cost, low carbon</option>
+                    <option value="rubble" style={{ color: '#2f7d46' }}>🌿 Rubble trench — drained gravel, low cost, low carbon</option>
                     <option value="stemwall">Stem wall — perimeter wall on footing</option>
                     <option value="slab">Insulated slab — simple, the most concrete</option>
                     <option value="basement">Basement — a full storey below grade</option>
@@ -8706,7 +8719,7 @@ function App() {
                   <div className="controlGrid">
                     <label>Frame type
                       <select value={resolveFrameType(spec, 1)} onChange={(event) => updateFrame(event.target.value)}>
-                        {Object.entries(FRAME_TYPES).map(([key, f]) => <option key={key} value={key}>{f.label}</option>)}
+                        {Object.entries(FRAME_TYPES).map(([key, f]) => <option key={key} value={key} style={greenOptStyle(f)}>{greenLeaf(f)}{f.label}</option>)}
                       </select>
                     </label>
                     {resolveFrameType(spec, 1) !== 'load-bearing' && (
@@ -8720,7 +8733,7 @@ function App() {
                       {levels.map((lvl) => (
                         <label key={lvl}>{lvl === 1 ? 'Ground' : floorLabel(spec, lvl)} frame
                           <select value={resolveFrameType(spec, lvl)} onChange={(event) => updateFrame(event.target.value, lvl)}>
-                            {Object.entries(FRAME_TYPES).map(([key, f]) => <option key={key} value={key}>{f.label}</option>)}
+                            {Object.entries(FRAME_TYPES).map(([key, f]) => <option key={key} value={key} style={greenOptStyle(f)}>{greenLeaf(f)}{f.label}</option>)}
                           </select>
                         </label>
                       ))}
@@ -8770,12 +8783,12 @@ function App() {
                 <div className="controlGrid">
                   <label>Subfloor
                     <select value={subfloorKey} onChange={(event) => updateSubfloor(event.target.value)}>
-                      {Object.entries(SUBFLOOR_TYPES).map(([key, f]) => <option key={key} value={key}>{f.label}</option>)}
+                      {Object.entries(SUBFLOOR_TYPES).map(([key, f]) => <option key={key} value={key} style={greenOptStyle(f)}>{greenLeaf(f)}{f.label}</option>)}
                     </select>
                   </label>
                   <label>Insulation <em className="pitchHint">R-{derived.floorR}</em>
                     <select value={resolveInsulation(utilitiesOf(spec).floorInsulation, 'cellulose')} onChange={(event) => updateUtility('floorInsulation', event.target.value)}>
-                      {Object.entries(INSULATION_TYPES).map(([key, ins]) => <option key={key} value={key}>{ins.label} (R≈{ins.r})</option>)}
+                      {Object.entries(INSULATION_TYPES).map(([key, ins]) => <option key={key} value={key} style={greenOptStyle(ins)}>{greenLeaf(ins)}{ins.label} (R≈{ins.r})</option>)}
                     </select>
                   </label>
                 </div>
@@ -8785,7 +8798,7 @@ function App() {
                 <div className="controlGrid">
                   <label>Floor type
                     <select value={flooringKey} onChange={(event) => updateFlooring(event.target.value)}>
-                      {Object.entries(FLOORING_TYPES).map(([key, f]) => <option key={key} value={key}>{f.label}</option>)}
+                      {Object.entries(FLOORING_TYPES).map(([key, f]) => <option key={key} value={key} style={greenOptStyle(f)}>{greenLeaf(f)}{f.label}</option>)}
                     </select>
                   </label>
                 </div>
@@ -8879,7 +8892,7 @@ function App() {
                   <select value={utilitiesOf(spec).waterSource} onChange={(event) => updateUtility('waterSource', event.target.value)}>
                     <option value="well">Drilled well — reliable, needs a pump</option>
                     <option value="spring">Spring — cheap if the land has one</option>
-                    <option value="catchment">Rain catchment — roof + rain</option>
+                    <option value="catchment" style={{ color: '#2f7d46' }}>🌿 Rain catchment — roof + rain</option>
                     <option value="town">Town main — simplest</option>
                   </select>
                 </label>
@@ -8896,7 +8909,7 @@ function App() {
                 <label>Method
                   <select value={utilitiesOf(spec).wasteMethod} onChange={(event) => updateUtility('wasteMethod', event.target.value)}>
                     <option value="septic">Septic + leach field — conventional</option>
-                    <option value="composting">Composting toilet + greywater</option>
+                    <option value="composting" style={{ color: '#2f7d46' }}>🌿 Composting toilet + greywater</option>
                     <option value="reedbed">Reed bed / constructed wetland</option>
                   </select>
                 </label>
@@ -8932,7 +8945,7 @@ function App() {
               <div className="controlGrid">
                 <label>Source
                   <select value={utilitiesOf(spec).heatSource} onChange={(event) => updateUtility('heatSource', event.target.value)}>
-                    <option value="rocket_mass">Rocket mass heater — wood, huge mass, very DIY</option>
+                    <option value="rocket_mass" style={{ color: '#2f7d46' }}>🌿 Rocket mass heater — wood, huge mass, very DIY</option>
                     <option value="masonry">Masonry heater — wood, slow steady radiant</option>
                     <option value="wood_stove">Wood stove — simple, familiar</option>
                     <option value="minisplit">Electric mini-split — no wood, draws power</option>
@@ -8962,7 +8975,7 @@ function App() {
                 <label>Pitch <em className="pitchHint">≈ {Math.round(Number(spec.shell.roofPitch || 0.32) * 12)}:12</em><input type="number" step="0.01" value={spec.shell.roofPitch} onChange={(event) => updateShell('roofPitch', event.target.value)} /></label>
                 <label>Insulation <em className="pitchHint">R-{derived.roofR}</em>
                   <select value={resolveInsulation(utilitiesOf(spec).roofInsulation, 'cellulose')} onChange={(event) => updateUtility('roofInsulation', event.target.value)}>
-                    {Object.entries(INSULATION_TYPES).map(([key, ins]) => <option key={key} value={key}>{ins.label} (R≈{ins.r})</option>)}
+                    {Object.entries(INSULATION_TYPES).map(([key, ins]) => <option key={key} value={key} style={greenOptStyle(ins)}>{greenLeaf(ins)}{ins.label} (R≈{ins.r})</option>)}
                   </select>
                 </label>
               </div>
@@ -9636,14 +9649,14 @@ function App() {
                   {selectedIsWall && <label>System
                     <select value={selected?.assemblyKey || 'framed'} onChange={(event) => updateSelectedRoom('assembly', event.target.value)}>
                       {Object.values(WALL_ASSEMBLIES).map((assembly) => (
-                        <option key={assembly.key} value={assembly.key}>{assembly.label}</option>
+                        <option key={assembly.key} value={assembly.key} style={greenOptStyle(assembly)}>{greenLeaf(assembly)}{assembly.label}</option>
                       ))}
                     </select>
                   </label>}
                   {selectedIsWall && <label>Interior finish<input type="text" value={selected?.interiorFinish || ''} onChange={(event) => updateSelectedRoom('interiorFinish', event.target.value)} /></label>}
                   {selectedIsWall && <label>Exterior cladding
                     <select value={resolveWallSide(spec, selected.side, selected.level || 1).cladding} onChange={(event) => updateSelectedRoom('cladding', event.target.value)}>
-                      {Object.entries(CLADDING_TYPES).map(([key, c]) => <option key={key} value={key}>{c.label}{c.costPsf ? ` (+$${c.costPsf}/sf)` : ''}</option>)}
+                      {Object.entries(CLADDING_TYPES).map(([key, c]) => <option key={key} value={key} style={greenOptStyle(c)}>{greenLeaf(c)}{c.label}{c.costPsf ? ` (+$${c.costPsf}/sf)` : ''}</option>)}
                     </select>
                   </label>}
                   {selectedIsWall && (selected?.level || 1) === 1 && (
@@ -9709,7 +9722,7 @@ function App() {
                   {selected?.id === 'frame-main' && <>
                     <label>Frame system
                       <select value={resolveFrameType(spec, 1)} onChange={(event) => updateSelectedRoom('type', event.target.value)}>
-                        {Object.entries(FRAME_TYPES).map(([key, f]) => <option key={key} value={key}>{f.label}</option>)}
+                        {Object.entries(FRAME_TYPES).map(([key, f]) => <option key={key} value={key} style={greenOptStyle(f)}>{greenLeaf(f)}{f.label}</option>)}
                       </select>
                     </label>
                     <label>Bay spacing (ft, post to post)<input type="number" step="0.5" min="4" max="16" value={Number(spec.frame?.baySpacingFt) || 8} onChange={(event) => updateSelectedRoom('baySpacingFt', event.target.value)} /></label>
@@ -9717,7 +9730,7 @@ function App() {
                   {selectedIsElement && selected?.category === 'partition' && <>
                     <label>Construction
                       <select value={PARTITION_TYPES[selected?.construction] ? selected.construction : 'framed'} onChange={(event) => updateSelectedRoom('construction', event.target.value)}>
-                        {Object.entries(PARTITION_TYPES).map(([key, p]) => <option key={key} value={key}>{p.label}</option>)}
+                        {Object.entries(PARTITION_TYPES).map(([key, p]) => <option key={key} value={key} style={greenOptStyle(p)}>{greenLeaf(p)}{p.label}</option>)}
                       </select>
                     </label>
                     <label>Door width (ft, 0 = solid)<input type="number" step="0.5" min="0" max="8" value={Number(selected?.doorWFt || 0)} onChange={(event) => updateSelectedRoom('doorWFt', event.target.value)} /></label>
