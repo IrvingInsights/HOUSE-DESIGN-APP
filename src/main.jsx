@@ -756,6 +756,7 @@ const ROOM_PRESETS = [
 // Button label for each one-click flag fix (keyed by issue.fixId). Absence of a
 // fixId means the flag needs human judgment and shows prose guidance only.
 const FIX_LABELS = {
+  'give-shed-fall': 'Drain it north (2′ fall)',
   'enclose-rooms': 'Grow the walls to enclose them',
   'add-wet-core': 'Add a bathroom',
   'add-mudroom': 'Add a mudroom',
@@ -2778,6 +2779,10 @@ function detectIssues(spec) {
   }
   if (spec.shell.wallHeightFt > 12) {
     issues.push({ severity: 'warning', title: 'Tall walls need explicit lateral strategy', owner: 'Engineer', system: 'walls', fix: 'Add shear wall schedule, hold-downs, and diaphragm notes.' });
+  }
+  const shedFall = Math.abs(Number(spec.shell.southWallHeightFt || spec.shell.wallHeightFt || 10) - Number(spec.shell.northWallHeightFt || spec.shell.wallHeightFt || 10));
+  if ((spec.shell.roofType || 'gable') === 'shed' && shedFall < 0.5) {
+    issues.push({ severity: 'warning', title: "Shed roof is flat — it won't drain", owner: 'Engineer', system: 'roof', fixId: 'give-shed-fall', fix: 'A shed needs a high eave and a low one. Set "Drains to" on the Roof page — high south wall draining north is the solar classic.' });
   }
   const glazedOffSouth = WALL_SIDES.filter((side) => { const r = resolveWallSide(spec, side); return !r.omitted && side !== 'south' && (r.assemblyKey === 'glazed' || r.sunGlazing); });
   if (naturalApproach && glazedOffSouth.length) {
@@ -7698,6 +7703,15 @@ function App() {
           chatText: `Grew the walls to ${clamp(needW, 18, 120)} × ${clamp(needD, 18, 120)} ft so every ground room is inside. The upper storey still covers only its Storey extent — resize or drag that on the 2nd-floor Plan tab, and the roof steps down over the single-storey part.`
         });
       }
+      case 'give-shed-fall': {
+        const hi = Math.max(7, Number(spec.shell.southWallHeightFt || spec.shell.wallHeightFt || 10));
+        return void applyBackendOperations({
+          operations: [{ type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: hi, northWallHeightFt: Math.max(2, hi - 2) }],
+          promptText: 'Give the shed roof its fall',
+          logPrefix: 'Fix',
+          chatText: `Gave the shed a 2′ fall to the north (south eave ${hi}′, north ${Math.max(2, hi - 2)}′) — the solar-classic slope. Adjust direction and fall on the Roof page.`
+        });
+      }
       case 'add-wet-core':
         return void addRoomPreset(preset('Bathroom'));
       case 'add-mudroom':
@@ -8912,6 +8926,39 @@ function App() {
                   </select>
                 </label>
               </div>
+              {spec.shell.roofType === 'shed' && (() => {
+                const sH = Number(spec.shell.southWallHeightFt || spec.shell.wallHeightFt || 10);
+                const nH = Number(spec.shell.northWallHeightFt || spec.shell.wallHeightFt || 10);
+                const highSide = Math.max(sH, nH);
+                const fallNow = Math.round(Math.abs(sH - nH) * 2) / 2;
+                const drainsNow = fallNow < 0.25 ? '' : (sH >= nH ? 'north' : 'south');
+                const setShedFall = (drainTo, fallFt) => {
+                  const hi = Math.max(7, highSide);
+                  const lo = Math.max(2, hi - Math.max(0.5, Number(fallFt) || 2));
+                  void applyBackendOperations({
+                    operations: [{ type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: drainTo === 'north' ? hi : lo, northWallHeightFt: drainTo === 'north' ? lo : hi }],
+                    promptText: `Shed roof drains ${drainTo}`,
+                    logPrefix: 'Roof',
+                    chatText: `Set the shed to drain ${drainTo}: high wall ${hi}′ falling to ${lo}′.`
+                  });
+                };
+                return (
+                  <>
+                    <div className="sectionHead">Which way the shed falls</div>
+                    <div className="controlGrid">
+                      <label>Drains to
+                        <select value={drainsNow} onChange={(event) => setShedFall(event.target.value, Math.max(2, fallNow))}>
+                          {drainsNow === '' && <option value="">Flat — pick a direction</option>}
+                          <option value="north">North — high south wall (solar classic)</option>
+                          <option value="south">South — high north wall</option>
+                        </select>
+                      </label>
+                      <label>Fall, high eave to low (ft)<input type="number" step="0.5" min="0.5" max="12" value={fallNow} onChange={(event) => setShedFall(drainsNow || 'north', event.target.value)} /></label>
+                    </div>
+                    {drainsNow === '' && <p className="systemNote">Both eaves are level right now — this “shed” is flat and won't drain. Pick a direction (or set a fall) and the wall heights follow.</p>}
+                  </>
+                );
+              })()}
               <div className="breakOpenRow">
                 <div className="sectionHead">Overhang</div>
                 <button className="breakOpen" onClick={() => setOverhangBreakOpen((open) => !open)}>

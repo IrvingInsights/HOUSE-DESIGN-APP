@@ -251,6 +251,12 @@ r = apply(r.spec, [{ type: 'resize_wall_segment', field: 'e3', value: 10, positi
 r = apply(freshSpec(), [{ type: 'resize_wall_segment', wall: 'south', value: 10 }]);
 ok(r.warnings.some((warning) => /custom outline|Split into 3/i.test(warning)), 'segment resize on a plain rectangle explains itself');
 
+// --- flat shed flags -----------------------------------------------------------
+r = apply(freshSpec(), [{ type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: 10, northWallHeightFt: 10 }]);
+ok(r.issues.some((issue) => /flat/i.test(issue.title) && /drain/i.test(issue.title)), 'flat shed roof flags for drainage');
+r = apply(freshSpec(), [{ type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: 12, northWallHeightFt: 9 }]);
+ok(!r.issues.some((issue) => /flat/i.test(issue.title)), 'a real shed fall stays quiet');
+
 // --- per-storey height ---------------------------------------------------------
 r = apply(freshSpec(), [
   { type: 'set_shell', field: 'storeys', value: '2' },
