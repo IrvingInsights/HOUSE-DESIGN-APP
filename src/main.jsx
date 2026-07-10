@@ -4820,12 +4820,8 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
         });
       }
 
-      const roofLabel = roofSpec.roofType === 'shed' ? `shed roof S ${southWallHeight}' / N ${northWallHeight}'` : 'gable roof';
-      if (layers.labels) {
-        const assemblyLabel = makeLabel(`${wallProfile.label} - ${wallT}' walls - ${roofLabel}`, 16);
-        assemblyLabel.position.set(width / 2, wallHeight + 1.4, depth / 2);
-        group.add(assemblyLabel);
-      }
+      // (The old floating assembly-summary chip is gone — that information
+      // lives in the selection chip and the Walls page; it was pure clutter.)
 
       // Stem wall foundation: a visible concrete plinth ring under the walls.
       if (utilitiesOf(spec).foundationType === 'stemwall') {
@@ -5192,7 +5188,10 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
           }
         }
 
-        if (layers.labels) {
+        // Element labels only when SELECTED — a chip over every fixture,
+        // partition, and plate buried the model in text. Names live in the
+        // selector and the plan.
+        if (layers.labels && element.id === selectedRoom) {
           const label = makeLabel(element.name, Math.max(element.w, 8));
           label.position.set(element.x + element.w / 2, elevation + elementHeight + 0.8, element.y + element.d / 2);
           parts.label = label;
@@ -5901,12 +5900,48 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       const hit = raycaster.intersectObjects(roomMeshes, false)[0];
       if (!hit?.object?.userData?.roomId) return;
       const objectId = hit.object.userData.roomId;
+      // Openings slide ALONG their wall — grab a window in 3D and move it.
+      if (objectId.startsWith('opening-')) {
+        const openingIndex = Number(objectId.replace('opening-', ''));
+        const opening = spec.openings?.[openingIndex];
+        if (!opening || opening.wall === 'roof') {
+          callbacksRef.current.onSelectRoom(objectId);
+          return;
+        }
+        renderer.domElement.setPointerCapture(event.pointerId);
+        if (!raycaster.ray.intersectPlane(floorPlane, dragPoint)) return;
+        const horiz = opening.wall === 'north' || opening.wall === 'south';
+        const run = horiz ? Number(spec.shell.widthFt) : Number(spec.shell.depthFt);
+        const startAlong = Number(horiz ? opening.x : opening.y) || 0;
+        const meshes = [];
+        scene.traverse((node) => { if (node.isMesh && node.userData?.roomId === objectId) meshes.push(node); });
+        dragState = { mode: 'openingSlide', id: objectId, pointerId: event.pointerId, horiz, run, width: Number(opening.widthFt) || 3, startAlong, currentAlong: startAlong, startX: dragPoint.x, startZ: dragPoint.z, meshes, began: false, moved: false };
+        return;
+      }
+      // Ground walls (and edge segments) drag IN and OUT — grab the wall and
+      // push it; the footprint follows on release. Upper bands move via the
+      // storey controls; the roof/pad follow the shell.
+      if (objectId.startsWith('wall-') && !objectId.endsWith('-u')) {
+        const side = hit.object.userData.wallSide;
+        if (!side) {
+          callbacksRef.current.onSelectRoom(objectId);
+          return;
+        }
+        renderer.domElement.setPointerCapture(event.pointerId);
+        if (!raycaster.ray.intersectPlane(floorPlane, dragPoint)) return;
+        const horiz = side === 'north' || side === 'south';
+        const outSign = side === 'south' || side === 'east' ? 1 : -1;
+        const meshes = [];
+        scene.traverse((node) => { if (node.isMesh && node.userData?.roomId === objectId) meshes.push(node); });
+        dragState = { mode: 'wallSlide', id: objectId, pointerId: event.pointerId, horiz, outSign, currentOffset: 0, startX: dragPoint.x, startZ: dragPoint.z, meshes, began: false, moved: false };
+        return;
+      }
       const object = [...spec.rooms, ...(spec.elements || []), ...getSpecialBimObjects(spec)].find((item) => item.id === objectId);
       if (!object) {
         callbacksRef.current.onSelectRoom(objectId);
         return;
       }
-      if (objectId === 'site-pad' || objectId === 'roof-main' || objectId.startsWith('opening-')) {
+      if (objectId === 'site-pad' || objectId === 'roof-main') {
         callbacksRef.current.onSelectRoom(objectId);
         return;
       }
@@ -5941,6 +5976,24 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
         renderer.domElement.style.cursor = dragState.mode === 'resize' ? 'nwse-resize' : 'grabbing';
       }
       dragState.moved = true;
+      if (dragState.mode === 'openingSlide') {
+        const rawAlong = dragState.startAlong + (dragState.horiz ? dragPoint.x - dragState.startX : dragPoint.z - dragState.startZ);
+        const along = clamp(Math.round(rawAlong * 2) / 2, 0, Math.max(0, dragState.run - dragState.width));
+        const deltaAlong = along - dragState.currentAlong;
+        if (deltaAlong) dragState.meshes.forEach((m) => { if (dragState.horiz) m.position.x += deltaAlong; else m.position.z += deltaAlong; });
+        dragState.currentAlong = along;
+        dragState.finalAlong = along;
+        return;
+      }
+      if (dragState.mode === 'wallSlide') {
+        const raw = dragState.horiz ? dragPoint.z - dragState.startZ : dragPoint.x - dragState.startX;
+        const offset = clamp(Math.round(raw * 2) / 2, -24, 24);
+        const delta = offset - dragState.currentOffset;
+        if (delta) dragState.meshes.forEach((m) => { if (dragState.horiz) m.position.z += delta; else m.position.x += delta; });
+        dragState.currentOffset = offset;
+        dragState.finalOffset = offset * dragState.outSign;
+        return;
+      }
       const bounds = dragState.bounds || { minX: 0, minY: 0, maxX: spec.shell.widthFt, maxY: spec.shell.depthFt };
       if (dragState.mode === 'resize') {
         const minSize = 4;
@@ -6017,7 +6070,13 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
       renderer.domElement.style.cursor = '';
       if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
       callbacksRef.current.onDimensionPreview(null);
-      if (finished.mode === 'resize' && finished.moved && Number.isFinite(finished.finalW) && Number.isFinite(finished.finalD)) {
+      if (finished.mode === 'openingSlide') {
+        if (finished.moved && Number.isFinite(finished.finalAlong)) callbacksRef.current.onMoveEnd(finished.id, finished.finalAlong, 0);
+        else callbacksRef.current.onSelectRoom(finished.id);
+      } else if (finished.mode === 'wallSlide') {
+        if (finished.moved && finished.finalOffset) callbacksRef.current.onMoveEnd(finished.id, finished.finalOffset, 0);
+        else callbacksRef.current.onSelectRoom(finished.id);
+      } else if (finished.mode === 'resize' && finished.moved && Number.isFinite(finished.finalW) && Number.isFinite(finished.finalD)) {
         callbacksRef.current.onResizeEnd(finished.id, finished.finalW, finished.finalD, finished.finalX, finished.finalY);
       } else if (finished.moved && Number.isFinite(finished.finalX) && Number.isFinite(finished.finalY)) {
         callbacksRef.current.onMoveEnd(finished.id, finished.finalX, finished.finalY);
@@ -7395,6 +7454,26 @@ function App() {
   }
 
   function finishPlanMove(objectId, x, y) {
+    // 3D drags route here for EVERYTHING grabbable: openings carry their new
+    // position along the wall in x; walls carry their outward offset in x.
+    if (objectId.startsWith('opening-')) {
+      planMoveOpening(Number(objectId.replace('opening-', '')), x);
+      return;
+    }
+    if (objectId.startsWith('wall-')) {
+      const wall = wallSections.find((item) => item.id === objectId);
+      const offset = clamp(Number(x) || 0, -48, 48);
+      if (!wall || !offset) return;
+      void applyBackendOperations({
+        operations: [wall.edgeKey
+          ? { type: 'move_wall_edge', field: wall.edgeKey, value: String(offset) }
+          : { type: 'move_wall_edge', wall: wall.side, value: String(offset) }],
+        promptText: `Move ${wall.name.toLowerCase()} ${offset > 0 ? 'out' : 'in'} ${Math.abs(offset)}′`,
+        logPrefix: 'Footprint',
+        nextSelectedId: objectId
+      });
+      return;
+    }
     const object = spec.rooms.find((item) => item.id === objectId) || (spec.elements || []).find((item) => item.id === objectId);
     if (!object) return;
     const finalX = Number.isFinite(x) ? x : object.x;
