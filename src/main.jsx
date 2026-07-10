@@ -3789,11 +3789,12 @@ const PLAN_CONTEXT_LABEL = {
   rooms: 'Room plan — drag to move, corners to resize',
   windows: 'Openings plan — white gaps mark windows & doors'
 };
-function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShell, onMoveEdge, context = null, activeFloor = 1 }) {
+function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShell, onMoveEdge, onMoveOpening, context = null, activeFloor = 1 }) {
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
   const [shellGhost, setShellGhost] = useState(null);
   const [edgeDrag, setEdgeDrag] = useState(null);
+  const [openingDrag, setOpeningDrag] = useState(null);
   const W = Number(spec.shell.widthFt) || 36;
   const D = Number(spec.shell.depthFt) || 28;
   const pad = Math.max(6, Math.round(Math.max(W, D) * 0.14));
@@ -3883,6 +3884,32 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShel
     setEdgeDrag(null);
   }
 
+  // Drag an opening ALONG its wall — windows and doors find their real spot
+  // on the plan, the natural home for that decision.
+  function startOpeningDrag(event, index, opening) {
+    if (!onMoveOpening) return;
+    event.stopPropagation();
+    event.preventDefault();
+    try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
+    const { fx, fy } = clientToFeet(event);
+    const horizontal = opening.wall === 'north' || opening.wall === 'south';
+    const along0 = Number(horizontal ? opening.x : opening.y) || 0;
+    setOpeningDrag({ index, horizontal, start: horizontal ? fx : fy, along0, along: along0, width: Number(opening.widthFt) || 3 });
+    onSelect?.(`opening-${index}`);
+  }
+  function onOpeningMove(event) {
+    if (!openingDrag) return;
+    const { fx, fy } = clientToFeet(event);
+    const cur = openingDrag.horizontal ? fx : fy;
+    const maxAlong = Math.max(0, (openingDrag.horizontal ? W : D) - openingDrag.width);
+    setOpeningDrag((current) => current && { ...current, along: clamp(snap(current.along0 + (cur - current.start)), 0, maxAlong) });
+  }
+  function endOpeningDrag() {
+    if (!openingDrag) return;
+    if (Math.abs(openingDrag.along - openingDrag.along0) >= 0.25) onMoveOpening(openingDrag.index, openingDrag.along);
+    setOpeningDrag(null);
+  }
+
   function startShellDrag(event) {
     event.stopPropagation();
     event.preventDefault();
@@ -3919,9 +3946,9 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShel
         className="planSvg"
         viewBox={`${-pad} ${-pad} ${W + pad * 2} ${D + pad * 2}`}
         preserveAspectRatio="xMidYMid meet"
-        onPointerMove={(event) => { onPointerMove(event); onShellMove(event); onEdgeMove(event); }}
-        onPointerUp={(event) => { endDrag(); endShellDrag(event); endEdgeDrag(); }}
-        onPointerLeave={(event) => { endDrag(); endShellDrag(event); endEdgeDrag(); }}
+        onPointerMove={(event) => { onPointerMove(event); onShellMove(event); onEdgeMove(event); onOpeningMove(event); }}
+        onPointerUp={(event) => { endDrag(); endShellDrag(event); endEdgeDrag(); endOpeningDrag(); }}
+        onPointerLeave={(event) => { endDrag(); endShellDrag(event); endEdgeDrag(); endOpeningDrag(); }}
         onClick={() => {}}
       >
         {/* site around the house */}
@@ -4045,19 +4072,47 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShel
             </g>
           );
         })}
-        {/* openings as white gaps on the walls */}
-        {openings.map((o, i) => {
+        {/* openings as white gaps on the walls — DRAGGABLE along their wall
+            (windows and doors find their spot on the plan). On a custom
+            footprint each gap draws on the opening's actual polygon edge. */}
+        {openings.map((o) => {
+          const index = (spec.openings || []).indexOf(o);
           const wide = Number(o.widthFt) || 3;
-          const isSel = String(selectedRoom || '') === `opening-${(spec.openings || []).indexOf(o)}`;
-          const stroke = isSel ? 'var(--active-line)' : '#e8e6dd';
-          const sw = isSel ? 1.5 : 1.1;
-          // On a custom footprint the gap draws on the opening's actual edge.
+          const horizontal = o.wall === 'north' || o.wall === 'south';
           const oEdge = fpCustom ? edgeForOpening(spec, o) : null;
-          const lineNS = oEdge && oEdge.horizontal ? oEdge.y0 : (o.wall === 'north' ? 0 : D);
-          const lineEW = oEdge && !oEdge.horizontal ? oEdge.x0 : (o.wall === 'east' ? W : 0);
-          if (o.wall === 'north' || o.wall === 'south') return <line key={i} x1={o.x} y1={lineNS} x2={o.x + wide} y2={lineNS} stroke={stroke} strokeWidth={sw} />;
-          if (o.wall === 'east' || o.wall === 'west') return <line key={i} x1={lineEW} y1={o.y} x2={lineEW} y2={o.y + wide} stroke={stroke} strokeWidth={sw} />;
-          return null;
+          const lineC = horizontal
+            ? (oEdge && oEdge.horizontal ? oEdge.y0 : (o.wall === 'north' ? 0 : D))
+            : (oEdge && !oEdge.horizontal ? oEdge.x0 : (o.wall === 'east' ? W : 0));
+          const dragging = openingDrag && openingDrag.index === index;
+          const along = dragging ? openingDrag.along : (Number(horizontal ? o.x : o.y) || 0);
+          const isSel = String(selectedRoom || '') === `opening-${index}`;
+          const stroke = dragging || isSel ? 'var(--active-line)' : '#e8e6dd';
+          const sw = dragging || isSel ? 1.5 : 1.1;
+          const x1 = horizontal ? along : lineC;
+          const y1 = horizontal ? lineC : along;
+          const x2 = horizontal ? along + wide : lineC;
+          const y2 = horizontal ? lineC : along + wide;
+          const draggable = Boolean(onMoveOpening) && activeFloor === 1 && !buildingContext && !siteContext;
+          return (
+            <g key={index}>
+              <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={stroke} strokeWidth={sw} />
+              {dragging && (
+                <text
+                  x={horizontal ? along + wide / 2 : lineC + (o.wall === 'east' ? -2.6 : 2.6)}
+                  y={horizontal ? lineC + (o.wall === 'north' ? 2.8 : -1.6) : along + wide / 2}
+                  textAnchor="middle" fontSize={2.2} fill="var(--active-line)" fontWeight="700" pointerEvents="none"
+                >{along}′</text>
+              )}
+              {draggable && (
+                <line
+                  x1={x1} y1={y1} x2={x2} y2={y2}
+                  stroke="var(--active-line)" strokeWidth={2.4} strokeOpacity={0.001}
+                  style={{ cursor: horizontal ? 'ew-resize' : 'ns-resize' }}
+                  onPointerDown={(event) => startOpeningDrag(event, index, o)}
+                />
+              )}
+            </g>
+          );
         })}
         {/* dimensions */}
         <text x={W / 2} y={-pad + 1.6} textAnchor="middle" fontSize={2} fill="var(--ink2)">{W}′</text>
@@ -6787,13 +6842,19 @@ function App() {
     let name = fixture.name;
     let n = 2;
     while (taken.has(name)) { name = `${fixture.name} ${n}`; n += 1; }
+    // Fixtures land on the floor you're LOOKING AT — placing a tub while on
+    // the 2nd-floor plan puts it upstairs, colliding only with what's up there.
+    const lvl = Math.max(1, activeFloor);
+    const { baseWallFt } = storeyInfo(spec.shell);
     const existing = (spec.rooms || []).concat((spec.elements || []).filter((e) => e.category !== 'floor'))
+      .filter((o) => Number(o.level || 1) === lvl)
       .map((o) => ({ x: Number(o.x), y: Number(o.y), w: Number(o.w), d: Number(o.d) }));
     const spot = findFreeSpot(Number(spec.shell.widthFt), Number(spec.shell.depthFt), existing, fixture.w, fixture.d)
       || { x: 2, y: 2 };
+    const where = lvl > 1 ? ` on the ${floorLabel(spec, lvl).toLowerCase()}` : '';
     void applyBackendOperations({
-      operations: [{ type: 'add_element', name, category: fixture.category, x: spot.x, y: spot.y, z: 0, w: fixture.w, d: fixture.d, h: fixture.h, reason: 'Interior fixture placed from the plan.' }],
-      promptText: `Place ${name}`,
+      operations: [{ type: 'add_element', name, category: fixture.category, x: spot.x, y: spot.y, z: lvl > 1 ? (lvl - 1) * baseWallFt + 0.45 : 0, w: fixture.w, d: fixture.d, h: fixture.h, level: lvl, reason: 'Interior fixture placed from the plan.' }],
+      promptText: `Place ${name}${where}`,
       logPrefix: 'Fixture'
     });
   }
@@ -6903,6 +6964,19 @@ function App() {
       promptText: `Resize ${object.name}`,
       logPrefix: 'Plan edit',
       nextSelectedId: id
+    });
+  }
+
+  // Slide an opening along its wall from the Plan view — one dispatch.
+  function planMoveOpening(index, along) {
+    const opening = spec.openings?.[index];
+    if (!opening || opening.wall === 'roof') return;
+    const field = opening.wall === 'north' || opening.wall === 'south' ? 'x' : 'y';
+    void applyBackendOperations({
+      operations: [{ type: 'update_object', targetId: `opening-${index}`, name: opening.label || '', field, value: along }],
+      promptText: `Move ${opening.label || 'opening'} to ${along}′`,
+      logPrefix: 'Plan edit',
+      nextSelectedId: `opening-${index}`
     });
   }
 
@@ -8294,6 +8368,7 @@ function App() {
               onResize={planResizeObject}
               onResizeShell={resizeShellPlan}
               onMoveEdge={planMoveEdge}
+              onMoveOpening={planMoveOpening}
               context={consoleView === 'systems' ? systemView : null}
               activeFloor={activeFloor}
             />

@@ -159,6 +159,14 @@ r = apply({ ...freshSpec(), openings: [
 ] }, [{ type: 'dedupe_openings' }]);
 ok(r.spec.openings.length === 2 && r.spec.openings.some((o) => o.type === 'door'), 'dedupe keeps the door of an overlapping cluster + untouched walls', JSON.stringify(r.spec.openings));
 
+// opening slide via update_object (the Plan drag path)
+r = apply(freshSpec(), [{ type: 'update_object', targetId: 'opening-0', field: 'x', value: 12 }]);
+ok(r.spec.openings[0].x === 12, 'update_object slides an opening along its wall (numeric x)', String(r.spec.openings[0].x));
+// fixture on an upper floor keeps its level + elevation
+r = apply(freshSpec(), [{ type: 'add_element', name: 'Loft Tub', category: 'water', x: 4, y: 4, z: 10.45, w: 5, d: 3, h: 2, level: 2 }]);
+const tub = r.spec.elements.find((el) => el.name === 'Loft Tub');
+ok(tub && tub.level === 2 && Math.abs(tub.z - 10.45) < 0.01, 'add_element keeps level 2 + elevation', JSON.stringify(tub && { level: tub.level, z: tub.z }));
+
 // --- design approach -----------------------------------------------------------
 r = apply(freshSpec(), [{ type: 'set_shell', field: 'designApproach', value: 'standard' }]);
 ok(r.spec.shell.designApproach === 'standard', 'set designApproach standard');
