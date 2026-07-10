@@ -26,6 +26,13 @@ const server = http.createServer(async (req, res) => {
       if (!handled) sendJson(res, 404, { error: 'Not found' });
     } catch (error) {
       console.error(`API ${pathname} failed:`, error);
+      // Durable trace regardless of how stdout/stderr were redirected — the
+      // one place to look when the app says "failed with HTTP 500".
+      try {
+        const fs = await import('node:fs');
+        fs.mkdirSync('.data', { recursive: true });
+        fs.appendFileSync('.data/server-errors.log', `${new Date().toISOString()} ${pathname} ${error?.stack || error}\n`);
+      } catch { /* logging must never break serving */ }
       if (!res.headersSent) sendJson(res, 500, { error: String(error?.message || error) });
       else try { res.end(); } catch { /* connection already gone */ }
     }

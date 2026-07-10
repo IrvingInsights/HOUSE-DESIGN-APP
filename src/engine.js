@@ -2553,7 +2553,12 @@ export async function requestServerAppliedBim(payload) {
   if (response.status === 404 && typeof window !== 'undefined' && window.location.port !== '5184') {
     response = await request('http://127.0.0.1:5184/api/bim/apply');
   }
-  if (!response.ok) throw new Error(`BIM apply failed with HTTP ${response.status}`);
+  if (!response.ok) {
+    // Surface the server's actual reason — "HTTP 500" alone is undiagnosable.
+    let detail = '';
+    try { detail = (await response.json())?.error || ''; } catch { /* body wasn't JSON */ }
+    throw new Error(`BIM apply failed with HTTP ${response.status}${detail ? ` — ${detail}` : ''}`);
+  }
   return response.json();
 }
 
