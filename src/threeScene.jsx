@@ -78,11 +78,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     fill.position.set(-34, 22, -26);
     scene.add(fill);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -90;
-    sun.shadow.camera.right = 90;
-    sun.shadow.camera.top = 90;
-    sun.shadow.camera.bottom = -90;
+    // Shadow camera fitted to the working site (not a 180ft void) at 4k —
+    // the house gets ~6x the shadow texels, so shadows land as crisp
+    // penumbras instead of blur blobs.
+    sun.shadow.mapSize.set(4096, 4096);
+    sun.shadow.camera.left = -55;
+    sun.shadow.camera.right = 55;
+    sun.shadow.camera.top = 55;
+    sun.shadow.camera.bottom = -55;
     sun.shadow.bias = -0.0004;
     sun.shadow.radius = 4;
     scene.add(sun);
@@ -98,13 +101,17 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     // corners, eaves, and reveals (the single biggest depth cue a plain
     // rasterizer lacks), and selection gets a crisp warm outline. OutputPass
     // applies the ACES tone mapping, so exposure behavior is unchanged.
-    const composer = new EffectComposer(renderer);
+    // Multisampled target — without it the post pipeline drops the canvas's
+    // antialiasing and every eave reads as a staircase. HalfFloat keeps the
+    // ACES mapping in OutputPass working on linear HDR values.
+    const composerTarget = new THREE.WebGLRenderTarget(mount.clientWidth, mount.clientHeight, { samples: 4, type: THREE.HalfFloatType });
+    const composer = new EffectComposer(renderer, composerTarget);
     composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     composer.addPass(new RenderPass(scene, camera));
     const ssao = new SSAOPass(scene, camera, mount.clientWidth, mount.clientHeight);
-    ssao.kernelRadius = 1.1;      // feet-scale scene: shade within ~a foot of a corner
-    ssao.minDistance = 0.0008;
-    ssao.maxDistance = 0.12;
+    ssao.kernelRadius = 2.2;      // feet-scale scene: corners/eaves/reveals shade a couple of feet in
+    ssao.minDistance = 0.001;
+    ssao.maxDistance = 0.25;
     composer.addPass(ssao);
     const outlinePass = new OutlinePass(new THREE.Vector2(mount.clientWidth, mount.clientHeight), scene, camera);
     outlinePass.edgeStrength = 2.6;
@@ -364,7 +371,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         group.add(halo);
         addResizeHandles(group, parts, 'site-pad', padObject.x, padObject.y, padObject.w, padObject.d, 0.7);
       }
-      group.add(slab);
+      group.add(addEdges(slab));
 
       const omittedWalls = new Set(spec.shell.omittedWalls || []);
       // Per-wall assembly + height: each side reads its own resolved profile so
@@ -552,7 +559,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             : (storey === 'upper' ? `wall-${side}-u` : `wall-${side}`);
           mesh.userData.wallSide = side;
           roomMeshes.push(mesh);
-          group.add(mesh);
+          group.add(addEdges(mesh));
         });
       });
 
@@ -613,7 +620,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           m.userData.roomId = 'frame-main';
           m.userData.generated = true;
           roomMeshes.push(m);
-          group.add(m);
+          group.add(addEdges(m));
           return m;
         };
         // A member along a slope in the span plane: a box rotated to follow
@@ -735,7 +742,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             box(tW + lip, stemH, depth + lip * 2, tW / 2, stemH / 2, depth / 2, stemMat),
             box(tE + lip, stemH, depth + lip * 2, width - tE / 2, stemH / 2, depth / 2, stemMat)
           ];
-        ring.forEach((segment) => { segment.name = 'Stem wall foundation'; group.add(segment); });
+        ring.forEach((segment) => { segment.name = 'Stem wall foundation'; group.add(addEdges(segment)); });
       }
 
       // Topography: when the site slopes, the foundation steps DOWN to meet
@@ -1230,7 +1237,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const roof = makeRoof(width, depth, wallHeight, spec.shell.roofPitch, roofMat, roofSpec, oAll);
           roof.userData.roomId = 'roof-main';
           roomMeshes.push(roof);
-          group.add(roof);
+          group.add(addEdges(roof));
         } else {
           // Roof as SEGMENTS — per rectangle of an L/T/U footprint and/or the
           // stepped upper-block + wings. Valleys are not modeled; segments meet.
@@ -1312,7 +1319,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               mesh.userData.roomId = 'roof-main';
               mesh.userData.generated = true;
               roomMeshes.push(mesh);
-              group.add(mesh);
+              group.add(addEdges(mesh));
             }
           });
         }
@@ -1480,6 +1487,21 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.userData.generated = true;
+      return mesh;
+    }
+
+    // Blender-style edge definition: a fine dark crease line along every
+    // corner sharper than 30° — added as a CHILD of the mesh so it rides
+    // drags, explode, and selection for free (LineSegments isn't raycast or
+    // emissive-tinted). EdgesGeometry position-hashes, so it works on both
+    // indexed boxes and the roof-slab triangle soup.
+    const edgeInk = new THREE.LineBasicMaterial({ color: 0x3a332a, transparent: true, opacity: 0.35 });
+    function addEdges(mesh) {
+      try {
+        const lines = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 30), edgeInk);
+        lines.userData.generated = true;
+        mesh.add(lines);
+      } catch { /* exotic geometry — skip the crease lines */ }
       return mesh;
     }
 
