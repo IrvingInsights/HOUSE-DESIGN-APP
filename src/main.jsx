@@ -4288,11 +4288,11 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShel
               <rect
                 x={el.x} y={el.y} width={w} height={d}
                 fill={PLAN_ELEMENT_HEX[raw.category] || '#8a7768'}
-                fillOpacity={raw.category === 'partition' ? (isSel ? 1 : 0.95) : (isSel ? 0.92 : 0.7) * (buildingContext ? 0.25 : 1)}
+                fillOpacity={raw.category === 'partition' ? (isSel ? 1 : 0.95) : (isSel ? 0.92 : 0.7) * (buildingContext && raw.category !== 'floor' ? 0.25 : 1)}
                 stroke={isSel ? 'var(--active-line)' : '#5a5348'}
                 strokeWidth={isSel ? 0.4 : 0.22}
                 strokeDasharray={raw.category === 'partition' ? undefined : '0.8 0.5'}
-                pointerEvents={buildingContext ? 'none' : undefined}
+                pointerEvents={buildingContext && raw.category !== 'floor' ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
               />
               <text x={el.x + w / 2} y={el.y + d / 2 + 0.5} textAnchor="middle" fontSize={Math.min(1.5, Math.max(w, d) / 5)} fill={planLabelInk(PLAN_ELEMENT_HEX[raw.category] || '#8a7768')} fontWeight="600" pointerEvents="none">{raw.name}</text>
@@ -8168,6 +8168,26 @@ function App() {
                   </div>
                 </label>
               </div>
+              {(spec.elements || []).filter((el) => el.category === 'floor' && Number(el.level || 1) > 1).map((plateEl) => {
+                const plateDispatch = (ops, label) => applyBackendOperations({ operations: ops, promptText: label, logPrefix: 'Storey', nextSelectedId: plateEl.id });
+                const num = (v) => Number(v) || 0;
+                return (
+                  <div key={plateEl.id}>
+                    <div className="sectionHead">{floorLabel(spec, Number(plateEl.level))} — where it sits over the ground floor</div>
+                    <div className="controlGrid">
+                      <label>From west wall (ft)<input type="number" step="0.5" value={num(plateEl.x)} onChange={(event) => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: num(event.target.value), y: num(plateEl.y) }], 'Move the upper storey')} /></label>
+                      <label>From north wall (ft)<input type="number" step="0.5" value={num(plateEl.y)} onChange={(event) => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: num(plateEl.x), y: num(event.target.value) }], 'Move the upper storey')} /></label>
+                      <label>Width (ft)<input type="number" step="0.5" min="6" value={num(plateEl.w)} onChange={(event) => plateDispatch([{ type: 'resize_object', targetId: plateEl.id, w: Math.max(6, num(event.target.value)), d: num(plateEl.d) }], 'Resize the upper storey')} /></label>
+                      <label>Depth (ft)<input type="number" step="0.5" min="6" value={num(plateEl.d)} onChange={(event) => plateDispatch([{ type: 'resize_object', targetId: plateEl.id, w: num(plateEl.w), d: Math.max(6, num(event.target.value)) }], 'Resize the upper storey')} /></label>
+                    </div>
+                    <div className="storeyControl">
+                      <button type="button" className="secondary" title="Cover the whole ground floor" onClick={() => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: 0.01, y: 0.01 }, { type: 'resize_object', targetId: plateEl.id, w: Number(spec.shell.widthFt), d: Number(spec.shell.depthFt) }], 'Match the storey to the ground floor')}>Match ground floor</button>
+                      <button type="button" className="secondary" title="Center the storey over the plan" onClick={() => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: Math.max(0.01, (Number(spec.shell.widthFt) - num(plateEl.w)) / 2), y: Math.max(0.01, (Number(spec.shell.depthFt) - num(plateEl.d)) / 2) }], 'Center the upper storey')}>Center it</button>
+                    </div>
+                    <p className="systemNote">The upper storey covers only this rectangle — walls ring it and the roof steps down over the rest. It's also draggable on the <b>{floorLabel(spec, Number(plateEl.level))}</b> Plan tab, and lives in the selector under that floor.</p>
+                  </div>
+                );
+              })}
               <div className="sectionHead">Footprint shape</div>
               {hasCustomFootprint(spec) ? (
                 <>
