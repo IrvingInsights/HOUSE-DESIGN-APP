@@ -13,9 +13,17 @@ BLENDER-GRADE VIEWPORT layers 1–2 are DONE:
 - Layer 2 (b3f2ee5): real timber frame from FRAME_MEMBERS (bents = posts +
   ties + knee braces, plates, rafters @ o.c., loft joists; studs for stick
   types) + 'Frame' LAYER_PRESET raising view (Layers panel button).
-STILL QUEUED from the viewport brief below: layer 3 (richer PBR-ish procedural
-materials), layer 4 (EffectComposer SSAO/outline/envMap — the big Blender-look
-win), layer 5 (view gizmo, orbit-around-selection, section-cut slider).
+Layers 3–4 are ALSO DONE (2afe13e + 99dc531):
+- Layer 3: bumpTexture() grayscale relief per material kind (trowel plaster,
+  LUMPY bale/cob/straw-clay render, standing-seam ridges, board-step wood w/
+  joints+knots in the color map too), RoomEnvironment reflections applied
+  per-material to glass+metal only (NOT scene.environment — exposure safe).
+- Layer 4: EffectComposer pipeline (RenderPass → SSAOPass kernelRadius 1.1 →
+  OutlinePass → OutputPass). SSAO shades corners/eaves/reveals; selection =
+  warm outline rim (emissive kept faint at 0.16). Resize + dispose wired.
+STILL QUEUED: layer 5 only — view gizmo (top/front/iso buttons), orbit-around-
+selection, optional walk-through, section-cut slider (clip plane). Mind the
+model-overlay lanes (invariant 10) when adding gizmo UI.
 Daniel has GitHub Desktop now and pulls the repo himself — push after every job.
 
 ## FRESH SESSION — START HERE (handoff written 2026-07-10 end of day, at commit f91510a)
