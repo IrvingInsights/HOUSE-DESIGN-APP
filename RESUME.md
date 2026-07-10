@@ -21,9 +21,19 @@ Layers 3–4 are ALSO DONE (2afe13e + 99dc531):
 - Layer 4: EffectComposer pipeline (RenderPass → SSAOPass kernelRadius 1.1 →
   OutlinePass → OutputPass). SSAO shades corners/eaves/reveals; selection =
   warm outline rim (emissive kept faint at 0.16). Resize + dispose wired.
-STILL QUEUED: layer 5 only — view gizmo (top/front/iso buttons), orbit-around-
-selection, optional walk-through, section-cut slider (clip plane). Mind the
-model-overlay lanes (invariant 10) when adding gizmo UI.
+Layer 5 is ALSO DONE (bb39650) + a quality pass 2 (7502f93 — Daniel pushed
+back "still inadequate vs blender", root causes were: EffectComposer had
+DROPPED canvas MSAA [now samples:4 HalfFloat target], faint SSAO [kernel 2.2],
+oversized shadow camera [now ±55 @4k], and no edge definition [EdgesGeometry
+crease lines >30° as mesh CHILDREN on walls/roof/frame/pad/stem]). Layer 5:
+.viewGizmo overlay bottom-right (Iso/Top/Front/Side flights + Slice slider =
+renderer.clippingPlanes), orbit pivot glides to a new selection's bbox center;
+all camera/cut state rides refs — the scene never rebuilds for a camera move.
+Honest gap: clipped-away geometry is still raycastable through the cut.
+THE WHOLE BLENDER-GRADE VIEWPORT BRIEF IS COMPLETE. Also fixed en route:
+opening card returns on every real open/refresh (vite:beforeFullReload marker,
+31e1f5b); 500s now leave a paper trail (.data/server-errors.log + real reason
+in the chat failure message, e4f2cea — check that log FIRST on any 500 report).
 Daniel has GitHub Desktop now and pulls the repo himself — push after every job.
 
 ## FRESH SESSION — START HERE (handoff written 2026-07-10 end of day, at commit f91510a)
