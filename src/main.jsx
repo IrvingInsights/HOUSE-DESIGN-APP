@@ -33,6 +33,15 @@ import { JointDetail, PlanView } from './planView.jsx';
 import { ThreeScene } from './threeScene.jsx';
 import './styles.css';
 
+// Vite announces a dev full-reload BEFORE it happens. Mark it so the opening
+// card can tell a code-edit reload (stay out of the way) from the user opening
+// or refreshing the app themselves (always show the front door).
+if (import.meta.hot) {
+  import.meta.hot.on('vite:beforeFullReload', () => {
+    try { window.sessionStorage.setItem('nbHmrReload', '1'); } catch { /* storage blocked — card just reopens */ }
+  });
+}
+
 function App() {
   const initialSaved = loadSavedDashboardState();
   const [projectId, setProjectId] = useState(() => initialSaved?.projectId || 'current-project');
@@ -95,13 +104,18 @@ function App() {
   // dropping the visitor into a finished sample house. Also reusable as "New".
   // The opening card is the front door: what the app is, how to use it, and
   // continue / start-fresh choices. It shows on every open; Continue is one tap.
-  // The opening card is the front door on every real page load — but an HMR
-  // hot-reload mid-session must NOT slam it in the user's face. Dismissal is
-  // remembered per browser tab (sessionStorage), cleared by a real reload? No:
-  // sessionStorage survives reloads in the tab, so the card shows once per tab
-  // session — reopen any time with the ? button in the brand.
+  // The opening card is the front door on EVERY real page load — but a code
+  // hot-reload mid-session must NOT slam it in the user's face. Vite announces
+  // a dev full-reload before it happens (the marker set at module scope below),
+  // so only THOSE reloads respect the per-tab dismissal; opening the app or
+  // pressing refresh yourself always starts at the front door.
   const [welcomeOpen, setWelcomeOpen] = useState(() => {
-    try { return !window.sessionStorage.getItem('nbWelcomeDismissed'); } catch { return true; }
+    try {
+      const wasHmrReload = window.sessionStorage.getItem('nbHmrReload');
+      window.sessionStorage.removeItem('nbHmrReload');
+      if (wasHmrReload) return !window.sessionStorage.getItem('nbWelcomeDismissed');
+      return true;
+    } catch { return true; }
   });
   useEffect(() => {
     try {
