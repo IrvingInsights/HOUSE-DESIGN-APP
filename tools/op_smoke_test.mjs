@@ -225,6 +225,32 @@ r = apply(freshSpec(), [{ type: 'add_element', name: 'Cob Divider', category: 'p
 part = r.spec.elements.find((el) => el.category === 'partition');
 ok(part && part.w === PARTITION_TYPES.cob.thicknessFt && part.doorWFt === 0, 'north-south cob partition: thickness on w, solid (no door)');
 
+// --- kneewalls + sun glazing + frame + segment resize --------------------------
+r = apply(freshSpec(), [{ type: 'set_wall_side', wall: 'south', field: 'heightFt', value: 3 }]);
+ok(r.spec.walls.south.heightFt === 3 && r.spec.shell.southWallHeightFt === 3, 'per-side kneewall height 3ft allowed');
+r = apply(r.spec, [
+  { type: 'set_wall_side', wall: 'south', field: 'sunGlazing', value: 'true' },
+  { type: 'set_wall_side', wall: 'south', field: 'sunGlazingTiltDeg', value: 32 }
+]);
+ok(resolveWallSide(r.spec, 'south').sunGlazing === true && resolveWallSide(r.spec, 'south').sunGlazingTiltDeg === 32, 'sun glazing + tilt round-trip');
+r = apply(freshSpec(), [{ type: 'set_wall_side', wall: 'north', field: 'heightFt', value: 0.5 }]);
+ok(r.spec.walls.north.heightFt === 2, 'kneewall clamps at 2ft floor');
+r = apply(freshSpec(), [{ type: 'set_frame', field: 'baySpacingFt', value: '6' }]);
+ok(r.spec.frame.baySpacingFt === 6, 'set_frame baySpacingFt');
+// segment resize: notch the south wall into 3, then set the middle's length + start
+r = apply(freshSpec(), [{ type: 'split_wall_edge', wall: 'south' }]);
+r = apply(r.spec, [{ type: 'resize_wall_segment', field: 'e3', value: 10, positionFt: 4 }]);
+{
+  const segPoly = footprintPolygon(r.spec);
+  const onSouth = segPoly.filter(([, py]) => py === 28).map(([px]) => px).sort((a, b) => a - b);
+  ok(Boolean(r.spec.shell.footprint) && onSouth.includes(4) && onSouth.includes(14), 'segment resize slides the split points (10ft long, starts at 4)', JSON.stringify(segPoly));
+  ok(segPoly.some(([px, py]) => px === 0 && py === 28) && segPoly.some(([px, py]) => px === 36 && py === 28), 'segment resize leaves the house corners alone', JSON.stringify(segPoly));
+  const area = polygonArea(segPoly);
+  ok(area > 0 && area <= 36 * 28, 'segment resize keeps a sane area', String(area));
+}
+r = apply(freshSpec(), [{ type: 'resize_wall_segment', wall: 'south', value: 10 }]);
+ok(r.warnings.some((warning) => /custom outline|Split into 3/i.test(warning)), 'segment resize on a plain rectangle explains itself');
+
 // --- vocab sanity: shared tables exist for every consumer ---------------------
 ok(Object.keys(WALL_ASSEMBLIES).length === 8, 'WALL_ASSEMBLIES table');
 ok(WALL_ASSEMBLIES.glazed && WALL_ASSEMBLIES.glazed.rValue === 2, 'glazed glass-wall assembly present');

@@ -1210,8 +1210,8 @@ function applyRoofInstruction(spec, text) {
   const genericHeights = [...text.matchAll(/(\d+(?:\.\d+)?)\s*(?:ft|feet|foot|')/g)].map((match) => Number(match[1]));
 
   if (wantsShed || southHeight || northHeight) shell.roofType = 'shed';
-  if (southHeight) shell.southWallHeightFt = clamp(Number(southHeight), 7, 24);
-  if (northHeight) shell.northWallHeightFt = clamp(Number(northHeight), 7, 24);
+  if (southHeight) shell.southWallHeightFt = clamp(Number(southHeight), 2, 24);
+  if (northHeight) shell.northWallHeightFt = clamp(Number(northHeight), 2, 24);
   if (!southHeight && !northHeight && wantsShed && genericHeights.length >= 2) {
     shell.southWallHeightFt = clamp(Math.max(...genericHeights), 7, 24);
     shell.northWallHeightFt = clamp(Math.min(...genericHeights), 7, 24);
@@ -1533,6 +1533,18 @@ function getSpecialBimObjects(spec) {
       h: roof.highWallHeightFt,
       note: `${roof.roofType} roof; south wall ${roof.southWallHeightFt}', north wall ${roof.northWallHeightFt}', pitch ${roof.pitch.toFixed(3)}.`
     },
+    ...(resolveFrameType(spec, 1) !== 'load-bearing' ? [{
+      id: 'frame-main',
+      name: `${FRAME_TYPES[resolveFrameType(spec, 1)]?.label || 'Frame'} (structure)`,
+      category: 'frame',
+      type: 'frame',
+      x: 0,
+      y: 0,
+      w: spec.shell.widthFt,
+      d: spec.shell.depthFt,
+      h: Number(spec.shell.wallHeightFt || 10),
+      note: `The structural skeleton — posts every ${Number(spec.frame?.baySpacingFt) || 8}' with plate beams at the eave. Tap it in the model or here to change the system or bay spacing; frame drawings come from Export.`
+    }] : []),
     ...(spec.openings || []).map((opening, index) => {
       const horizontal = opening.wall === 'north' || opening.wall === 'south';
       const along = Number(opening.x ?? opening.y ?? 0);
@@ -1784,6 +1796,10 @@ function resolveWallSide(spec, side, level = 1) {
     thicknessFt: Number(w.thicknessFt ?? assembly.thicknessFt),
     interiorFinish: w.interiorFinish || assembly.finish,
     exteriorFinish: w.exteriorFinish || 'rainscreen / lime render',
+    // Angled greenhouse glazing above the wall (kneewall below, glass to the
+    // eave at sunGlazingTiltDeg from vertical, carried by the frame).
+    sunGlazing: Boolean(w.sunGlazing),
+    sunGlazingTiltDeg: Number(w.sunGlazingTiltDeg ?? 30),
     omitted: Boolean(w.omitted) || omittedSet.has(side)
   };
   if (level <= 1) return ground;
@@ -2305,8 +2321,8 @@ function applyStructuredDesignPlan(currentSpec, plan) {
 
     if (operation.type === 'set_roof' || operation.type === 'set_roof_profile' || operation.type === 'add_roof_plane') {
       if (operation.roofType) next.shell.roofType = operation.roofType;
-      if (operation.southWallHeightFt) next.shell.southWallHeightFt = clamp(operation.southWallHeightFt, 7, 40);
-      if (operation.northWallHeightFt) next.shell.northWallHeightFt = clamp(operation.northWallHeightFt, 7, 40);
+      if (operation.southWallHeightFt) next.shell.southWallHeightFt = clamp(operation.southWallHeightFt, 2, 40);
+      if (operation.northWallHeightFt) next.shell.northWallHeightFt = clamp(operation.northWallHeightFt, 2, 40);
       if (operation.pitch) next.shell.roofPitch = clamp(operation.pitch, 0.02, 1.5);
       const profile = roofProfile(next.shell);
       next.shell.wallHeightFt = profile.highWallHeightFt;
@@ -2317,7 +2333,8 @@ function applyStructuredDesignPlan(currentSpec, plan) {
     }
 
     if (operation.type === 'set_wall_height') {
-      const height = clamp(Number(operation.h || operation.value || 10), 7, 40);
+      const heightMin = operation.wall === 'south' || operation.wall === 'north' ? 2 : 7;
+      const height = clamp(Number(operation.h || operation.value || 10), heightMin, 40);
       if (operation.wall === 'south') next.shell.southWallHeightFt = height;
       else if (operation.wall === 'north') next.shell.northWallHeightFt = height;
       else next.shell.wallHeightFt = height;
@@ -2743,7 +2760,7 @@ function detectIssues(spec) {
   if (spec.shell.wallHeightFt > 12) {
     issues.push({ severity: 'warning', title: 'Tall walls need explicit lateral strategy', owner: 'Engineer', system: 'walls', fix: 'Add shear wall schedule, hold-downs, and diaphragm notes.' });
   }
-  const glazedOffSouth = WALL_SIDES.filter((side) => { const r = resolveWallSide(spec, side); return !r.omitted && r.assemblyKey === 'glazed' && side !== 'south'; });
+  const glazedOffSouth = WALL_SIDES.filter((side) => { const r = resolveWallSide(spec, side); return !r.omitted && side !== 'south' && (r.assemblyKey === 'glazed' || r.sunGlazing); });
   if (naturalApproach && glazedOffSouth.length) {
     issues.push({ severity: 'warning', title: `Glass wall faces ${glazedOffSouth.join(' + ')} — little solar gain, big heat leak`, owner: 'Natural Builder', system: 'walls', fix: 'A glazed wall earns its keep facing south. Off-south glass loses heat all winter for little gain — face it south, or accept the heat cost knowingly.' });
   }
@@ -3012,7 +3029,23 @@ function deriveDesign(spec, wallSections) {
       const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
       return sum + (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1);
     }, 0);
-  const southGlass = southOpeningGlass + glazedSouthWallArea * GLAZED_WALL_GLASS_FRAC;
+  // Angled sun-glazing bands above kneewalls (the greenhouse face): glass area
+  // = run x slant length. Tilted glass meets the low winter sun more squarely,
+  // so south bands get a modest gain bonus (approximation, capped +30%).
+  const eaveForBand = Number(spec.shell.wallHeightFt || 10) + storeyExtraFt;
+  const sunBands = WALL_SIDES.map((side) => {
+    const r = resolveWallSide(spec, side);
+    if (!r.sunGlazing || r.omitted) return null;
+    const gapH = Math.max(0, eaveForBand - r.heightFt);
+    if (gapH < 1.5) return null;
+    const tilt = clamp(Number(r.sunGlazingTiltDeg ?? 30), 0, 45);
+    const area = ((side === 'north' || side === 'south' ? w : d) - 1) * (gapH / Math.cos(tilt * Math.PI / 180));
+    return { side, tilt, area, glass: area * 0.9 };
+  }).filter(Boolean);
+  const southBandGlass = sunBands.filter((b) => b.side === 'south').reduce((sum, b) => sum + b.glass * (1 + Math.min(0.3, b.tilt / 100)), 0);
+  const nonSouthBandGlass = sunBands.filter((b) => b.side !== 'south').reduce((sum, b) => sum + b.glass, 0);
+  const bandFrameArea = sunBands.reduce((sum, b) => sum + b.area, 0);
+  const southGlass = southOpeningGlass + glazedSouthWallArea * GLAZED_WALL_GLASS_FRAC + southBandGlass;
   // House orientation: how far the south face is rotated off true south. Solar
   // gain falls with the cosine of that angle, so a house aimed SE/SW harvests
   // less winter sun from the same glass.
@@ -3042,7 +3075,7 @@ function deriveDesign(spec, wallSections) {
     if (!profile.glazed) return sum;
     if (profile.roof) return sum + (Number(opening.widthFt) || 2.5) ** 2;
     return sum + (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1);
-  }, 0);
+  }, 0) + sunBands.reduce((sum, b) => sum + b.glass, 0);
   const glazingU = utilities.windowQuality === 'triple' ? 0.28 : 0.5;
   // Insulation is an explicit layer of the roof and floor assemblies.
   const roofInsulKey = resolveInsulation(utilities.roofInsulation, 'cellulose');
@@ -3054,7 +3087,7 @@ function deriveDesign(spec, wallSections) {
   const heatUA = Math.max(0, opaqueWallArea - southOpeningGlass) / Math.max(wallR, 1)
     + Math.max(0, roofArea - skylightArea) / roofR
     + floorLoss
-    + (southGlass + skylightArea + (glazedWallArea - glazedSouthWallArea) * GLAZED_WALL_GLASS_FRAC) * glazingU;
+    + (southGlass + skylightArea + nonSouthBandGlass + (glazedWallArea - glazedSouthWallArea) * GLAZED_WALL_GLASS_FRAC) * glazingU;
   const heatLoadKbtu = (heatUA * 70) / 1000;
 
   const bedrooms = Math.max(1, spec.rooms.filter((room) => room.type === 'sleeping').length);
@@ -3135,7 +3168,9 @@ function deriveDesign(spec, wallSections) {
   const reclaimed = reclaimedOf(spec);
   const groundFrameKey = resolveFrameType(spec, 1);
   const upperFrameKey = resolveFrameType(spec, 2);
-  const groundFrameArea = perimeterFt * baseWallFt;
+  // The sun-glazing bands are CARRIED BY THE FRAME — their slant area joins
+  // the frame quantity (a load-bearing "frame" prices at 0, honestly).
+  const groundFrameArea = perimeterFt * baseWallFt + bandFrameArea;
   const upperPlateForFrame = upperPlateRect(spec, 2);
   const upperPerimeterFt = upperPlateForFrame ? 2 * (upperPlateForFrame.w + upperPlateForFrame.d) : perimeterFt;
   const upperFrameArea = upperPerimeterFt * storeyExtraFt;
@@ -3823,6 +3858,14 @@ const PLAN_ELEMENT_HEX = {
   chimney: '#9a5944', deck: '#8e7049', custom: '#8b786d'
 };
 
+// Label ink by fill luminance — dark ink on light fills, paper ink on dark
+// fills (slab plates, partitions, chimneys were unreadable with dark-on-dark).
+function planLabelInk(hex) {
+  const n = parseInt(String(hex || '#8a7768').slice(1), 16);
+  const lum = 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  return lum > 140 ? '#1a1f1d' : '#f4f1e6';
+}
+
 // Zone fill colors as hex strings for the 2D plan (mirrors the 3D zonePalette).
 const PLAN_ZONE_HEX = {
   living: '#79a7a8', service: '#be9b6f', sleeping: '#8f9cc2', wet: '#78a9c8',
@@ -4210,7 +4253,7 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShel
                 pointerEvents={buildingContext || siteContext ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
               />
-              <text x={room.x + room.w / 2} y={room.y + room.d / 2 - 0.3} textAnchor="middle" fontSize={Math.min(2, room.w / 5)} fill="#1a1f1d" fontWeight="600" pointerEvents="none">{raw.name}</text>
+              <text x={room.x + room.w / 2} y={room.y + room.d / 2 - 0.3} textAnchor="middle" fontSize={Math.min(2, room.w / 5)} fill={planLabelInk(PLAN_ZONE_HEX[raw.type] || '#79a7a8')} fontWeight="600" pointerEvents="none">{raw.name}</text>
               <text x={room.x + room.w / 2} y={room.y + room.d / 2 + 1.5} textAnchor="middle" fontSize={Math.min(1.6, room.w / 6)} fill="#2a302d" opacity={0.75} pointerEvents="none">{raw.w}×{raw.d}′</text>
               {isSel && ['nw', 'ne', 'sw', 'se'].map((corner) => {
                 const cx = room.x + (corner.includes('e') ? room.w : 0);
@@ -4242,7 +4285,7 @@ function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShel
                 pointerEvents={buildingContext ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
               />
-              <text x={el.x + w / 2} y={el.y + d / 2 + 0.5} textAnchor="middle" fontSize={Math.min(1.5, w / 5)} fill="#1a1f1d" fontWeight="600" pointerEvents="none">{raw.name}</text>
+              <text x={el.x + w / 2} y={el.y + d / 2 + 0.5} textAnchor="middle" fontSize={Math.min(1.5, Math.max(w, d) / 5)} fill={planLabelInk(PLAN_ELEMENT_HEX[raw.category] || '#8a7768')} fontWeight="600" pointerEvents="none">{raw.name}</text>
               {isSel && ['nw', 'ne', 'sw', 'se'].map((corner) => {
                 const cx = el.x + (corner.includes('e') ? w : 0);
                 const cy = el.y + (corner.includes('s') ? d : 0);
@@ -4680,6 +4723,83 @@ function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, onSelec
         roomMeshes.push(mesh);
         group.add(mesh);
       });
+
+      // Sun glazing: a wall lower than the eave with sunGlazing on gets an
+      // ANGLED glass plane from its top up to the eave, with timber battens
+      // riding the same angle — the attached-greenhouse face: bale kneewall
+      // below, tilted glazing above, all carried by the frame. The tilt leans
+      // the top INTO the house so the footprint stays honest. Rect footprints
+      // v1 (custom outlines: set the side low and ask — noted in TESTING.md).
+      if (!customFp) {
+        WALL_SIDES.forEach((side) => {
+          const rSg = wallResolved[side];
+          if (!rSg.sunGlazing || rSg.omitted || omittedWalls.has(side)) return;
+          if (!layers[`wall${titleCase(side)}`]) return;
+          const kneeH = rSg.heightFt;
+          const eaveH = roofSpec.roofType === 'shed'
+            ? (side === 'south' ? southWallHeight : side === 'north' ? northWallHeight : Math.max(northWallHeight, southWallHeight))
+            : wallHeight;
+          const gapH = eaveH - kneeH;
+          if (gapH < 1.5) return;
+          const tiltRad = clamp(Number(rSg.sunGlazingTiltDeg ?? 30), 0, 45) * Math.PI / 180;
+          const slantLen = gapH / Math.cos(tiltRad);
+          const inset = gapH * Math.tan(tiltRad);
+          const runLen = (side === 'north' || side === 'south' ? width : depth) - 1;
+          const bandGlassMat = new THREE.MeshStandardMaterial({ color: 0xcfe5ea, roughness: 0.1, metalness: 0.05, transparent: true, opacity: 0.36, side: THREE.DoubleSide });
+          const bandPart = (m) => { m.userData.roomId = `wall-${side}`; m.userData.wallSide = side; m.userData.generated = true; group.add(m); return m; };
+          const midY = kneeH + gapH / 2;
+          const place = (thick, isBatten, along = 0) => {
+            let m;
+            if (side === 'south') { m = box(isBatten ? 0.3 : runLen, slantLen, thick, width / 2 + along, midY, depth - inset / 2, isBatten ? frameMat : bandGlassMat); m.rotation.x = -tiltRad; }
+            else if (side === 'north') { m = box(isBatten ? 0.3 : runLen, slantLen, thick, width / 2 + along, midY, inset / 2, isBatten ? frameMat : bandGlassMat); m.rotation.x = tiltRad; }
+            else if (side === 'east') { m = box(thick, slantLen, isBatten ? 0.3 : runLen, width - inset / 2, midY, depth / 2 + along, isBatten ? frameMat : bandGlassMat); m.rotation.z = tiltRad; }
+            else { m = box(thick, slantLen, isBatten ? 0.3 : runLen, inset / 2, midY, depth / 2 + along, isBatten ? frameMat : bandGlassMat); m.rotation.z = -tiltRad; }
+            return bandPart(m);
+          };
+          const pane = place(0.14, false);
+          roomMeshes.push(pane);
+          const bays = Math.max(2, Math.round(runLen / 4));
+          for (let b = 0; b <= bays; b += 1) {
+            place(0.24, true, runLen * (b / bays) - runLen / 2);
+          }
+        });
+      }
+
+      // The structural FRAME is a real, selectable object: posts at bay
+      // spacing along each wall (inside face) with a plate beam on top — tap
+      // any member to work its numbers (system, bay spacing). Load-bearing
+      // walls have no separate frame; custom outlines come later (v1 rect).
+      const frameKey3d = resolveFrameType(spec, 1);
+      if (!customFp && frameKey3d !== 'load-bearing') {
+        const bay = clamp(Number(spec.frame?.baySpacingFt) || 8, 4, 16);
+        const postT = frameKey3d === 'timber' || frameKey3d === 'post-beam' ? 0.66 : 0.4;
+        const framePart = (m) => {
+          m.userData.roomId = 'frame-main';
+          m.userData.generated = true;
+          roomMeshes.push(m);
+          group.add(m);
+          return m;
+        };
+        [
+          { side: 'north', horiz: true, line: tN + postT / 2 + 0.08, h: hN },
+          { side: 'south', horiz: true, line: depth - tS - postT / 2 - 0.08, h: hS },
+          { side: 'west', horiz: false, line: tW + postT / 2 + 0.08, h: hW },
+          { side: 'east', horiz: false, line: width - tE - postT / 2 - 0.08, h: hE }
+        ].forEach(({ side, horiz, line, h }) => {
+          if (omittedWalls.has(side) || wallResolved[side].omitted) return;
+          const run = horiz ? width : depth;
+          const bays = Math.max(1, Math.round(run / bay));
+          for (let i = 0; i <= bays; i += 1) {
+            const along = clamp((run * i) / bays, postT, run - postT);
+            framePart(horiz
+              ? box(postT, Math.max(1, h - 0.4), postT, along, Math.max(1, h - 0.4) / 2, line, frameMat)
+              : box(postT, Math.max(1, h - 0.4), postT, line, Math.max(1, h - 0.4) / 2, along, frameMat));
+          }
+          framePart(horiz
+            ? box(run - postT, 0.45, postT, width / 2, h - 0.2, line, frameMat)
+            : box(postT, 0.45, run - postT, line, h - 0.2, depth / 2, frameMat));
+        });
+      }
 
       const roofLabel = roofSpec.roofType === 'shed' ? `shed roof S ${southWallHeight}' / N ${northWallHeight}'` : 'gable roof';
       if (layers.labels) {
@@ -6118,7 +6238,20 @@ function App() {
   // dropping the visitor into a finished sample house. Also reusable as "New".
   // The opening card is the front door: what the app is, how to use it, and
   // continue / start-fresh choices. It shows on every open; Continue is one tap.
-  const [welcomeOpen, setWelcomeOpen] = useState(true);
+  // The opening card is the front door on every real page load — but an HMR
+  // hot-reload mid-session must NOT slam it in the user's face. Dismissal is
+  // remembered per browser tab (sessionStorage), cleared by a real reload? No:
+  // sessionStorage survives reloads in the tab, so the card shows once per tab
+  // session — reopen any time with the ? button in the brand.
+  const [welcomeOpen, setWelcomeOpen] = useState(() => {
+    try { return !window.sessionStorage.getItem('nbWelcomeDismissed'); } catch { return true; }
+  });
+  useEffect(() => {
+    try {
+      if (welcomeOpen) window.sessionStorage.removeItem('nbWelcomeDismissed');
+      else window.sessionStorage.setItem('nbWelcomeDismissed', '1');
+    } catch { /* storage blocked — the card just reopens on HMR */ }
+  }, [welcomeOpen]);
   const [welcomeIsFirstRun, setWelcomeIsFirstRun] = useState(() => !initialSaved);
   // Every design ever saved lives in the revision snapshots — the card offers
   // them back ("start other previous model").
@@ -6816,7 +6949,7 @@ function App() {
     } else if (field === 'basementHeated') {
       operations.push({ type: 'set_shell', field, value: value === true || value === 'true' ? 'true' : 'false' });
     } else if (field === 'southWallHeightFt' || field === 'northWallHeightFt') {
-      operations.push({ type: 'set_wall_height', wall: field === 'southWallHeightFt' ? 'south' : 'north', h: clamp(numeric, 7, 24) });
+      operations.push({ type: 'set_wall_height', wall: field === 'southWallHeightFt' ? 'south' : 'north', h: clamp(numeric, 2, 24) });
     } else {
       operations.push({ type: 'set_shell', field, value: String(field === 'roofPitch' ? clamp(numeric, 0.08, 0.75) : field === 'wallHeightFt' ? clamp(numeric, 7, 40) : field === 'storeys' ? clamp(numeric, 1, 3) : clamp(numeric, 18, field === 'depthFt' ? 80 : field === 'widthFt' ? 96 : field === 'padExtensionFt' ? 200 : 24)) });
     }
@@ -6845,9 +6978,11 @@ function App() {
   // Per-wall edit: system / height / thickness / finish / omit, per N/S/E/W side.
   function updateWallSide(side, field, rawValue, level = 1) {
     let value = rawValue;
-    if (field === 'heightFt') value = clamp(Number(rawValue), 7, 40);
+    // Per-side heights go down to a 2' kneewall (greenhouse south face).
+    if (field === 'heightFt') value = clamp(Number(rawValue), 2, 40);
     else if (field === 'thicknessFt') value = clamp(Number(rawValue), 0.2, 3.5);
-    else if (field === 'omitted') value = Boolean(rawValue);
+    else if (field === 'sunGlazingTiltDeg') value = clamp(Number(rawValue) || 0, 0, 45);
+    else if (field === 'sunGlazing' || field === 'omitted') value = Boolean(rawValue);
     void applyBackendOperations({
       operations: [{ type: 'set_wall_side', wall: side, field, value, ...(level > 1 ? { level } : {}) }],
       promptText: `Set ${level > 1 ? 'upper ' : ''}${side} wall ${field}`,
@@ -7087,6 +7222,14 @@ function App() {
       if (operations.length) void applyBackendOperations({ operations, promptText: 'Update roof', logPrefix: 'Roof edit', nextSelectedId: 'roof-main' });
       return;
     }
+    if (selectedRoom === 'frame-main') {
+      if (field === 'type') {
+        void applyBackendOperations({ operations: [{ type: 'set_frame', value }], promptText: `Set frame to ${FRAME_TYPES[value]?.label || value}`, logPrefix: 'Frame', nextSelectedId: 'frame-main' });
+      } else if (field === 'baySpacingFt') {
+        void applyBackendOperations({ operations: [{ type: 'set_frame', field: 'baySpacingFt', value: String(clamp(Number(value) || 8, 4, 16)) }], promptText: `Set frame bay spacing to ${value}'`, logPrefix: 'Frame', nextSelectedId: 'frame-main' });
+      }
+      return;
+    }
     if (selectedRoom?.startsWith('opening-')) {
       const openingIndex = Number(selectedRoom.replace('opening-', ''));
       const opening = spec.openings?.[openingIndex];
@@ -7110,9 +7253,29 @@ function App() {
     if (wall) {
       const lvl = wall.level || 1;
       if (field === 'h' && lvl === 1) updateWallSide(wall.side, 'heightFt', value);
+      else if (field === 'w' && wall.edgeKey) {
+        // An edge SEGMENT's length is its own — the jog corners slide along
+        // the wall line (the whole side still comes from the shell dims).
+        void applyBackendOperations({
+          operations: [{ type: 'resize_wall_segment', field: wall.edgeKey, value: String(Math.max(1, Number(value) || 1)) }],
+          promptText: `Set ${wall.name.toLowerCase()} to ${value}' long`,
+          logPrefix: 'Footprint',
+          nextSelectedId: selectedRoom
+        });
+      }
+      else if (field === 'startFt' && wall.edgeKey) {
+        void applyBackendOperations({
+          operations: [{ type: 'resize_wall_segment', field: wall.edgeKey, positionFt: Math.max(0.5, Number(value) || 0.5) }],
+          promptText: `Slide ${wall.name.toLowerCase()} to start at ${value}'`,
+          logPrefix: 'Footprint',
+          nextSelectedId: selectedRoom
+        });
+      }
       else if (field === 'w') updateShell(wall.side === 'north' || wall.side === 'south' ? 'widthFt' : 'depthFt', value);
       else if (field === 'thickness') updateWallSide(wall.side, 'thicknessFt', value, lvl);
       else if (field === 'assembly') updateWallSide(wall.side, 'assembly', value, lvl);
+      else if (field === 'sunGlazing') updateWallSide(wall.side, 'sunGlazing', value, lvl);
+      else if (field === 'sunGlazingTiltDeg') updateWallSide(wall.side, 'sunGlazingTiltDeg', value, lvl);
       else if (field === 'interiorFinish') updateWallSide(wall.side, 'interiorFinish', value, lvl);
       else if (field === 'exteriorFinish') updateWallSide(wall.side, 'exteriorFinish', value, lvl);
       return;
@@ -8319,6 +8482,9 @@ function App() {
                         {Object.entries(FRAME_TYPES).map(([key, f]) => <option key={key} value={key}>{f.label}</option>)}
                       </select>
                     </label>
+                    {resolveFrameType(spec, 1) !== 'load-bearing' && (
+                      <label>Bay spacing (ft, post to post)<input type="number" step="0.5" min="4" max="16" value={Number(spec.frame?.baySpacingFt) || 8} onChange={(event) => applyBackendOperations({ operations: [{ type: 'set_frame', field: 'baySpacingFt', value: String(clamp(Number(event.target.value) || 8, 4, 16)) }], promptText: 'Set frame bay spacing', logPrefix: 'Frame' })} /></label>
+                    )}
                   </div>
                 ) : (
                   <>
@@ -9076,6 +9242,7 @@ function App() {
                           ['Openings', (spec.openings || []).map((opening, index) => ({ id: `opening-${index}`, label: opening.label || `${titleCase(opening.wall)} ${titleCase(opening.type)}`, sub: `${opening.widthFt}′` }))],
                           ['Structure & site', [
                             { id: 'roof-main', label: 'Roof', sub: spec.shell.roofType || 'gable' },
+                            ...(resolveFrameType(spec, 1) !== 'load-bearing' ? [{ id: 'frame-main', label: 'Frame', sub: `${FRAME_TYPES[resolveFrameType(spec, 1)]?.label || ''} · ${Number(spec.frame?.baySpacingFt) || 8}′ bays` }] : []),
                             { id: 'site-pad', label: 'Site pad', sub: '' },
                             ...(spec.elements || []).filter((element) => element.category === 'floor').map((element) => ({ id: element.id, label: element.name || 'Storey extent', sub: `${element.w}×${element.d}′` }))
                           ]],
@@ -9183,7 +9350,12 @@ function App() {
                 {!selectedIsElement && !selectedIsWall && !selectedIsSpecial && <div className="modelEditHint"><Camera size={15} /> Drag the room body to move it. Drag green corner cubes in the model to resize; dimensions appear live.</div>}
                 <div className={selectedIsWall ? 'liveEdit wallEdit' : 'liveEdit'}>
                   <label>Name<input value={selected?.name || ''} onChange={(event) => updateSelectedRoom('name', event.target.value)} /></label>
-                  <label>{selectedIsWall ? 'Length' : 'Width'}<input type="number" value={selectedIsWall ? selected?.lengthFt || 0 : selected?.w || 0} disabled={selectedIsRoof || selectedIsGrid || Boolean(selected?.edgeKey)} title={selected?.edgeKey ? 'A segment’s length follows the outline — move walls in the Plan view or with Move in/out below.' : undefined} onChange={(event) => updateSelectedRoom('w', event.target.value)} /></label>
+                  <label>{selectedIsWall ? 'Length' : 'Width'}<input type="number" value={selectedIsWall ? selected?.lengthFt || 0 : selected?.w || 0} disabled={selectedIsRoof || selectedIsGrid} title={selected?.edgeKey ? 'Length of this segment — its jog corners slide along the wall line.' : undefined} onChange={(event) => updateSelectedRoom('w', event.target.value)} /></label>
+                  {selectedIsWall && selected?.edgeKey && (() => {
+                    const edge = footprintEdges(spec)[Number(String(selected.edgeKey).replace(/^e/, ''))];
+                    const startAt = edge ? Math.min(edge.horizontal ? edge.x0 : edge.y0, edge.horizontal ? edge.x1 : edge.y1) : 0;
+                    return <label>Starts at (ft along wall)<input type="number" step="0.5" value={startAt} onChange={(event) => updateSelectedRoom('startFt', event.target.value)} /></label>;
+                  })()}
                   <label>{selectedIsWall ? 'Thickness' : 'Depth'}<input type="number" step={selectedIsWall ? 0.05 : undefined} value={selectedIsWall ? selected?.thicknessFt ?? modeledWallProfile.thicknessFt : selected?.d || 0} disabled={selectedIsOpening || selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom(selectedIsWall ? 'thickness' : 'd', event.target.value)} /></label>
                   {selectedIsWall && <label>System
                     <select value={selected?.assemblyKey || 'framed'} onChange={(event) => updateSelectedRoom('assembly', event.target.value)}>
@@ -9203,6 +9375,18 @@ function App() {
                       </span>
                     </label>
                   )}
+                  {selectedIsWall && (selected?.level || 1) === 1 && !selected?.edgeKey && (() => {
+                    const rW = resolveWallSide(spec, selected.side);
+                    return (
+                      <label>Sun glazing above (greenhouse face)
+                        <span className="wallMoveRow">
+                          <input type="checkbox" checked={rW.sunGlazing} title="Angled glass from the top of this wall up to the eave, carried by the frame — drop the wall to a kneewall height first (e.g. 3')" onChange={(event) => updateSelectedRoom('sunGlazing', event.target.checked)} />
+                          {rW.sunGlazing && <input type="number" step="5" min="0" max="45" title="Glazing tilt in degrees from vertical — steeper aims lower winter sun" value={rW.sunGlazingTiltDeg} onChange={(event) => updateSelectedRoom('sunGlazingTiltDeg', event.target.value)} />}
+                          {rW.sunGlazing && <small>° from vertical</small>}
+                        </span>
+                      </label>
+                    );
+                  })()}
                   {!selectedIsWall && <label>{selectedIsOpening ? 'Along Wall' : 'X'}<input type="number" value={selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? selected.x : selected.y) || 0 : selected?.x || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom(selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? 'x' : 'y') : 'x', event.target.value)} /></label>}
                   {!selectedIsWall && !selectedIsOpening && <label>Y<input type="number" value={selected?.y || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom('y', event.target.value)} /></label>}
                   {!selectedIsWall && !selectedIsSpecial && !selectedIsElement && (storeyInfo(spec.shell).storeys > 1 || basementInfo(spec.shell).present) && <label>Level ({basementInfo(spec.shell).present ? '-1 = basement' : 'floor'})<input type="number" min={basementInfo(spec.shell).present ? -1 : 1} max={Math.ceil(storeyInfo(spec.shell).storeys)} value={Number(selected?.level || 1)} onChange={(event) => updateSelectedRoom('level', event.target.value)} /></label>}
@@ -9242,6 +9426,14 @@ function App() {
                       <option value="gable">Gable canopy</option>
                     </select>
                   </label>}
+                  {selected?.id === 'frame-main' && <>
+                    <label>Frame system
+                      <select value={resolveFrameType(spec, 1)} onChange={(event) => updateSelectedRoom('type', event.target.value)}>
+                        {Object.entries(FRAME_TYPES).map(([key, f]) => <option key={key} value={key}>{f.label}</option>)}
+                      </select>
+                    </label>
+                    <label>Bay spacing (ft, post to post)<input type="number" step="0.5" min="4" max="16" value={Number(spec.frame?.baySpacingFt) || 8} onChange={(event) => updateSelectedRoom('baySpacingFt', event.target.value)} /></label>
+                  </>}
                   {selectedIsElement && selected?.category === 'partition' && <>
                     <label>Construction
                       <select value={PARTITION_TYPES[selected?.construction] ? selected.construction : 'framed'} onChange={(event) => updateSelectedRoom('construction', event.target.value)}>

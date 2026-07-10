@@ -781,8 +781,10 @@ textarea {
 
 .changeBadge {
   left: 18px;
-  top: 18px;
-  max-width: min(430px, calc(100% - 84px));
+  top: 14px;
+  /* Row 1 of the model overlays: badge | view toggle (center) | layers.
+     The badge may never reach the centered toggle — hard width cap. */
+  max-width: min(430px, calc(50% - 150px));
   min-height: 32px;
   gap: 7px;
   padding: 7px 10px;
@@ -2574,7 +2576,7 @@ textarea,
 /* Model-view layers panel */
 .layersToggle {
   position: absolute;
-  top: 52px;
+  top: 14px;
   right: 12px;
   z-index: 6;
   min-height: 30px;
@@ -3337,9 +3339,10 @@ button.ghost.saveButton {
 }
 .viewModeToggle button.active { background: #3C6472; color: #fff; }
 
-/* Floor selector (multi-storey) — top-left of the model */
+/* Floor selector (multi-storey) — row 2 of the model overlays, under the
+   rev badge; the selection chip takes row 3. Nothing overlaps. */
 .floorTabs {
-  position: absolute; top: 46px; left: 12px; z-index: 6;
+  position: absolute; top: 56px; left: 12px; z-index: 6;
   display: flex; gap: 3px; padding: 3px;
   background: rgba(255,255,255,0.92); border: 1px solid var(--line2, #CAC8BB);
   border-radius: 8px; box-shadow: 0 8px 20px rgba(34,37,31,0.12);
@@ -3729,7 +3732,7 @@ button.danger:hover,
 .inspectorDock .selectedSummary { padding: 0 !important; }
 
 /* ---- Live selection chip on the model (the selector surface) ---- */
-.selChipWrap { position: absolute; top: 52px; left: 14px; z-index: 30; }
+.selChipWrap { position: absolute; top: 98px; left: 14px; z-index: 30; }
 .selChip {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 6px 11px; border-radius: 999px;

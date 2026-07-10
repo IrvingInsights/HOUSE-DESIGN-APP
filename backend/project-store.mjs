@@ -25,6 +25,14 @@ async function readJsonIfExists(filePath) {
     return JSON.parse(raw);
   } catch (error) {
     if (error?.code === 'ENOENT') return null;
+    // A corrupt file (interrupted write) must NEVER take the server down —
+    // set the damaged copy aside and fall back to null; every state is also
+    // snapshotted in revisions/, so nothing real is lost.
+    if (error instanceof SyntaxError) {
+      try { await fs.copyFile(filePath, `${filePath}.corrupt-${Date.now()}.bak`); } catch { /* best effort */ }
+      console.warn(`Corrupt JSON set aside: ${filePath} (${error.message})`);
+      return null;
+    }
     throw error;
   }
 }
@@ -70,7 +78,13 @@ export async function saveProjectState(incomingState, options = {}) {
     updatedAt: now
   };
   await ensureProjectDirs(projectId);
-  await fs.writeFile(projectStatePath(projectId), JSON.stringify(nextState, null, 2), 'utf8');
+  // Atomic write: temp file + rename. A process killed mid-write (or two
+  // servers racing) can then never leave a half-written live pointer —
+  // exactly the corruption that once took the whole server down.
+  const statePath = projectStatePath(projectId);
+  const tmpPath = `${statePath}.tmp-${process.pid}`;
+  await fs.writeFile(tmpPath, JSON.stringify(nextState, null, 2), 'utf8');
+  await fs.rename(tmpPath, statePath);
 
   const revision = Number(nextState?.spec?.revision || 1);
   const snapshotName = `${now.replace(/[:.]/g, '-')}-rev-${revision}.json`;

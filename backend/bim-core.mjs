@@ -138,6 +138,10 @@ export function resolveWallSide(spec, side, level = 1) {
     thicknessFt: Number(w.thicknessFt ?? assembly.thicknessFt),
     interiorFinish: w.interiorFinish || assembly.finish,
     exteriorFinish: w.exteriorFinish || 'rainscreen / lime render',
+    // Angled greenhouse glazing above the wall (kneewall below, glass to the
+    // eave at sunGlazingTiltDeg from vertical, carried by the frame).
+    sunGlazing: Boolean(w.sunGlazing),
+    sunGlazingTiltDeg: Number(w.sunGlazingTiltDeg ?? 30),
     omitted: Boolean(w.omitted) || omittedSet.has(side)
   };
   if (level <= 1) return ground;
@@ -638,7 +642,7 @@ function detectIssues(spec) {
   if (naturalApproach && !spec.openings.some((item) => item.type === 'door' && item.wall === 'south')) issues.push({ severity: 'warning', title: 'Primary entry lacks clear solar-side approach', owner: 'Designer', fix: 'Add or move the main entry to a legible approach with weather protection.' });
   if (naturalApproach && !spec.openings.some((item) => item.type === 'window' && item.wall === 'south')) issues.push({ severity: 'warning', title: 'Insufficient south-facing daylight strategy', owner: 'Permaculture', fix: 'Add balanced south glazing with summer shading and winter solar gain.' });
   if (spec.shell.wallHeightFt > 12) issues.push({ severity: 'warning', title: 'Tall walls need explicit lateral strategy', owner: 'Engineer', fix: 'Add shear wall schedule, hold-downs, and diaphragm notes.' });
-  const glazedOffSouth = WALL_SIDES.filter((side) => { const r = resolveWallSide(spec, side); return !r.omitted && r.assemblyKey === 'glazed' && side !== 'south'; });
+  const glazedOffSouth = WALL_SIDES.filter((side) => { const r = resolveWallSide(spec, side); return !r.omitted && side !== 'south' && (r.assemblyKey === 'glazed' || r.sunGlazing); });
   if (naturalApproach && glazedOffSouth.length) issues.push({ severity: 'warning', title: `Glass wall faces ${glazedOffSouth.join(' + ')} — little solar gain, big heat leak`, owner: 'Natural Builder', fix: 'A glazed wall earns its keep facing south. Off-south glass loses heat all winter for little gain — face it south, or accept the heat cost knowingly.' });
   const basementBedroom = basementInfo(spec.shell).present && spec.rooms.find((room) => Number(room.level || 1) === BASEMENT_LEVEL && room.type === 'sleeping');
   if (basementBedroom) issues.push({ severity: 'critical', title: `${basementBedroom.name} is a basement bedroom — egress required`, owner: 'Engineer', fix: 'A below-grade sleeping room needs an egress window or a walkout door (min clear opening per code). Plan the well or walkout on the downhill side.' });
@@ -996,8 +1000,8 @@ export function applyBimOperations(currentSpec, plan) {
 
     if (operation.type === 'set_roof' || operation.type === 'set_roof_profile' || operation.type === 'add_roof_plane') {
       if (operation.roofType) next.shell.roofType = operation.roofType;
-      if (operation.southWallHeightFt) next.shell.southWallHeightFt = clamp(operation.southWallHeightFt, 7, 40);
-      if (operation.northWallHeightFt) next.shell.northWallHeightFt = clamp(operation.northWallHeightFt, 7, 40);
+      if (operation.southWallHeightFt) next.shell.southWallHeightFt = clamp(operation.southWallHeightFt, 2, 40);
+      if (operation.northWallHeightFt) next.shell.northWallHeightFt = clamp(operation.northWallHeightFt, 2, 40);
       if (operation.pitch) next.shell.roofPitch = clamp(operation.pitch, 0.02, 1.5);
       const profile = roofProfile(next.shell);
       next.shell.wallHeightFt = profile.highWallHeightFt;
@@ -1008,7 +1012,9 @@ export function applyBimOperations(currentSpec, plan) {
     }
 
     if (operation.type === 'set_wall_height') {
-      const height = clamp(Number(operation.h || operation.value || 10), 7, 40);
+      // A named side may drop to a 2' kneewall; the whole-house height keeps 7.
+      const heightMin = operation.wall === 'south' || operation.wall === 'north' ? 2 : 7;
+      const height = clamp(Number(operation.h || operation.value || 10), heightMin, 40);
       if (operation.wall === 'south') next.shell.southWallHeightFt = height;
       else if (operation.wall === 'north') next.shell.northWallHeightFt = height;
       else next.shell.wallHeightFt = height;
@@ -1036,13 +1042,20 @@ export function applyBimOperations(currentSpec, plan) {
       }
       next.walls[side] ||= {};
       if (field === 'heightFt') {
-        const h = clamp(Number(operation.value), 7, 40);
+        // Per-side walls go down to a 2' kneewall — the greenhouse south face
+        // (low bale wall with angled glazing above). Global height stays >= 7.
+        const h = clamp(Number(operation.value), 2, 40);
         next.walls[side].heightFt = h;
         if (side === 'south') next.shell.southWallHeightFt = h;
         if (side === 'north') next.shell.northWallHeightFt = h;
         const profile = roofProfile(next.shell);
         next.shell.wallHeightFt = profile.highWallHeightFt;
         next.shell.roofPitch = Math.round(profile.pitch * 1000) / 1000;
+      } else if (field === 'sunGlazing') {
+        // Angled greenhouse glazing above this wall, up to the eave.
+        next.walls[side].sunGlazing = operation.value === true || String(operation.value) === 'true' || operation.value === 1 || operation.value === '1';
+      } else if (field === 'sunGlazingTiltDeg') {
+        next.walls[side].sunGlazingTiltDeg = clamp(Number(operation.value) || 0, 0, 45);
       } else if (field === 'assembly') {
         next.walls[side].assembly = WALL_ASSEMBLIES[operation.value] ? operation.value : 'framed';
       } else if (field === 'thicknessFt') {
@@ -1078,6 +1091,66 @@ export function applyBimOperations(currentSpec, plan) {
       }
       anchorFootprint(next, normalized);
       actions.push(`Set the footprint outline (${normalized.length} corners, ${Math.round(polygonArea(normalized))} sf).`);
+      continue;
+    }
+
+    if (operation.type === 'resize_wall_segment') {
+      // Adjust a wall SEGMENT's length and/or start position ALONG its wall
+      // line (the ask behind "the S wall won't let me adjust length or
+      // position"). The segment's jog corners slide with it: each jog edge
+      // translates whole, and the parallel neighbour segments absorb the
+      // difference — rectilinearity holds. value = new length (ft);
+      // positionFt = new start along the axis (0 = keep the current start —
+      // ops are zero-filled, so 0 cannot mean "slide to the corner").
+      // Any STORED outline qualifies — including a just-split wall that is
+      // still rectangle-shaped (hasCustomFootprint would call that "not
+      // custom" and block the very segment the user just made).
+      const storedPoly = normalizeFootprint(next.shell.footprint);
+      if (!storedPoly) {
+        warnings.push('Length and position of one wall segment need segments — on a plain rectangle the wall IS the full side (set Width/Length on the Shell page), or Split into 3 first.');
+        rejectedOperations.push(operation);
+        continue;
+      }
+      const poly = storedPoly.map(([px, py]) => [px, py]);
+      const n = poly.length;
+      const idx = Number(String(operation.field || operation.wall || '').replace(/^e/, ''));
+      if (!Number.isFinite(idx) || idx < 0 || idx >= n) {
+        warnings.push('Segment resize needs the edge id (e0, e1, …).');
+        rejectedOperations.push(operation);
+        continue;
+      }
+      const vA = poly[idx];
+      const vB = poly[(idx + 1) % n];
+      const axis = vA[1] === vB[1] ? 0 : 1;
+      const lo = Math.min(vA[axis], vB[axis]);
+      const hi = Math.max(vA[axis], vB[axis]);
+      const curLen = hi - lo;
+      const newLen = Math.max(1, Number(operation.value) > 0 ? Number(operation.value) : curLen);
+      let newLo = Number(operation.positionFt) > 0 ? Number(operation.positionFt) : lo;
+      let newHi = newLo + newLen;
+      // Each end's neighbour is either a PERPENDICULAR jog (a real corner —
+      // the jog edge slides whole, so its far vertex moves too) or a
+      // COLLINEAR split segment (only the shared vertex moves; the split
+      // neighbour absorbs the change). Clamp so every neighbour keeps >= 1'.
+      const vPrev = poly[(idx - 1 + n) % n];
+      const vNext2 = poly[(idx + 2) % n];
+      const prevPerp = vPrev[axis] === vA[axis];
+      const nextPerp = vNext2[axis] === vB[axis];
+      const prevLimit = prevPerp ? poly[(idx - 2 + n) % n][axis] : vPrev[axis];
+      const nextLimit = nextPerp ? poly[(idx + 3) % n][axis] : vNext2[axis];
+      const aIsLo = vA[axis] === lo;
+      const loLimit = aIsLo ? prevLimit : nextLimit;
+      const hiLimit = aIsLo ? nextLimit : prevLimit;
+      if (loLimit <= lo) newLo = Math.max(newLo, loLimit + 1); else newLo = Math.min(newLo, loLimit - 1);
+      if (hiLimit >= hi) newHi = Math.min(newHi, hiLimit - 1); else newHi = Math.max(newHi, hiLimit + 1);
+      newHi = Math.max(newHi, newLo + 1);
+      const assign = (vertexIndex, valueOnAxis) => { poly[(vertexIndex + n) % n][axis] = Math.round(valueOnAxis * 2) / 2; };
+      assign(idx, aIsLo ? newLo : newHi);
+      assign(idx + 1, aIsLo ? newHi : newLo);
+      if (prevPerp) assign(idx - 1, aIsLo ? newLo : newHi);
+      if (nextPerp) assign(idx + 2, aIsLo ? newHi : newLo);
+      anchorFootprint(next, poly);
+      actions.push(`Set wall segment e${idx} to ${Math.round((newHi - newLo) * 2) / 2}' long, starting at ${Math.round(newLo * 2) / 2}'.`);
       continue;
     }
 
@@ -1229,6 +1302,11 @@ export function applyBimOperations(currentSpec, plan) {
     if (operation.type === 'set_frame') {
       next.frame ||= { type: 'load-bearing', storeyTypes: {} };
       next.frame.storeyTypes ||= {};
+      if (operation.field === 'baySpacingFt') {
+        next.frame.baySpacingFt = clamp(Number(operation.value) || 8, 4, 16);
+        actions.push(`Set frame bay spacing to ${next.frame.baySpacingFt}'.`);
+        continue;
+      }
       const value = FRAME_TYPES[operation.value] ? operation.value : 'load-bearing';
       const level = Number(operation.level || 0);
       if (level > 1) next.frame.storeyTypes[String(level)] = value;
