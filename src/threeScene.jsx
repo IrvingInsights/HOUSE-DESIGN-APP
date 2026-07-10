@@ -299,9 +299,38 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const customFp = hasCustomFootprint(spec);
       const fpPoly = customFp ? footprintPolygon(spec) : null;
       const fpEdges = customFp ? footprintEdges(spec) : null;
+      // Openings cut REAL holes: each wall run is built as pieces around its
+      // openings (full-height stretches between them, a band under each sill,
+      // a header above). Gap positions are collected per wall side — or per
+      // polygon edge on a custom footprint — before any wall mesh is built.
+      // When the Openings layer is hidden the walls render solid (no bare holes).
+      const openingGapsByWall = new Map();
+      const gapByOpening = []; // index-aligned with spec.openings; .cut set when the hole is real
+      if (layers.openings) (spec.openings || []).forEach((opening, openingIdx) => {
+        if (opening.wall === 'roof') return;
+        const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
+        let key;
+        let along;
+        if (customFp) {
+          const e = edgeForOpening(spec, opening);
+          if (!e) return;
+          key = e.key;
+          along = e.horizontal ? Number(opening.x) || 0 : Number(opening.y) || 0;
+        } else {
+          key = opening.wall;
+          along = (opening.wall === 'north' || opening.wall === 'south') ? Number(opening.x) || 0 : Number(opening.y) || 0;
+        }
+        const w = Number(opening.widthFt) || 3;
+        const gap = { from: along, to: along + w, sill: profile.sill, top: profile.sill + profile.h };
+        gapByOpening[openingIdx] = gap;
+        const list = openingGapsByWall.get(key) || [];
+        list.push(gap);
+        openingGapsByWall.set(key, list);
+      });
+      const gapsFor = (key) => openingGapsByWall.get(key) || [];
       const pushSideBoxes = (side, totalH, thickness, place) => {
         const groundH = Math.max(1, totalH - storeyLift);
-        wallMeshSpecs.push({ side, storey: 'ground', mesh: place(thickness, groundH, 0) });
+        wallMeshSpecs.push({ side, storey: 'ground', meshes: place(thickness, groundH, 0) });
         if (storeyLift > 0) {
           const u = wallUpper[side];
           const tU = u.thicknessFt;
@@ -310,7 +339,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             : side === 'south' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + p.d - tU / 2, wallMatOf(u))
             : side === 'west' ? box(tU, storeyLift, p.d, p.x + tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u))
             : box(tU, storeyLift, p.d, p.x + p.w - tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u));
-          wallMeshSpecs.push({ side, storey: 'upper', mesh: upperMesh });
+          wallMeshSpecs.push({ side, storey: 'upper', meshes: [upperMesh] });
         }
       };
       if (customFp) {
@@ -335,17 +364,24 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             ? (edge.horizontal ? eaveAt(edge.y0) : Math.max(eaveAt(edge.y0), eaveAt(edge.y1)))
             : rG.heightFt + storeyLift;
           const groundH = Math.max(1, totalH - storeyLift);
-          let mesh;
+          const matG = wallMatOf(rG);
+          let meshes;
           if (shed && !edge.horizontal) {
             const z0 = Math.min(edge.y0, edge.y1);
             const z1 = Math.max(edge.y0, edge.y1);
-            mesh = makeRakedWallSegment(cx - t / 2, cx + t / 2, z0, z1, Math.max(1, eaveAt(z0) - (hasPlate ? storeyLift : 0)), Math.max(1, eaveAt(z1) - (hasPlate ? storeyLift : 0)), wallMatOf(rG));
+            meshes = wallRunMeshes({
+              horizontal: false, thickCenter: cx, t, a0: z0, a1: z1,
+              hAt: (zz) => Math.max(1, eaveAt(zz) - (hasPlate ? storeyLift : 0)),
+              mat: matG, gaps: gapsFor(edge.key)
+            });
+          } else if (edge.horizontal) {
+            const a0 = Math.min(edge.x0, edge.x1);
+            meshes = wallRunMeshes({ horizontal: true, thickCenter: cy, t, a0, a1: a0 + len, hAt: () => groundH, mat: matG, gaps: gapsFor(edge.key) });
           } else {
-            mesh = edge.horizontal
-              ? box(len, groundH, t, cx, groundH / 2, cy, wallMatOf(rG))
-              : box(t, groundH, len, cx, groundH / 2, cy, wallMatOf(rG));
+            const a0 = Math.min(edge.y0, edge.y1);
+            meshes = wallRunMeshes({ horizontal: false, thickCenter: cx, t, a0, a1: a0 + len, hAt: () => groundH, mat: matG, gaps: gapsFor(edge.key) });
           }
-          wallMeshSpecs.push({ side: edge.facing, storey: 'ground', edgeKey: edge.key, mesh });
+          wallMeshSpecs.push({ side: edge.facing, storey: 'ground', edgeKey: edge.key, meshes });
           // No extent plate: the upper band rides this same edge.
           if (storeyLift > 0 && !hasPlate) {
             const u = wallUpper[edge.facing];
@@ -355,7 +391,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const upperMesh = edge.horizontal
               ? box(len, storeyLift, tU, ux, groundH + storeyLift / 2, uy, wallMatOf(u))
               : box(tU, storeyLift, len, ux, groundH + storeyLift / 2, uy, wallMatOf(u));
-            wallMeshSpecs.push({ side: edge.facing, storey: 'upper', edgeKey: edge.key, mesh: upperMesh });
+            wallMeshSpecs.push({ side: edge.facing, storey: 'upper', edgeKey: edge.key, meshes: [upperMesh] });
           }
         });
         // With a plate, upper bands ring IT — same cardinal ids as a rectangle.
@@ -370,31 +406,34 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               : side === 'south' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + p.d - tU / 2, wallMatOf(u))
               : side === 'west' ? box(tU, storeyLift, p.d, p.x + tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u))
               : box(tU, storeyLift, p.d, p.x + p.w - tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u));
-            wallMeshSpecs.push({ side, storey: 'upper', mesh: upperMesh });
+            wallMeshSpecs.push({ side, storey: 'upper', meshes: [upperMesh] });
           });
         }
       } else if (roofSpec.roofType === 'shed') {
-        pushSideBoxes('north', hN, tN, (t, h, y0) => box(width, h, t, width / 2, y0 + h / 2, t / 2, wallMatFor('north')));
-        pushSideBoxes('south', hS, tS, (t, h, y0) => box(width, h, t, width / 2, y0 + h / 2, depth - t / 2, wallMatFor('south')));
-        wallMeshSpecs.push({ side: 'west', storey: 'ground', mesh: makeShedSideWall(0, tW, depth, northWallHeight, southWallHeight, wallMatFor('west')) });
-        wallMeshSpecs.push({ side: 'east', storey: 'ground', mesh: makeShedSideWall(width - tE, tE, depth, northWallHeight, southWallHeight, wallMatFor('east')) });
+        const eaveAtZ = (zz) => northWallHeight + (southWallHeight - northWallHeight) * clamp(depth > 0 ? zz / depth : 0, 0, 1);
+        pushSideBoxes('north', hN, tN, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north') }));
+        pushSideBoxes('south', hS, tS, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south') }));
+        wallMeshSpecs.push({ side: 'west', storey: 'ground', meshes: wallRunMeshes({ horizontal: false, thickCenter: tW / 2, t: tW, a0: 0, a1: depth, hAt: eaveAtZ, mat: wallMatFor('west'), gaps: gapsFor('west') }) });
+        wallMeshSpecs.push({ side: 'east', storey: 'ground', meshes: wallRunMeshes({ horizontal: false, thickCenter: width - tE / 2, t: tE, a0: 0, a1: depth, hAt: eaveAtZ, mat: wallMatFor('east'), gaps: gapsFor('east') }) });
       } else {
-        pushSideBoxes('north', hN, tN, (t, h, y0) => box(width, h, t, width / 2, y0 + h / 2, t / 2, wallMatFor('north')));
-        pushSideBoxes('south', hS, tS, (t, h, y0) => box(width, h, t, width / 2, y0 + h / 2, depth - t / 2, wallMatFor('south')));
-        pushSideBoxes('west', hW, tW, (t, h, y0) => box(t, h, depth, t / 2, y0 + h / 2, depth / 2, wallMatFor('west')));
-        pushSideBoxes('east', hE, tE, (t, h, y0) => box(t, h, depth, width - t / 2, y0 + h / 2, depth / 2, wallMatFor('east')));
+        pushSideBoxes('north', hN, tN, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north') }));
+        pushSideBoxes('south', hS, tS, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south') }));
+        pushSideBoxes('west', hW, tW, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('west'), gaps: gapsFor('west') }));
+        pushSideBoxes('east', hE, tE, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: width - t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('east'), gaps: gapsFor('east') }));
       }
-      wallMeshSpecs.forEach(({ side, storey, mesh, edgeKey }) => {
+      wallMeshSpecs.forEach(({ side, storey, meshes, edgeKey }) => {
         if (omittedWalls.has(side) || wallResolved[side].omitted) return;
         if (!layers[`wall${titleCase(side)}`]) return;
         const resolved = storey === 'upper' ? wallUpper[side] : wallResolved[side];
-        mesh.name = `${titleCase(side)} Wall${storey === 'upper' ? ' (upper)' : ''} - ${resolved.assembly.label}`;
-        mesh.userData.roomId = edgeKey
-          ? (storey === 'upper' ? `wall-${edgeKey}-u` : `wall-${edgeKey}`)
-          : (storey === 'upper' ? `wall-${side}-u` : `wall-${side}`);
-        mesh.userData.wallSide = side;
-        roomMeshes.push(mesh);
-        group.add(mesh);
+        (meshes || []).forEach((mesh) => {
+          mesh.name = `${titleCase(side)} Wall${storey === 'upper' ? ' (upper)' : ''} - ${resolved.assembly.label}`;
+          mesh.userData.roomId = edgeKey
+            ? (storey === 'upper' ? `wall-${edgeKey}-u` : `wall-${edgeKey}`)
+            : (storey === 'upper' ? `wall-${side}-u` : `wall-${side}`);
+          mesh.userData.wallSide = side;
+          roomMeshes.push(mesh);
+          group.add(mesh);
+        });
       });
 
       // Sun glazing: a wall lower than the eave with sunGlazing on gets an
@@ -927,23 +966,41 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               return m;
             };
             const fw = 0.22;
+            // When the wall cut this opening's REAL hole, the assembly recesses
+            // into it: jamb/head/sill liners span the wall thickness (the
+            // visible reveal) and the pane sits mid-wall. When the hole wasn't
+            // cut (clerestory above a low wall, degenerate positions) the
+            // assembly keeps its old proud-of-the-wall placement.
+            const facing = oEdge?.facing || opening.wall;
+            const tHere = wallResolved[facing]?.thicknessFt || 1;
+            const recessed = Boolean(gapByOpening[index]?.cut);
+            const rIn = recessed ? -(tHere / 2) : 0.05;
+            // exterior casing (head, sill trim, jamb trim)
             part(size + fw * 2, fw, 0.3, mid, profile.sill + openH + fw / 2, 0.14, frameMat);
             part(size + fw * 2, fw, 0.3, mid, Math.max(fw / 2, profile.sill - fw / 2), 0.14, frameMat);
             part(fw, openH, 0.3, mid - size / 2 - fw / 2, centerY, 0.14, frameMat);
             part(fw, openH, 0.3, mid + size / 2 + fw / 2, centerY, 0.14, frameMat);
+            if (recessed) {
+              // reveal liners — the window buck lining the hole through the wall
+              const revealD = Math.max(0.6, tHere - 0.06);
+              part(size, 0.12, revealD, mid, profile.sill + openH - 0.06, rIn, frameMat);
+              part(size, 0.12, revealD, mid, profile.sill + 0.06, rIn, frameMat);
+              part(0.12, openH, revealD, mid - size / 2 + 0.06, centerY, rIn, frameMat);
+              part(0.12, openH, revealD, mid + size / 2 - 0.06, centerY, rIn, frameMat);
+            }
             const paneMat = profile.glazed ? glassMat : doorMatWood;
-            mesh = part(Math.max(0.6, size - 0.08), openH, 0.14, mid, centerY, 0.05, paneMat);
+            mesh = part(Math.max(0.6, size - (recessed ? 0.26 : 0.08)), openH - (recessed ? 0.22 : 0), 0.14, mid, centerY, rIn, paneMat);
             if (profile.glazed && !profile.entry && size >= 2) {
               // divided lites — one vertical + one horizontal muntin
-              part(0.09, openH, 0.2, mid, centerY, 0.13, frameMat);
-              part(size, 0.09, 0.2, mid, centerY, 0.13, frameMat);
+              part(0.09, openH, 0.2, mid, centerY, rIn + 0.09, frameMat);
+              part(size, 0.09, 0.2, mid, centerY, rIn + 0.09, frameMat);
             }
             if (opening.type === 'french' || opening.type === 'slider') {
-              part(0.12, openH, 0.24, mid, centerY, 0.13, frameMat);
+              part(0.12, openH, 0.24, mid, centerY, rIn + 0.09, frameMat);
             }
             if (profile.entry && !profile.glazed) {
               // door hardware — a small knob at the latch side
-              part(0.14, 0.14, 0.14, mid + size * 0.34, profile.sill + Math.min(3.1, openH * 0.45), 0.2, frameMat);
+              part(0.14, 0.14, 0.14, mid + size * 0.34, profile.sill + Math.min(3.1, openH * 0.45), rIn + 0.16, frameMat);
             }
             if (profile.sill > 0.6) {
               // projecting exterior sill ledge under windows
@@ -1225,13 +1282,16 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       return mesh;
     }
 
-    function makeShedSideWall(x, thickness, depth, northHeight, southHeight, material) {
+    // A raked wall piece for shed side walls: runs along z between a0..a1,
+    // base at yBot, top raking h0→h1. (Only vertical runs rake in this model —
+    // horizontal walls always sit under a level eave line.)
+    function rakedPieceZ(thickCenter, t, a0, a1, yBot, h0, h1, material) {
+      const x0 = thickCenter - t / 2;
+      const x1 = thickCenter + t / 2;
       const geometry = new THREE.BufferGeometry();
-      const x0 = x;
-      const x1 = x + thickness;
       const vertices = new Float32Array([
-        x0, 0, 0, x1, 0, 0, x1, northHeight, 0, x0, northHeight, 0,
-        x0, 0, depth, x1, 0, depth, x1, southHeight, depth, x0, southHeight, depth
+        x0, yBot, a0, x1, yBot, a0, x1, h0, a0, x0, h0, a0,
+        x0, yBot, a1, x1, yBot, a1, x1, h1, a1, x0, h1, a1
       ]);
       const indices = [
         0, 1, 2, 0, 2, 3,
@@ -1251,24 +1311,69 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       return mesh;
     }
 
-    // A raked wall segment between z0..z1 (heights vary along z) — the
-    // per-edge cousin of makeShedSideWall for custom footprints under sheds.
-    function makeRakedWallSegment(x0, x1, z0, z1, h0, h1, material) {
+    // A wall run built as PIECES so its openings are true holes: full-height
+    // stretches between openings, a band below each sill, a header above each
+    // opening. The cut faces are the reveal — the wall's own thickness shows.
+    // hAt(along) gives the top height, so raked shed walls cut the same way.
+    function wallRunMeshes({ horizontal, thickCenter, t, a0, a1, hAt, mat, gaps }) {
+      const meshes = [];
+      const hA = hAt(a0);
+      const hB = hAt(a1);
+      const lerpH = (a) => hA + (hB - hA) * ((a - a0) / Math.max(0.01, a1 - a0));
+      const flatPiece = (pa, pb, yBot, yTop) => {
+        const len = pb - pa;
+        const h = yTop - yBot;
+        if (len < 0.05 || h < 0.05) return;
+        meshes.push(horizontal
+          ? box(len, h, t, (pa + pb) / 2, yBot + h / 2, thickCenter, mat)
+          : box(t, h, len, thickCenter, yBot + h / 2, (pa + pb) / 2, mat));
+      };
+      const piece = (pa, pb, yBot, yTopA, yTopB) => {
+        if (pb - pa < 0.05) return;
+        if (horizontal || Math.abs(yTopA - yTopB) < 0.02) {
+          flatPiece(pa, pb, yBot, Math.min(yTopA, yTopB));
+          return;
+        }
+        if (Math.min(yTopA, yTopB) - yBot < 0.05) return;
+        meshes.push(rakedPieceZ(thickCenter, t, pa, pb, yBot, yTopA, yTopB, mat));
+      };
+      const clean = (gaps || [])
+        .map((g) => ({ ref: g, sill: g.sill, top: g.top, from: Math.max(a0 + 0.2, g.from), to: Math.min(a1 - 0.2, g.to) }))
+        .filter((g) => g.to - g.from > 0.4 && g.sill < Math.min(lerpH(g.from), lerpH(g.to)) - 0.8)
+        .sort((ga, gb) => ga.from - gb.from);
+      let at = a0;
+      for (const g of clean) {
+        if (g.from < at + 0.05) continue; // overlapping opening: wall stays solid there
+        g.ref.cut = true; // the opening assembly recesses into this real hole
+        piece(at, g.from, 0, lerpH(at), lerpH(g.from));
+        const gapTop = Math.min(g.top, Math.min(lerpH(g.from), lerpH(g.to)) - 0.25);
+        if (g.sill > 0.2) flatPiece(g.from, g.to, 0, g.sill);
+        piece(g.from, g.to, gapTop, lerpH(g.from), lerpH(g.to));
+        at = g.to;
+      }
+      piece(at, a1, 0, lerpH(at), lerpH(a1));
+      return meshes;
+    }
+
+    // Roof planes are SLABS now, not paper: a face (3 or 4 points, wound CCW
+    // seen from above) grows a parallel underside `thk` below plus edge strips
+    // all around — the strip along an eave IS the fascia, the underside over
+    // an overhang IS the soffit. Returns raw triangle positions so multi-face
+    // roofs (hip, gable segments) can merge into one selectable mesh.
+    function slabTris(points, thk) {
+      const tris = [];
+      const bot = points.map(([px, py, pz]) => [px, py - thk, pz]);
+      for (let i = 1; i < points.length - 1; i += 1) tris.push(...points[0], ...points[i], ...points[i + 1]);
+      for (let i = 1; i < bot.length - 1; i += 1) tris.push(...bot[0], ...bot[i + 1], ...bot[i]);
+      for (let i = 0; i < points.length; i += 1) {
+        const j = (i + 1) % points.length;
+        tris.push(...points[i], ...bot[i], ...bot[j], ...points[i], ...bot[j], ...points[j]);
+      }
+      return tris;
+    }
+    function meshFromTris(positions, material) {
       const geometry = new THREE.BufferGeometry();
-      const vertices = new Float32Array([
-        x0, 0, z0, x1, 0, z0, x1, h0, z0, x0, h0, z0,
-        x0, 0, z1, x1, 0, z1, x1, h1, z1, x0, h1, z1
-      ]);
-      const indices = [
-        0, 1, 2, 0, 2, 3,
-        4, 6, 5, 4, 7, 6,
-        0, 4, 5, 0, 5, 1,
-        3, 2, 6, 3, 6, 7,
-        0, 3, 7, 0, 7, 4,
-        1, 5, 6, 1, 6, 2
-      ];
-      geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-      geometry.setIndex(indices);
+      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
       geometry.computeVertexNormals();
       const mesh = new THREE.Mesh(geometry, material);
       mesh.castShadow = true;
@@ -1276,6 +1381,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       mesh.userData.generated = true;
       return mesh;
     }
+    const ROOF_THK = 0.3;
 
     // One sloped plane over a rect: high along highSide (tucked against the
     // upper block), falling away at the given pitch — the stepped roof's wing.
@@ -1290,18 +1396,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         if (highSide === 'west') return topY - ((px - x0) / (x1 - x0)) * drop;
         return topY - ((x1 - px) / (x1 - x0)) * drop;
       };
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
-        x0, yAt(x0, z0), z0,
-        x1, yAt(x1, z0), z0,
-        x1, yAt(x1, z1), z1,
-        x0, yAt(x0, z1), z1
-      ]), 3));
-      geometry.setIndex([0, 1, 2, 0, 2, 3]);
-      geometry.computeVertexNormals();
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.userData.generated = true;
-      return mesh;
+      return meshFromTris(slabTris([
+        [x0, yAt(x0, z0), z0],
+        [x1, yAt(x1, z0), z0],
+        [x1, yAt(x1, z1), z1],
+        [x0, yAt(x0, z1), z1]
+      ], ROOF_THK), material);
     }
 
     // A flat-or-sloped quad over a rect where height is any function of z —
@@ -1309,18 +1409,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     function makeShedPiece(rect, o, yAt, material) {
       const x0 = rect.x - o.west, x1 = rect.x + rect.w + o.east;
       const z0 = rect.y - o.north, z1 = rect.y + rect.d + o.south;
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
-        x0, yAt(z0), z0,
-        x1, yAt(z0), z0,
-        x1, yAt(z1), z1,
-        x0, yAt(z1), z1
-      ]), 3));
-      geometry.setIndex([0, 1, 2, 0, 2, 3]);
-      geometry.computeVertexNormals();
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.userData.generated = true;
-      return mesh;
+      return meshFromTris(slabTris([
+        [x0, yAt(z0), z0],
+        [x1, yAt(z0), z0],
+        [x1, yAt(z1), z1],
+        [x0, yAt(z1), z1]
+      ], ROOF_THK), material);
     }
 
     // A gable over one rect segment with the ridge along its LONGER axis
@@ -1333,8 +1427,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const ridgeY = eave + 0.25 + (Math.min(spanX, spanZ) / 2) * pitch;
       const base = eave + 0.25;
       const verts = [];
-      const quad = (p0, p1, p2, p3) => { verts.push(...p0, ...p1, ...p2, ...p0, ...p2, ...p3); };
-      const tri = (p0, p1, p2) => { verts.push(...p0, ...p1, ...p2); };
+      const quad = (p0, p1, p2, p3) => { verts.push(...slabTris([p0, p1, p2, p3], ROOF_THK)); }; // slope = slab (fascia edge)
+      const tri = (p0, p1, p2) => { verts.push(...p0, ...p1, ...p2); };                          // gable end stays a face
       if (alongX) {
         const cz = (z0 + z1) / 2;
         const rA = [x0, ridgeY, cz], rB = [x1, ridgeY, cz];
@@ -1350,12 +1444,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         tri([x0, base, z0], [x1, base, z0], rA);                    // north gable end
         tri([x1, base, z1], [x0, base, z1], rB);                    // south gable end
       }
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3));
-      geometry.computeVertexNormals();
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.userData.generated = true;
-      return mesh;
+      return meshFromTris(verts, material);
     }
 
     function addResizeHandles(group, parts, id, x, y, width, depth, height) {
@@ -1383,39 +1472,27 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const rise = depth * pitch;
       const o = overhangs || { north: 1.6, south: 1.6, east: 1.6, west: 1.6 };
       if (roofSpec.roofType === 'shed') {
-        const geometry = new THREE.BufferGeometry();
         const southHeight = roofSpec.southWallHeightFt + 0.28;
         const northHeight = roofSpec.northWallHeightFt + 0.28;
-        const vertices = new Float32Array([
-          -o.west, northHeight, -o.north,
-          width + o.east, northHeight, -o.north,
-          width + o.east, southHeight, depth + o.south,
-          -o.west, southHeight, depth + o.south
-        ]);
-        geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-        geometry.setIndex([0, 1, 2, 0, 2, 3]);
-        geometry.computeVertexNormals();
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.userData.generated = true;
+        const mesh = meshFromTris(slabTris([
+          [-o.west, northHeight, -o.north],
+          [width + o.east, northHeight, -o.north],
+          [width + o.east, southHeight, depth + o.south],
+          [-o.west, southHeight, depth + o.south]
+        ], ROOF_THK), material);
         mesh.name = 'Shed / lean-to roof plane';
         return mesh;
       }
       if (roofSpec.roofType === 'flat') {
-        // A near-flat roof: one horizontal plane just above the walls, extended
-        // to the overhangs. (Low-slope drainage is left implicit at this scale.)
+        // A near-flat roof: one slab just above the walls, extended to the
+        // overhangs. (Low-slope drainage is left implicit at this scale.)
         const y = wallHeight + 0.25;
-        const geometry = new THREE.BufferGeometry();
-        const vertices = new Float32Array([
-          -o.west, y, -o.north,
-          width + o.east, y, -o.north,
-          width + o.east, y, depth + o.south,
-          -o.west, y, depth + o.south
-        ]);
-        geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-        geometry.setIndex([0, 1, 2, 0, 2, 3]);
-        geometry.computeVertexNormals();
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.userData.generated = true;
+        const mesh = meshFromTris(slabTris([
+          [-o.west, y, -o.north],
+          [width + o.east, y, -o.north],
+          [width + o.east, y, depth + o.south],
+          [-o.west, y, depth + o.south]
+        ], ROOF_THK), material);
         mesh.name = 'Flat roof plane';
         return mesh;
       }
@@ -1444,16 +1521,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           ? [[c00, c10, rB, rA], [c11, c01, rA, rB], [c10, c11, rB], [c01, c00, rA]]
           : [[c10, c11, rB, rA], [c01, c00, rA, rB], [c00, c10, rA], [c11, c01, rB]];
         const verts = [];
-        for (const face of faces) {
-          const [p0, p1, p2, p3] = face;
-          verts.push(...p0, ...p1, ...p2);
-          if (p3) verts.push(...p0, ...p2, ...p3);
-        }
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3));
-        geometry.computeVertexNormals();
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.userData.generated = true;
+        for (const face of faces) verts.push(...slabTris(face, ROOF_THK)); // each hip face is a slab
+        const mesh = meshFromTris(verts, material);
         mesh.name = 'Hip roof';
         return mesh;
       }
