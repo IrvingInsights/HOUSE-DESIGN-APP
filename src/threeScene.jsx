@@ -2,6 +2,11 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { SSAOPass } from 'three/examples/jsm/postprocessing/SSAOPass.js';
+import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { FRAME_MEMBERS } from './frameDrawings.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
@@ -88,6 +93,28 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     // zone colors (the ACES-exposure lesson).
     const pmrem = new THREE.PMREMGenerator(renderer);
     const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+    // Post pipeline — the "Blender look": ambient occlusion darkens the
+    // corners, eaves, and reveals (the single biggest depth cue a plain
+    // rasterizer lacks), and selection gets a crisp warm outline. OutputPass
+    // applies the ACES tone mapping, so exposure behavior is unchanged.
+    const composer = new EffectComposer(renderer);
+    composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    composer.addPass(new RenderPass(scene, camera));
+    const ssao = new SSAOPass(scene, camera, mount.clientWidth, mount.clientHeight);
+    ssao.kernelRadius = 1.1;      // feet-scale scene: shade within ~a foot of a corner
+    ssao.minDistance = 0.0008;
+    ssao.maxDistance = 0.12;
+    composer.addPass(ssao);
+    const outlinePass = new OutlinePass(new THREE.Vector2(mount.clientWidth, mount.clientHeight), scene, camera);
+    outlinePass.edgeStrength = 2.6;
+    outlinePass.edgeGlow = 0;
+    outlinePass.edgeThickness = 1;
+    outlinePass.visibleEdgeColor.set(0xc88a5b);
+    outlinePass.hiddenEdgeColor.set(0x6b543c);
+    composer.addPass(outlinePass);
+    composer.addPass(new OutputPass());
+    composer.setSize(mount.clientWidth, mount.clientHeight);
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
@@ -1399,16 +1426,19 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       }
       }
 
-      // The 3D view reflects the selection like Plan and Detail do: whatever is
-      // selected — wall band, roof, opening, pad — glows warm. (Rooms and
-      // elements already carry their own active tint; the glow just unifies it.)
+      // The 3D view reflects the selection like Plan and Detail do: whatever
+      // is selected gets a crisp warm OUTLINE (post pass) plus a faint warm
+      // glow — wall pieces, opening assemblies, frame members all rim as one.
+      const outlined = [];
       group.traverse((node) => {
         if (!node.isMesh || !node.material || !node.material.emissive) return;
         if (String(node.userData.roomId || '') === String(selectedRoom || '')) {
           node.material.emissive = new THREE.Color(0xc88a5b);
-          node.material.emissiveIntensity = 0.35;
+          node.material.emissiveIntensity = 0.16;
+          outlined.push(node);
         }
       });
+      outlinePass.selectedObjects = outlined;
 
       // Exploded view: pull the systems apart so their joints and layers read —
       // roof lifts, walls slide outward by side, upper bands rise a little more,
@@ -1981,13 +2011,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
 
     function animate() {
       controls.update();
-      renderer.render(scene, camera);
+      composer.render();
       sceneRef.current = { renderer, scene, camera };
       requestAnimationFrame(animate);
     }
 
     function resize() {
       renderer.setSize(mount.clientWidth, mount.clientHeight);
+      composer.setSize(mount.clientWidth, mount.clientHeight);
       camera.aspect = mount.clientWidth / mount.clientHeight;
       camera.updateProjectionMatrix();
     }
@@ -2017,6 +2048,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       mountObserver?.disconnect();
       mount.removeChild(renderer.domElement);
       pmrem.dispose();
+      composer.dispose();
       renderer.dispose();
     };
   }, [spec, selectedRoom, layers]);
