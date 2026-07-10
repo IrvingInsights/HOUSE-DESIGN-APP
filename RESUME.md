@@ -1,6 +1,113 @@
 # Resume / Handoff — Natural Building GC app (house-bim-app)
 
-## FRESH SESSION — START HERE (updated 2026-07-10, pick-ups session)
+## FRESH SESSION — START HERE (handoff written 2026-07-10 end of day, at commit f91510a)
+
+Daniel asked for FRESH EYES. Read this section, then the invariants, then go.
+Deep provenance for everything: Claude memory `natural-building-gc-dashboard-inventory.md`.
+
+### The two jobs Daniel explicitly queued for THIS session
+
+**JOB 1 — Salvetti-grade 3D timber frame.** Daniel: "When I click frame, I
+should see a frame like the ones from David Salvetti rendered in the 3D."
+Today's frame render (renderModel, search `frameKey3d`) is posts + top plates
+only — placeholder grade. What he wants is a REAL timber frame skeleton:
+bents (posts + tie beams + knee braces), plates, and rafters, reading like a
+frame-raising photo. **The geometry already exists in `src/frameDrawings.js`**
+— `FRAME_MEMBERS` sizes, the F110 Typical Bent math (posts, ties, braces,
+plumb-cut rafters), per-facing elevations. Port that member logic into the 3D
+elements: bents at `spec.frame.baySpacingFt` along the long axis, plates
+running wall lines, rafters at o.c. following roofProfile (shed raked /
+gable ridge), knee braces post↔plate. Strong follow-on: a "Frame" LAYER
+preset (walls translucent/hidden, skeleton solid) so clicking Frame in the
+selector/page shows the raising view. All members carry
+`userData.roomId = 'frame-main'` (selection glow + explode already work).
+
+**JOB 2 — the UX-designer pass, round 2.** Daniel: "we are not done
+perfecting the simplicity and ease of use." His pain points this arc, in his
+words: "the workflow of editing in the model is painful", "why can't I grab
+every part", "cluttered with labels", "the very top is muddled", "I cannot
+reposition the storeys" (fixed, but the DISCOVERABILITY was the failure),
+numeric variables must always be workable. Direction from earlier passes:
+he picks a direction when offered 2-3 concrete options (AskUserQuestion with
+previews worked well: "warm earthen studio", "Direction 2 one-editor").
+Ideas worth proposing: click-to-edit-in-place on the model (tap wall → inline
+height field at the wall), a compact always-visible "what can I do with this"
+action row on selection, progressive disclosure on system pages (plain
+numbers first is policy but pages have grown), a first-run guided tour.
+Audit the whole left bar against "EVERYTHING it needs, NOTHING it doesn't."
+
+### What today shipped (all committed, suites 96 op + 41 geom + 12 trace green)
+One line each; details in the sections below and in Claude memory:
+- Basement = 4th foundation option AND a storey (level **-1**, never 0);
+  heated toggle; egress + stair checks; Basement plan tab.
+- Interior partition walls (category 'partition', door via widthFt/positionFt,
+  "Draw walls between rooms" auto-generate, 3D door gaps + headers).
+- Real stairs (treads/risers) + stairwell VOIDS through plates (subtractRect).
+- Glazed wall assembly + porch canopies (element.roofType) + chimney flues.
+- Greenhouse face: per-side kneewalls (min 2ft) + sunGlazing/sunGlazingTiltDeg
+  (angled glass band kneewall→eave, timber battens, engine + frame accounting).
+- resize_wall_segment op: segment length + start position slide along the wall.
+- Frame selectable (frame-main) w/ baySpacingFt; posts+plates 3D placeholder.
+- Per-storey controls (upperStoreyHeightFt; Shell page storey blocks w/
+  position/size/Match/Center); storey-organized selector menu.
+- Shed drainage ("Drains to" + flat-shed flag/fix); exterior CLADDING_TYPES
+  (lap/board&batten/shingle/metal/stucco/stone/brick, per side, 3D materials).
+- Standard options beside natural everywhere (SIPs, marine-ply panel, ICF) +
+  🌿 green marks on natural methods across every options list.
+- 3D grab-everything: openings slide along walls, walls drag in/out; labels
+  decluttered (element labels only when selected; assembly chip gone).
+- Enclose-rooms check/fix ("shell must enclose the whole ground floor").
+- 3-column opening card; welcome card survives HMR (sessionStorage).
+- **Storage hardened**: atomic tmp+rename writes (w/ Windows EPERM retry +
+  copy fallback), corrupt-file set-aside, API route try/catch — the server
+  can no longer be killed by a request or a bad file.
+- **Planner op-enum hole FIXED**: set_wall_side/set_frame/set_flooring/
+  set_reclaimed/resize_wall_segment were taught in the prompt but missing
+  from the schema enum — Gemini silently dropped them. This was a real
+  "butchered drawings" cause.
+
+### Invariants that will bite you (hard-won, do not relearn)
+1. **Every new op = THREE registrations**: bim-core handler + main.jsx client
+   mirror + planner schema ENUM (grep the enum when "chat can't do X").
+2. **Zero-filled ops**: 0 means "unset" for x/y/z/level/positionFt in planner
+   ops. Basement is level **-1**. positionFt 0 = "keep".
+3. resolveWallSide + WALL_ASSEMBLIES are DUPLICATED in bim-core and main.jsx —
+   keep both copies identical. detectIssues also has two copies (main.jsx has
+   fixIds/systems; bim-core's is lighter).
+4. Backend .mjs edits need a server restart; check $TEMP/nbapp_server.log for
+   REAL vite errors (a 200 can be stale). **Never Force-kill the server while
+   Daniel's tab is open** — restart is now write-safe (atomic), but his
+   in-flight click still drops (posts a "didn't save" message, expected).
+5. updateShell's generic clamp has an **18ft minimum** — every new shell field
+   needs its own branch there AND in both set_shell handlers.
+6. Multi-step UI actions = ONE batched dispatch (never N calls on stale spec).
+7. Browser testing: synthetic canvas PointerEvent drags MOVE ROOMS (it's the
+   drag pipeline); wheel-zoom is safe. Snapshot first: GET /designs → note
+   file → test → POST /api/projects/current/restore {file}. Close test tabs.
+8. Daniel USES the app while you work — GET /api/projects/current for the true
+   rev; HMR hot-reloads his tab live; the welcome card no longer interrupts.
+9. Run `node tools/op_smoke_test.mjs` (+ geom_core_test, trace_repair_test)
+   after ANY bim-core/planner edit. 96+41+12 green at f91510a.
+10. Model overlay rows: badge | 3D-Plan-Detail | Layers | N-compass (row 1),
+    floorTabs (row 2, top:56), selection chip (row 3, top:98) — keep new
+    overlays out of these lanes.
+
+### How to run
+`node server.mjs` with cwd = this dir (`.env.local` must load). App at
+http://127.0.0.1:5184/. Kill stale listener on 5184 first. Tester zip:
+`git archive --format=zip -o <Desktop>\natural-building-mvp.zip HEAD`
+(Desktop is OneDrive-redirected: use [Environment]::GetFolderPath('Desktop')).
+
+### Older open threads (below in this file, still valid)
+Dormers; per-room ceiling heights; gutters→cistern; interactive Project Plan;
+permit-set JSON refactor; custom-footprint support for sun-glazing band /
+frame render / basement walls (all rect-v1); Blender/IFC still models the
+bounding rect; "compare model to drawing" report button (fresh-trace is the
+answer today); rotate the Gemini key.
+
+---
+
+## Previous session log (2026-07-10, pick-ups session)
 
 **The 2026-07-10 pick-ups session shipped (one commit, suites 65+41+12 green, server restarted, verified live):**
 1. **Reference-turn PDF speedup** (planner.mjs): attachments now ride to Gemini ONLY on
