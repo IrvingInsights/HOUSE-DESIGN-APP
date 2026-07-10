@@ -13,9 +13,10 @@ the 3D/2D model in the center, an AI chat on the right. Users design by system p
 by dragging in a 2D plan, by tapping parts of the 3D model, or by asking the chat —
 including tracing a whole design from an uploaded PDF floor plan.
 
-Run it: `node server.mjs` from the repo root, then open http://127.0.0.1:5184/
-(or review the running instance if one is up). Drive it like a real user: start a design
-from scratch, trace the sample PDF if provided, drag rooms, tap walls, change numbers.
+Run it: `npm install` once, then `node server.mjs` from the repo root, and open
+http://127.0.0.1:5184/ (or review the running instance if one is up). Drive it like a
+real user: start a design from scratch, trace the sample PDF if provided, drag rooms,
+tap walls, change numbers.
 
 ## Who it is for — this rules everything
 
