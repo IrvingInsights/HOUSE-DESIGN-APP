@@ -5,7 +5,19 @@
 Daniel asked for FRESH EYES. Read this section, then the invariants, then go.
 Deep provenance for everything: Claude memory `natural-building-gc-dashboard-inventory.md`.
 
-### The two jobs Daniel explicitly queued for THIS session
+### JOB 0 — split main.jsx (context-efficiency refactor, do it FIRST or alone)
+`src/main.jsx` is ~9,500 lines — every search, read, and edit in any session
+pays its size tax, and it is the #1 reason sessions chew context. Split into
+modules with NO behavior change (pure moves + imports):
+`src/engine.js` (deriveDesign, detectIssues, tables), `src/threeScene.jsx`
+(ThreeScene + renderModel), `src/planView.jsx` (PlanView), `src/inspector.jsx`
+(the editor pane), `src/systemPages.jsx` (the left-bar pages), `src/ops.js`
+(client op mirror + dispatch helpers). Keep the bim-core duplicates
+(resolveWallSide, WALL_ASSEMBLIES) exactly as they are — just relocated.
+Verify: all three suites + Vite transform + a browser smoke. This is a
+one-session mechanical job that makes every later session cheaper.
+
+### The two jobs Daniel explicitly queued for the next session
 
 **JOB 1 — Salvetti-grade 3D timber frame.** Daniel: "When I click frame, I
 should see a frame like the ones from David Salvetti rendered in the 3D."
