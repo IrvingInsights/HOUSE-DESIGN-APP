@@ -358,7 +358,141 @@ export function traceLooksIncomplete(plan, sourceSpec) {
   const hasStair = ops.some((o) => o.type === 'add_element' && /stair/i.test(o.name || ''))
     || (sourceSpec.elements || []).some((el) => /stair/i.test(el.name || ''));
   const noStair = impliesUpper && !hasStair;
-  return { incomplete: deferred || addOpenings === 0 || totalRooms < 2 || noStair, addRooms, addOpenings, totalRooms, deferred, noStair };
+  // GARBAGE GEOMETRY: a pass that placed rooms without measuring them —
+  // negative coordinates (the model's own origin, not the plan's) or many
+  // rooms sharing one identical default size. The rooms exist but their
+  // numbers are fiction; the repair pass must re-measure, not just add.
+  const roomOps = ops.filter((o) => o.type === 'add_room');
+  const negative = roomOps.some((o) => Number(o.x) < 0 || Number(o.y) < 0);
+  const sizeCounts = new Map();
+  roomOps.forEach((o) => {
+    const key = `${Number(o.w) || 0}x${Number(o.d) || 0}`;
+    sizeCounts.set(key, (sizeCounts.get(key) || 0) + 1);
+  });
+  const modal = Math.max(0, ...sizeCounts.values());
+  const unmeasured = roomOps.length >= 5 && modal / roomOps.length >= 0.7;
+  const badGeometry = negative || unmeasured;
+  return { incomplete: deferred || addOpenings === 0 || totalRooms < 2 || noStair || badGeometry, addRooms, addOpenings, totalRooms, deferred, noStair, badGeometry };
+}
+
+// Deterministic tower rescue: when a takeoff says storeys > 1 but leaves the
+// tower/lookout room on the ground floor with no storey-extent plate, the
+// model would grow a FULL second storey — not the drawn tower. Lift the
+// tower room to level 2 and give the storey an extent plate over its bay.
+// Exported for unit tests.
+export function repairTowerStorey(plan, sourceSpec) {
+  const ops = plan.operations || [];
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const storeysOp = ops.find((o) => o.type === 'set_shell' && o.field === 'storeys' && Number(o.value) > 1);
+  const storeys = storeysOp ? Number(storeysOp.value) : Number(sourceSpec?.shell?.storeys || 1);
+  if (storeys < 2) return plan;
+  let upperRooms = ops.filter((o) => o.type === 'add_room' && Number(o.level) >= 2);
+  if (!upperRooms.length) {
+    const towerRoom = ops.find((o) => o.type === 'add_room' && (!o.level || Number(o.level) <= 1)
+      && /tower|lookout|crow'?s ?nest|widow'?s ?walk|studio above|loft/i.test(o.name || ''));
+    if (!towerRoom) return plan;
+    towerRoom.level = 2;
+    upperRooms = [towerRoom];
+    plan.warnings = [...(plan.warnings || []), `${towerRoom.name} modeled as the upper storey (it is drawn above the main roof).`];
+  }
+  // Normalize plates the AI emitted itself: an extent plate without level 2
+  // (or without its elevation) is invisible to the roof/wall step logic.
+  let baseWallFtForPlates = num(sourceSpec?.shell?.wallHeightFt) || 10;
+  const wallHOp = ops.find((o) => o.type === 'set_shell' && o.field === 'wallHeightFt' && num(o.value));
+  if (wallHOp) baseWallFtForPlates = num(wallHOp.value);
+  for (const op of ops) {
+    if (op.type !== 'add_element') continue;
+    const isPlate = op.category === 'floor' || /storey \d+ extent/i.test(op.name || '');
+    if (!isPlate) continue;
+    const n = (op.name || '').match(/storey (\d+)/i);
+    const lvl = n ? Number(n[1]) : 2;
+    if (!op.level || Number(op.level) < 2) op.level = lvl;
+    if (!num(op.z)) op.z = baseWallFtForPlates * (lvl - 1);
+  }
+  const hasPlate = ops.some((o) => o.type === 'add_element' && (o.category === 'floor' || /storey \d+ extent/i.test(o.name || '')))
+    || (sourceSpec?.elements || []).some((el) => el.category === 'floor');
+  if (!hasPlate) {
+    const minX = Math.min(...upperRooms.map((o) => num(o.x)));
+    const minY = Math.min(...upperRooms.map((o) => num(o.y)));
+    const maxX = Math.max(...upperRooms.map((o) => num(o.x) + Math.max(1, num(o.w))));
+    const maxY = Math.max(...upperRooms.map((o) => num(o.y) + Math.max(1, num(o.d))));
+    let baseWallFt = num(sourceSpec?.shell?.wallHeightFt) || 10;
+    const wallOp = ops.find((o) => o.type === 'set_shell' && o.field === 'wallHeightFt' && num(o.value));
+    if (wallOp) baseWallFt = num(wallOp.value);
+    plan.operations = [...ops, {
+      type: 'add_element', category: 'floor', name: 'Storey 2 extent', level: 2,
+      x: minX, y: minY, w: Math.max(4, maxX - minX), d: Math.max(4, maxY - minY), h: 0.35, z: baseWallFt
+    }];
+    plan.warnings = [...(plan.warnings || []), 'The upper storey covers only its drawn bay — the roof steps down around it.'];
+  }
+  return plan;
+}
+
+// Deterministic geometry rescue for fresh takeoffs — no AI, always safe:
+// an unlucky pass can emit rooms in its own coordinate frame (negative x/y)
+// or a shell SMALLER than the rooms it just placed (the "9x18 house with ten
+// rooms" failure — every later drag then snaps back inside the tiny shell).
+// Re-anchor everything to the northwest origin and grow the planned shell to
+// enclose the ground-floor rooms. Exported for unit tests.
+export function repairTraceGeometry(plan, sourceSpec) {
+  const ops = plan.operations || [];
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const rooms = ops.filter((o) => o.type === 'add_room');
+  if (!rooms.length) return plan;
+  const ground = rooms.filter((o) => !o.level || Number(o.level) <= 1);
+  const scan = ground.length ? ground : rooms;
+  const minX = Math.min(...scan.map((o) => num(o.x)));
+  const minY = Math.min(...scan.map((o) => num(o.y)));
+  const dx = minX < 0 ? -minX : 0;
+  const dy = minY < 0 ? -minY : 0;
+  if (dx || dy) {
+    for (const op of ops) {
+      if (op.type === 'add_room') {
+        op.x = num(op.x) + dx;
+        op.y = num(op.y) + dy;
+      } else if (op.type === 'add_element' && (num(op.x) || num(op.y))) {
+        // zero-filled element coords mean "unset" — only shift explicit ones
+        op.x = num(op.x) + dx;
+        op.y = num(op.y) + dy;
+      }
+    }
+    plan.warnings = [...(plan.warnings || []), 'Takeoff coordinates were re-anchored to the northwest corner.'];
+  }
+  const extentW = Math.ceil(Math.max(...scan.map((o) => num(o.x) + Math.max(1, num(o.w)))) * 2) / 2;
+  const extentD = Math.ceil(Math.max(...scan.map((o) => num(o.y) + Math.max(1, num(o.d)))) * 2) / 2;
+  // What shell does the plan intend? set_shell carries w/d directly and/or
+  // field widthFt/depthFt value pairs; fall back to the current model.
+  let shellW = 0;
+  let shellD = 0;
+  for (const op of ops) {
+    if (op.type !== 'set_shell') continue;
+    if (num(op.w)) shellW = num(op.w);
+    if (num(op.d)) shellD = num(op.d);
+    if (op.field === 'widthFt' && num(op.value)) shellW = num(op.value);
+    if (op.field === 'depthFt' && num(op.value)) shellD = num(op.value);
+  }
+  if (!shellW) shellW = num(sourceSpec?.shell?.widthFt);
+  if (!shellD) shellD = num(sourceSpec?.shell?.depthFt);
+  const needW = extentW > shellW ? extentW : 0;
+  const needD = extentD > shellD ? extentD : 0;
+  if (needW || needD) {
+    let fixedInPlace = false;
+    for (const op of ops) {
+      if (op.type !== 'set_shell') continue;
+      if (needW && (num(op.w) || op.field === 'widthFt')) { if (num(op.w)) op.w = needW; if (op.field === 'widthFt') op.value = needW; fixedInPlace = true; }
+      if (needD && (num(op.d) || op.field === 'depthFt')) { if (num(op.d)) op.d = needD; if (op.field === 'depthFt') op.value = needD; fixedInPlace = true; }
+    }
+    // No set_shell to correct: prepend one so rooms never clamp against the
+    // old, smaller shell while they're being added.
+    const injected = [];
+    if (!fixedInPlace) {
+      if (needW) injected.push({ type: 'set_shell', field: 'widthFt', value: needW });
+      if (needD) injected.push({ type: 'set_shell', field: 'depthFt', value: needD });
+    }
+    plan.operations = [...injected, ...ops];
+    plan.warnings = [...(plan.warnings || []), `Shell grown to ${needW || shellW}x${needD || shellD} ft so it encloses every ground-floor room from the drawing.`];
+  }
+  return plan;
 }
 
 // Rewrite a summary that still brags about deferral so the user never sees the
@@ -396,6 +530,8 @@ Emit ONLY the operations still MISSING to complete the takeoff:
 - if the elevations or sections show an upper floor (gable windows, a second row of windows, two levels in section), set_shell field:'storeys' value:'2'. A basement in the section = set_shell field:'basementHeightFt'.
 - if the plan has two storeys or a basement and no stair exists yet, add_element named 'Stairs' (category 'structure') at its drawn plan position and size, level = the floor it climbs FROM (1 ground, -1 basement).
 - interior walls drawn between rooms that are still missing: add_element category:'partition' per wall run, widthFt/positionFt for its doorway.
+${check.badGeometry ? `- YOUR ROOM GEOMETRY WAS NOT MEASURED (identical default sizes and/or negative coordinates). For EVERY room already listed above, emit ONE update pass: move_object (name, x, y) + resize_object (name, w, d) with that room's REAL measured position and size from the floor plan, in feet, origin at the shell's northwest corner, all coordinates >= 0. Rooms come in different sizes — read each one off the plan.
+- Also re-check the shell: set_shell w and d must be the conditioned footprint's overall dimension strings from the drawing.` : ''}
 Do NOT restate the shell or footprint unless the earlier value is wrong. NEVER defer, summarize, or write "future refinement" — emit the operations. Report final counts in summary.`
   };
 
@@ -403,18 +539,23 @@ Do NOT restate the shell or footprint unless the earlier value is wrong. NEVER d
   if (!res.ok) return scrubDeferralSummary(plan);
   let extra;
   try { extra = JSON.parse(res.text); } catch { return scrubDeferralSummary(plan); }
-  return mergeTracePlans(plan, extra, sourceSpec, already);
+  return mergeTracePlans(plan, extra, sourceSpec, already, { allowShellDims: check.badGeometry });
 }
 
 // Merge a repair pass into the first plan: append the missing rooms/openings/
 // storeys, drop repeated rooms (by name), never let the repair restate the
 // shell or footprint. Pure + exported so the dedup logic is unit-tested.
-export function mergeTracePlans(plan, extra, sourceSpec, alreadyNames) {
+export function mergeTracePlans(plan, extra, sourceSpec, alreadyNames, options = {}) {
   const already = alreadyNames || [
     ...(sourceSpec.rooms || []).map((r) => r.name),
     ...(plan.operations || []).filter((o) => o.type === 'add_room').map((o) => o.name)
   ].filter(Boolean);
   const takenNames = new Set(already.map(normName));
+  // Elements dedupe by name too — otherwise both passes contribute a 'Stairs'.
+  const takenElements = new Set([
+    ...(plan.operations || []).filter((o) => o.type === 'add_element').map((o) => normName(o.name)),
+    ...((sourceSpec?.elements || []).map((el) => normName(el.name)))
+  ].filter(Boolean));
   const extraOps = (extra.operations || []).filter((op) => {
     if (op.type === 'add_room') {
       const key = normName(op.name);
@@ -422,9 +563,20 @@ export function mergeTracePlans(plan, extra, sourceSpec, alreadyNames) {
       takenNames.add(key);
       return true;
     }
-    if (op.type === 'add_opening' || op.type === 'add_element') return true;
-    // storeys and the basement are the only shell fields the repair may set.
-    if (op.type === 'set_shell' && (op.field === 'storeys' || op.field === 'basementHeightFt')) return true;
+    if (op.type === 'add_element') {
+      const key = normName(op.name);
+      if (key && takenElements.has(key)) return false;
+      if (key) takenElements.add(key);
+      return true;
+    }
+    if (op.type === 'add_opening') return true;
+    // re-measured geometry from a badGeometry repair rides move/resize/update
+    if (op.type === 'move_object' || op.type === 'resize_object' || op.type === 'update_object') return true;
+    // storeys, the basement, and the tower's storey height may always be set;
+    // shell DIMS only when this repair was fixing unmeasured geometry —
+    // otherwise a flaky second pass would churn a good first-pass shell.
+    if (op.type === 'set_shell' && (op.field === 'storeys' || op.field === 'basementHeightFt' || op.field === 'upperStoreyHeightFt')) return true;
+    if (op.type === 'set_shell' && options.allowShellDims && (op.field === 'widthFt' || op.field === 'depthFt' || Number(op.w) || Number(op.d))) return true;
     return false;
   });
 
@@ -484,12 +636,13 @@ A DRAWING OR DOCUMENT IS ATTACHED. Your job is a COMPLETE takeoff, not a summary
 1. set_shell from the overall plan dimensions: ONE op carrying BOTH numbers — w AND d (e.g. w:40.5, d:23, field:'', value:''). Never set only one dimension. Read dimension strings; if none, scale from a labeled element like a 3'-0" door and record that in assumptions. If the drawing shows multiple above-grade storeys, also set_shell field:'storeys'.
 2. ONE add_room PER ROOM visible on the floor plan — every single one — with its real name and x/y/w/d in feet. Plan coordinates: origin at the northwest corner of the shell, x increases east, y increases south. Rooms on an upper floor get level 2 (or 3). If the CURRENT BIM STATE below already lists some rooms, KEEP them and ADD every remaining room from the drawing — never stop just because a few rooms already exist.
 2b. STOREYS: count the above-grade floors from the elevations and sections. A story-and-a-half or two-storey house (windows up in the gable, a second row of windows, two occupied levels in the section) gets set_shell field:'storeys' value:'2', with the upper rooms on level 2. A basement is below grade — do NOT count it as a storey.
+2c. A TOWER / lookout / studio ABOVE part of the plan (a dashed "above" rectangle on the floor plan, a small box rising past the main roof in section): model it as a PARTIAL upper storey — set_shell field:'storeys' one more than the main house, add_element category:'floor' named 'Storey 2 extent' (or 'Storey 3 extent') level:2 with the tower bay's exact x/y/w/d from the plan, and the tower's room as add_room at that level with the same footprint. If the tower's own eave heights are dimensioned in section, set_shell field:'upperStoreyHeightFt' with its wall height. The main roof steps down around the tower automatically. A roof deck / perch on the lower roof cannot be modeled yet — record it in warnings so nothing is lost.
 3. ONE add_opening PER WINDOW AND DOOR with wall (north/south/east/west), openingType, widthFt, and positionFt along that wall. A real floor plan ALWAYS has at least a front door plus several windows — never return zero openings.
 4. Porches, decks, garages, and outbuildings: add_element with a fitting category and real dimensions. A COVERED porch/deck/carport also gets roofType 'shed' or 'gable' on the add_element so its canopy is drawn.
 5. STAIRS: a plan with two storeys or a basement ALWAYS shows a stair — ONE add_element named 'Stairs' (category 'structure') at its real plan position and size, level = the floor it climbs FROM (1 for ground up, -1 for basement up). Never skip it.
 6. INTERIOR WALLS: the wall lines between rooms are drawn on the plan — add_element category:'partition' for each interior wall RUN as drawn (x/y plus the run as w x d; thickness comes from construction). Where the plan shows a doorway between two rooms, put it on the partition with widthFt (door width) and positionFt (along the run) — interior doors belong to partitions, add_opening is ONLY for exterior walls. An open-concept plan legitimately has few partitions.
 7. A chimney or fireplace symbol: add_element category:'chimney' at its plan position (its flue is drawn through the roof automatically).
-RULES: If the plan shows 11 rooms, emit 11 add_room operations. NEVER write "noted for future refinement" or defer anything — emit the operation instead. BASEMENTS ARE MODELED: a below-grade storey = set_shell field:'basementHeightFt' value:'8' (read the real height from the section if drawn) plus ONE add_room with level:-1 per basement room. A basement still does NOT count toward field:'storeys' (that's above-grade only). In the summary, report counts: "Traced: shell WxD, N rooms, M openings." If a page is illegible, say which page in warnings and keep going with the rest.
+RULES: If the plan shows 11 rooms, emit 11 add_room operations. MEASURE, never default: every room's x/y/w/d must be read from the plan — real rooms come in different sizes, so emitting many rooms with identical w x d is an ERROR, not a takeoff. All coordinates are ≥ 0 from the shell's northwest corner. The shell w x d is the CONDITIONED footprint's overall dimension strings; attached greenhouses, sunspaces, and covered outdoor areas drawn OUTSIDE the conditioned line are add_element items, NOT part of the shell. NEVER write "noted for future refinement" or defer anything — emit the operation instead. BASEMENTS ARE MODELED: a below-grade storey = set_shell field:'basementHeightFt' value:'8' (read the real height from the section if drawn) plus ONE add_room with level:-1 per basement room. A basement still does NOT count toward field:'storeys' (that's above-grade only). In the summary, report counts: "Traced: shell WxD, N rooms, M openings." If a page is illegible, say which page in warnings and keep going with the rest.
 MODEL WHAT THE DRAWING SHOWS — many documents are EXISTING conventional houses being modified, not natural builds. A framed house gets framed walls (set_wall_side field=assembly value=framed, or set_assembly), a slab stays a slab (set_utility foundationType), standard storeys stay standard, AND emit set_shell field:'designApproach' value:'standard' so the app's natural-building checks stand down for this design. Do NOT convert the building to natural systems unless the user asks. Mine EVERY page for usable data: dimension strings, room and door/window schedules, elevation heights (wall heights, storeys), roof type and pitch, site plans (lot, setbacks, orientation -> set_site), and existing-condition notes (put constraints the model can't express into warnings/assumptions so nothing is lost).
 ` : '';
 
@@ -597,8 +750,14 @@ ${payload.prompt}`
     // A FRESH drawing takeoff must be complete — verify and repair a punted
     // pass. Follow-up edits skip this (repairing an edit re-adds duplicates).
     if (freshTrace) {
+      // Deterministic geometry rescue first (origin + shell), then the AI
+      // repair for anything missing or unmeasured, then rescue again in case
+      // the repair itself added rooms in a stray frame.
+      plan = repairTraceGeometry(plan, sourceSpec);
       const attachmentParts = geminiParts(content.filter((c) => c.type === 'input_image'));
       plan = await repairTraceIfNeeded(plan, { attachmentParts, sourceSpec });
+      plan = repairTraceGeometry(plan, sourceSpec);
+      plan = repairTowerStorey(plan, sourceSpec);
     }
     return setCached(cacheKey, { source: 'ai-planner-gemini', ...plan }, 3 * 60 * 1000);
   }
