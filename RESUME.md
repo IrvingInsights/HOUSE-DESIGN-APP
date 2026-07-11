@@ -1,5 +1,32 @@
 # Resume / Handoff — Natural Building GC app (house-bim-app)
 
+## STATUS UPDATE (2026-07-10 night, commit 5f92ac6) — UX-review response shipped
+The cloud UX deep review (all six journeys) came back with 10 findings; ALL TEN
+are fixed and pushed in 5f92ac6. The theme was TRANSACTION TRUTH: the app must
+never claim a change the model doesn't hold. Key invariants added — keep them:
+- The offline (no-AI-key) planner REFUSES drawing-dependent asks with an honest
+  message (never invents objects from the prompt's words); the client gates
+  Apply when the prompt needs a drawing and none is attached.
+- bim-core rejects nameless/one-letter objects and duplicate loft/tower names
+  VISIBLY (rejectedOperations now print in chat as "Couldn't apply: …").
+- A loft/tower add raises shell.storeys and creates that level's extent plate
+  (the floor tab must exist for anything the chat says it added).
+- Room preset clicks queue (roomQueueRef in main.jsx) and apply serially, each
+  chained on the previous report's spec. Server side, saveProjectState is
+  chained per-project with unique temp names — concurrent apply+autosave once
+  collided on .tmp-<pid> and threw ENOENT (random "didn't respond" failures).
+- The Walls global assembly selector derives from the four RESOLVED sides
+  (never systems.envelope); multi-op batches report as one transaction.
+- Plan labels are collision-aware (planLabelFit in planView.jsx) — a label may
+  never cross its room's boundary.
+- materialsTakeoff covers every non-zero derived.cost system, with honest
+  "not calculated yet" rows (completeness sweep over COST_ROWS).
+- No-WebGL: all 3D-only overlays are gated on webglOK; the fallback pane has
+  Return to Plan / Open Detail.
+Suites now 39 trace + 106 op + 41 geom. The review doc's remaining delight
+ideas (drag ghost "stayed put" confirmation, resume-card plan thumbnail) are
+unbuilt and optional.
+
 ## STATUS UPDATE (2026-07-10 afternoon, commits 58b2914 → b3f2ee5)
 JOB 0 is DONE: main.jsx is split into src/engine.js (spec logic + tables +
 backend fetchers), src/docExports.js (IFC summary + permit set), src/planView.jsx
