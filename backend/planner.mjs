@@ -442,10 +442,26 @@ export function manifestGaps(plan, sourceSpec, manifest) {
   }
   const storeysShort = storeysAboveGrade >= 2 && plannedStoreys < 2;
   const sheetCount = Array.isArray(manifest.sheets) ? manifest.sheets.length : 0;
+  // Shell vs the drawing's OWN dimension strings (conditioned envelope): the
+  // universal guard against the shell swallowing a carport or porch.
+  const expectedW = Number(manifest.overallWidthFt) || 0;
+  const expectedD = Number(manifest.overallDepthFt) || 0;
+  let plannedW = Number(sourceSpec?.shell?.widthFt) || 0;
+  let plannedD = Number(sourceSpec?.shell?.depthFt) || 0;
+  for (const op of ops) {
+    if (op.type !== 'set_shell') continue;
+    if (Number(op.w) > 0) plannedW = Number(op.w);
+    if (Number(op.d) > 0) plannedD = Number(op.d);
+    if (op.field === 'widthFt' && Number(op.value) > 0) plannedW = Number(op.value);
+    if (op.field === 'depthFt' && Number(op.value) > 0) plannedD = Number(op.value);
+  }
+  const off = (planned, expected) => expected > 6 && planned > 0 && Math.abs(planned - expected) / expected > 0.15;
+  const shellDeviation = off(plannedW, expectedW) || off(plannedD, expectedD);
   return {
     roomNames, missingRooms, roomsCovered: roomNames.length - missingRooms.length,
     windowCount, doorCount, expectedOpenings, plannedOpenings, lowOpenings,
-    storeysAboveGrade, storeysShort, sheetCount
+    storeysAboveGrade, storeysShort, sheetCount,
+    expectedW, expectedD, plannedW, plannedD, shellDeviation
   };
 }
 
@@ -507,8 +523,9 @@ export function traceLooksIncomplete(plan, sourceSpec, manifest = null) {
   const gaps = manifest ? manifestGaps(plan, sourceSpec, manifest) : null;
   const missingRooms = Boolean(gaps && gaps.missingRooms.length);
   const lowOpenings = Boolean(gaps && gaps.lowOpenings);
+  const shellDeviation = Boolean(gaps && gaps.shellDeviation);
   return {
-    incomplete: deferred || addOpenings === 0 || totalRooms < 2 || noStair || badGeometry || unmeasuredElements || unmeasuredRooms || missingRooms || lowOpenings,
+    incomplete: deferred || addOpenings === 0 || totalRooms < 2 || noStair || badGeometry || unmeasuredElements || unmeasuredRooms || missingRooms || lowOpenings || shellDeviation,
     addRooms, addOpenings, totalRooms, deferred, noStair, badGeometry,
     unmeasuredElements, unmeasuredElementNames,
     unmeasuredRooms, unmeasuredRoomNames,
@@ -763,6 +780,8 @@ const manifestSchema = {
     roomNames: { type: 'array', items: { type: 'string' } },
     windowCount: { type: 'number' },
     doorCount: { type: 'number' },
+    overallWidthFt: { type: 'number' },
+    overallDepthFt: { type: 'number' },
     notes: { type: 'string' }
   }
 };
@@ -774,7 +793,7 @@ const manifestSchema = {
 export async function extractDrawingManifest({ attachmentParts }) {
   if (!attachmentParts?.length) return null;
   const prompt = {
-    text: 'Inventory the attached construction drawing set. List sheet names/numbers you can see, count storeys above grade, whether there is a basement level, every room NAME labeled on the floor plans (each once), and total exterior windows and doors (from schedules if present, else count the plans). Report only what the drawings show.'
+    text: 'Inventory the attached construction drawing set. List sheet names/numbers you can see, count storeys above grade, whether there is a basement level, every room NAME labeled on the floor plans (each once), and total exterior windows and doors (from schedules if present, else count the plans). Also read the overall dimension strings of the CONDITIONED envelope: overallWidthFt and overallDepthFt in feet — the enclosed heated building only, EXCLUDING unenclosed structures (carports, porches, decks, detached garages). Report only what the drawings show.'
   };
   // One retry — a flaky first inventory call shouldn't silently cost the
   // whole checklist (it did, on the Columbia set).
@@ -818,6 +837,7 @@ ${check.badGeometry ? `- YOUR ROOM GEOMETRY WAS NOT MEASURED (identical default 
 ${check.unmeasuredElements ? `- THESE ELEMENTS WERE EMITTED WITHOUT SIZES: ${check.unmeasuredElementNames.join(', ')}. For EACH one, emit resize_object (name, w, d) + move_object (name, x, y) with its REAL measured footprint and position from the plan — a stair is a stair-sized rectangle, a heater a heater-sized one; porches and decks have drawn outlines. Never leave an element at a default size.` : ''}
 ${check.unmeasuredRooms ? `- THESE ROOMS WERE ADDED WITHOUT MEASUREMENTS: ${check.unmeasuredRoomNames.join(', ')}. Your notes prove you read the dimension strings — for EACH, emit resize_object (name, w, d) + move_object (name, x, y) with its measured size and position in feet from the plan. A room without a size is not traced.` : ''}
 ${check.gaps && (check.missingRooms || check.lowOpenings || check.gaps.storeysShort) ? `- THE DRAWING'S OWN INDEX SAYS: rooms ${check.gaps.roomNames.join(', ')}; ~${check.gaps.windowCount} windows, ${check.gaps.doorCount} doors.${check.missingRooms ? ` Missing from your takeoff: ${check.gaps.missingRooms.join(', ')}. Add each with measured size and position.` : ''}${check.lowOpenings ? ` Only ${check.gaps.plannedOpenings} opening${check.gaps.plannedOpenings === 1 ? ' is' : 's are'} placed so far — trace the rest from the plans and schedules.` : ''}${check.gaps.storeysShort ? ` The index counts ${check.gaps.storeysAboveGrade} storeys above grade but the takeoff has fewer — set_shell field:'storeys' with the drawn count and put the upper-floor rooms on level 2.` : ''}` : ''}
+${check.gaps?.shellDeviation ? `- THE DRAWING'S DIMENSION STRINGS say the CONDITIONED envelope is ${check.gaps.expectedW} x ${check.gaps.expectedD} ft, but the takeoff shell is ${check.gaps.plannedW} x ${check.gaps.plannedD} ft. Correct it with set_shell (w and d) — the shell is ONLY the enclosed heated building; carports, porches, and decks are add_element, never part of the shell.` : ''}
 Do NOT restate the shell or footprint unless the earlier value is wrong. NEVER defer, summarize, or write "future refinement" — emit the operations. Report final counts in summary.`
   };
 
@@ -825,7 +845,7 @@ Do NOT restate the shell or footprint unless the earlier value is wrong. NEVER d
   if (!res.ok) return scrubDeferralSummary(plan);
   let extra;
   try { extra = JSON.parse(res.text); } catch { return scrubDeferralSummary(plan); }
-  return mergeTracePlans(plan, extra, sourceSpec, already, { allowShellDims: check.badGeometry });
+  return mergeTracePlans(plan, extra, sourceSpec, already, { allowShellDims: check.badGeometry || Boolean(check.gaps?.shellDeviation) });
 }
 
 // ---- The trace CYCLE: build → compare against the drawing → fix → compare
@@ -994,7 +1014,7 @@ const TRACE_PASSES = [
     types: ['set_shell', 'set_footprint', 'set_roof', 'set_roof_profile', 'set_wall_height', 'set_site', 'set_utility', 'set_overhang'],
     text: `STRUCTURE PASS — read ONLY the building structure from the attached drawings: the floor plans for the outline, the elevations/sections for heights and storeys, the site plan for topography.
 Emit ONLY these operation types: set_shell (fields w and d = the overall conditioned footprint from the dimension strings; also field storeys, wallHeightFt, upperStoreyHeightFt, basementHeightFt when the sections/elevations show them), set_footprint (JSON corner list, ONLY if the outline is not a plain rectangle), set_roof (roofType, pitch), set_roof_profile (sheds only — different south/north heights), set_wall_height, set_site (slopeFt/slopeDir/gradeFt from contours or spot elevations, zip if shown), set_utility (foundationType; basement = set_shell basementHeightFt), set_overhang.
-No rooms, no openings, no elements in this pass.`
+The shell is the CONDITIONED envelope only — exclude carports, porches, decks, and any unenclosed structure from set_shell/set_footprint (they come later as elements). No rooms, no openings, no elements in this pass.`
   },
   {
     key: 'rooms',
@@ -1041,14 +1061,24 @@ async function stagedTracePlan({ attachmentParts, geminiResponseSchema, note }) 
       res = null;
     }
     let ops = null;
+    let raw = 0;
     if (res?.ok) {
-      try { ops = filterOpsForPass(JSON.parse(res.text)?.operations, pass.types); } catch { ops = null; }
+      try {
+        const parsed = JSON.parse(res.text)?.operations;
+        raw = Array.isArray(parsed) ? parsed.length : 0;
+        ops = filterOpsForPass(parsed, pass.types);
+      } catch { ops = null; }
     }
     if (ops === null || (pass.required && !ops.length)) {
+      // Say exactly HOW a pass came up short — "the call failed",
+      // "unreadable reply", and "wrong op types" point at different fixes.
+      const why = !res?.ok ? 'the call failed' : ops === null ? 'unreadable reply' : raw > 0 ? `${raw} ops of the wrong type` : 'empty reply';
+      note?.(`${pass.key} pass came up short (${why})${pass.required ? ' — falling back to a whole-set read…' : ', continuing…'}`);
       if (pass.required) return null; // structural pass failed — classic trace
       collected[pass.key] = [];
       continue;
     }
+    note?.(`${pass.key}: ${ops.length} read`);
     collected[pass.key] = ops;
   }
   const roomCount = collected.rooms.length;
@@ -1121,6 +1151,7 @@ A DRAWING OR DOCUMENT IS ATTACHED. Your job is a COMPLETE takeoff, not a summary
 6. INTERIOR WALLS: the wall lines between rooms are drawn on the plan — add_element category:'partition' for each interior wall RUN as drawn (x/y plus the run as w x d; thickness comes from construction). Where the plan shows a doorway between two rooms, put it on the partition with widthFt (door width) and positionFt (along the run) — interior doors belong to partitions, add_opening is ONLY for exterior walls. An open-concept plan legitimately has few partitions.
 7. A chimney or fireplace symbol: add_element category:'chimney' at its plan position (its flue is drawn through the roof automatically).
 RULES: If the plan shows 11 rooms, emit 11 add_room operations. MEASURE, never default: every room's x/y/w/d must be read from the plan — real rooms come in different sizes, so emitting many rooms with identical w x d is an ERROR, not a takeoff. All coordinates are ≥ 0 from the shell's northwest corner. The shell w x d is the CONDITIONED footprint's overall dimension strings; attached greenhouses, sunspaces, and covered outdoor areas drawn OUTSIDE the conditioned line are add_element items, NOT part of the shell. NEVER write "noted for future refinement" or defer anything — emit the operation instead. BASEMENTS ARE MODELED: a below-grade storey = set_shell field:'basementHeightFt' value:'8' (read the real height from the section if drawn) plus ONE add_room with level:-1 per basement room. A basement still does NOT count toward field:'storeys' (that's above-grade only). In the summary, report counts: "Traced: shell WxD, N rooms, M openings." If a page is illegible, say which page in warnings and keep going with the rest.
+THE SHELL IS THE CONDITIONED ENVELOPE — set_shell w/d (or set_footprint) covers ONLY the enclosed heated building read from its dimension strings. Carports, porches, decks, and detached structures are NEVER part of the shell: each is its own add_element (category carport/porch/deck) at its drawn position.
 MODEL WHAT THE DRAWING SHOWS — many documents are EXISTING conventional houses being modified, not natural builds. A framed house gets framed walls (set_wall_side field=assembly value=framed, or set_assembly), a slab stays a slab (set_utility foundationType), standard storeys stay standard, AND emit set_shell field:'designApproach' value:'standard' so the app's natural-building checks stand down for this design. Do NOT convert the building to natural systems unless the user asks. Mine EVERY page for usable data: dimension strings, room and door/window schedules, elevation heights (wall heights, storeys), roof type and pitch, site plans (lot, setbacks, orientation -> set_site), and existing-condition notes (put constraints the model can't express into warnings/assumptions so nothing is lost).
 ` : '';
 
