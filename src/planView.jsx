@@ -1,5 +1,5 @@
 // 2D surfaces: JointDetail, PlanView, PlanMoveBoard (moved verbatim from main.jsx, JOB 0 split).
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   OPENING_TYPES, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES, resolveInsulation, footprintPolygon,
   footprintEdges, hasCustomFootprint, edgeForOpening, basementInfo, BASEMENT_LEVEL
@@ -182,10 +182,71 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
   const [openingDrag, setOpeningDrag] = useState(null);
   const W = Number(spec.shell.widthFt) || 36;
   const D = Number(spec.shell.depthFt) || 28;
-  const pad = Math.max(6, Math.round(Math.max(W, D) * 0.14));
   const snap = (v) => Math.round(v * 2) / 2;
   const buildingContext = ['foundation', 'shell', 'frame', 'flooring', 'roof'].includes(context);
   const siteContext = context === 'site' || context === 'outdoors';
+
+  // The plan must SHOW everything it holds: patios, a carport 40 ft out, the
+  // greenhouse below the south wall. Fit the view to the whole floor's
+  // content (the old house-only viewBox cut the site off and drew the rest
+  // oversized), and let the user zoom (wheel) / pan (drag the ground) / Fit.
+  const planLevelFilter = (el) => (el.category === 'floor'
+    ? (activeFloor > 1 && Number(el.level || 1) === activeFloor)
+    : (Number(el.level || 1) === activeFloor || (/stair|ladder/i.test(el.name || '')
+      && Number(el.level || 1) === (activeFloor === 1 && basementInfo(spec.shell).present ? BASEMENT_LEVEL : activeFloor - 1))));
+  const fitBox = (() => {
+    let minX = 0; let minY = 0; let maxX = W; let maxY = D;
+    for (const el of (spec.elements || []).filter(planLevelFilter)) {
+      const x = Number(el.x) || 0; const y = Number(el.y) || 0;
+      minX = Math.min(minX, x); minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x + (Number(el.w) || 4)); maxY = Math.max(maxY, y + (Number(el.d) || 4));
+    }
+    const margin = Math.max(4, Math.round(Math.max(maxX - minX, maxY - minY) * 0.08));
+    return { x: minX - margin, y: minY - margin, w: (maxX - minX) + margin * 2, h: (maxY - minY) + margin * 2 };
+  })();
+  const [viewOverride, setViewOverride] = useState(null);
+  const [panDrag, setPanDrag] = useState(null);
+  const vb = viewOverride || fitBox;
+  const vbRef = useRef(vb); vbRef.current = vb;
+  const fitBoxRef = useRef(fitBox); fitBoxRef.current = fitBox;
+  useEffect(() => { setViewOverride(null); }, [activeFloor, context]);
+  // Wheel = zoom at the cursor. Manual listener: React's onWheel can't
+  // preventDefault (passive), and the page must not scroll instead.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return undefined;
+    const onWheel = (event) => {
+      event.preventDefault();
+      const point = svg.createSVGPoint();
+      point.x = event.clientX; point.y = event.clientY;
+      const user = point.matrixTransform(svg.getScreenCTM().inverse());
+      const factor = event.deltaY > 0 ? 1.18 : 1 / 1.18;
+      setViewOverride((current) => {
+        const cur = current || fitBoxRef.current;
+        const w = clamp(cur.w * factor, 8, Math.max(240, fitBoxRef.current.w * 2.5));
+        const scale = w / cur.w;
+        return { x: user.x - (user.x - cur.x) * scale, y: user.y - (user.y - cur.y) * scale, w, h: cur.h * scale };
+      });
+    };
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  }, []);
+  function startPan(event) {
+    if (event.button !== 0) return;
+    try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
+    const rect = svgRef.current.getBoundingClientRect();
+    const cur = vbRef.current;
+    // 'meet' letterboxes: one uniform scale, the larger ft-per-px ratio.
+    const fpp = Math.max(cur.w / rect.width, cur.h / rect.height);
+    setPanDrag({ cx: event.clientX, cy: event.clientY, orig: cur, fpp });
+  }
+  function onPanMove(event) {
+    if (!panDrag) return;
+    const dx = (event.clientX - panDrag.cx) * panDrag.fpp;
+    const dy = (event.clientY - panDrag.cy) * panDrag.fpp;
+    setViewOverride({ ...panDrag.orig, x: panDrag.orig.x - dx, y: panDrag.orig.y - dy });
+  }
+  function endPan() { setPanDrag(null); }
   const fpCustom = hasCustomFootprint(spec);
   const fpPoly = footprintPolygon(spec);
   const fpEdgesList = footprintEdges(spec);
@@ -222,7 +283,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
     const o = drag.orig;
     let ghost;
     if (drag.mode === 'move') {
-      ghost = { x: clamp(snap(o.x + dx), -pad, W + pad - o.w), y: clamp(snap(o.y + dy), -pad, D + pad - o.d), w: o.w, d: o.d };
+      ghost = { x: clamp(snap(o.x + dx), vbRef.current.x, vbRef.current.x + vbRef.current.w - o.w), y: clamp(snap(o.y + dy), vbRef.current.y, vbRef.current.y + vbRef.current.h - o.d), w: o.w, d: o.d };
     } else {
       // corner resize keeps the opposite corner fixed
       let { x, y, w, d } = o;
@@ -329,15 +390,22 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
       <svg
         ref={svgRef}
         className="planSvg"
-        viewBox={`${-pad} ${-pad} ${W + pad * 2} ${D + pad * 2}`}
+        viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}
         preserveAspectRatio="xMidYMid meet"
-        onPointerMove={(event) => { onPointerMove(event); onShellMove(event); onEdgeMove(event); onOpeningMove(event); }}
-        onPointerUp={(event) => { endDrag(); endShellDrag(event); endEdgeDrag(); endOpeningDrag(); }}
-        onPointerLeave={(event) => { endDrag(); endShellDrag(event); endEdgeDrag(); endOpeningDrag(); }}
+        onPointerMove={(event) => { onPointerMove(event); onShellMove(event); onEdgeMove(event); onOpeningMove(event); onPanMove(event); }}
+        onPointerUp={(event) => { endDrag(); endShellDrag(event); endEdgeDrag(); endOpeningDrag(); endPan(); }}
+        onPointerLeave={(event) => { endDrag(); endShellDrag(event); endEdgeDrag(); endOpeningDrag(); endPan(); }}
         onClick={() => {}}
       >
-        {/* site around the house */}
-        <rect x={-pad} y={-pad} width={W + pad * 2} height={D + pad * 2} fill="var(--canvas)" />
+        {/* the ground — oversized so panning never runs out of paper; drag it
+            to move the view, double-tap to fit everything again */}
+        <rect
+          x={vb.x - 400} y={vb.y - 400} width={vb.w + 800} height={vb.h + 800}
+          fill="var(--canvas)"
+          style={{ cursor: panDrag ? 'grabbing' : 'grab' }}
+          onPointerDown={startPan}
+          onDoubleClick={() => setViewOverride(null)}
+        />
         {gridLines}
         {/* shell / exterior wall — the footprint (editable in a building context) */}
         {fpCustom ? (
@@ -455,10 +523,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
         })}
         {/* placed elements (heater, tank, garden, coop, stairs…) — dashed to
             read as objects/fixtures rather than rooms; drag + resize like rooms */}
-        {(spec.elements || []).filter((el) => (el.category === 'floor'
-          ? (activeFloor > 1 && Number(el.level || 1) === activeFloor)
-          : (Number(el.level || 1) === activeFloor || (/stair|ladder/i.test(el.name || '')
-            && Number(el.level || 1) === (activeFloor === 1 && basementInfo(spec.shell).present ? BASEMENT_LEVEL : activeFloor - 1))))).map((raw) => {
+        {(spec.elements || []).filter(planLevelFilter).map((raw) => {
           const el = roomAt(raw);
           const isSel = raw.id === selectedRoom;
           const w = Number(el.w) || 4;
@@ -541,11 +606,12 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
           );
         })}
         {/* dimensions */}
-        <text x={W / 2} y={-pad + 1.6} textAnchor="middle" fontSize={2} fill="var(--ink2)">{W}′</text>
-        <text x={-pad + 1.6} y={D / 2} textAnchor="middle" fontSize={2} fill="var(--ink2)" transform={`rotate(-90 ${-pad + 1.6} ${D / 2})`}>{D}′</text>
+        <text x={W / 2} y={-1.2} textAnchor="middle" fontSize={2} fill="var(--ink2)">{W}′</text>
+        <text x={-1.2} y={D / 2} textAnchor="middle" fontSize={2} fill="var(--ink2)" transform={`rotate(-90 ${-1.2} ${D / 2})`}>{D}′</text>
       </svg>
       <div className="planNorth">▲ N</div>
-      <div className="planHint">{buildingContext && onMoveEdge ? `${PLAN_CONTEXT_LABEL[context] || 'Footprint'} · drag a wall edge to move that wall · corner dot resizes the whole plan` : PLAN_CONTEXT_LABEL[context] || `${floorLabel(spec, activeFloor)} plan · drag to move, drag corners to resize (½ ft snap)`}{floorCount(spec) > 1 ? ' · switch floors top-left' : ''}</div>
+      {viewOverride && <button type="button" className="planFit" title="Show everything again" onClick={() => setViewOverride(null)}>⤢ Fit all</button>}
+      <div className="planHint">{buildingContext && onMoveEdge ? `${PLAN_CONTEXT_LABEL[context] || 'Footprint'} · drag a wall edge to move that wall · corner dot resizes the whole plan` : PLAN_CONTEXT_LABEL[context] || `${floorLabel(spec, activeFloor)} plan · drag to move, drag corners to resize (½ ft snap)`} · scroll to zoom · drag the ground to pan</div>
     </div>
   );
 }
