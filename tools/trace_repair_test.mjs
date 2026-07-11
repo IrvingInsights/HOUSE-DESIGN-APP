@@ -1,6 +1,6 @@
 // Deterministic tests for the trace verify/repair decision + merge logic,
 // plus the offline (local) planner's honesty rules.
-import { traceLooksIncomplete, scrubDeferralSummary, mergeTracePlans, repairTraceGeometry, repairTowerStorey, localPlan, promptNeedsDrawing, cleanTraceElements, describeModelForAudit, sanitizeAuditOperations, filterOpsForPass, scrubDeadOperations, manifestGaps }
+import { traceLooksIncomplete, scrubDeferralSummary, mergeTracePlans, repairTraceGeometry, repairTowerStorey, localPlan, promptNeedsDrawing, cleanTraceElements, describeModelForAudit, sanitizeAuditOperations, filterOpsForPass, reclassifyOutdoorRooms, repairBasementRooms, scrubDeadOperations, manifestGaps }
   from '../backend/planner.mjs';
 
 let pass = 0, fail = 0;
@@ -347,6 +347,47 @@ ok(dimlessCheck.unmeasuredElements === true && dimlessCheck.unmeasuredElementNam
   const kept = sanitizeAuditOperations([{ type: 'move_object', targetId: 'kitchen', x: 1, y: 1 }, ...removals]);
   ok(kept.filter((o) => o.type === 'remove_object').length === 4, 'audit rounds cap removals at 4');
   ok(kept.some((o) => o.type === 'move_object'), 'non-removal corrections survive the removal cap');
+}
+
+// ---- Corpus class fixes: outdoor rooms + basement levels + partition clamp ----
+{
+  const plan = { operations: [
+    { type: 'add_room', name: 'Kitchen', x: 2, y: 2, w: 12, d: 10 },
+    { type: 'add_room', name: 'SOUTH-ENTRY CARPORT', x: 30, y: 0, w: 18, d: 20 },
+    { type: 'add_room', name: 'West Porch', x: -6, y: 4, w: 6, d: 8 },
+    { type: 'add_room', name: 'Greenhouse', x: 0, y: 28, w: 18, d: 8 }
+  ], warnings: [] };
+  reclassifyOutdoorRooms(plan);
+  const rooms = plan.operations.filter((o) => o.type === 'add_room');
+  const els = plan.operations.filter((o) => o.type === 'add_element');
+  ok(rooms.length === 1 && rooms[0].name === 'Kitchen', 'indoor rooms stay rooms');
+  ok(els.length === 3, 'outdoor-named rooms become elements');
+  ok(els.find((e) => /carport/i.test(e.name))?.category === 'carport', 'carport maps to its category');
+  ok(els.find((e) => /greenhouse/i.test(e.name))?.category === 'greenhouse', 'greenhouse maps to its category');
+  ok(plan.warnings.some((w) => /unenclosed spaces/i.test(w)), 'reclassification announced honestly');
+}
+{
+  const plan = { operations: [
+    { type: 'set_shell', field: 'basementHeightFt', value: '8' },
+    { type: 'add_room', name: 'Basement Storage', x: 0, y: 0, w: 20, d: 20, level: 1 },
+    { type: 'add_room', name: 'Kitchen', x: 2, y: 2, w: 12, d: 10, level: 1 }
+  ], warnings: [] };
+  repairBasementRooms(plan, { shell: {} });
+  ok(plan.operations[1].level === -1, 'basement-named room dropped to level -1');
+  ok(plan.operations[2].level === 1, 'ordinary rooms keep their level');
+  const noB = { operations: [{ type: 'add_room', name: 'Basement Storage', level: 1 }], warnings: [] };
+  repairBasementRooms(noB, { shell: {} });
+  ok(noB.operations[0].level === 1, 'no basement in the takeoff = no re-leveling');
+}
+{
+  const plan = { operations: [
+    { type: 'set_shell', w: 36, d: 28 },
+    { type: 'add_room', name: 'Kitchen', x: 2, y: 2, w: 12, d: 10 },
+    { type: 'add_element', category: 'partition', name: 'Stray Partition', x: 60, y: -4, w: 10, d: 0.45 }
+  ], warnings: [] };
+  repairTraceGeometry(plan, { shell: { widthFt: 36, depthFt: 28 } });
+  const part = plan.operations.find((o) => o.category === 'partition');
+  ok(part.x + part.w <= 36.01 && part.x >= 0 && part.y >= 0, 'stray partition clamped into the shell');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

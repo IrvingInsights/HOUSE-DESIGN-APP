@@ -613,6 +613,52 @@ export function repairTowerStorey(plan, sourceSpec) {
 // rooms" failure — every later drag then snaps back inside the tiny shell).
 // Re-anchor everything to the northwest origin and grow the planned shell to
 // enclose the ground-floor rooms. Exported for unit tests.
+// CLASS FIX (corpus: fl0-carport): schematics label unenclosed spaces like
+// rooms — GREENHOUSE, CARPORT, WEST PORCH arrived as level-1 rooms standing
+// outside the shell, and the shell-grow step must never swallow them. Any
+// add_room whose NAME says it is an outdoor/unenclosed space becomes the
+// matching add_element instead, carrying its measured footprint.
+const OUTDOOR_ROOM_LEXICON = [
+  [/green\s*house|sun\s*space|sunroom/i, 'greenhouse'],
+  [/car\s*port|garage/i, 'carport'],
+  [/porch|veranda|stoop/i, 'porch'],
+  [/patio|terrace|courtyard/i, 'patio'],
+  [/deck|balcony/i, 'deck'],
+  [/fire\s*wood|wood\s*(store|shed|split)/i, 'structure']
+];
+export function reclassifyOutdoorRooms(plan) {
+  const ops = plan.operations || [];
+  const moved = [];
+  plan.operations = ops.map((op) => {
+    if (op?.type !== 'add_room') return op;
+    const hit = OUTDOOR_ROOM_LEXICON.find(([re]) => re.test(String(op.name || '')));
+    if (!hit) return op;
+    moved.push(op.name);
+    return { ...op, type: 'add_element', category: hit[1] };
+  });
+  if (moved.length) {
+    plan.warnings = [...(plan.warnings || []), `Unenclosed spaces modeled as site elements, not rooms: ${moved.join(', ')}.`];
+  }
+  return plan;
+}
+
+// CLASS FIX (corpus: columbia-st): rooms NAMED for the basement must live on
+// the basement level whenever the takeoff has one — the AI keeps reading the
+// basement plan correctly and then leaving its rooms on level 1.
+export function repairBasementRooms(plan, sourceSpec) {
+  const ops = plan.operations || [];
+  const hasBasement = Number(sourceSpec?.shell?.basementHeightFt) > 0
+    || ops.some((o) => o?.type === 'set_shell' && o.field === 'basementHeightFt' && Number(o.value) > 0)
+    || ops.some((o) => o?.type === 'set_utility' && o.field === 'foundationType' && o.value === 'basement');
+  if (!hasBasement) return plan;
+  for (const op of ops) {
+    if (op?.type === 'add_room' && /basement|cellar/i.test(String(op.name || '')) && Number(op.level || 1) !== -1) {
+      op.level = -1;
+    }
+  }
+  return plan;
+}
+
 export function repairTraceGeometry(plan, sourceSpec) {
   const ops = plan.operations || [];
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -670,6 +716,29 @@ export function repairTraceGeometry(plan, sourceSpec) {
     }
     plan.operations = [...injected, ...ops];
     plan.warnings = [...(plan.warnings || []), `Shell grown to ${needW || shellW}x${needD || shellD} ft so it encloses every ground-floor room from the drawing.`];
+  }
+  // CLASS FIX (corpus: fl0-v6): stray interior walls — clamp partition
+  // elements into the (possibly just-grown) shell rectangle.
+  const shellWNow = (() => {
+    let w = num(sourceSpec?.shell?.widthFt) || 0;
+    let d = num(sourceSpec?.shell?.depthFt) || 0;
+    for (const op of ops) {
+      if (op.type !== 'set_shell') continue;
+      if (num(op.w) > 0) w = num(op.w);
+      if (num(op.d) > 0) d = num(op.d);
+      if (op.field === 'widthFt' && num(op.value) > 0) w = num(op.value);
+      if (op.field === 'depthFt' && num(op.value) > 0) d = num(op.value);
+    }
+    return { w, d };
+  })();
+  if (shellWNow.w > 4 && shellWNow.d > 4) {
+    for (const op of ops) {
+      if (op.type !== 'add_element' || op.category !== 'partition') continue;
+      const w = Math.min(num(op.w) || 1, shellWNow.w);
+      const d = Math.min(num(op.d) || 1, shellWNow.d);
+      op.x = Math.max(0, Math.min(num(op.x), shellWNow.w - w));
+      op.y = Math.max(0, Math.min(num(op.y), shellWNow.d - d));
+    }
   }
   return plan;
 }
@@ -914,7 +983,7 @@ async function auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt = D
     }
     note?.(`Self-check round ${round}…`);
     const auditText = {
-      text: `AUDIT PASS — you already traced the attached drawing(s) into a BIM model. Below is the model EXACTLY as it stands after your trace. Compare it against the drawings and correct real discrepancies.
+      text: `AUDIT PASS${round > 1 ? ` (round ${round}: the previous round's corrections are ALREADY APPLIED below — report ONLY discrepancies that remain; if the model now matches the drawing, return ZERO operations)` : ''} — you already traced the attached drawing(s) into a BIM model. Below is the model EXACTLY as it stands after your trace. Compare it against the drawings and correct real discrepancies.
 
 ${describeModelForAudit(working)}
 
@@ -1023,6 +1092,7 @@ The shell is the CONDITIONED envelope only — exclude carports, porches, decks,
     types: ['add_room'],
     text: `ROOMS PASS — emit ONE add_room per labeled room on EVERY level of the attached floor plans, with its real name and MEASURED x, y, w, d in feet. level 1 = ground floor, 2 = upper floor, -1 = basement.
 A room without measured w and d is not traced — measure every one from the plan and its dimension strings.
+CONDITIONED indoor rooms ONLY — do NOT emit carports, porches, patios, decks, or greenhouses here (the elements pass covers them).
 ONLY add_room operations.`
   },
   {
@@ -1068,6 +1138,22 @@ async function stagedTracePlan({ attachmentParts, geminiResponseSchema, note }) 
         raw = Array.isArray(parsed) ? parsed.length : 0;
         ops = filterOpsForPass(parsed, pass.types);
       } catch { ops = null; }
+    }
+    if (ops === null) {
+      // Unreadable usually means the reply outran the token cap — one retry
+      // asking for a tighter list (the classic single call retries the same).
+      try {
+        res = await callGemini({ parts: [{ text: `Your previous reply was truncated or unreadable. Same task again, but reply with FEWER, tighter operations — at most 30, the most important first, short reason strings.
+${pass.text}
+${TRACE_CONVENTIONS}` }, ...attachmentParts], responseSchema: geminiResponseSchema });
+      } catch { res = null; }
+      if (res?.ok) {
+        try {
+          const parsed = JSON.parse(res.text)?.operations;
+          raw = Array.isArray(parsed) ? parsed.length : 0;
+          ops = filterOpsForPass(parsed, pass.types);
+        } catch { ops = null; }
+      }
     }
     if (ops === null || (pass.required && !ops.length)) {
       // Say exactly HOW a pass came up short — "the call failed",
@@ -1283,16 +1369,21 @@ ${payload.prompt}`
       // for anything missing or unmeasured, then rescue again in case the
       // repair itself added rooms in a stray frame.
       plan = scrubDeadOperations(plan);
+      plan = reclassifyOutdoorRooms(plan);
+      plan = repairBasementRooms(plan, sourceSpec);
       plan = repairTraceGeometry(plan, sourceSpec);
       note?.('Completeness check…');
       plan = await repairTraceIfNeeded(plan, { attachmentParts, sourceSpec, manifest });
       plan = scrubDeadOperations(plan);
+      plan = reclassifyOutdoorRooms(plan);
+      plan = repairBasementRooms(plan, sourceSpec);
       plan = repairTraceGeometry(plan, sourceSpec);
       plan = repairTowerStorey(plan, sourceSpec);
       plan = cleanTraceElements(plan, sourceSpec);
       // CYCLE until faithful: simulate the applied model, show the AI its own
       // result next to the drawing, take its corrections, check again.
       plan = await auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt, budgetMs: auditBudgetMs, note });
+      plan = repairBasementRooms(plan, sourceSpec);
       plan = repairTraceGeometry(plan, sourceSpec);
       // Surface the index honestly: what the sheets list vs what got traced.
       if (manifest) {
