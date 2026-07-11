@@ -646,6 +646,19 @@ function normalizeRooms(spec) {
       return { ...resized, ...clampObjectPosition(spec, resized, resized.x || 0, resized.y || 0) };
     });
   }
+  // Openings live ON their wall: legacy/garbled traces stored negative or
+  // past-the-end positions, which drew window assemblies floating in the
+  // yard. (Custom footprints resolve their own edge, so only clamp rects.)
+  if (Array.isArray(spec.openings) && !hasCustomFootprint(spec)) {
+    spec.openings = spec.openings.map((opening) => {
+      if (opening.wall === 'roof') return opening;
+      const axis = (opening.wall === 'north' || opening.wall === 'south') ? 'x' : 'y';
+      const wallLen = axis === 'x' ? Number(spec.shell.widthFt) : Number(spec.shell.depthFt);
+      const w = Number(opening.widthFt) || 3;
+      const along = clamp(Number(opening[axis]) || 0, 0.2, Math.max(0.2, wallLen - w - 0.2));
+      return { ...opening, [axis]: along };
+    });
+  }
 }
 
 function detectIssues(spec) {

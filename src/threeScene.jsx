@@ -523,6 +523,13 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           along = (opening.wall === 'north' || opening.wall === 'south') ? Number(opening.x) || 0 : Number(opening.y) || 0;
         }
         const w = Number(opening.widthFt) || 3;
+        // Corrupt or legacy data can put an opening OFF its wall (negative or
+        // past the end) — old traces did exactly that. Clamp it onto the wall
+        // so the assembly never floats in the yard.
+        if (!customFp) {
+          const wallLen = (opening.wall === 'north' || opening.wall === 'south') ? width : depth;
+          along = clamp(along, 0.2, Math.max(0.2, wallLen - w - 0.2));
+        }
         const gap = { from: along, to: along + w, sill: profile.sill, top: profile.sill + profile.h };
         gapByOpening[openingIdx] = gap;
         const list = openingGapsByWall.get(key) || [];
@@ -1906,8 +1913,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const rise = depth * pitch;
       const o = overhangs || { north: 1.6, south: 1.6, east: 1.6, west: 1.6 };
       if (roofSpec.roofType === 'shed') {
-        const southHeight = roofSpec.southWallHeightFt + 0.28;
-        const northHeight = roofSpec.northWallHeightFt + 0.28;
+        // The walls' shed eave line includes the storey lift (the upper bands
+        // ride up to it) — the roof must ride the SAME line. wallHeight comes
+        // in lifted; the raw roofSpec heights are ground-storey only. Without
+        // this, a two-storey shed drew its roof at the ground plane, 10+ feet
+        // below its own walls and rafters.
+        const lift = Math.max(0, wallHeight - Math.max(roofSpec.southWallHeightFt, roofSpec.northWallHeightFt));
+        const southHeight = roofSpec.southWallHeightFt + lift + 0.28;
+        const northHeight = roofSpec.northWallHeightFt + lift + 0.28;
         const mesh = meshFromTris(slabTris([
           [-o.west, northHeight, -o.north],
           [width + o.east, northHeight, -o.north],
@@ -2255,8 +2268,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       composer.render();
       sceneRef.current = { renderer, scene, camera, controls };
       // Dev/test handle: lets automated checks measure real member geometry
-      // (e.g. "no frame member outside the building") without screenshots.
-      if (typeof window !== 'undefined') window.__nbScene = scene;
+      // and capture framed renders (e.g. "no frame member outside the
+      // building") without relying on flaky window screenshots.
+      if (typeof window !== 'undefined') {
+        window.__nbScene = scene;
+        window.__nbView = { renderer, scene, camera, controls, composer };
+      }
       requestAnimationFrame(animate);
     }
 
