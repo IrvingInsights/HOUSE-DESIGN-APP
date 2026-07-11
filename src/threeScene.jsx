@@ -2163,7 +2163,10 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       shape.lineTo(-o.west, wallHeight);
       const geometry = new THREE.ExtrudeGeometry(shape, { depth: depth + o.north + o.south, bevelEnabled: false });
       const mesh = new THREE.Mesh(geometry, material);
-      mesh.rotation.x = -Math.PI / 2;
+      // The profile is drawn in world coords already (x = plan x, y = height)
+      // and the extrusion IS the plan depth — no rotation. A leftover
+      // rotation.x = -PI/2 from an older profile stood the whole gable roof
+      // on its edge beside the house.
       mesh.position.set(0, 0, -o.north);
       mesh.userData.generated = true;
       return mesh;

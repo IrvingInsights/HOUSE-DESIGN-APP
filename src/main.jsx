@@ -591,6 +591,11 @@ function App() {
       }
 
       if (isModifier && key === 'c' && !isTyping && selected && !selectedIsWall && !selectedIsSpecial) {
+        // A real text selection wins: Ctrl+C copies the highlighted text
+        // (chat replies, notes). The copy-OBJECT shortcut only fires when
+        // nothing on the page is highlighted — something is always selected
+        // in the model, so without this check text could never be copied.
+        if (String(window.getSelection?.() || '').length > 0) return;
         event.preventDefault();
         setClipboardObject(structuredClone(selected));
         return;
@@ -612,6 +617,8 @@ function App() {
       }
 
       if ((event.key === 'Delete' || event.key === 'Backspace') && !isTyping) {
+        // Same courtesy: highlighted text + Delete must not vaporize a room.
+        if (String(window.getSelection?.() || '').length > 0) return;
         event.preventDefault();
         removeSelectedRoom();
       }
