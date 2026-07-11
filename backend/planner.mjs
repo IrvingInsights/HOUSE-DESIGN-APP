@@ -450,7 +450,14 @@ export function traceLooksIncomplete(plan, sourceSpec) {
   const modal = Math.max(0, ...sizeCounts.values());
   const unmeasured = roomOps.length >= 5 && modal / roomOps.length >= 0.7;
   const badGeometry = negative || unmeasured;
-  return { incomplete: deferred || addOpenings === 0 || totalRooms < 2 || noStair || badGeometry, addRooms, addOpenings, totalRooms, deferred, noStair, badGeometry };
+  // Elements deserve the same standard as rooms: three-plus site/structure
+  // elements emitted with NO dimensions means the pass placed default boxes,
+  // not the drawn features (the 10×10-everything pile).
+  const elementOps = ops.filter((o) => o.type === 'add_element' && o.category !== 'partition' && o.category !== 'floor' && o.category !== 'foundation');
+  const dimless = elementOps.filter((o) => !Number(o.w) && !Number(o.d));
+  const unmeasuredElements = dimless.length >= 3;
+  const unmeasuredElementNames = dimless.map((o) => o.name).filter(Boolean);
+  return { incomplete: deferred || addOpenings === 0 || totalRooms < 2 || noStair || badGeometry || unmeasuredElements, addRooms, addOpenings, totalRooms, deferred, noStair, badGeometry, unmeasuredElements, unmeasuredElementNames };
 }
 
 // Deterministic tower rescue: when a takeoff says storeys > 1 but leaves the
@@ -594,6 +601,61 @@ export function repairTraceGeometry(plan, sourceSpec) {
   return plan;
 }
 
+// Element hygiene for fresh takeoffs — deterministic, no AI. The room pass got
+// reliable, but elements kept arriving UNMEASURED (default 10×10 pads piled on
+// top of each other) and DOUBLED (a "Greenhouse" room plus a "Greenhouse"
+// element for the same thing). Exported for unit tests.
+const OUTDOOR_ELEMENT_CATS = new Set(['porch', 'deck', 'greenhouse', 'carport', 'garden', 'animal', 'site', 'outbuilding']);
+export function cleanTraceElements(plan, sourceSpec) {
+  const ops = plan.operations || [];
+  // 1) An element that duplicates a ROOM by name is the same thing twice —
+  //    the measured room wins.
+  const roomNames = new Set([
+    ...((sourceSpec.rooms || []).map((r) => normName(r.name))),
+    ...ops.filter((o) => o.type === 'add_room').map((o) => normName(o.name))
+  ].filter(Boolean));
+  const dropped = [];
+  plan.operations = ops.filter((op) => {
+    if (op.type !== 'add_element' || OUTDOOR_ELEMENT_CATS.has(op.category) === false) return true;
+    const key = normName(op.name);
+    if (key && roomNames.has(key)) { dropped.push(op.name); return false; }
+    return true;
+  });
+  if (dropped.length) {
+    plan.warnings = [...(plan.warnings || []), `${dropped.join(', ')}: traced as both a room and a site element — kept the measured room.`];
+  }
+  // 2) Overlapping outdoor elements are a pile, not a site plan: when they
+  //    collide, re-lay ALL of them in a readable rank beside the house.
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  let shellW = num(sourceSpec?.shell?.widthFt) || 36;
+  for (const op of plan.operations) {
+    if (op.type !== 'set_shell') continue;
+    if (num(op.w)) shellW = num(op.w);
+    if (op.field === 'widthFt' && num(op.value)) shellW = num(op.value);
+  }
+  const outdoor = plan.operations.filter((o) => o.type === 'add_element' && OUTDOOR_ELEMENT_CATS.has(o.category) && !num(o.z));
+  const rectOf = (o) => ({ x: num(o.x), y: num(o.y), w: num(o.w) || 10, d: num(o.d) || 10 });
+  const overlapArea = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y));
+  const piled = outdoor.some((a, i) => outdoor.some((b, j) => {
+    if (j <= i) return false;
+    const ra = rectOf(a); const rb = rectOf(b);
+    return overlapArea(ra, rb) > 0.4 * Math.min(ra.w * ra.d, rb.w * rb.d);
+  }));
+  if (piled && outdoor.length > 1) {
+    let colX = shellW + 3;
+    let atY = 2;
+    for (const op of outdoor) {
+      const r = rectOf(op);
+      if (atY + r.d > 46) { colX += 14; atY = 2; } // next column when the rank gets long
+      op.x = colX;
+      op.y = atY;
+      atY += r.d + 2;
+    }
+    plan.warnings = [...(plan.warnings || []), 'The outdoor structures overlapped each other, so they were laid out in a rank beside the house — drag each one where it belongs.'];
+  }
+  return plan;
+}
+
 // Rewrite a summary that still brags about deferral so the user never sees the
 // banned phrase; state the real counts instead.
 export function scrubDeferralSummary(plan) {
@@ -631,6 +693,7 @@ Emit ONLY the operations still MISSING to complete the takeoff:
 - interior walls drawn between rooms that are still missing: add_element category:'partition' per wall run, widthFt/positionFt for its doorway.
 ${check.badGeometry ? `- YOUR ROOM GEOMETRY WAS NOT MEASURED (identical default sizes and/or negative coordinates). For EVERY room already listed above, emit ONE update pass: move_object (name, x, y) + resize_object (name, w, d) with that room's REAL measured position and size from the floor plan, in feet, origin at the shell's northwest corner, all coordinates >= 0. Rooms come in different sizes — read each one off the plan.
 - Also re-check the shell: set_shell w and d must be the conditioned footprint's overall dimension strings from the drawing.` : ''}
+${check.unmeasuredElements ? `- THESE ELEMENTS WERE EMITTED WITHOUT SIZES: ${check.unmeasuredElementNames.join(', ')}. For EACH one, emit resize_object (name, w, d) + move_object (name, x, y) with its REAL measured footprint and position from the plan — a stair is a stair-sized rectangle, a heater a heater-sized one; porches and decks have drawn outlines. Never leave an element at a default size.` : ''}
 Do NOT restate the shell or footprint unless the earlier value is wrong. NEVER defer, summarize, or write "future refinement" — emit the operations. Report final counts in summary.`
   };
 
@@ -857,6 +920,7 @@ ${payload.prompt}`
       plan = await repairTraceIfNeeded(plan, { attachmentParts, sourceSpec });
       plan = repairTraceGeometry(plan, sourceSpec);
       plan = repairTowerStorey(plan, sourceSpec);
+      plan = cleanTraceElements(plan, sourceSpec);
     }
     return setCached(cacheKey, { source: 'ai-planner-gemini', ...plan }, 3 * 60 * 1000);
   }

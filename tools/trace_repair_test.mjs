@@ -1,6 +1,6 @@
 // Deterministic tests for the trace verify/repair decision + merge logic,
 // plus the offline (local) planner's honesty rules.
-import { traceLooksIncomplete, scrubDeferralSummary, mergeTracePlans, repairTraceGeometry, repairTowerStorey, localPlan, promptNeedsDrawing }
+import { traceLooksIncomplete, scrubDeferralSummary, mergeTracePlans, repairTraceGeometry, repairTowerStorey, localPlan, promptNeedsDrawing, cleanTraceElements }
   from '../backend/planner.mjs';
 
 let pass = 0, fail = 0;
@@ -183,6 +183,42 @@ ok(retryTower && retryTower.level === 3 && retryTower.z === 18, 'tower retry: to
 // The words of a request never become an object: "build them" ≠ element "m".
 const noInvention = localPlan({ prompt: 'build them', spec: { shell: {}, rooms: [], elements: [] } });
 ok(!noInvention.operations.some((o) => o.type === 'add_element' && String(o.name).replace(/[^a-zA-Z0-9]/g, '').length < 3), 'no single-letter objects invented from prompt words');
+
+// --- trace element hygiene (2026-07-11) ---------------------------------------
+// An element that duplicates a measured room is dropped; overlapping outdoor
+// pads get re-laid in a rank instead of a pile.
+const elPlan = cleanTraceElements({
+  summary: 'x', warnings: [], assumptions: [],
+  operations: [
+    { type: 'set_shell', w: 24, d: 36 },
+    { type: 'add_room', name: 'Greenhouse', x: 2, y: 28, w: 18, d: 8 },
+    { type: 'add_element', name: 'Greenhouse', category: 'greenhouse', x: 27, y: 28 },
+    { type: 'add_element', name: 'Covered Patio', category: 'deck', x: 24, y: 16 },
+    { type: 'add_element', name: 'Outdoor Kitchen', category: 'deck', x: 24, y: 16 },
+    { type: 'add_element', name: 'Stairs', category: 'structure', x: 9, y: 12 }
+  ]
+}, { rooms: [], elements: [], shell: { widthFt: 24, depthFt: 36 } });
+ok(!elPlan.operations.some((o) => o.type === 'add_element' && o.name === 'Greenhouse'), 'element duplicating a measured room is dropped');
+{
+  const decks = elPlan.operations.filter((o) => o.type === 'add_element' && o.category === 'deck');
+  const [a, b] = decks.map((o) => ({ x: Number(o.x), y: Number(o.y) }));
+  ok(decks.length === 2 && (a.x !== b.x || Math.abs(a.y - b.y) >= 10), 'overlapping pads re-laid apart');
+  ok(decks.every((o) => Number(o.x) >= 24 + 3), 're-laid pads sit beside the house, not inside it');
+}
+ok(elPlan.operations.some((o) => o.name === 'Stairs'), 'non-outdoor elements pass through untouched');
+
+// Three-plus dimensionless elements flag the takeoff as incomplete.
+const dimlessCheck = traceLooksIncomplete({
+  summary: 'x', warnings: [], assumptions: [],
+  operations: [
+    { type: 'add_room', name: 'A', ...sized(0) }, { type: 'add_room', name: 'B', ...sized(1) },
+    { type: 'add_opening', wall: 'south', widthFt: 3 },
+    { type: 'add_element', name: 'P1', category: 'porch' },
+    { type: 'add_element', name: 'P2', category: 'deck' },
+    { type: 'add_element', name: 'P3', category: 'carport' }
+  ]
+}, { rooms: [], elements: [], shell: {} });
+ok(dimlessCheck.unmeasuredElements === true && dimlessCheck.unmeasuredElementNames.length === 3, 'dimensionless elements flagged for the repair pass');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

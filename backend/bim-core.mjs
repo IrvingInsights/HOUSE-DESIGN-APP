@@ -1565,6 +1565,13 @@ export function applyBimOperations(currentSpec, plan) {
         }
       }
       const id = uniqueObjectId(next, operation.id || operation.name || 'custom element');
+      // Category-true default sizes: an unmeasured element should still look
+      // like what it IS — a 10×10 default box labeled "Mass Heater" or
+      // "Stairs" reads as broken, not approximate.
+      const elementName = String(operation.name || '');
+      const sizeDefaults = /stair|ladder/i.test(elementName) ? { w: 3.5, d: 10, h: 3 }
+        : (operation.category === 'chimney' || /chimney|flue|heater|stove/i.test(elementName)) ? { w: 4, d: 4, h: 5 }
+        : { w: 10, d: 10, h: 1.2 };
       const element = {
         id,
         name: operation.name || titleCase(id),
@@ -1577,9 +1584,9 @@ export function applyBimOperations(currentSpec, plan) {
         x: Number(operation.x || (operation.category === 'floor' ? 0 : next.shell.widthFt + 3)),
         y: Number(operation.y || (operation.category === 'floor' ? 0 : 3)),
         z: Number(operation.z || 0),
-        w: Math.max(1, Number(operation.w || 10)),
-        d: Math.max(1, Number(operation.d || 10)),
-        h: Math.max(0.2, Number(operation.h || 1.2)),
+        w: Math.max(1, Number(operation.w || sizeDefaults.w)),
+        d: Math.max(1, Number(operation.d || sizeDefaults.d)),
+        h: Math.max(0.2, Number(operation.h || sizeDefaults.h)),
         level: Number(operation.level || 1),
         roofType: operation.roofType || '',
         construction: operation.construction || '',

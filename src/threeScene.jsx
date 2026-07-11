@@ -622,8 +622,33 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         const eaveAtZ = (zz) => northWallHeight + (southWallHeight - northWallHeight) * clamp(depth > 0 ? zz / depth : 0, 0, 1);
         pushSideBoxes('north', hN, tN, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north') }));
         pushSideBoxes('south', hS, tS, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south') }));
-        wallMeshSpecs.push({ side: 'west', storey: 'ground', meshes: wallRunMeshes({ horizontal: false, thickCenter: tW / 2, t: tW, a0: 0, a1: depth, hAt: eaveAtZ, mat: wallMatFor('west'), gaps: gapsFor('west') }) });
-        wallMeshSpecs.push({ side: 'east', storey: 'ground', meshes: wallRunMeshes({ horizontal: false, thickCenter: width - tE / 2, t: tE, a0: 0, a1: depth, hAt: eaveAtZ, mat: wallMatFor('east'), gaps: gapsFor('east') }) });
+        // With a PARTIAL upper storey the raked side walls STEP: they reach
+        // the lifted eave only alongside the extent plate and stay at ground
+        // height elsewhere. One full-lift triangle across the whole house
+        // towered over the stepped roof.
+        const plateWalls = upperPlateRect(spec, 2);
+        const stepsWalls = storeyLift > 0 && plateWalls && plateWalls.w * plateWalls.d < width * depth - 1;
+        const buildRakedSide = (side, thickCenter, tSide) => {
+          const touchesPlate = stepsWalls && (side === 'west' ? plateWalls.x <= 0.05 : plateWalls.x + plateWalls.w >= width - 0.05);
+          const runs = [];
+          if (touchesPlate) {
+            const y0 = clamp(plateWalls.y, 0, depth);
+            const y1 = clamp(plateWalls.y + plateWalls.d, 0, depth);
+            if (y0 > 0.1) runs.push({ a0: 0, a1: y0, lift: storeyLift });
+            if (y1 - y0 > 0.1) runs.push({ a0: y0, a1: y1, lift: 0 });
+            if (depth - y1 > 0.1) runs.push({ a0: y1, a1: depth, lift: storeyLift });
+          } else {
+            runs.push({ a0: 0, a1: depth, lift: stepsWalls ? storeyLift : 0 });
+          }
+          const meshes = runs.flatMap((run) => wallRunMeshes({
+            horizontal: false, thickCenter, t: tSide, a0: run.a0, a1: run.a1,
+            hAt: (zz) => Math.max(1, eaveAtZ(zz) - run.lift),
+            mat: wallMatFor(side), gaps: gapsFor(side)
+          }));
+          wallMeshSpecs.push({ side, storey: 'ground', meshes });
+        };
+        buildRakedSide('west', tW / 2, tW);
+        buildRakedSide('east', width - tE / 2, tE);
       } else {
         pushSideBoxes('north', hN, tN, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north') }));
         pushSideBoxes('south', hS, tS, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south') }));
@@ -918,6 +943,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             }
             const x0 = rect.x - oSide.west, x1 = rect.x + rect.w + oSide.east;
             const z0 = rect.y - oSide.north, z1 = rect.y + rect.d + oSide.south;
+            if (roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat') {
+              // Shed wings ride the GROUND shed plane — same as the roof.
+              const groundAt = (zz) => upperEaveAt(zz) - storeyLift + 0.12;
+              rafterRun(rect.x, rect.x + rect.w, groundAt, true, z0, z1);
+              return;
+            }
             const topY = groundEave + 0.25;
             if (touch === 'north' || touch === 'south') {
               const drop = Math.max(0.1, (z1 - z0) * pitchF);
@@ -1520,7 +1551,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const o = segOverhangs(seg.rect, Boolean(seg.upper));
             let mesh = null;
             if (seg.kind === 'wing') {
-              mesh = makeStepRoofPlane(seg.rect, seg.highSide, seg.eave + 0.25, pitchNow, o, roofMat);
+              // A shed's wings are pieces of the GROUND shed plane (the roof
+              // the house would have without the upper storey) — a level
+              // "falling away" plane left them floating above the low wall.
+              mesh = roofSpec.roofType === 'shed'
+                ? makeShedPiece(seg.rect, o, (zz) => shedYAt(zz) - storeyLift, roofMat)
+                : makeStepRoofPlane(seg.rect, seg.highSide, seg.eave + 0.25, pitchNow, o, roofMat);
             } else if (roofSpec.roofType === 'shed') {
               mesh = makeShedPiece(seg.rect, o, shedYAt, roofMat);
             } else if (roofSpec.roofType === 'flat') {
