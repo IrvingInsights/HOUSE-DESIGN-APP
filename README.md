@@ -13,13 +13,13 @@ Go to [nodejs.org](https://nodejs.org), click the big green **LTS** download but
 On this page, click the green **`<> Code`** button near the top, choose **Download ZIP**, then unzip the downloaded file anywhere you like (right-click → Extract All on Windows).
 
 **Step 3 — Start it:**
-Open the unzipped folder and double-click **`start.bat`** (Windows) or **`start.sh`** (Mac). A black window will open — that's the app running; leave it open. Then open your web browser and go to:
+Open the unzipped folder and double-click **`start.bat`** (Windows) or **`Start Mac.command`** (Mac — the first time, right-click it and choose Open). A black window will open — that's the app running; leave it open. Then open your web browser and go to:
 
 ```
 http://localhost:5184
 ```
 
-That's it. The welcome card walks you through the rest. To stop the app, close the black window. To start it again later, double-click `start.bat` again.
+**The very first launch needs an internet connection** — it downloads the app's components automatically (a few minutes). After that it runs entirely offline. The welcome card walks you through the rest. To stop the app, close the black window. To start it again later, double-click the same file — later starts are fast.
 
 ## Using it — the short version
 
@@ -44,3 +44,5 @@ Click **Issues** at the top of this GitHub page → **New issue** → describe w
 ## For AI coding sessions and developers
 
 The technical handoff lives in [RESUME.md](RESUME.md) (state, queued jobs, hard-won invariants). Tester notes and known limitations: [TESTING.md](TESTING.md). Test suites: `node tools/op_smoke_test.mjs`, `tools/geom_core_test.mjs`, `tools/trace_repair_test.mjs`.
+
+To run from a terminal instead of the launchers: `npm install` once, then `node server.mjs` (the launchers do exactly this). The frontend deps (vite/react/three) are real npm packages — a clean clone won't start without the install.

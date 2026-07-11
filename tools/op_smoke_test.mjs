@@ -287,6 +287,51 @@ ok(Object.keys(FRAME_TYPES).length === 6, 'FRAME_TYPES table');
 ok(Object.keys(FLOORING_TYPES).length === 6 && Object.keys(SUBFLOOR_TYPES).length === 4, 'floor tables');
 ok(Object.keys(OPENING_TYPES).length === 11, 'OPENING_TYPES table');
 
+// --- transaction truth (UX review 2026-07-10) --------------------------------
+// All-sides assembly batch: one plan, four ops, every side ends up resolved to
+// the same assembly (the global selector on the Walls page derives from these).
+r = apply(freshSpec(), ['north', 'south', 'east', 'west'].map((wall) => ({ type: 'set_wall_side', wall, field: 'assembly', value: 'straw-bale' })));
+{
+  const keys = ['north', 'south', 'east', 'west'].map((side) => resolveWallSide(r.spec, side).assemblyKey);
+  ok(keys.every((key) => key === 'straw-bale'), 'all-walls batch: every resolved side is straw-bale', keys.join(','));
+  ok(new Set(keys).size === 1, 'all-walls batch: sides are not mixed after the batch');
+}
+
+// Loft + tower stack: the model must actually contain what the chat claims —
+// storeys rise, each upper level gets an extent plate, the floor tab can exist.
+r = apply(freshSpec(), [
+  { type: 'add_loft', name: 'East Bay Loft', category: 'loft', x: 16, y: 10, z: 10, w: 18, d: 14, h: 8, level: 2 },
+  { type: 'add_tower', name: 'Tower', category: 'tower', x: 20, y: 12, z: 18, w: 10, d: 10, h: 8, level: 3 }
+]);
+ok(r.spec.shell.storeys === 3, 'loft+tower: storeys raised to 3', String(r.spec.shell.storeys));
+ok(r.spec.elements.some((el) => el.category === 'loft') && r.spec.elements.some((el) => el.category === 'tower'), 'loft+tower: both elements exist');
+ok(r.spec.elements.some((el) => el.category === 'floor' && el.level === 2) && r.spec.elements.some((el) => el.category === 'floor' && el.level === 3), 'loft+tower: extent plates at levels 2 and 3');
+
+// A retry must not create a duplicate loft — same name + stack category rejects.
+{
+  const once = apply(freshSpec(), [{ type: 'add_loft', name: 'Kitchen Loft', category: 'loft', x: 16, y: 10, z: 10, w: 14, d: 12, h: 8, level: 2 }]);
+  const twice = applyBimOperations(once.spec, { operations: [{ type: 'add_loft', name: 'Kitchen Loft', category: 'loft', x: 16, y: 10, z: 10, w: 14, d: 12, h: 8, level: 2 }] });
+  const lofts = twice.spec.elements.filter((el) => el.category === 'loft').length;
+  ok(lofts === 1 && twice.rejectedOperations.length === 1, 'duplicate loft rejected with a visible warning', `lofts=${lofts}`);
+}
+
+// Nameless / one-letter objects are parse failures, never model objects.
+r = apply(freshSpec(), [{ type: 'add_element', name: 'm', category: 'custom', w: 10, d: 10 }]);
+ok(r.rejectedOperations.length === 1 && !r.spec.elements.some((el) => el.name === 'm'), 'one-letter element name rejected');
+r = apply(freshSpec(), [{ type: 'add_room', name: 'x', w: 10, d: 10 }]);
+ok(r.rejectedOperations.length === 1 && !r.spec.rooms.some((room) => room.name === 'x'), 'one-letter room name rejected');
+
+// A room added on a floor the house lacks raises the storey count (tab truth);
+// a story-and-a-half design (storeys 1.5) is left alone.
+r = apply(freshSpec(), [{ type: 'add_room', name: 'Attic Studio', x: 4, y: 4, w: 12, d: 10, level: 2 }]);
+ok(r.spec.shell.storeys === 2, 'level-2 room raises storeys 1 -> 2', String(r.spec.shell.storeys));
+{
+  const half = freshSpec();
+  half.shell.storeys = 1.5;
+  const out = applyBimOperations(half, { operations: [{ type: 'add_room', name: 'Loft Bedroom', x: 4, y: 4, w: 12, d: 10, level: 2 }] });
+  ok(out.spec.shell.storeys === 1.5, 'level-2 room leaves a 1.5-storey design alone');
+}
+
 async function httpSanity() {
   const base = 'http://localhost:5184';
   const current = await fetch(`${base}/api/projects/current`).then((res) => res.json());

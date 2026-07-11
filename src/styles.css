@@ -4195,3 +4195,28 @@ button.danger:hover,
 .sceneFallback > div { max-width: 420px; }
 .sceneFallback b { display: block; font-size: 15px; margin-bottom: 8px; color: #22251F; }
 .sceneFallback p { font-size: 13px; line-height: 1.5; }
+
+/* ---- UX-review fixes (2026-07-10): queued adds, honest read-only dims,
+   no-WebGL fallback navigation ---- */
+.pendingAdds { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; }
+.pendingAdd {
+  font-size: 12.5px; padding: 4px 10px; border-radius: 999px;
+  border: 1px dashed var(--active-line); color: var(--ink);
+  background: rgba(255, 255, 255, 0.04);
+  animation: pendingPulse 1.2s ease-in-out infinite;
+}
+.pendingAdd:first-child { border-style: solid; }
+@keyframes pendingPulse { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
+.readOnlyDim {
+  display: flex; align-items: baseline; gap: 6px; padding: 8px 10px;
+  border-radius: 8px; border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03); color: var(--ink); font-size: 14px;
+}
+.readOnlyDim small { color: var(--ink3); font-size: 11.5px; }
+.inlineLink {
+  background: none !important; border: none; padding: 0; margin: 0;
+  color: var(--active-line); text-decoration: underline; cursor: pointer;
+  font: inherit; display: inline;
+}
+.sceneFallback .fallbackNav { display: flex; gap: 10px; margin-top: 14px; justify-content: center; }
+.sceneFallback .fallbackNav button { padding: 8px 18px; }

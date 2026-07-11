@@ -1495,6 +1495,13 @@ export function applyBimOperations(currentSpec, plan) {
     }
 
     if (operation.type === 'add_room') {
+      // A nameless or one-letter "room" is a parse failure upstream — applying
+      // it would let a garbled plan claim success. Reject it visibly instead.
+      if (String(operation.name || '').replace(/[^a-zA-Z0-9]/g, '').length < 2) {
+        rejectedOperations.push(operation);
+        warnings.push(`Rejected a room with no usable name ("${operation.name || ''}") — nothing was added for it.`);
+        continue;
+      }
       const id = uniqueObjectId(next, operation.id || operation.name || 'room');
       const profile = roomProfile(operation.name || '');
       const room = {
@@ -1513,10 +1520,37 @@ export function applyBimOperations(currentSpec, plan) {
       upsertRoom(next, room);
       changedIds.push(room.id);
       actions.push(operationDescription(operation, next));
+      // TRANSACTION TRUTH: a room on a floor the house doesn't have yet raises
+      // the storey count, so its floor tab and the roof actually follow. The
+      // ">= 1 gap" rule leaves story-and-a-half designs (storeys 1.5) alone.
+      const roomLevel = Number(room.level || 1);
+      if (roomLevel > 1 && roomLevel - Number(next.shell.storeys || 1) >= 1) {
+        next.shell.storeys = Math.min(3, roomLevel);
+        actions.push(`Raised the house to ${next.shell.storeys} storeys so ${room.name} has its floor.`);
+      }
       continue;
     }
 
     if (operation.type === 'add_element' || operation.type === 'add_site_element' || operation.type === 'add_loft' || operation.type === 'add_tower' || operation.type === 'add_floor') {
+      // Same honesty rule as rooms: no one-letter mystery objects.
+      if (String(operation.name || '').replace(/[^a-zA-Z0-9]/g, '').length < 2) {
+        rejectedOperations.push(operation);
+        warnings.push(`Rejected an element with no usable name ("${operation.name || ''}") — nothing was added for it.`);
+        continue;
+      }
+      // A loft or tower with the same name already in the model is a retry,
+      // not a request for a second one — adding it again is the duplicate-loft
+      // trap. (Sheds and garden beds may repeat; stacked storeys don't.)
+      const stackCategory = operation.category === 'loft' || operation.category === 'tower' || operation.type === 'add_loft' || operation.type === 'add_tower';
+      if (stackCategory) {
+        const wantedName = String(operation.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+        const twin = next.elements.find((el) => String(el.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '') === wantedName);
+        if (twin) {
+          rejectedOperations.push(operation);
+          warnings.push(`${twin.name} already exists — I didn't add a duplicate. Select it to move or resize it instead.`);
+          continue;
+        }
+      }
       const id = uniqueObjectId(next, operation.id || operation.name || 'custom element');
       const element = {
         id,
@@ -1554,9 +1588,40 @@ export function applyBimOperations(currentSpec, plan) {
         else { element.w = Number(operation.w) > 0 && Number(operation.w) <= 2 ? Number(operation.w) : thick; }
         if (!Number(operation.h)) element.h = Math.max(7, Number(next.shell.wallHeightFt || 10) - 0.5);
       }
-      next.elements.push({ ...element, ...clampObjectPosition(next, element, element.x, element.y) });
+      const placed = { ...element, ...clampObjectPosition(next, element, element.x, element.y) };
+      next.elements.push(placed);
       changedIds.push(id);
       actions.push(operationDescription(operation, next));
+      // TRANSACTION TRUTH for stacked storeys: a loft or tower the chat just
+      // "added" must actually be reachable — the storey count rises to its
+      // level and the level gets an extent plate over the element's bay, so
+      // the floor tab appears and the roof steps around it. Without this the
+      // app claimed a tower that no view could reach.
+      if (placed.category === 'loft' || placed.category === 'tower') {
+        const stackLevel = Math.min(3, Math.max(2, Number(placed.level || 2)));
+        placed.level = stackLevel;
+        if (stackLevel - Number(next.shell.storeys || 1) >= 1) {
+          next.shell.storeys = stackLevel;
+          actions.push(`Raised the house to ${stackLevel} storeys so the ${placed.name.toLowerCase()} has its floor.`);
+        }
+        const plateAt = (lvl) => next.elements.some((el) => el.category === 'floor' && Number(el.level || 1) === lvl);
+        if (!plateAt(stackLevel)) {
+          const baseWallFt = Number(next.shell.wallHeightFt || 10);
+          const plate = {
+            id: uniqueObjectId(next, `storey-${stackLevel}-extent`),
+            name: `Storey ${stackLevel} extent`,
+            category: 'floor',
+            sourceCategory: 'Level',
+            note: `Extent plate created with ${placed.name} — resize it on the ${stackLevel === 3 ? '3rd' : '2nd'}-floor plan.`,
+            x: placed.x, y: placed.y, z: Number(placed.z) || baseWallFt * (stackLevel - 1),
+            w: placed.w, d: placed.d, h: 0.35,
+            level: stackLevel, type: 'work'
+          };
+          next.elements.push(plate);
+          changedIds.push(plate.id);
+          actions.push(`Added the Storey ${stackLevel} extent over ${placed.name} — the roof steps down around it.`);
+        }
+      }
       continue;
     }
 

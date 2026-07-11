@@ -1,5 +1,6 @@
-// Deterministic tests for the trace verify/repair decision + merge logic.
-import { traceLooksIncomplete, scrubDeferralSummary, mergeTracePlans, repairTraceGeometry, repairTowerStorey }
+// Deterministic tests for the trace verify/repair decision + merge logic,
+// plus the offline (local) planner's honesty rules.
+import { traceLooksIncomplete, scrubDeferralSummary, mergeTracePlans, repairTraceGeometry, repairTowerStorey, localPlan, promptNeedsDrawing }
   from '../backend/planner.mjs';
 
 let pass = 0, fail = 0;
@@ -152,6 +153,36 @@ const stairsDedup = mergeTracePlans(
   { rooms: [], elements: [] });
 const stairCount = stairsDedup.operations.filter((o) => o.type === 'add_element' && /stairs/i.test(o.name)).length;
 ok(stairCount === 1 && stairsDedup.operations.some((o) => o.name === 'Carport'), 'merge dedupes elements by name, keeps new ones');
+
+// --- offline planner honesty (UX review 2026-07-10) --------------------------
+// A drawing-dependent ask NEVER produces invented objects offline — the exact
+// prompt Start-from-file prefills once became a custom object named "m".
+const traceAsk = 'Start this design from the attached drawing: read the footprint, the rooms and their sizes, and the windows and doors, and build them.';
+const honest = localPlan({ prompt: traceAsk, spec: { shell: { widthFt: 36, depthFt: 28 }, rooms: [], elements: [] }, attachedImages: [{ name: 'plan.pdf', src: 'data:application/pdf;base64,x' }] });
+ok(honest.operations.length === 0 && /can't read|cannot read/i.test(honest.summary), 'offline trace ask: zero operations, honest summary');
+ok(honest.questions.length > 0, 'offline trace ask: offers the manual path');
+const honestNoFile = localPlan({ prompt: traceAsk, spec: { shell: {}, rooms: [], elements: [] }, attachedImages: [] });
+ok(honestNoFile.operations.length === 0 && /no readable drawing/i.test(honestNoFile.summary), 'offline trace ask without attachment: zero operations');
+ok(promptNeedsDrawing('trace the attached pdf') && !promptNeedsDrawing('arrange the rooms in the 2D planning surface') && !promptNeedsDrawing('add a bedroom 12x11'), 'promptNeedsDrawing matches drawing asks only');
+
+// Loft + tower in one ask: both created with the asked-for sizes and stacked.
+const stackedLocal = localPlan({ prompt: 'add a loft 18 × 14 over the east bay and a tower 10 × 10 above it', spec: { shell: { widthFt: 36, depthFt: 28, wallHeightFt: 10 }, rooms: [], elements: [] } });
+const localLoft = stackedLocal.operations.find((o) => o.category === 'loft');
+const localTower = stackedLocal.operations.find((o) => o.category === 'tower');
+ok(localLoft && localLoft.w === 18 && localLoft.d === 14 && localLoft.level === 2, 'local loft: asked-for size on level 2');
+ok(localLoft && /east bay/i.test(localLoft.name), 'local loft: named for its place, not "Kitchen Loft"');
+ok(localTower && localTower.w === 10 && localTower.d === 10 && localTower.level === 3 && localTower.z === localLoft.z + localLoft.h, 'local tower: 10×10 on level 3, stacked on the loft');
+
+// A tower-only retry that names the loft as a LOCATION must not re-create the
+// loft (the duplicate-Kitchen-Loft trap).
+const retry = localPlan({ prompt: 'add a tower 10 x 10 above the kitchen loft', spec: { shell: { widthFt: 36, depthFt: 28, wallHeightFt: 10 }, rooms: [], elements: [{ id: 'kitchen-loft', name: 'Kitchen Loft', category: 'loft', x: 20, y: 14, w: 14, d: 12, z: 10, h: 8, level: 2 }] } });
+ok(!retry.operations.some((o) => o.category === 'loft'), 'tower retry: no second loft created');
+const retryTower = retry.operations.find((o) => o.category === 'tower');
+ok(retryTower && retryTower.level === 3 && retryTower.z === 18, 'tower retry: tower stacks on the existing loft (level 3, z 18)');
+
+// The words of a request never become an object: "build them" ≠ element "m".
+const noInvention = localPlan({ prompt: 'build them', spec: { shell: {}, rooms: [], elements: [] } });
+ok(!noInvention.operations.some((o) => o.type === 'add_element' && String(o.name).replace(/[^a-zA-Z0-9]/g, '').length < 3), 'no single-letter objects invented from prompt words');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

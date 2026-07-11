@@ -72,7 +72,15 @@ function App() {
   const [appMode, setAppMode] = useState('design');
   // No graphics acceleration (WebGL off) → the app starts in the Plan view
   // instead of a broken 3D pane; the 3D tab stays clickable and explains.
-  const [viewMode, setViewMode] = useState(() => (webglAvailable() ? '3d' : 'plan'));
+  // webglOK also hides every 3D-only overlay control (camera buttons, slice,
+  // layers, drag hints) so the fallback pane never shows dead chrome.
+  const webglOK = webglAvailable();
+  const [viewMode, setViewMode] = useState(() => (webglOK ? '3d' : 'plan'));
+  // Room-add queue: rapid preset clicks are applied ONE at a time, each
+  // against the spec the previous add returned — never against stale state.
+  // pendingRoomAdds is the visible "Adding Bedroom…" acknowledgment.
+  const roomQueueRef = useRef({ queue: [], running: false });
+  const [pendingRoomAdds, setPendingRoomAdds] = useState([]);
   // Camera flight requests + the section-cut slider — deliberately plain
   // state (not persisted): a fresh open always starts whole and unsliced.
   const [viewRequest, setViewRequest] = useState(null);
@@ -368,11 +376,15 @@ function App() {
     recordOperationAudit(promptText, plan, report, spec.revision, report.spec.revision);
     const chosenId = nextSelectedId || report.changedIds[0];
     if (chosenId) setSelectedRoom(chosenId);
-    if (report.actions[0]) setLastModelChange(report.actions[0]);
+    // A multi-op batch is ONE transaction — the chip says what the whole batch
+    // did ("Set all walls to Straw Bale"), not just its first operation
+    // ("set north wall…", which read as a change to one wall).
+    const transactionText = report.actions.length > 1 ? `${promptText} (${report.actions.length} changes)` : report.actions[0];
+    if (transactionText) setLastModelChange(transactionText);
     if (chatText) {
-      setChatMessages((items) => [...items, { role: 'studio', speaker: 'Studio', text: chatText || report.actions[0] }]);
+      setChatMessages((items) => [...items, { role: 'studio', speaker: 'Studio', text: chatText || transactionText }]);
     }
-    setRevisionLog((items) => [`Rev ${report.spec.revision}: ${logPrefix}${report.actions[0] ? ` - ${report.actions[0]}` : ''}`, ...items]);
+    setRevisionLog((items) => [`Rev ${report.spec.revision}: ${logPrefix}${transactionText ? ` - ${transactionText}` : ''}`, ...items]);
     return report;
   }
 
@@ -566,6 +578,21 @@ function App() {
     const questionOnly = !attachedImages.length && isConsultativePrompt(submittedPrompt, []) && !/\b(apply|build|make|create|add|move|resize|change|set|trace|use|model|draw)\b/i.test(submittedPrompt);
     if (questionOnly) {
       await answerConsultativePrompt(submittedPrompt);
+      return;
+    }
+
+    // TRUTH GATE: a request that depends on reading an attached drawing must
+    // stop honestly when there is nothing readable attached (the earlier read
+    // may have failed) — never fall through to a planner that would fabricate
+    // a "trace" from the words of the request.
+    const needsDrawing = /\battach(?:ed|ment)?\b|\btrace\b|\bfrom\s+(?:the|this|my)\s+(?:drawing|sketch|blueprint|pdf|file|image|photo|plans?)\b|\b(?:the|this)\s+(?:drawing|sketch|blueprint|pdf)\b/i.test(submittedPrompt);
+    if (needsDrawing && !attachedImages.length) {
+      setChatMessages((items) => [
+        ...items,
+        { role: 'user', speaker: 'You', text: submittedPrompt },
+        { role: 'studio', speaker: 'Studio', text: 'I don\'t have a readable drawing attached, so I haven\'t changed anything. The earlier file may have failed to read — re-attach it (the 📎 button, or Start from a file on the opening card), or tell me the numbers instead: overall width × depth in feet, which way is south, and the rooms with sizes. I\'ll build from those.' }
+      ]);
+      setRevisionLog((items) => [`No change: "${submittedPrompt}" needs a drawing and none is attached.`, ...items]);
       return;
     }
 
@@ -1466,15 +1493,53 @@ function App() {
     });
   }
 
-  async function addRoomPreset(preset) {
-    const plan = planNewRoomPlacements(spec, [preset], activeFloor);
-    const where = activeFloor > 1 ? ` on the ${floorLabel(spec, activeFloor).toLowerCase()}` : '';
-    await applyBackendOperations({
-      operations: plan.ops,
-      promptText: `Add ${plan.names[0]}${where}`,
-      logPrefix: 'Add room',
-      chatText: plan.grew ? `Added the ${plan.names[0]}${where} and grew the house to ${plan.newW}′ × ${plan.newD}′ to fit it — your other rooms stayed put.` : undefined
-    });
+  // Every preset click is acknowledged instantly (queued chip) and applied in
+  // click order, one at a time. Each add PLANS against and APPLIES onto the
+  // spec the previous add returned — the old racing version planned four adds
+  // against the same stale spec, so rapid clicks arrived late, out of order,
+  // or (when two picked the same free spot) not at all.
+  function addRoomPreset(preset) {
+    roomQueueRef.current.queue.push(preset);
+    setPendingRoomAdds((names) => [...names, preset.name]);
+    void processRoomQueue();
+  }
+
+  async function processRoomQueue() {
+    const q = roomQueueRef.current;
+    if (q.running) return;
+    q.running = true;
+    // The first add starts from the freshest committed spec this closure saw;
+    // every later one chains from the report the backend just returned.
+    let base = null;
+    try {
+      while (q.queue.length) {
+        const preset = q.queue.shift();
+        const source = base || spec;
+        const plan = planNewRoomPlacements(source, [preset], activeFloor);
+        const where = activeFloor > 1 ? ` on the ${floorLabel(source, activeFloor).toLowerCase()}` : '';
+        const report = await applyBackendOperations({
+          operations: plan.ops,
+          promptText: `Add ${plan.names[0]}${where}`,
+          logPrefix: 'Add room',
+          baseSpec: base,
+          chatText: plan.grew ? `Added the ${plan.names[0]}${where} and grew the house to ${plan.newW}′ × ${plan.newD}′ to fit it — your other rooms stayed put.` : undefined
+        });
+        if (report) {
+          base = report.spec;
+          // Reconcile by name: if the room the click asked for isn't in the
+          // returned model, say so — never let a click vanish silently.
+          if (!report.spec.rooms.some((room) => room.name === plan.names[0])) {
+            setChatMessages((items) => [...items, { role: 'studio', speaker: 'Studio', text: `The ${preset.name} didn't make it into the plan — try once more, or add it by chat ("add a ${preset.name.toLowerCase()}").` }]);
+          }
+        }
+        setPendingRoomAdds((names) => {
+          const idx = names.indexOf(preset.name);
+          return idx === -1 ? names : [...names.slice(0, idx), ...names.slice(idx + 1)];
+        });
+      }
+    } finally {
+      q.running = false;
+    }
   }
 
   // One-click fixes for council flags. Each maps a flagged issue to the SAME
@@ -2144,7 +2209,14 @@ function App() {
                   </button>
                 ))}
               </div>
-              <p className="systemNote">Click to drop a room in — it slots into free space (nothing else moves). Rename or resize any room in the Inspector below, or drag it in the 2D plan. You can also tell the assistant "add a pantry 8 × 10".</p>
+              {pendingRoomAdds.length > 0 && (
+                <div className="pendingAdds" aria-live="polite">
+                  {pendingRoomAdds.map((name, index) => (
+                    <span key={`${name}-${index}`} className="pendingAdd">{index === 0 ? `Adding ${name}…` : `Queued: ${name}`}</span>
+                  ))}
+                </div>
+              )}
+              <p className="systemNote">Click to drop a room in — it slots into free space (nothing else moves). Rapid clicks queue up and land in order. Rename or resize any room in the Inspector below, or drag it in the 2D plan. You can also tell the assistant "add a pantry 8 × 10".</p>
 
               <div className="sectionHead">Add a fixture</div>
               <div className="roomAddGrid">
@@ -2190,17 +2262,40 @@ function App() {
 
           {systemView === 'walls' && (() => {
             const resolvedSides = WALL_SIDES.map((side) => ({ side, r: resolveWallSide(spec, side) }));
-            const globalKey = wallAssemblyKeyFromText(spec.systems?.envelope);
-            const mixed = wallsAreMixed(spec);
-            const activeHeights = resolvedSides.filter(({ r }) => !r.omitted).map(({ r }) => r.heightFt);
+            // The global selector shows what the four walls actually ARE (the
+            // resolved sides), never the legacy envelope text — that field
+            // goes stale the moment per-side ops run, and a selector that says
+            // "Framed" over four straw-bale walls destroys trust.
+            const activeSides = resolvedSides.filter(({ r }) => !r.omitted);
+            const assemblyKeys = new Set(activeSides.map(({ r }) => r.assemblyKey));
+            const globalKey = assemblyKeys.size === 1 ? activeSides[0]?.r.assemblyKey : '';
+            const mixed = assemblyKeys.size > 1;
+            const activeHeights = activeSides.map(({ r }) => r.heightFt);
             const heightsMixed = new Set(activeHeights).size > 1;
             const sharedHeight = activeHeights[0] ?? spec.shell.wallHeightFt;
             return (
               <div className="systemPage">
+                <div className="sectionHead">The obvious numbers first</div>
+                <div className="controlGrid">
+                  {heightsMixed ? (
+                    <label>Height
+                      <div className="mixedField">
+                        <span>Mixed · {Math.min(...activeHeights)}–{Math.max(...activeHeights)}' — each side rules below</span>
+                        <button className="breakOpen" onClick={() => updateShell('wallHeightFt', Math.max(...activeHeights))}>unify at {Math.max(...activeHeights)}'</button>
+                      </div>
+                    </label>
+                  ) : (
+                    <label>Height (ft)<input type="number" min="7" max="40" value={sharedHeight} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
+                  )}
+                  <label>Width<span className="readOnlyDim">{spec.shell.widthFt}′ <small>north/south walls</small></span></label>
+                  <label>Length<span className="readOnlyDim">{spec.shell.depthFt}′ <small>east/west walls</small></span></label>
+                </div>
+                <p className="systemNote">Height lives here. Width and Length are the overall shape of the house — <button type="button" className="inlineLink" onClick={() => setSystemView('shell')}>edit the overall shape on the Shell page</button> so there's one place that changes it.</p>
+
                 <div className="sectionHead">Wall system (all sides)</div>
                 <div className="controlGrid">
                   <label>Assembly
-                    <select value={mixed ? '' : globalKey} onChange={(event) => setAllWallsAssembly(event.target.value)}>
+                    <select value={globalKey} onChange={(event) => setAllWallsAssembly(event.target.value)}>
                       {mixed && <option value="" disabled>Mixed — see per-side</option>}
                       {Object.values(WALL_ASSEMBLIES).map((assembly) => (
                         <option key={assembly.key} value={assembly.key} style={greenOptStyle(assembly)}>{greenLeaf(assembly)}{assembly.label} (R≈{assembly.rValue})</option>
@@ -2219,24 +2314,12 @@ function App() {
                       </label>
                     );
                   })()}
-                  {heightsMixed ? (
-                    <label>Height
-                      <div className="mixedField">
-                        <span>Mixed · {Math.min(...activeHeights)}–{Math.max(...activeHeights)}' — each side rules below</span>
-                        <button className="breakOpen" onClick={() => updateShell('wallHeightFt', Math.max(...activeHeights))}>unify at {Math.max(...activeHeights)}'</button>
-                      </div>
-                    </label>
-                  ) : (
-                    <label>Height (ft)<input type="number" min="7" max="40" value={sharedHeight} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
-                  )}
-                  <label>Width (ft)<input type="number" value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
-                  <label>Length (ft)<input type="number" value={spec.shell.depthFt} onChange={(event) => updateShell('depthFt', event.target.value)} /></label>
                 </div>
                 <label className="diyToggle">
                   <input type="checkbox" checked={utilitiesOf(spec).diyWalls} onChange={(event) => updateUtility('diyWalls', event.target.checked)} />
                   <span>I'll raise the walls myself (sweat equity — walls are the most DIY-able system)</span>
                 </label>
-                <p className="systemNote">While all sides share one height you can set it here; once a side differs, set its height by tapping that wall below. Width is the north/south wall length; Length is the east/west wall length.</p>
+                <p className="systemNote">While all sides share one height you can set it here; once a side differs, set its height by tapping that wall below.</p>
 
                 <div className="sectionHead">{storeyInfo(spec.shell).storeys > 1 ? 'Ground storey — each side' : 'Each side'}</div>
                 <p className="systemNote">Tap a wall — here or in the model — to edit that side (system, height, thickness, finishes) in the Inspector below. Toggle a side open for no wall there.</p>
@@ -3152,9 +3235,10 @@ function App() {
               onMoveEnd={finishPlanMove}
               onResizeEnd={finishPlanResize}
               onDimensionPreview={setDimensionPreview}
+              onFallbackNav={setViewMode}
             />
           )}
-          {viewMode === '3d' && (
+          {viewMode === '3d' && webglOK && (
             <div className="viewGizmo">
               {[['iso', 'Iso'], ['top', 'Top'], ['front', 'Front'], ['side', 'Side']].map(([mode, label]) => (
                 <button key={mode} title={`Look at the model from the ${mode === 'iso' ? 'corner' : mode}`} onClick={() => setViewRequest({ mode, n: Date.now() })}>{label}</button>
@@ -3170,13 +3254,13 @@ function App() {
             <button className={viewMode === 'plan' ? 'active' : ''} onClick={() => setViewMode('plan')}>Plan</button>
             <button className={viewMode === 'detail' ? 'active' : ''} title="Connection details — how the selected part is built" onClick={() => setViewMode('detail')}>Detail</button>
           </div>
-          {viewMode !== 'detail' && (viewMode === 'plan' || floorCount(spec) > 1 || basementInfo(spec.shell).present) && <div className="floorTabs">
+          {viewMode !== 'detail' && (viewMode !== '3d' || webglOK) && (viewMode === 'plan' || floorCount(spec) > 1 || basementInfo(spec.shell).present) && <div className="floorTabs">
             {[...(basementInfo(spec.shell).present ? [BASEMENT_LEVEL] : []), ...Array.from({ length: floorCount(spec) }, (_, i) => i + 1)].map((floor) => (
               <button key={floor} className={activeFloor === floor ? 'active' : ''} onClick={() => setActiveFloor(floor)} title={`${floorLabel(spec, floor)} — view & edit this floor`}>{floor === 1 ? 'Ground' : floorLabel(spec, floor).replace(' floor', '')}</button>
             ))}
             {floorCount(spec) < 3 && <button className="addFloor" onClick={addStorey} title="Add a storey">+ Floor</button>}
           </div>}
-          {viewMode === '3d' && <button className={`layersToggle${layersOpen ? ' open' : ''}${hiddenLayerCount > 0 || modelLayers.xray ? ' filtered' : ''}`} onClick={() => setLayersOpen((open) => !open)} title="Show / hide model layers">
+          {viewMode === '3d' && webglOK && <button className={`layersToggle${layersOpen ? ' open' : ''}${hiddenLayerCount > 0 || modelLayers.xray ? ' filtered' : ''}`} onClick={() => setLayersOpen((open) => !open)} title="Show / hide model layers">
             <Layers size={14} /> Layers{hiddenLayerCount > 0 ? ` · ${hiddenLayerCount} off` : modelLayers.xray ? ' · x-ray' : ''}
           </button>}
           {(hiddenLayerCount > 0 || modelLayers.xray) && (
@@ -3234,7 +3318,7 @@ function App() {
               </div>
             );
           })()}
-          {viewMode === '3d' && <div className="viewBadge"><Camera size={15} /> drag rooms, drag corner handles to resize</div>}
+          {viewMode === '3d' && webglOK && <div className="viewBadge"><Camera size={15} /> drag rooms, drag corner handles to resize</div>}
           <div className="changeBadge" key={`${spec.revision}-${selectedRoom}`}><Sparkles size={14} /> Rev {spec.revision}: {lastModelChange}</div>
           {viewMode === '3d' && dimensionPreview && (
             <div className="dimensionBadge">
@@ -3242,7 +3326,7 @@ function App() {
               <span>{dimensionPreview.mode === 'resize' ? 'Resizing' : 'Moving'} · {dimensionPreview.w}' x {dimensionPreview.d}' · X {dimensionPreview.x}' Y {dimensionPreview.y}'</span>
             </div>
           )}
-          {viewMode === '3d' && <div className="northBadge">N</div>}
+          {viewMode === '3d' && webglOK && <div className="northBadge">N</div>}
           {/* The selector moved into the left panel (BIM Inspector header) —
               the model stays a pure tap-to-select surface. */}
         </div>

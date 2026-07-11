@@ -65,13 +65,28 @@ const operationSchema = {
 };
 
 function dimensionsFromText(text, fallback = { w: 10, d: 10, h: 1.2 }) {
-  const match = text.match(/(\d+(?:\.\d+)?)\s*(?:ft|feet|foot|')?\s*(?:x|by)\s*(\d+(?:\.\d+)?)\s*(?:x|by)?\s*(\d+(?:\.\d+)?)?/i);
+  const match = text.match(/(\d+(?:\.\d+)?)\s*(?:ft|feet|foot|')?\s*(?:x|by|×)\s*(\d+(?:\.\d+)?)\s*(?:x|by|×)?\s*(\d+(?:\.\d+)?)?/i);
   if (!match) return fallback;
   return {
     w: Number(match[1]),
     d: Number(match[2]),
     h: Number(match[3] || fallback.h)
   };
+}
+
+// "a loft 18 × 14" / "tower 10x10" — the pair of numbers nearest the word.
+function dimensionsNearWord(text, word) {
+  const match = text.match(new RegExp(`\\b${word}\\b[^.;\\n]{0,50}?(\\d+(?:\\.\\d+)?)\\s*(?:ft|feet|foot|')?\\s*(?:x|by|×)\\s*(\\d+(?:\\.\\d+)?)`, 'i'));
+  return match ? { w: Number(match[1]), d: Number(match[2]) } : null;
+}
+
+const capWords = (value) => String(value || '').replace(/\b[a-z]/g, (c) => c.toUpperCase());
+
+// Does the prompt depend on READING an attached drawing/document? The local
+// fallback has no eyes, so these asks must fail honestly instead of inventing
+// a generic object and claiming a takeoff happened.
+export function promptNeedsDrawing(promptText) {
+  return /\battach(?:ed|ment)?\b|\btrace\b|\btake ?-?offs?\b|\b(?:the|this|that|my)\s+(?:drawing|sketch|blueprint|floor ?plans?|pdf|survey|document|file|image|photo|picture)\b|\bfrom\s+(?:the|this|a|an|my)\s+(?:drawing|sketch|blueprint|pdf|file|image|photo|plans?)\b/i.test(String(promptText || ''));
 }
 
 export function localPlan(payload) {
@@ -83,6 +98,26 @@ export function localPlan(payload) {
   const warnings = [];
   const assumptions = [];
   const questions = [];
+
+  // HONESTY GATE: this parser cannot read drawings, PDFs, or photos. When the
+  // request depends on one, say so and change NOTHING — a fabricated "trace"
+  // (the infamous single-letter "m" element) destroys trust in every later
+  // success message.
+  if (promptNeedsDrawing(prompt)) {
+    const hasFiles = (payload.attachedImages || []).length > 0;
+    return {
+      source: 'local-fallback',
+      summary: hasFiles
+        ? 'I can\'t read drawings right now, so nothing was changed.'
+        : 'No readable drawing is attached, so nothing was changed.',
+      operations: [],
+      warnings: [hasFiles
+        ? 'Reading drawings needs the AI planner, and this copy is running without one (no AI key is configured on the server).'
+        : 'The attachment may have failed to read — re-attach it, or continue by hand.'],
+      assumptions: [],
+      questions: ['Tell me the numbers instead and I\'ll build from those: overall width × depth in feet, which way is south, and each room with its size (e.g. "kitchen 12×14, two bedrooms 11×12"). The Shell and Rooms pages work too.']
+    };
+  }
 
   const push = (operation) => operations.push({
     type: 'no_change',
@@ -111,6 +146,25 @@ export function localPlan(payload) {
     reason: '',
     ...operation
   });
+
+  const finishLocalPlan = () => {
+    if (!operations.length) {
+      push({
+        type: 'no_change',
+        reason: 'Local fallback could not confidently map this prompt to a BIM operation.'
+      });
+    }
+    return {
+      source: 'local-fallback',
+      summary: operations.some((operation) => operation.type !== 'no_change')
+        ? 'Created a structured local BIM plan from the prompt.'
+        : 'No confident BIM operation found.',
+      operations,
+      warnings,
+      assumptions,
+      questions
+    };
+  };
 
   const roomByName = (label) => {
     const normalized = slugify(label).replace(/-/g, ' ');
@@ -228,47 +282,80 @@ export function localPlan(payload) {
   if (/\bdog\s+run\b/.test(text)) {
     push({ type: 'add_site_element', id: 'dog-run-against-west-door', name: 'Dog Run Against West Door', category: 'animal', x: -16, y: Math.max(0, Number(shell.depthFt || 28) * 0.35), z: 0, w: 14, d: 18, h: 4, reason: 'Added dog run against the west side near the west door.' });
   }
-  if (/\bloft|mezzanine\b/.test(text)) {
-    const kitchen = roomByName('kitchen');
-    const kitchenCeiling = Number(text.match(/\bkitchen\s+ceiling\s+(?:will\s+be|is|at)?\s*(\d+(?:\.\d+)?)\s*(?:ft|feet|')?/)?.[1] || 10);
-    const loftCeiling = Number(text.match(/\bloft\s+ceiling\s+(?:will\s+be|is|at)?\s*(\d+(?:\.\d+)?)\s*(?:ft|feet|')?/)?.[1] || 8);
-    push({
-      type: 'add_loft',
-      id: 'kitchen-loft',
-      name: 'Kitchen Loft',
-      category: 'loft',
-      x: Number(kitchen?.x ?? Math.max(2, Number(shell.widthFt || 36) - 14)),
-      y: Number(kitchen?.y ?? Math.max(2, Number(shell.depthFt || 28) - 12)),
-      z: kitchenCeiling,
-      w: Number(kitchen?.w || 14),
-      d: Number(kitchen?.d || 12),
-      h: loftCeiling,
-      level: 2,
-      reason: `Added loft above kitchen: kitchen ceiling ${kitchenCeiling}', loft ceiling ${loftCeiling}'.`
-    });
+  const towerIntent = /\btower\b/.test(text);
+  const loftMentioned = /\bloft\b|\bmezzanine\b/.test(text);
+  // "a tower above the kitchen loft" NAMES the loft as a location — it is not
+  // an ask to create one. Re-creating the loft on every tower retry is how
+  // duplicate lofts piled up.
+  const loftIsReference = towerIntent && /\b(?:above|over|atop|on top of)\s+(?:the|that|this|my)?\s*(?:[\w-]+\s+){0,2}(?:loft|mezzanine)\b/.test(text);
+  const wantsAnother = /\banother\b|\bsecond\b|\bone more\b/.test(text);
+  const existingLoft = (spec.elements || []).find((el) => el.category === 'loft' || /\bloft\b/i.test(el.name || ''));
+  const existingTower = (spec.elements || []).find((el) => el.category === 'tower' || /\btower\b/i.test(el.name || ''));
+  const wallHeightFt = Number(shell.wallHeightFt || 10);
+  let loftSkipped = false;
+  let towerSkipped = false;
+  let loftOp = null;
+
+  if (loftMentioned && !loftIsReference) {
+    if (existingLoft && !wantsAnother) {
+      loftSkipped = true;
+      assumptions.push(`${existingLoft.name} already exists, so I didn't add a second one — say "another loft" if you want two.`);
+    } else {
+      // Name and place the loft from what the prompt actually says — "over the
+      // east bay" is not a kitchen loft.
+      const overMatch = text.match(/\b(?:over|above)\s+(?:the\s+)?([a-z][a-z\- ]{1,28}?)(?=\s+(?:and|with|so|then)\b|[.,;\n]|$)/);
+      const overName = overMatch?.[1]?.trim();
+      const baseRoom = overName ? roomByName(overName) : roomByName('kitchen');
+      const dims = dimensionsNearWord(text, '(?:loft|mezzanine)') || { w: Number(baseRoom?.w || 14), d: Number(baseRoom?.d || 12) };
+      const baseCeiling = Number(text.match(/\b(?:kitchen|room)\s+ceiling\s+(?:will\s+be|is|at)?\s*(\d+(?:\.\d+)?)\s*(?:ft|feet|')?/)?.[1] || wallHeightFt);
+      const loftCeiling = Number(text.match(/\bloft\s+ceiling\s+(?:will\s+be|is|at)?\s*(\d+(?:\.\d+)?)\s*(?:ft|feet|')?/)?.[1] || 8);
+      const name = baseRoom ? `${baseRoom.name} Loft` : overName ? `${capWords(overName)} Loft` : 'Loft';
+      loftOp = {
+        type: 'add_loft',
+        id: slugify(name),
+        name,
+        category: 'loft',
+        x: Number(baseRoom?.x ?? Math.max(2, Number(shell.widthFt || 36) - dims.w - 2)),
+        y: Number(baseRoom?.y ?? Math.max(2, Number(shell.depthFt || 28) - dims.d - 2)),
+        z: baseCeiling,
+        w: dims.w,
+        d: dims.d,
+        h: loftCeiling,
+        level: 2,
+        reason: `Added ${name.toLowerCase()}${baseRoom ? ` above the ${baseRoom.name}` : ''}: ${dims.w}' × ${dims.d}', ceiling ${loftCeiling}'.`
+      };
+      push(loftOp);
+    }
   }
-  if (/\btower\b/.test(text)) {
-    const kitchen = roomByName('kitchen');
-    const kitchenCeiling = Number(text.match(/\bkitchen\s+ceiling\s+(?:will\s+be|is|at)?\s*(\d+(?:\.\d+)?)\s*(?:ft|feet|')?/)?.[1] || 10);
-    const loftCeiling = Number(text.match(/\bloft\s+ceiling\s+(?:will\s+be|is|at)?\s*(\d+(?:\.\d+)?)\s*(?:ft|feet|')?/)?.[1] || 8);
-    const towerHeight = Number(text.match(/\bextra\s+(\d+(?:\.\d+)?)\s*(?:ft|feet|')?\s+above/)?.[1] || 4);
-    const w = Math.min(12, Number(kitchen?.w || 12));
-    const d = Math.min(12, Number(kitchen?.d || 12));
-    push({
-      type: 'add_tower',
-      id: 'gabled-tower-above-kitchen-loft',
-      name: 'Gabled Tower Above Kitchen Loft',
-      category: 'tower',
-      x: Number(kitchen?.x ?? 20) + Math.max(0, (Number(kitchen?.w || 14) - w) / 2),
-      y: Number(kitchen?.y ?? 12) + Math.max(0, (Number(kitchen?.d || 12) - d) / 2),
-      z: kitchenCeiling + loftCeiling,
-      w,
-      d,
-      h: towerHeight,
-      level: 3,
-      roofType: /\bgable\b/.test(text) ? 'gable' : '',
-      reason: `Added tower above loft with ${towerHeight}' extra height${/\bgable\b/.test(text) ? ' and gable roof' : ''}.`
-    });
+  if (towerIntent) {
+    if (existingTower && !wantsAnother) {
+      towerSkipped = true;
+      assumptions.push(`${existingTower.name} already exists, so I didn't add a second one — say "another tower" if you want two.`);
+    } else {
+      // The tower stacks on the loft when one exists (in this plan or already
+      // in the model) — level 3 with the loft's headroom beneath it.
+      const baseEl = loftOp || existingLoft;
+      const dims = dimensionsNearWord(text, 'tower') || { w: Math.min(12, Number(baseEl?.w || 10)), d: Math.min(12, Number(baseEl?.d || 10)) };
+      const towerHeight = Number(text.match(/\bextra\s+(\d+(?:\.\d+)?)\s*(?:ft|feet|')?\s+above/)?.[1] || 8);
+      const z = baseEl ? Number(baseEl.z || wallHeightFt) + Number(baseEl.h || 8) : wallHeightFt;
+      const gabled = /\bgable\b/.test(text);
+      const name = gabled ? 'Gabled Tower' : 'Tower';
+      push({
+        type: 'add_tower',
+        id: slugify(name),
+        name,
+        category: 'tower',
+        x: Number(baseEl?.x ?? Math.max(2, Number(shell.widthFt || 36) - dims.w - 2)) + Math.max(0, (Number(baseEl?.w || dims.w) - dims.w) / 2),
+        y: Number(baseEl?.y ?? Math.max(2, Number(shell.depthFt || 28) - dims.d - 2)) + Math.max(0, (Number(baseEl?.d || dims.d) - dims.d) / 2),
+        z,
+        w: dims.w,
+        d: dims.d,
+        h: towerHeight,
+        level: baseEl ? 3 : 2,
+        roofType: gabled ? 'gable' : '',
+        reason: `Added ${name.toLowerCase()} ${dims.w}' × ${dims.d}'${baseEl ? ` above ${baseEl.name}` : ''} (${towerHeight}' tall).`
+      });
+    }
   }
 
   if (/\b(add|include|create|build|place|put|need|want)\b/.test(text)) {
@@ -287,13 +374,20 @@ export function localPlan(payload) {
         h: Number(shell.wallHeightFt || 10),
         reason: 'Recognized request for an additional floor/level.'
       });
-    } else if ((isLoft || isTower) && operations.some((operation) => operation.category === 'loft' || operation.category === 'tower')) {
+    } else if ((isLoft || isTower) && (operations.some((operation) => operation.category === 'loft' || operation.category === 'tower') || loftSkipped || towerSkipped || loftIsReference)) {
       assumptions.push('Loft/tower request was handled as specific stacked BIM elements, so I skipped generic object creation.');
     } else if (isOutdoor && operations.some((operation) => ['garden', 'animal'].includes(operation.category))) {
       assumptions.push('Outdoor homestead elements were handled individually, so I skipped generic site object creation.');
     } else if (isLoft || isTower || isOutdoor || !knownRoom) {
-      const nameMatch = prompt.match(/\b(?:add|include|create|build|place|put|need|want)\s+(?:a|an|the)?\s*([^.,;\n]+)/i);
+      // The article must be word-bounded: an unbounded (?:a|an|the)? once ate
+      // the "the" inside "them" and created an element literally named "m".
+      const nameMatch = prompt.match(/\b(?:add|include|create|build|place|put|need|want)\s+(?:(?:a|an|the)\s+)?([^.,;\n]+)/i);
       const rawName = (nameMatch?.[1] || 'Custom Building Element').replace(/\b(?:at|near|beside|outside|inside|with|using|as)\b.*$/i, '').trim();
+      // A name that isn't a real word is a parse failure, not an object.
+      if (rawName.replace(/[^a-zA-Z0-9]/g, '').length < 3) {
+        questions.push('What should I add? Give it a name and a size — "add a wood shed 8 × 10" — and I\'ll place it.');
+        return finishLocalPlan();
+      }
       const name = isTower ? rawName || 'Tower' : isLoft ? rawName || 'Loft' : rawName || 'Custom Building Element';
       push({
         type: 'add_element',
@@ -312,23 +406,7 @@ export function localPlan(payload) {
     }
   }
 
-  if (!operations.length) {
-    push({
-      type: 'no_change',
-      reason: 'Local fallback could not confidently map this prompt to a BIM operation.'
-    });
-  }
-
-  return {
-    source: 'local-fallback',
-    summary: operations.some((operation) => operation.type !== 'no_change')
-      ? 'Created a structured local BIM plan from the prompt.'
-      : 'No confident BIM operation found.',
-    operations,
-    warnings,
-    assumptions,
-    questions
-  };
+  return finishLocalPlan();
 }
 
 function normName(value) {

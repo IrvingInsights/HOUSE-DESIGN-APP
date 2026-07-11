@@ -139,6 +139,41 @@ export const PLAN_CONTEXT_LABEL = {
   rooms: 'Room plan — drag to move, corners to resize',
   windows: 'Openings plan — white gaps mark windows & doors'
 };
+// Collision-aware plan labels: a label may never cross its room's boundary.
+// Full name when it fits, two lines when the room is tall enough, initials
+// when tight, nothing when tiny — except the SELECTED room/element, which
+// always shows its full name on a paper halo. Returns null to draw no label.
+const LABEL_CHAR_W = 0.62; // approx glyph width as a fraction of font size
+function planLabelFit(name, w, d, isSel, maxSize = 2) {
+  const clean = String(name || '').trim();
+  if (!clean) return null;
+  const room = Math.max(0.5, w - 0.8);
+  const sizeFor = (text) => room / (Math.max(1, text.length) * LABEL_CHAR_W);
+  if (isSel) {
+    return { lines: [clean], size: Math.max(0.85, Math.min(maxSize, sizeFor(clean))), halo: true };
+  }
+  const natural = Math.min(maxSize, w / 5, d / 2.2);
+  if (natural <= 0) return null;
+  const oneLine = Math.min(natural, sizeFor(clean));
+  if (oneLine >= 0.95 && d >= 2.2) return { lines: [clean], size: oneLine, halo: false };
+  const words = clean.split(/[\s/-]+/).filter(Boolean);
+  if (words.length > 1 && d >= 4.2) {
+    // balance the words across two lines, longest line decides the size
+    let best = null;
+    for (let i = 1; i < words.length; i += 1) {
+      const a = words.slice(0, i).join(' ');
+      const b = words.slice(i).join(' ');
+      const size = Math.min(natural, sizeFor(a.length >= b.length ? a : b));
+      if (!best || size > best.size) best = { lines: [a, b], size, halo: false };
+    }
+    if (best && best.size >= 0.95) return best;
+  }
+  const initials = words.map((word) => word[0]).join('').toUpperCase();
+  const shortSize = Math.min(1.5, sizeFor(initials), d / 2.2);
+  if (initials.length >= 1 && shortSize >= 0.9 && d >= 1.8) return { lines: [initials], size: shortSize, halo: false };
+  return null;
+}
+
 export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShell, onMoveEdge, onMoveOpening, context = null, activeFloor = 1 }) {
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
@@ -382,8 +417,34 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                 pointerEvents={buildingContext || siteContext ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
               />
-              <text x={room.x + room.w / 2} y={room.y + room.d / 2 - 0.3} textAnchor="middle" fontSize={Math.min(2, room.w / 5)} fill={planLabelInk(PLAN_ZONE_HEX[raw.type] || '#79a7a8')} fontWeight="600" pointerEvents="none">{raw.name}</text>
-              <text x={room.x + room.w / 2} y={room.y + room.d / 2 + 1.5} textAnchor="middle" fontSize={Math.min(1.6, room.w / 6)} fill="#2a302d" opacity={0.75} pointerEvents="none">{raw.w}×{raw.d}′</text>
+              {(() => {
+                const lab = planLabelFit(raw.name, room.w, room.d, isSel);
+                if (!lab) return null;
+                const cx = room.x + room.w / 2;
+                const cy = room.y + room.d / 2;
+                const ink = planLabelInk(PLAN_ZONE_HEX[raw.type] || '#79a7a8');
+                const lineH = lab.size * 1.2;
+                const dimText = `${raw.w}×${raw.d}′`;
+                const dimSize = Math.min(1.4, room.w / 6);
+                // dims only when they fit under the name without touching it
+                const showDims = lab.lines.length === 1
+                  && dimText.length * dimSize * LABEL_CHAR_W <= room.w - 0.8
+                  && room.d >= lab.size + dimSize + 2.4;
+                return (
+                  <>
+                    {lab.lines.map((line, index) => (
+                      <text
+                        key={index}
+                        x={cx}
+                        y={cy - 0.3 + (index - (lab.lines.length - 1) / 2) * lineH}
+                        textAnchor="middle" fontSize={lab.size} fill={ink} fontWeight="600" pointerEvents="none"
+                        paintOrder="stroke" stroke={lab.halo ? 'rgba(246,244,236,0.85)' : 'none'} strokeWidth={lab.halo ? lab.size * 0.22 : 0}
+                      >{line}</text>
+                    ))}
+                    {showDims && <text x={cx} y={cy - 0.3 + lab.size * 0.4 + dimSize + 0.35} textAnchor="middle" fontSize={dimSize} fill="#2a302d" opacity={0.75} pointerEvents="none">{dimText}</text>}
+                  </>
+                );
+              })()}
               {isSel && ['nw', 'ne', 'sw', 'se'].map((corner) => {
                 const cx = room.x + (corner.includes('e') ? room.w : 0);
                 const cy = room.y + (corner.includes('s') ? room.d : 0);
@@ -414,7 +475,21 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                 pointerEvents={buildingContext && raw.category !== 'floor' ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
               />
-              <text x={el.x + w / 2} y={el.y + d / 2 + 0.5} textAnchor="middle" fontSize={Math.min(1.5, Math.max(w, d) / 5)} fill={planLabelInk(PLAN_ELEMENT_HEX[raw.category] || '#8a7768')} fontWeight="600" pointerEvents="none">{raw.name}</text>
+              {(() => {
+                const lab = planLabelFit(raw.name, w, d, isSel, 1.5);
+                if (!lab) return null;
+                const ink = planLabelInk(PLAN_ELEMENT_HEX[raw.category] || '#8a7768');
+                const lineH = lab.size * 1.2;
+                return lab.lines.map((line, index) => (
+                  <text
+                    key={index}
+                    x={el.x + w / 2}
+                    y={el.y + d / 2 + 0.5 + (index - (lab.lines.length - 1) / 2) * lineH}
+                    textAnchor="middle" fontSize={lab.size} fill={ink} fontWeight="600" pointerEvents="none"
+                    paintOrder="stroke" stroke={lab.halo ? 'rgba(246,244,236,0.85)' : 'none'} strokeWidth={lab.halo ? lab.size * 0.22 : 0}
+                  >{line}</text>
+                ));
+              })()}
               {isSel && ['nw', 'ne', 'sw', 'se'].map((corner) => {
                 const cx = el.x + (corner.includes('e') ? w : 0);
                 const cy = el.y + (corner.includes('s') ? d : 0);

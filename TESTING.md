@@ -7,12 +7,21 @@ building model with cost, code checks, and carbon while you design.
 
 1. Install **Node.js 20+** (nodejs.org).
 2. Double-click **start.bat** (Windows) or **Start Mac.command** (Mac —
-   first time: right-click it → Open, to get past Gatekeeper). Dependencies
-   install themselves on first run; the Mac launcher also opens the browser.
+   first time: right-click it → Open, to get past Gatekeeper). The first
+   launch installs the app's components automatically and **needs an
+   internet connection** (a few minutes); later launches are fast and
+   offline. The Mac launcher also opens the browser.
 3. Open **http://127.0.0.1:5184/** in a browser.
 
 That's the whole app: design, 3D/plan/detail views, costs, code checks,
 permit-sheet export. No other software needed.
+
+Developers running from a terminal: `npm install` once, then
+`node server.mjs` from the app folder (that's all the launchers do).
+
+Regression check if 3D ever misbehaves: open the app with `?no3d` on the URL
+— the whole app must still load in the Plan view with an explanation in the
+3D tab, never a blank page.
 
 ## Optional: Blender (only for IFC export / Blender sync)
 

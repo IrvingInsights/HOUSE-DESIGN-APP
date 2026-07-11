@@ -66,9 +66,25 @@ export async function loadProjectState(projectId = DEFAULT_PROJECT_ID) {
   return readJsonIfExists(projectStatePath(projectId));
 }
 
-export async function saveProjectState(incomingState, options = {}) {
+// Saves for one project run strictly one-after-another. Two concurrent saves
+// (an apply persisting + the 250ms autosave) once shared the same temp path
+// (.tmp-<pid>): the first rename stole the second's temp file, the second
+// threw ENOENT, and rapid UI actions surfaced as random "didn't respond"
+// failures. The chain also orders the read-modify-write, so no save works
+// from a state another save is halfway through replacing.
+const saveChains = new Map();
+let saveSequence = 0;
+
+export function saveProjectState(incomingState, options = {}) {
   const requestedId = options.projectId || incomingState?.projectId || DEFAULT_PROJECT_ID;
   const projectId = slugify(requestedId) || DEFAULT_PROJECT_ID;
+  const previousLink = saveChains.get(projectId) || Promise.resolve();
+  const run = previousLink.then(() => writeProjectState(incomingState, projectId));
+  saveChains.set(projectId, run.catch(() => {}));
+  return run;
+}
+
+async function writeProjectState(incomingState, projectId) {
   const now = new Date().toISOString();
   const previous = await loadProjectState(projectId);
   const nextState = {
@@ -85,7 +101,10 @@ export async function saveProjectState(incomingState, options = {}) {
   // retry once, then fall back to a direct copy (not atomic, but the
   // corrupt-read set-aside above still protects the worst case).
   const statePath = projectStatePath(projectId);
-  const tmpPath = `${statePath}.tmp-${process.pid}`;
+  // Unique per write — a shared temp name is what let one save's rename
+  // steal another's file. (Belt to the save-chain's braces.)
+  saveSequence += 1;
+  const tmpPath = `${statePath}.tmp-${process.pid}-${saveSequence}`;
   await fs.writeFile(tmpPath, JSON.stringify(nextState, null, 2), 'utf8');
   try {
     await fs.rename(tmpPath, statePath);

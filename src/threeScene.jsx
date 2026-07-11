@@ -50,7 +50,7 @@ function cutPlanes(spec, cut) {
   return [new THREE.Plane(new THREE.Vector3(0, 0, -1), cutZ)];
 }
 
-export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, viewRequest = null, sectionCut = 1, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview }) {
+export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, viewRequest = null, sectionCut = 1, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview, onFallbackNav }) {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraStateRef = useRef(null);
@@ -2185,6 +2185,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         <div>
           <b>The 3D view needs graphics acceleration (WebGL), and this browser has it turned off.</b>
           <p>Everything else works — design in the Plan view and tap parts there; the Detail view still draws construction sections. To see the 3D model, turn on hardware acceleration in the browser settings or open the app in another browser.</p>
+          {onFallbackNav && (
+            <div className="fallbackNav">
+              <button type="button" onClick={() => onFallbackNav('plan')}>Return to Plan</button>
+              <button type="button" className="secondary" onClick={() => onFallbackNav('detail')}>Open Detail</button>
+            </div>
+          )}
         </div>
       </div>
     );

@@ -1084,24 +1084,135 @@ export function buildTimeline(spec, derived) {
   return phases;
 }
 
-// Directional materials takeoff from the real quantities.
+// The Build page's materials list. LAW: every system the design PRICES (each
+// non-zero derived.cost line) shows up here — with a real quantity where the
+// model can compute one, and an honest "not calculated yet" where it can't.
+// Four rows under the heading "Materials takeoff" read as a complete list,
+// and a list that silently omits the walls of the house breaks trust.
 export function materialsTakeoff(spec, derived) {
   const u = derived.utilities;
   const rows = [];
+  const covered = new Set();
+  const add = (costKey, item, qty, note) => { covered.add(costKey); rows.push([item, qty, note]); };
   const perimeter = 2 * ((Number(spec.shell.widthFt) || 0) + (Number(spec.shell.depthFt) || 0));
-  if (u.foundationType === 'rubble') rows.push(['Drain rock', `${Math.round(perimeter * 1.5 * 3 / 27)} yd³`, 'perimeter trench 18" × 36"']);
-  if (u.foundationType === 'stemwall') rows.push(['Concrete (stem + footing)', `${Math.round((perimeter * derived.stemwallHeightFt * 0.67 + perimeter * 1.33 * 0.83) / 27)} yd³`, `${derived.stemwallHeightFt}' stem on footing`]);
-  if (u.foundationType === 'slab') rows.push(['Concrete (slab)', `${Math.round(derived.floor * 0.33 / 27)} yd³`, '4" slab over insulation']);
-  const baleArea = WALL_SIDES.map((side) => resolveWallSide(spec, side)).filter((r) => !r.omitted && r.assemblyKey === 'straw-bale')
-    .reduce((sum, r) => sum + (r.side === 'north' || r.side === 'south' ? Number(spec.shell.widthFt) : Number(spec.shell.depthFt)) * r.heightFt, 0);
-  if (baleArea > 0) rows.push(['Straw bales', `~${Math.ceil(baleArea / 5.5)}`, 'two-string, laid flat — plus 15% spares']);
-  const naturalFaces = WALL_SIDES.map((side) => resolveWallSide(spec, side)).filter((r) => !r.omitted && r.assemblyKey !== 'framed')
-    .reduce((sum, r) => sum + (r.side === 'north' || r.side === 'south' ? Number(spec.shell.widthFt) : Number(spec.shell.depthFt)) * r.heightFt * 2, 0);
-  if (naturalFaces > 0) rows.push(['Plaster (3 coats)', `${Math.round(naturalFaces)} sf`, 'both faces of natural walls']);
-  rows.push(['Roof cladding + sheathing', `${Math.round(derived.roofArea)} sf`, 'includes overhangs and pitch']);
-  rows.push(['Glazing', `${Math.round(derived.totalGlass)} sf`, u.windowQuality === 'triple' ? 'triple pane' : 'double pane']);
-  if (derived.panels > 0) rows.push(['Solar panels', `${derived.panels} × 400 W`, `${derived.batteryKwh > 0 ? `+ ${derived.batteryKwh} kWh battery` : 'grid-tied'}`]);
-  if (spec.systems?.structure?.toLowerCase().includes('timber')) rows.push(['Timber posts', `~${Math.ceil(perimeter / 8)}`, 'one bent post per 8 lf of perimeter']);
+
+  // Foundation
+  if (derived.basement?.present) {
+    add('foundation', 'Concrete (basement)', `${Math.round((perimeter * derived.basement.heightFt * 0.67 + derived.floor * 0.33) / 27)} yd³`, 'basement walls + slab');
+  } else if (u.foundationType === 'rubble') {
+    add('foundation', 'Drain rock', `${Math.round(perimeter * 1.5 * 3 / 27)} yd³`, 'perimeter trench 18" × 36"');
+  } else if (u.foundationType === 'stemwall') {
+    add('foundation', 'Concrete (stem + footing)', `${Math.round((perimeter * derived.stemwallHeightFt * 0.67 + perimeter * 1.33 * 0.83) / 27)} yd³`, `${derived.stemwallHeightFt}' stem on footing`);
+  } else if (u.foundationType === 'slab') {
+    add('foundation', 'Concrete (slab)', `${Math.round(derived.floor * 0.33 / 27)} yd³`, '4" slab over insulation');
+  }
+  const runs = (spec.elements || []).filter((el) => el.category === 'foundation');
+  if (runs.length) {
+    const runLf = runs.reduce((sum, el) => sum + Math.max(Number(el.w) || 0, Number(el.d) || 0), 0);
+    add('foundation', 'Foundation runs', `${Math.round(runLf)} lf`, 'strips under specific walls');
+  }
+
+  // Frame
+  if ((derived.cost.frame || 0) > 0) {
+    const frame = FRAME_TYPES[derived.frameGround] || FRAME_TYPES['load-bearing'];
+    const bay = Number(frameOf(spec).baySpacingFt) || 8;
+    if (['timber', 'post-beam', 'pole'].includes(derived.frameGround)) {
+      add('frame', `${frame.label} posts`, `~${Math.ceil(perimeter / bay)}`, `one per ${bay}′ bay — full member list: Export → Frame drawings`);
+    } else if (['stick', 'double-stud'].includes(derived.frameGround)) {
+      add('frame', 'Studs (frame)', `~${Math.ceil(perimeter / 1.33) * Math.max(1, Math.round(derived.storeys || 1)) * (derived.frameGround === 'double-stud' ? 2 : 1)}`, '16" on center — full cut list: Export → Frame drawings');
+    } else {
+      add('frame', `Frame (${frame.label.toLowerCase()})`, '—', 'not calculated yet — see Export → Frame drawings');
+    }
+  }
+
+  // Walls — one row per assembly actually on the building, both storeys.
+  const sections = getWallSections(spec).filter((wall) => !wall.omitted);
+  const areaByAssembly = new Map();
+  sections.forEach((wall) => {
+    const area = wall.lengthFt * wall.heightFt;
+    areaByAssembly.set(wall.assemblyKey, (areaByAssembly.get(wall.assemblyKey) || 0) + area);
+  });
+  for (const [key, area] of areaByAssembly) {
+    const assembly = WALL_ASSEMBLIES[key];
+    if (!assembly || area <= 0) continue;
+    if (key === 'straw-bale') add('walls', 'Straw bales', `~${Math.ceil(area / 5.5)}`, 'two-string, laid flat — plus 15% spares');
+    else if (key === 'glazed') add('walls', 'Glass wall panels', `${Math.round(area)} sf`, 'glazed wall faces');
+    else add('walls', `${assembly.label} walls`, `${Math.round(area)} sf`, 'wall face area');
+  }
+  const plasterFaces = sections.filter((wall) => !['framed', 'sips', 'ply-insulated', 'icf', 'glazed'].includes(wall.assemblyKey))
+    .reduce((sum, wall) => sum + wall.lengthFt * wall.heightFt * 2, 0);
+  if (plasterFaces > 0) add('walls', 'Plaster (3 coats)', `${Math.round(plasterFaces)} sf`, 'both faces of natural walls');
+  const claddingByType = new Map();
+  sections.forEach((wall) => {
+    const key = resolveWallSide(spec, wall.side, wall.level || 1).cladding || 'render';
+    if (key === 'render') return;
+    claddingByType.set(key, (claddingByType.get(key) || 0) + wall.lengthFt * wall.heightFt);
+  });
+  for (const [key, area] of claddingByType) {
+    const clad = CLADDING_TYPES[key];
+    if (clad && area > 0) add('walls', `Cladding (${clad.label.toLowerCase()})`, `${Math.round(area)} sf`, 'exterior faces');
+  }
+  const partitionLf = (spec.elements || []).filter((el) => el.category === 'partition')
+    .reduce((sum, el) => sum + Math.max(Number(el.w) || 0, Number(el.d) || 0), 0);
+  if (partitionLf > 0) add('walls', 'Interior walls', `${Math.round(partitionLf)} lf`, 'partition runs with doorways');
+
+  // Floor assembly
+  const subfloor = SUBFLOOR_TYPES[derived.subfloor];
+  if (subfloor && derived.subfloor !== 'slab') add('flooring', `Subfloor (${subfloor.label.split(' —')[0]})`, `${Math.round(derived.floor)} sf`, 'ground-floor deck');
+  const finish = FLOORING_TYPES[derived.flooring];
+  if (finish) add('flooring', `Finish floor (${finish.label.toLowerCase()})`, `${Math.round(derived.heatedFloor)} sf`, 'all heated floors');
+  const floorInsul = INSULATION_TYPES[derived.floorInsulation];
+  if (floorInsul && derived.floorInsulation !== 'none') add('flooring', `Floor insulation (${floorInsul.label.toLowerCase()})`, `${Math.round(derived.floor)} sf`, 'under the ground floor');
+
+  // Upper floors (storey decks, lofts, towers)
+  if ((derived.cost.upperFloors || 0) > 0) {
+    add('upperFloors', 'Upper floor structure', `${Math.round(derived.cost.upperFloors / 12)} sf`, 'joists + decking for storeys and lofts');
+  }
+
+  // Roof
+  add('roof', 'Roof cladding + sheathing', `${Math.round(derived.roofArea)} sf`, 'includes overhangs and pitch');
+  const roofInsul = INSULATION_TYPES[derived.roofInsulation];
+  if (roofInsul && derived.roofInsulation !== 'none') add('roof', `Roof insulation (${roofInsul.label.toLowerCase()})`, `${Math.round(derived.roofArea)} sf`, `R≈${derived.roofR}`);
+  add('roof', 'Roof framing (rafters)', '—', 'not calculated yet — rafters draw in Export → Frame drawings');
+
+  // Windows & doors
+  const openings = spec.openings || [];
+  const glazedCount = openings.filter((opening) => (OPENING_TYPES[opening.type] || OPENING_TYPES.window).glazed).length;
+  const doorCount = openings.length - glazedCount;
+  if (glazedCount > 0) add('windows', 'Windows', `${glazedCount}`, 'each with frame, flashing, and sill');
+  if (doorCount > 0) add('windows', 'Doors', `${doorCount}`, 'exterior doors and frames');
+  add('windows', 'Glazing', `${Math.round(derived.totalGlass)} sf`, u.windowQuality === 'triple' ? 'triple pane' : 'double pane');
+
+  // Heat
+  const heatLabels = { rocket_mass: 'Rocket mass heater', masonry: 'Masonry heater', wood_stove: 'Wood stove', minisplit: 'Mini-split heat pump' };
+  add('heat', heatLabels[u.heatSource] || 'Heating system', '1', 'plus flue/lineset — clearances on the Heat page');
+
+  // Water
+  if (u.waterSource === 'well') add('water', 'Well + pump', '1', 'depth is site-specific — not calculated yet');
+  else if (u.waterSource === 'catchment') add('water', 'Rain catchment', `${Math.round(derived.catchmentGpd)} gal/day`, 'gutters + first-flush + filtration');
+  else if (u.waterSource === 'spring') add('water', 'Spring development', '1', 'boxes and line — not calculated yet');
+  else add('water', 'Water hookup', '1', 'meter + trench to the main');
+  if ((Number(u.tankGal) || 0) > 0) add('water', 'Storage tank', `${Number(u.tankGal).toLocaleString()} gal`, 'cistern or above-ground');
+
+  // Waste
+  const wasteLabels = { septic: 'Septic system', composting: 'Composting toilet system', reedbed: 'Reed bed + greywater' };
+  add('waste', wasteLabels[u.wasteMethod] || 'Waste system', '1', u.wasteMethod === 'septic' ? 'tank + field, sized by perc test — not calculated yet' : 'sized by occupancy');
+
+  // Power
+  if (derived.panels > 0) add('power', 'Solar panels', `${derived.panels} × 400 W`, `${derived.batteryKwh > 0 ? `+ ${derived.batteryKwh} kWh battery` : 'grid-tied'}`);
+  else add('power', 'Grid connection', '1', 'panel + meter');
+
+  // Outdoors
+  const outdoorCount = (spec.elements || []).filter((el) => ['outbuilding', 'garden', 'animal', 'site'].includes(el.category)).length;
+  if ((derived.cost.outdoors || 0) > 0) add('outdoors', 'Outdoor structures & site work', `${outdoorCount || '—'} item${outdoorCount === 1 ? '' : 's'}`, 'per-item quantities not calculated yet — priced in Costs');
+
+  // COMPLETENESS SWEEP: any priced system that still has no row gets an honest
+  // placeholder — the list never silently omits something the design pays for.
+  for (const { key, label } of COST_ROWS) {
+    if ((derived.cost[key] || 0) > 0 && !covered.has(key)) {
+      rows.push([label, '—', 'not calculated yet — priced in Costs']);
+    }
+  }
   return rows;
 }
 
@@ -2505,12 +2616,18 @@ export function structuredPlanSummary(report) {
   const opening = report.actions.length
     ? `${report.summary}\n\nWhat changed:\n${report.actions.slice(0, 10).map((action) => `- ${action}`).join('\n')}`
     : `${report.summary}\n\nNothing was changed in the model.`;
+  // Truth in reporting: anything the plan asked for that did NOT apply is
+  // said out loud, never silently dropped.
+  const rejectedOps = report.rejectedOperations || [];
+  const rejected = rejectedOps.length
+    ? `\n\nCouldn't apply:\n${rejectedOps.slice(0, 6).map((operation) => `- ${operationDescription(operation, report.spec)}`).join('\n')}`
+    : '';
   const warnings = report.warnings.length ? `\n\nWatch out: ${report.warnings.join(' ')}` : '';
   const assumptions = report.assumptions.length ? `\n\nI assumed: ${report.assumptions.join(' ')}` : '';
   const questions = report.questions.length ? `\n\nTo do this better, tell me:\n${report.questions.map((item) => `- ${item}`).join('\n')}` : '';
   // Council opinions are OPT-IN (Council Loop button / Review tab), not a
   // sermon appended to every reply.
-  return `${opening}${warnings}${assumptions}${questions}`;
+  return `${opening}${rejected}${warnings}${assumptions}${questions}`;
 }
 
 export async function requestCurrentProjectState() {
