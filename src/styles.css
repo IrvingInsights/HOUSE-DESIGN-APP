@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Architects+Daughter&display=swap');
 
 :root {
   color-scheme: light;
@@ -4689,3 +4689,31 @@ button.ghost.saveButton {
   color: #7A6120;
   background: #F7EFD9;
 }
+
+/* ==== The drafting hand (2026-07-11) — lettering from the Salvetti frame
+   sheets. Rule: anything that IS a drawing letters by hand (plan labels,
+   dimensions, construction details, the wordmark); the instrument panel
+   stays typeset. Segoe Print is the local fallback — the same face the
+   frame drawings print with. ==== */
+:root { --font-hand: 'Architects Daughter', 'Segoe Print', 'Comic Sans MS', cursive; }
+
+/* The wordmark: hand-lettered like a title block signature */
+.brand h1 {
+  font-family: var(--font-hand);
+  font-size: 20px;
+  font-weight: 400;
+  letter-spacing: 0.015em;
+}
+
+/* The 2D plan letters like a drawing */
+.planSvg text { font-family: var(--font-hand); }
+.planNorth { font-family: var(--font-hand); font-weight: 400; }
+.planHint { font-family: var(--font-hand); }
+
+/* Construction details: hand-lettered callouts, like the F-sheets */
+.jointSvg text { font-family: var(--font-hand); }
+.detailTitle { font-family: var(--font-hand); font-weight: 400; }
+.detailHint { font-family: var(--font-hand); }
+
+/* Live dimension ghost while dragging — a penciled measurement */
+.dimensionBadge { font-family: var(--font-hand); }
