@@ -4778,3 +4778,66 @@ body { letter-spacing: 0.004em; }
 
 /* Headings keep slate for hierarchy — brown body, slate heads, teal actions */
 .sectionHead, .blockTitle { color: #26424C; }
+
+/* ==== SAGE STUDIO (2026-07-11, Daniel-chosen): sage green workspace with
+   teal, wheat, and wood accents. Same Drafting Studio bones — value steps,
+   one action accent — re-grounded in green. Teal = act here (unchanged),
+   wheat = highlights & identity warmth (replaces straw), wood = the sepia
+   ink and timber browns already carrying the text and the model. ==== */
+.leftPanel,
+.workspace,
+.rightPanel {
+  background: #EDF0E3;
+  --ivory: #FBFCF7;
+  --raise: #FFFFFF;
+  --vellum: #EDF0E3;
+  --line: #D6DCC6;
+  --line2: #C3CBAF;
+  --canvas: #E9EDDC;
+  --field-border: #C3CBAF;
+  --panel-2: #F3F6EA;
+  --panel-3: #EDF1DF;
+  --sage: #E0EBE7;
+  --active: #E0EBE7;
+  --straw: #D3A85C;
+}
+body,
+.app { background: #E4E8D8; }
+.leftPanel { background: #EDF0E3; border-right-color: var(--line); }
+.rightPanel { border-left-color: var(--line); }
+.workspace .topBar { background: color-mix(in srgb, #EDF0E3 94%, transparent); }
+.workspace .lowerDeck,
+.lowerDeck { background: #EDF1DF; }
+.inspectorDock { background: #E6EBD8; border-top-color: var(--line2); }
+.roomRow.element { background: #F2F4E7; }
+.roomRow.element.active { background: #F0EBD6; border-color: var(--straw); }
+.roomRow.wall { background: #EEF1E2; }
+.workspace *::-webkit-scrollbar-thumb { background: var(--line2); border-color: #EDF0E3; }
+.workspace .modelShell { border-bottom-color: var(--line); box-shadow: inset 0 0 0 1px rgba(58, 70, 45, 0.06); }
+
+/* Toolbar chips on the sage ground */
+.modelBar { border-bottom-color: var(--line); }
+.modelBar .viewModeToggle,
+.modelBar .floorTabs,
+.workspace .modelBar .changeBadge,
+.workspace .modelBar .northBadge,
+.workspace .modelBar .layersToggle {
+  background: #FBFCF7;
+  border-color: #D6DCC6;
+}
+/* Wheat takes the highlight roles straw held */
+.workspace .modelBar .northBadge { color: #B98F45; }
+.modelBar .floorTabs button.addFloor:hover { border-color: #D3A85C; background: rgba(211, 168, 92, 0.12); }
+.workspace .modelBar .layersToggle:hover,
+.workspace .modelBar .layersToggle.open { border-color: #B98F45; background: rgba(211, 168, 92, 0.14); color: #3A2F24; }
+.fineTune { border-color: var(--line); background: rgba(58, 70, 45, 0.025); }
+.fineTune > summary:hover { color: #A87F35; }
+.selChipWrap.inDock .selChip { background: #FBFCF7; border-color: #C3CBAF; }
+.selChipWrap.inDock .selChip:hover, .selChipWrap.inDock .selChip.open { border-color: #3C6472; }
+/* Wood: the secondary controls take a timber edge — all three columns */
+.leftPanel button.secondary,
+.workspace button.secondary,
+.rightPanel button.secondary { border-color: #C5AE8C; color: #6B5334; }
+.leftPanel button.secondary:hover,
+.workspace button.secondary:hover,
+.rightPanel button.secondary:hover { border-color: #8A6F4E; color: #4A3A26; }
