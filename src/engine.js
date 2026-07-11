@@ -2679,6 +2679,55 @@ export async function requestServerAppliedBim(payload) {
   return response.json();
 }
 
+// Async variant for long drawing traces: the browser aborts a fetch that
+// waits ~5 minutes for headers, but a full takeoff with self-checks can take
+// 6-8. So instead of one long request, this starts a server-side JOB (returns
+// instantly) and polls its status every few seconds — each poll is a fast
+// little request the browser is happy with. Resolves with the exact same
+// shape as requestServerAppliedBim. onNote (optional) receives the job's
+// latest progress note, e.g. "Self-check round 2…", for live UI updates.
+export async function requestServerAppliedBimAsync(payload, onNote) {
+  const request = (url) => fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...payload, async: true })
+  });
+  let base = '';
+  let response = await request('/api/bim/apply');
+  if (response.status === 404 && typeof window !== 'undefined' && window.location.port !== '5184') {
+    base = 'http://127.0.0.1:5184';
+    response = await request(`${base}/api/bim/apply`);
+  }
+  if (!response.ok) {
+    let detail = '';
+    try { detail = (await response.json())?.error || ''; } catch { /* body wasn't JSON */ }
+    throw new Error(`BIM apply failed with HTTP ${response.status}${detail ? ` — ${detail}` : ''}`);
+  }
+  const { jobId } = await response.json();
+  if (!jobId) throw new Error('BIM apply did not return a trace job id.');
+
+  const deadline = Date.now() + 15 * 60 * 1000; // hard stop: 15 minutes
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    let poll;
+    try {
+      poll = await fetch(`${base}/api/bim/job/${jobId}`);
+    } catch { continue; } // transient network blip — keep polling
+    if (poll.status === 404) {
+      throw new Error('The trace job was lost — the design engine restarted mid-trace. Send the drawing again.');
+    }
+    if (!poll.ok) continue;
+    let job;
+    try { job = await poll.json(); } catch { continue; }
+    if (typeof onNote === 'function' && job.notes?.length) {
+      onNote(job.notes[job.notes.length - 1]);
+    }
+    if (job.status === 'done') return job.result;
+    if (job.status === 'error') throw new Error(job.error || 'The trace failed on the server.');
+  }
+  throw new Error('The trace is still running after 15 minutes — the server may finish yet; reload the page in a bit to see the result.');
+}
+
 export async function requestStudioResponse(payload) {
   const request = (url) => fetch(url, {
     method: 'POST',

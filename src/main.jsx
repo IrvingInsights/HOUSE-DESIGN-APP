@@ -26,7 +26,7 @@ import {
   operationDescription, structuredPlanSummary, buildDashboardStatePayload, normalizeRooms, detectIssues, runCouncil, convertSpecApproach, deriveDesign,
   fmtMoney, fmtNum, SYSTEM_GROUPS, COST_ROWS, SYSTEM_META, expertResponse, wholeTeamResponse, reviseSpec,
   greenLeaf, greenOptStyle,
-  requestCurrentProjectState, saveDashboardStateToBackend, requestServerAppliedBim, requestStudioResponse
+  requestCurrentProjectState, saveDashboardStateToBackend, requestServerAppliedBim, requestServerAppliedBimAsync, requestStudioResponse
 } from './engine.js';
 import { createIfcSummary, createDrawingSetHtml } from './docExports.js';
 import { JointDetail, PlanView } from './planView.jsx';
@@ -221,6 +221,9 @@ function App() {
   const [geoResults, setGeoResults] = useState([]);
   const [geoStatus, setGeoStatus] = useState('');
   const [isPlanning, setIsPlanning] = useState(false);
+  // Live progress line inside the planning bubble ("Self-check round 2…") —
+  // fed by the async trace job's notes so a long trace never looks hung.
+  const [planningNote, setPlanningNote] = useState('');
   const planDragRevisionRef = useRef(false);
   const chatStreamRef = useRef(null);
   const autosaveTimerRef = useRef(null);
@@ -757,7 +760,12 @@ function App() {
         projectBrain,
         contextPacket: buildContextPacket(spec, projectBrain, selected, submittedPrompt)
       };
-      const result = await requestServerAppliedBim(payload);
+      // A drawing trace runs as an async server job (started instantly, then
+      // polled) so the browser's ~5-minute fetch limit can't cut the planner's
+      // self-check loop short. Plain prompts keep the simple synchronous call.
+      const result = attachedImages.length
+        ? await requestServerAppliedBimAsync(payload, (noteText) => setPlanningNote(noteText))
+        : await requestServerAppliedBim(payload);
       const plan = result.plan;
       const structuredReport = result.report;
       recordOperationAudit(submittedPrompt, plan, structuredReport, spec.revision, structuredReport.spec.revision);
@@ -824,6 +832,7 @@ function App() {
       setRevisionLog((items) => [`Rev ${next.revision}: Fallback parser applied changes after planner error.`, ...items]);
     } finally {
       setIsPlanning(false);
+      setPlanningNote('');
     }
   }
 
@@ -4007,7 +4016,7 @@ function App() {
               <div className="chatBubble studio planningBubble">
                 <b>Studio</b>
                 <span><span className="planningWheel" aria-hidden="true" />{chatTarget !== 'design' ? 'Consulting the team' : attachedImages.length ? 'Reading your drawing and building the model' : 'Planning the change'}<span className="planningDots"><i>.</i><i>.</i><i>.</i></span></span>
-                <small>{attachedImages.length ? 'a full takeoff runs a trace, a completeness check, then compares its own result against the drawing and corrects itself — allow up to five minutes for a big set' : 'a full drawing takeoff can take up to a minute'}</small>
+                <small>{planningNote || (attachedImages.length ? 'a full takeoff runs a trace, a completeness check, then compares its own result against the drawing and corrects itself — a big set can take several minutes, and this line reports each stage as it runs' : 'a full drawing takeoff can take up to a minute')}</small>
               </div>
             )}
           </div>

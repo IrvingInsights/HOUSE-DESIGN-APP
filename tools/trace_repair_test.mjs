@@ -1,6 +1,6 @@
 // Deterministic tests for the trace verify/repair decision + merge logic,
 // plus the offline (local) planner's honesty rules.
-import { traceLooksIncomplete, scrubDeferralSummary, mergeTracePlans, repairTraceGeometry, repairTowerStorey, localPlan, promptNeedsDrawing, cleanTraceElements, describeModelForAudit, sanitizeAuditOperations }
+import { traceLooksIncomplete, scrubDeferralSummary, mergeTracePlans, repairTraceGeometry, repairTowerStorey, localPlan, promptNeedsDrawing, cleanTraceElements, describeModelForAudit, sanitizeAuditOperations, scrubDeadOperations, manifestGaps }
   from '../backend/planner.mjs';
 
 let pass = 0, fail = 0;
@@ -243,6 +243,90 @@ ok(dimlessCheck.unmeasuredElements === true && dimlessCheck.unmeasuredElementNam
   ]);
   ok(fixes.length === 20, 'audit fixes cap at 20 per round');
   ok(fixes[0].type === 'move_object' && !fixes.some((o) => o.type === 'set_site'), 'non-corrective op types are dropped');
+}
+
+// --- measurement strictness (the Columbia St failure, 2026-07-11) -------------
+// "Added Living & Dining at 0' x 0'" — an add_room with no w/d becomes a silent
+// 10x10 placeholder. Any zero-sized room flags the takeoff for re-measurement.
+{
+  const zeroRoom = traceLooksIncomplete({
+    summary: 'Traced from A101.', warnings: [], assumptions: [],
+    operations: [
+      { type: 'add_room', name: 'Living & Dining', x: 0, y: 0, w: 0, d: 0 },
+      { type: 'add_room', name: 'Kitchen', x: 14, y: 0, w: 12, d: 11 },
+      { type: 'add_opening', wall: 'south', widthFt: 3 }
+    ]
+  }, { rooms: [] });
+  ok(zeroRoom.incomplete && zeroRoom.unmeasuredRooms === true, 'add_room without w/d = unmeasuredRooms = incomplete');
+  ok(zeroRoom.unmeasuredRoomNames.length === 1 && zeroRoom.unmeasuredRoomNames[0] === 'Living & Dining', 'unmeasured rooms named for the repair prompt');
+  const measured = traceLooksIncomplete(good, { rooms: [] });
+  ok(measured.unmeasuredRooms === false && measured.unmeasuredRoomNames.length === 0, 'fully measured takeoff: unmeasuredRooms stays quiet');
+}
+
+// --- dead-operation scrub ------------------------------------------------------
+// "Updated Kitchen ." — update_object with a name but no field and no non-zero
+// geometry is a no-op that still prints as an action. Nameless add_room too.
+{
+  const scrub = scrubDeadOperations({
+    summary: 'x', warnings: ['w1'], assumptions: [],
+    operations: [
+      { type: 'update_object', name: 'Kitchen', field: '', value: '', x: 0, y: 0, z: 0, w: 0, d: 0, h: 0 }, // dead
+      { type: 'update_object', name: 'Porch', field: 'roofType', value: 'shed' },                           // real: has field
+      { type: 'update_object', name: 'Loft', w: 14, d: 12 },                                                // real: has geometry
+      { type: 'add_room', name: '', w: 10, d: 10 },                                                         // dead: nameless
+      { type: 'add_room', name: 'Kitchen', x: 2, y: 3, w: 12, d: 11 },                                      // real
+      { type: 'resize_object', name: 'Kitchen', w: 12, d: 14 }                                              // other types untouched
+    ]
+  });
+  ok(scrub.operations.length === 4, 'scrub drops fieldless update_object + nameless add_room only');
+  ok(scrub.operations.some((o) => o.name === 'Porch') && scrub.operations.some((o) => o.type === 'update_object' && o.name === 'Loft'), 'updates with a field or real geometry survive');
+  ok(scrub.warnings.some((w) => /Dropped 2 empty operations/.test(w)), 'scrub reports the dropped count in one warning');
+  const clean = scrubDeadOperations({ summary: 'x', warnings: [], assumptions: [],
+    operations: [{ type: 'add_room', name: 'Bath', x: 0, y: 0, w: 8, d: 6 }] });
+  ok(clean.operations.length === 1 && clean.warnings.length === 0, 'scrub is silent when nothing is dead');
+}
+
+// --- drawing-manifest comparison (deterministic half of extractDrawingManifest) --
+{
+  const manifest = {
+    sheets: ['A100', 'A101', 'A201'], storeysAboveGrade: 2, hasBasement: false,
+    roomNames: ['Living Room', 'Kitchen', 'Bedroom 1', 'Bedroom 2', 'Bath'],
+    windowCount: 10, doorCount: 3, notes: ''
+  };
+  const gapPlan = {
+    summary: 'x', warnings: [], assumptions: [],
+    operations: [
+      { type: 'add_room', name: 'living-room', x: 0, y: 0, w: 14, d: 16 },   // matches via normalization
+      { type: 'add_room', name: 'KITCHEN', x: 14, y: 0, w: 12, d: 11 },      // matches via normalization
+      ...Array.from({ length: 5 }, () => ({ type: 'add_opening', wall: 'south', widthFt: 3 }))
+    ]
+  };
+  const g = manifestGaps(gapPlan, { rooms: [], shell: {} }, manifest);
+  ok(g.missingRooms.length === 3 && g.missingRooms.includes('Bedroom 1') && !g.missingRooms.includes('Living Room'), 'manifest missing-room detection normalizes names (living-room = Living Room)');
+  ok(g.lowOpenings === true && g.expectedOpenings === 13 && g.plannedOpenings === 5, '5 of 13 openings < 60% threshold = lowOpenings');
+  ok(g.storeysShort === true, 'manifest says 2 storeys, plan has 1 = storeysShort');
+  ok(g.roomsCovered === 2 && g.sheetCount === 3, 'coverage counts feed the honest warning');
+  // rooms already IN THE MODEL count as covered too
+  const g2 = manifestGaps({ summary: 'x', warnings: [], assumptions: [], operations: [] },
+    { rooms: [{ name: 'Bedroom #1' }], shell: {} }, manifest);
+  ok(!g2.missingRooms.includes('Bedroom 1'), 'existing model rooms count toward manifest coverage');
+  // enough openings + storeys set -> both flags stand down
+  const okPlan = {
+    summary: 'x', warnings: [], assumptions: [],
+    operations: [
+      { type: 'set_shell', field: 'storeys', value: '2' },
+      ...manifest.roomNames.map((n, i) => ({ type: 'add_room', name: n, ...sized(i) })),
+      ...Array.from({ length: 8 }, () => ({ type: 'add_opening', wall: 'south', widthFt: 3 }))
+    ]
+  };
+  const g3 = manifestGaps(okPlan, { rooms: [], shell: {} }, manifest);
+  ok(g3.missingRooms.length === 0 && g3.lowOpenings === false && g3.storeysShort === false, 'complete takeoff clears every manifest flag (8 >= 60% of 13)');
+  ok(manifestGaps(okPlan, { rooms: [] }, null) === null, 'no manifest = null (pipeline behaves as today)');
+  // traceLooksIncomplete folds the manifest in via its optional third arg
+  const withManifest = traceLooksIncomplete(gapPlan, { rooms: [], shell: {} }, manifest);
+  ok(withManifest.incomplete && withManifest.missingRooms === true && withManifest.lowOpenings === true, 'traceLooksIncomplete + manifest flags the same plan incomplete');
+  const withoutManifest = traceLooksIncomplete(gapPlan, { rooms: [], shell: {} });
+  ok(!withoutManifest.incomplete && withoutManifest.gaps === null, 'same plan without a manifest stays complete (old behavior preserved)');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -7,6 +7,47 @@ import { listDesigns, listProjects, loadProjectRevisions, loadProjectState, rest
 import { applyBimOperations } from './bim-core.mjs';
 import { buildContextPacket, ensureProjectBrain, updateProjectBrainAfterOperation } from './project-brain-service.mjs';
 import { respondFromStudioAgent } from './studio-agent-service.mjs';
+import { getTraceJob, startTraceJob } from './trace-jobs.mjs';
+
+// The one true apply path: plan (if needed) -> apply ops -> update the project
+// brain -> persist. Both the synchronous POST /api/bim/apply route and the
+// async trace-job path run THIS function, so saving and the response shape are
+// identical no matter how the request arrived.
+async function runBimApply(payload) {
+  const currentState = payload.state || {};
+  const spec = payload.bim || payload.spec || currentState.spec;
+  if (!spec?.shell || !Array.isArray(spec?.rooms)) {
+    const invalid = new Error('Missing valid BIM spec.');
+    invalid.statusCode = 400;
+    throw invalid;
+  }
+  const projectBrain = ensureProjectBrain(payload.projectBrain || currentState.projectBrain, spec);
+  const contextPacket = payload.contextPacket || buildContextPacket(spec, projectBrain, payload.selected, payload.prompt);
+  const plan = payload.plan || await aiPlan({ ...payload, projectBrain, contextPacket });
+  const report = applyBimOperations(spec, plan);
+  const nextBrain = updateProjectBrainAfterOperation(projectBrain, report.spec, {
+    prompt: payload.prompt || plan.summary || 'Backend BIM operation',
+    source: report.source || plan.source || 'planner',
+    beforeRevision: spec.revision,
+    afterRevision: report.spec.revision,
+    actions: report.actions || [],
+    changedIds: report.changedIds || [],
+    issues: report.issues || [],
+    summary: report.summary
+  });
+  let nextState = {
+    ...currentState,
+    projectId: currentState.projectId || DEFAULT_PROJECT_ID,
+    spec: report.spec,
+    projectBrain: nextBrain,
+    savedAt: currentState.savedAt || new Date().toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+  };
+  if (payload.persist !== false) {
+    const saved = await saveProjectState(nextState, { projectId: nextState.projectId || DEFAULT_PROJECT_ID });
+    nextState = saved.state;
+  }
+  return { ok: true, plan, report, state: nextState };
+}
 
 export async function handleApiRoute(req, res, pathname) {
   if (req.method === 'GET' && pathname === '/api/projects') {
@@ -132,49 +173,48 @@ export async function handleApiRoute(req, res, pathname) {
   if (req.method === 'POST' && pathname === '/api/bim/apply') {
     try {
       const payload = await readJson(req);
-      const currentState = payload.state || {};
-      const spec = payload.bim || payload.spec || currentState.spec;
-      if (!spec?.shell || !Array.isArray(spec?.rooms)) {
-        sendJson(res, 400, { error: 'Missing valid BIM spec.' });
+      if (payload?.async === true) {
+        // Async mode: kick the job off and answer immediately with the jobId
+        // so the browser never sits on a multi-minute request. jobMode gives
+        // the planner's self-check loop a full budget — no fetch to outlive.
+        const { jobId } = startTraceJob((note) => runBimApply({
+          ...payload,
+          async: false,
+          jobMode: true,
+          auditBudgetMs: Number(payload.auditBudgetMs) || 480000,
+          onNote: note
+        }));
+        sendJson(res, 200, { ok: true, jobId });
         return true;
       }
-      const projectBrain = ensureProjectBrain(payload.projectBrain || currentState.projectBrain, spec);
-      const contextPacket = payload.contextPacket || buildContextPacket(spec, projectBrain, payload.selected, payload.prompt);
-      const plan = payload.plan || await aiPlan({ ...payload, projectBrain, contextPacket });
-      const report = applyBimOperations(spec, plan);
-      const nextBrain = updateProjectBrainAfterOperation(projectBrain, report.spec, {
-        prompt: payload.prompt || plan.summary || 'Backend BIM operation',
-        source: report.source || plan.source || 'planner',
-        beforeRevision: spec.revision,
-        afterRevision: report.spec.revision,
-        actions: report.actions || [],
-        changedIds: report.changedIds || [],
-        issues: report.issues || [],
-        summary: report.summary
-      });
-      let nextState = {
-        ...currentState,
-        projectId: currentState.projectId || DEFAULT_PROJECT_ID,
-        spec: report.spec,
-        projectBrain: nextBrain,
-        savedAt: currentState.savedAt || new Date().toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
-      };
-      if (payload.persist !== false) {
-        const saved = await saveProjectState(nextState, { projectId: nextState.projectId || DEFAULT_PROJECT_ID });
-        nextState = saved.state;
-      }
-      sendJson(res, 200, {
-        ok: true,
-        plan,
-        report,
-        state: nextState
-      });
+      sendJson(res, 200, await runBimApply(payload));
     } catch (error) {
-      sendJson(res, 500, {
-        ok: false,
-        error: error?.message || String(error)
-      });
+      if (error?.statusCode === 400) {
+        sendJson(res, 400, { error: error.message });
+      } else {
+        sendJson(res, 500, {
+          ok: false,
+          error: error?.message || String(error)
+        });
+      }
     }
+    return true;
+  }
+
+  if (req.method === 'GET' && pathname.startsWith('/api/bim/job/')) {
+    const jobId = decodeURIComponent(pathname.slice('/api/bim/job/'.length));
+    const job = getTraceJob(jobId);
+    if (!job) {
+      sendJson(res, 404, { error: 'No such job — the engine may have restarted since it was started.' });
+      return true;
+    }
+    sendJson(res, 200, {
+      status: job.status,
+      notes: job.notes,
+      startedAt: job.startedAt,
+      ...(job.status === 'done' ? { result: job.result } : {}),
+      ...(job.status === 'error' ? { error: job.error } : {})
+    });
     return true;
   }
 

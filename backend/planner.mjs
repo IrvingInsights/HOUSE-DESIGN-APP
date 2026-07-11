@@ -414,11 +414,48 @@ function normName(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
+// Compare a takeoff against the drawing's OWN index (the manifest that
+// extractDrawingManifest pulls from the sheets): which labeled rooms are
+// missing from the plan, whether the opening count falls far short, whether
+// the storey count disagrees. Pure + exported for unit tests — the Gemini
+// extraction is stochastic, this comparison is not. Returns null without a
+// manifest so callers keep today's behavior exactly.
+export function manifestGaps(plan, sourceSpec, manifest) {
+  if (!manifest || typeof manifest !== 'object') return null;
+  const ops = plan.operations || [];
+  const roomNames = (Array.isArray(manifest.roomNames) ? manifest.roomNames : [])
+    .map((n) => String(n || '').trim()).filter(Boolean);
+  const have = new Set([
+    ...((sourceSpec?.rooms || []).map((r) => normName(r.name))),
+    ...ops.filter((o) => o.type === 'add_room').map((o) => normName(o.name))
+  ].filter(Boolean));
+  const missingRooms = roomNames.filter((name) => !have.has(normName(name)));
+  const windowCount = Math.max(0, Number(manifest.windowCount) || 0);
+  const doorCount = Math.max(0, Number(manifest.doorCount) || 0);
+  const expectedOpenings = windowCount + doorCount;
+  const plannedOpenings = ops.filter((o) => o.type === 'add_opening').length + (sourceSpec?.openings || []).length;
+  const lowOpenings = expectedOpenings > 0 && plannedOpenings < expectedOpenings * 0.6;
+  const storeysAboveGrade = Number(manifest.storeysAboveGrade) || 0;
+  let plannedStoreys = Number(sourceSpec?.shell?.storeys || 1);
+  for (const op of ops) {
+    if (op.type === 'set_shell' && op.field === 'storeys' && Number(op.value) > plannedStoreys) plannedStoreys = Number(op.value);
+  }
+  const storeysShort = storeysAboveGrade >= 2 && plannedStoreys < 2;
+  const sheetCount = Array.isArray(manifest.sheets) ? manifest.sheets.length : 0;
+  return {
+    roomNames, missingRooms, roomsCovered: roomNames.length - missingRooms.length,
+    windowCount, doorCount, expectedOpenings, plannedOpenings, lowOpenings,
+    storeysAboveGrade, storeysShort, sheetCount
+  };
+}
+
 // A takeoff of an attached drawing should be COMPLETE: real rooms AND real
 // openings. gemini-flash is capable but inconsistent — on an unlucky pass it
 // sets the shell and then defers the layout ("noted for future refinement",
-// the phrase the mandate bans). Detect that so we can repair it.
-export function traceLooksIncomplete(plan, sourceSpec) {
+// the phrase the mandate bans). Detect that so we can repair it. Optional
+// third arg: the drawing's own manifest (extractDrawingManifest) — when
+// present, the takeoff is also held against what the sheets actually list.
+export function traceLooksIncomplete(plan, sourceSpec, manifest = null) {
   const ops = plan.operations || [];
   const addRooms = ops.filter((o) => o.type === 'add_room').length;
   const addOpenings = ops.filter((o) => o.type === 'add_opening').length;
@@ -458,7 +495,25 @@ export function traceLooksIncomplete(plan, sourceSpec) {
   const dimless = elementOps.filter((o) => !Number(o.w) && !Number(o.d));
   const unmeasuredElements = dimless.length >= 3;
   const unmeasuredElementNames = dimless.map((o) => o.name).filter(Boolean);
-  return { incomplete: deferred || addOpenings === 0 || totalRooms < 2 || noStair || badGeometry || unmeasuredElements, addRooms, addOpenings, totalRooms, deferred, noStair, badGeometry, unmeasuredElements, unmeasuredElementNames };
+  // ZERO-SIZED ROOMS: "Added Living & Dining at 0' x 0'" — the op arrived with
+  // no w/d, so the backend drops in a silent 10x10 placeholder. The AI's prose
+  // usually PROVES it read the dimension strings; the numbers just never made
+  // it into the operation. Name each such room so the repair pass re-measures.
+  const zeroSized = roomOps.filter((o) => !Number(o.w) || !Number(o.d));
+  const unmeasuredRooms = zeroSized.length > 0;
+  const unmeasuredRoomNames = zeroSized.map((o) => o.name).filter(Boolean);
+  // MANIFEST cross-check: rooms the drawing's own index lists that the takeoff
+  // lacks, or an opening count far short of the schedules.
+  const gaps = manifest ? manifestGaps(plan, sourceSpec, manifest) : null;
+  const missingRooms = Boolean(gaps && gaps.missingRooms.length);
+  const lowOpenings = Boolean(gaps && gaps.lowOpenings);
+  return {
+    incomplete: deferred || addOpenings === 0 || totalRooms < 2 || noStair || badGeometry || unmeasuredElements || unmeasuredRooms || missingRooms || lowOpenings,
+    addRooms, addOpenings, totalRooms, deferred, noStair, badGeometry,
+    unmeasuredElements, unmeasuredElementNames,
+    unmeasuredRooms, unmeasuredRoomNames,
+    missingRooms, lowOpenings, gaps
+  };
 }
 
 // Deterministic tower rescue: when a takeoff says storeys > 1 but leaves the
@@ -669,12 +724,75 @@ export function scrubDeferralSummary(plan) {
   return plan;
 }
 
+// Drop operations that LOOK like actions but do nothing: update_object with a
+// name but no field and no non-zero geometry prints "Updated Kitchen ." and
+// changes nothing; add_room with no name creates an unnameable placeholder.
+// Both erode trust — the action log claims work the model never received.
+// Deterministic, no AI. Exported for unit tests.
+export function scrubDeadOperations(plan) {
+  const ops = plan.operations || [];
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const kept = ops.filter((op) => {
+    if (!op || typeof op !== 'object') return false;
+    if (op.type === 'update_object') {
+      const hasField = String(op.field || '').trim() !== '';
+      const hasGeometry = ['x', 'y', 'z', 'w', 'd', 'h'].some((k) => num(op[k]) !== 0);
+      return hasField || hasGeometry;
+    }
+    if (op.type === 'add_room') return String(op.name || '').trim() !== '';
+    return true;
+  });
+  const dropped = ops.length - kept.length;
+  if (dropped > 0) {
+    plan.operations = kept;
+    plan.warnings = [...(plan.warnings || []), `Dropped ${dropped} empty operation${dropped === 1 ? '' : 's'} the AI emitted without content.`];
+  }
+  return plan;
+}
+
+// SLIM manifest schema: only roomNames is required — the codebase learned the
+// hard way that fat required-lists push responses past the token cap.
+const manifestSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['roomNames'],
+  properties: {
+    sheets: { type: 'array', items: { type: 'string' } },
+    storeysAboveGrade: { type: 'number' },
+    hasBasement: { type: 'boolean' },
+    roomNames: { type: 'array', items: { type: 'string' } },
+    windowCount: { type: 'number' },
+    doorCount: { type: 'number' },
+    notes: { type: 'string' }
+  }
+};
+
+// One small dedicated Gemini call that reads the drawing set as an INDEX, not
+// a takeoff: sheet list, storey count, room names, opening totals. The later
+// completeness checks hold the trace against this checklist. Failure-tolerant:
+// any error returns null and the pipeline behaves exactly as it does today.
+export async function extractDrawingManifest({ attachmentParts }) {
+  if (!attachmentParts?.length) return null;
+  const prompt = {
+    text: 'Inventory the attached construction drawing set. List sheet names/numbers you can see, count storeys above grade, whether there is a basement level, every room NAME labeled on the floor plans (each once), and total exterior windows and doors (from schedules if present, else count the plans). Report only what the drawings show.'
+  };
+  try {
+    const res = await callGemini({ parts: [prompt, ...attachmentParts], responseSchema: geminiSchema(manifestSchema) });
+    if (!res?.ok) return null;
+    const manifest = JSON.parse(res.text);
+    if (!manifest || typeof manifest !== 'object' || !Array.isArray(manifest.roomNames) || !manifest.roomNames.length) return null;
+    return manifest;
+  } catch {
+    return null;
+  }
+}
+
 // One focused repair call: hand the model what it already produced and the
 // same drawing, and ask ONLY for the rooms/openings it still owes. Merge the
 // missing pieces in (dedup rooms by name). Model-agnostic — makes a flaky
 // single pass reliable without a full multi-stage rework.
-async function repairTraceIfNeeded(plan, { attachmentParts, sourceSpec }) {
-  const check = traceLooksIncomplete(plan, sourceSpec);
+async function repairTraceIfNeeded(plan, { attachmentParts, sourceSpec, manifest = null }) {
+  const check = traceLooksIncomplete(plan, sourceSpec, manifest);
   if (!check.incomplete) return scrubDeferralSummary(plan);
 
   const already = [
@@ -695,6 +813,8 @@ Emit ONLY the operations still MISSING to complete the takeoff:
 ${check.badGeometry ? `- YOUR ROOM GEOMETRY WAS NOT MEASURED (identical default sizes and/or negative coordinates). For EVERY room already listed above, emit ONE update pass: move_object (name, x, y) + resize_object (name, w, d) with that room's REAL measured position and size from the floor plan, in feet, origin at the shell's northwest corner, all coordinates >= 0. Rooms come in different sizes — read each one off the plan.
 - Also re-check the shell: set_shell w and d must be the conditioned footprint's overall dimension strings from the drawing.` : ''}
 ${check.unmeasuredElements ? `- THESE ELEMENTS WERE EMITTED WITHOUT SIZES: ${check.unmeasuredElementNames.join(', ')}. For EACH one, emit resize_object (name, w, d) + move_object (name, x, y) with its REAL measured footprint and position from the plan — a stair is a stair-sized rectangle, a heater a heater-sized one; porches and decks have drawn outlines. Never leave an element at a default size.` : ''}
+${check.unmeasuredRooms ? `- THESE ROOMS WERE ADDED WITHOUT MEASUREMENTS: ${check.unmeasuredRoomNames.join(', ')}. Your notes prove you read the dimension strings — for EACH, emit resize_object (name, w, d) + move_object (name, x, y) with its measured size and position in feet from the plan. A room without a size is not traced.` : ''}
+${check.gaps && (check.missingRooms || check.lowOpenings || check.gaps.storeysShort) ? `- THE DRAWING'S OWN INDEX SAYS: rooms ${check.gaps.roomNames.join(', ')}; ~${check.gaps.windowCount} windows, ${check.gaps.doorCount} doors.${check.missingRooms ? ` Missing from your takeoff: ${check.gaps.missingRooms.join(', ')}. Add each with measured size and position.` : ''}${check.lowOpenings ? ` Only ${check.gaps.plannedOpenings} opening${check.gaps.plannedOpenings === 1 ? ' is' : 's are'} placed so far — trace the rest from the plans and schedules.` : ''}${check.gaps.storeysShort ? ` The index counts ${check.gaps.storeysAboveGrade} storeys above grade but the takeoff has fewer — set_shell field:'storeys' with the drawn count and put the upper-floor rooms on level 2.` : ''}` : ''}
 Do NOT restate the shell or footprint unless the earlier value is wrong. NEVER defer, summarize, or write "future refinement" — emit the operations. Report final counts in summary.`
   };
 
@@ -748,7 +868,7 @@ const AUDIT_ROUNDS = 2;
 // the server keeps working, which reads as "the engine died". Budget the
 // loop: a round only STARTS while total planning time is under this.
 const AUDIT_TIME_BUDGET_MS = 200 * 1000;
-async function auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt = Date.now(), force = false }) {
+async function auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt = Date.now(), force = false, budgetMs = AUDIT_TIME_BUDGET_MS, note = null }) {
   if (!attachmentParts?.length) return plan;
   if (!(plan.operations || []).length && !force) return plan;
   plan.operations ||= [];
@@ -761,10 +881,11 @@ async function auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt = D
     return plan; // simulation failed — ship the plan as-is rather than stall
   }
   for (let round = 1; round <= AUDIT_ROUNDS; round += 1) {
-    if (Date.now() - startedAt > AUDIT_TIME_BUDGET_MS) {
+    if (Date.now() - startedAt > budgetMs) {
       plan.warnings = [...(plan.warnings || []), `Self-check stopped after ${round - 1} round${round === 2 ? '' : 's'} — a large drawing set uses the time up; say "re-check the trace against the drawing" to run another pass.`];
       break;
     }
+    note?.(`Self-check round ${round}…`);
     const auditText = {
       text: `AUDIT PASS — you already traced the attached drawing(s) into a BIM model. Below is the model EXACTLY as it stands after your trace. Compare it against the drawings and correct real discrepancies.
 
@@ -853,6 +974,10 @@ export function mergeTracePlans(plan, extra, sourceSpec, alreadyNames, options =
 export async function aiPlan(payload) {
   if (!hasGemini() && !process.env.OPENAI_API_KEY) return localPlan(payload);
   const startedAt = Date.now();
+  // Progress notes for the async trace-job path; absent = no-op everywhere.
+  const note = typeof payload.onNote === 'function' ? payload.onNote : null;
+  const auditBudgetMs = Number(payload.auditBudgetMs) || AUDIT_TIME_BUDGET_MS;
+  if ((payload.attachedImages || []).length) note?.('Reading the drawing…');
 
   const cacheKey = makeCacheKey({
     kind: 'planner',
@@ -1012,24 +1137,42 @@ ${payload.prompt}`
     // A FRESH drawing takeoff must be complete — verify and repair a punted
     // pass. Follow-up edits skip this (repairing an edit re-adds duplicates).
     if (freshTrace) {
-      // Deterministic geometry rescue first (origin + shell), then the AI
-      // repair for anything missing or unmeasured, then rescue again in case
-      // the repair itself added rooms in a stray frame.
-      plan = repairTraceGeometry(plan, sourceSpec);
       const attachmentParts = geminiParts(content.filter((c) => c.type === 'input_image'));
-      plan = await repairTraceIfNeeded(plan, { attachmentParts, sourceSpec });
+      // The drawing's own INDEX first: a slim dedicated extraction the later
+      // completeness checks hold the takeoff against. Failure-tolerant — a
+      // null manifest means every later step behaves exactly as before.
+      note?.('Indexing the drawing set…');
+      let manifest = null;
+      try { manifest = await extractDrawingManifest({ attachmentParts }); } catch { manifest = null; }
+      // Dead-op scrub first (fieldless updates, nameless rooms), then the
+      // deterministic geometry rescue (origin + shell), then the AI repair
+      // for anything missing or unmeasured, then rescue again in case the
+      // repair itself added rooms in a stray frame.
+      plan = scrubDeadOperations(plan);
+      plan = repairTraceGeometry(plan, sourceSpec);
+      note?.('Completeness check…');
+      plan = await repairTraceIfNeeded(plan, { attachmentParts, sourceSpec, manifest });
+      plan = scrubDeadOperations(plan);
       plan = repairTraceGeometry(plan, sourceSpec);
       plan = repairTowerStorey(plan, sourceSpec);
       plan = cleanTraceElements(plan, sourceSpec);
       // CYCLE until faithful: simulate the applied model, show the AI its own
       // result next to the drawing, take its corrections, check again.
-      plan = await auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt });
+      plan = await auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt, budgetMs: auditBudgetMs, note });
       plan = repairTraceGeometry(plan, sourceSpec);
+      // Surface the index honestly: what the sheets list vs what got traced.
+      if (manifest) {
+        const finalGaps = manifestGaps(plan, sourceSpec, manifest);
+        if (finalGaps) {
+          plan.warnings = [...(plan.warnings || []),
+            `Drawing index: ${finalGaps.roomNames.length} rooms, ${finalGaps.windowCount} windows, ${finalGaps.doorCount} doors across ${finalGaps.sheetCount} sheet${finalGaps.sheetCount === 1 ? '' : 's'} — takeoff covers ${finalGaps.roomsCovered} of ${finalGaps.roomNames.length} rooms.`];
+        }
+      }
     } else if (asksAudit && sendAttachments) {
       // Audit-only ask ("re-check the trace against the drawing"): compare
       // the CURRENT model to the drawing and emit only the corrections.
       const attachmentParts = geminiParts(content.filter((c) => c.type === 'input_image'));
-      plan = await auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt, force: true });
+      plan = await auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt, force: true, budgetMs: auditBudgetMs, note });
       plan = repairTraceGeometry(plan, sourceSpec);
       if (!(plan.operations || []).length && !String(plan.summary || '').trim()) {
         plan.summary = 'Checked the model against the drawing — no discrepancies worth correcting.';
