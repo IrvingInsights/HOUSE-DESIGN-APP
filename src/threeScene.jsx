@@ -99,9 +99,9 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     const mount = mountRef.current;
     if (!mount) return undefined;
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xe9e1cf);
+    scene.background = new THREE.Color(0xf0ece1);
     // Faint atmospheric falloff so the site melts into the paper backdrop.
-    scene.fog = new THREE.Fog(0xe9e1cf, 220, 520);
+    scene.fog = new THREE.Fog(0xf0ece1, 220, 520);
 
     const camera = new THREE.PerspectiveCamera(45, mount.clientWidth / mount.clientHeight, 0.1, 2000);
     if (cameraStateRef.current?.position) {

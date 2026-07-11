@@ -4548,3 +4548,144 @@ button.danger:hover,
 .workspace .modelBar .layersToggle:hover,
 .workspace .modelBar .layersToggle.open { border-color: #C9A24B; background: rgba(201, 162, 75, 0.12); color: #ECE4D6; }
 .workspace .modelBar .layersToggle.filtered { background: rgba(169, 120, 31, 0.2); border-color: #D9B36A; color: #D9B36A; }
+
+/* ==== DRAFTING STUDIO (2026-07-11, Daniel-chosen direction) ====
+   Light and airy: warm paper ground, near-white cards (real VALUE STEPS —
+   the dark theme's failure was a 4-point value band), deep ink, ONE slate
+   accent. The sunlit scene now blends with the page instead of sitting in
+   a dark frame. Morning light on a drafting table. */
+.leftPanel,
+.workspace,
+.rightPanel {
+  background: #F3F0E8;
+  color: #22251F;
+  --ink: #22251F;
+  --ink2: #565A4F;
+  --ink3: #83887B;
+  --ivory: #FCFBF7;
+  --raise: #FFFFFF;
+  --vellum: #F3F0E8;
+  --line: #DCD8CA;
+  --line2: #C9C4B4;
+  --sage: #E2ECEE;
+  --plum: #26424C;
+  --evergreen: #3C6472;
+  --canvas: #EFEBE0;
+  --muted: #83887B;
+  --field: #FFFFFF;
+  --field-border: #C9C4B4;
+  --active: #E2ECEE;
+  --active-line: #3C6472;
+  --panel-2: #F7F5EE;
+  --panel-3: #F1EEE5;
+  --good: #3E7B53;
+  --good-bg: #E4EFE3;
+  --warn: #A9781F;
+  --warn-bg: #F3EAD3;
+  --bad: #AE452F;
+  --bad-bg: #F6E3DC;
+  --clay: #B4623F;
+  --straw: #C9A24B;
+  --limesage: #7E8A6A;
+}
+
+/* Ground + edges: page slightly deeper than the columns so edges define
+   themselves with light, not dark borders. */
+body,
+.app { background: #EAE6DB; }
+.leftPanel { border-right-color: var(--line); background: #F3F0E8; }
+.rightPanel { border-left-color: var(--line); }
+
+/* Cards float on the paper: near-white + a soft warm shadow (the value
+   step the dark theme never had). */
+.brand,
+.panelBlock,
+.elementLibrary details,
+.workspace .bimEditor,
+.workspace .planMove {
+  background: var(--ivory);
+  border-color: var(--line);
+  box-shadow: 0 1px 3px rgba(62, 55, 45, 0.07), 0 6px 18px -14px rgba(62, 55, 45, 0.2);
+}
+.workspace .lowerDeck,
+.lowerDeck { background: #F1EEE5; }
+.workspace .topBar { background: color-mix(in srgb, #F3F0E8 94%, transparent); }
+.workspace .modelShell {
+  border-bottom-color: var(--line);
+  box-shadow: inset 0 0 0 1px rgba(62, 55, 45, 0.06);
+}
+.roomRow.element { background: #F5F1E6; }
+.roomRow.element.active { background: #F1E9D4; border-color: var(--straw); }
+.roomRow.wall { background: #EFEDE4; border-left-color: var(--active-line); }
+.roomRow.wall.active { background: var(--sage); }
+.workspace *::-webkit-scrollbar-thumb { background: var(--line2); border-color: #F3F0E8; }
+
+/* ONE accent: slate. Primary actions, active tabs, the journey rail. */
+button { background: var(--evergreen); }
+.modeTabs button.active,
+.consoleTabs button.active,
+.systemTabs button.active,
+.viewModeToggle button.active { background: var(--evergreen); border-color: var(--evergreen); color: #fff; }
+.systemRail button.railNext { background: var(--evergreen); border-color: var(--evergreen); color: #fff; }
+.chatUnread { background: var(--evergreen); }
+.brandMark { background: linear-gradient(140deg, #3C6472, #26424C); }
+.welcomeHow b { color: #26424C; }
+
+/* The model toolbar chips return to paper — the whole app is paper now. */
+.modelBar { border-bottom-color: var(--line); }
+.modelBar .viewModeToggle,
+.modelBar .floorTabs,
+.workspace .modelBar .changeBadge,
+.workspace .modelBar .northBadge,
+.workspace .modelBar .layersToggle {
+  --ivory: #FCFBF7;
+  --sage: #E2ECEE;
+  --line: #DCD8CA;
+  background: #FCFBF7;
+  border-color: #DCD8CA;
+  color: #565A4F;
+}
+.workspace .modelBar .northBadge { color: #3C6472; }
+.modelBar .viewModeToggle button, .modelBar .floorTabs button { color: #565A4F; }
+.modelBar .viewModeToggle button:hover, .modelBar .floorTabs button:hover { background: #E2ECEE; color: #22251F; }
+.modelBar .viewModeToggle button.active, .modelBar .floorTabs button.active { background: #3C6472; color: #fff; }
+.workspace .modelBar .layersToggle:hover,
+.workspace .modelBar .layersToggle.open { border-color: #3C6472; background: #E2ECEE; color: #22251F; }
+.workspace .modelBar .layersToggle.filtered { background: #F3EAD3; border-color: #E2D1A5; color: #A9781F; }
+
+/* Pinned inspector: a shaded paper tray, not a dark pit. */
+.inspectorDock {
+  background: #EFECE2;
+  border-top-color: var(--line2);
+  box-shadow: 0 -10px 22px -20px rgba(62, 55, 45, 0.5);
+}
+.dockCollapse { border-color: var(--line2); color: var(--ink2); }
+.dockCollapse:hover { border-color: var(--evergreen); color: var(--ink); }
+.fineTune { border-color: var(--line); background: rgba(62, 55, 45, 0.025); }
+.fineTune > summary:hover { color: var(--evergreen); }
+
+/* A little scale confidence: identity and verdict moments get room. */
+.brand h1 { font-size: 21px; letter-spacing: 0.01em; }
+
+/* Drafting Studio stragglers: the in-dock selection chip fell back to a
+   dark --card, and the Save button kept its dark-amber dress. */
+.leftPanel, .workspace, .rightPanel { --card: #FCFBF7; }
+.selChipWrap.inDock .selChip {
+  background: #FCFBF7;
+  border-color: #C9C4B4;
+  color: #22251F;
+}
+.selChipWrap.inDock .selChip b { color: #22251F; }
+.selChipWrap.inDock .selChip .selDetail { color: #83887B; }
+.selChipWrap.inDock .selChip:hover, .selChipWrap.inDock .selChip.open { border-color: #3C6472; }
+.selChipWrap.inDock .selMenu button { color: #22251F; }
+.selChipWrap.inDock .selMenu button:hover { background: #E2ECEE; }
+.selChipWrap.inDock .selMenu button.active { background: #E2ECEE; color: #26424C; }
+.selChipWrap.inDock .selMenu button small,
+.selChipWrap.inDock .selMenu .selMenuEyebrow { color: #83887B; }
+.workspace button.ghost.saveButton,
+button.ghost.saveButton {
+  border-color: #C9A24B;
+  color: #7A6120;
+  background: #F7EFD9;
+}
