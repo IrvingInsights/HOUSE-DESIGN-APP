@@ -2711,7 +2711,8 @@ export function buildDashboardStatePayload({
   projectBrain,
   chatMessages,
   modelLayers,
-  buildProgress
+  buildProgress,
+  visitedSystems
 }) {
   return {
     version: 1,
@@ -2732,7 +2733,8 @@ export function buildDashboardStatePayload({
     projectBrain,
     chatMessages: compactChatForStorage(chatMessages),
     modelLayers,
-    buildProgress
+    buildProgress,
+    visitedSystems
   };
 }
 

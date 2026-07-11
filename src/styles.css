@@ -4412,3 +4412,45 @@ button.danger:hover,
   box-shadow: none;
 }
 .planFrameToggle button.active { background: #3C6472; color: #fff; }
+
+/* ---- The design journey (2026-07-11): quiet progress + a hand through
+   the build order + calmer rhythm. ---- */
+/* Nav dots: hollow = not visited, sage = you've been through it, clay = a
+   check is failing. A glance shows ground covered on the way to complete. */
+.sysDot { background: transparent; border: 1.5px solid var(--line2, #CAC8BB); }
+.sysDot.done { background: var(--limesage, #7E8A6A); border-color: var(--limesage, #7E8A6A); }
+.sysDot.flag { border-color: var(--bad, #AE452F); }
+.systemTabs button.active .sysDot { background: var(--straw, #C9A24B); border-color: var(--straw, #C9A24B); }
+.systemTabs button.active .sysDot.flag { background: var(--bad, #AE452F); border-color: var(--bad, #AE452F); }
+
+/* Journey rail at the foot of every system page */
+.systemRail {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line, #423931);
+}
+.systemRail button {
+  min-height: 30px;
+  padding: 3px 13px;
+  font-size: 12px;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid var(--line, #423931);
+  color: var(--ink2, #B9AF9F);
+}
+.systemRail button:hover { border-color: var(--straw, #C9A24B); color: var(--ink); }
+.systemRail button.railNext {
+  background: var(--clay, #B4623F);
+  border-color: var(--clay, #B4623F);
+  color: #FBF6EE;
+}
+.systemRail button.railNext:hover { filter: brightness(1.08); }
+
+/* Calmer rhythm: room to breathe between a page's ideas */
+.systemPage .sectionHead { margin-top: 20px; }
+.systemPage .sectionHead:first-child { margin-top: 6px; }
+.systemPage .systemNote { line-height: 1.55; }

@@ -135,6 +135,9 @@ function App() {
   // find-it — the old smooth-scroll bridge was cancelled by the 3D rebuild
   // that fires on the same selection, so tapping a wall looked like a no-op).
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  // The design journey: systems the user has opened get a quiet sage dot in
+  // the nav — a sense of ground covered on the way to a complete design.
+  const [visitedSystems, setVisitedSystems] = useState(() => initialSaved?.visitedSystems || ['shell']);
   const [dimensionPreview, setDimensionPreview] = useState(null);
   const [savedAt, setSavedAt] = useState(() => initialSaved?.savedAt || '');
   const [libraryActionMode, setLibraryActionMode] = useState(() => initialSaved?.libraryActionMode || 'apply');
@@ -259,6 +262,7 @@ function App() {
     setLibraryActionMode(snapshot.libraryActionMode || 'apply');
     setModelLayers({ ...DEFAULT_MODEL_LAYERS, ...(snapshot.modelLayers || {}) });
     setBuildProgress(snapshot.buildProgress || {});
+    setVisitedSystems(snapshot.visitedSystems || ['shell']);
   }
 
   function currentDashboardState(custom = {}) {
@@ -281,6 +285,7 @@ function App() {
       chatMessages,
       modelLayers,
       buildProgress,
+      visitedSystems,
       ...custom
     });
   }
@@ -463,6 +468,11 @@ function App() {
   }, [spec, activeFloor]);
 
   useEffect(() => {
+    if (appMode !== 'design' || consoleView !== 'systems') return;
+    setVisitedSystems((visited) => (visited.includes(systemView) ? visited : [...visited, systemView]));
+  }, [systemView, consoleView, appMode]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
@@ -503,7 +513,8 @@ function App() {
       projectBrain,
       chatMessages,
       modelLayers,
-      buildProgress
+      buildProgress,
+      visitedSystems
     });
     window.clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = window.setTimeout(() => {
@@ -516,7 +527,7 @@ function App() {
     }, 250);
     if (!savedAt) setSavedAt(now);
     return () => window.clearTimeout(autosaveTimerRef.current);
-  }, [projectId, spec, selectedRoom, libraryActionMode, chatMessages, chatTarget, addToTarget, selectedExpertId, expertQuestion, prompt, operationAudit, projectBrain, modelLayers, buildProgress]);
+  }, [projectId, spec, selectedRoom, libraryActionMode, chatMessages, chatTarget, addToTarget, selectedExpertId, expertQuestion, prompt, operationAudit, projectBrain, modelLayers, buildProgress, visitedSystems]);
 
   useEffect(() => {
     const prev = prevChatLenRef.current;
@@ -2004,7 +2015,8 @@ function App() {
       projectBrain,
       chatMessages: chatWithNotice,
       modelLayers,
-      buildProgress
+      buildProgress,
+      visitedSystems
     });
     window.localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(payload));
     setSavedAt(now);
@@ -2185,8 +2197,8 @@ function App() {
                 <div className="systemNavEyebrow">{group.label}</div>
                 <div className="systemTabs">
                   {group.keys.map((key) => (
-                    <button key={key} className={systemView === key ? 'active' : ''} onClick={() => setSystemView(key)} title={flaggedSystems.has(key) ? 'A council check is failing in this system' : undefined}>
-                      <span className={flaggedSystems.has(key) ? 'sysDot flag' : 'sysDot'} />{SYSTEM_META[key].label}
+                    <button key={key} className={systemView === key ? 'active' : ''} onClick={() => setSystemView(key)} title={flaggedSystems.has(key) ? 'A council check is failing in this system' : visitedSystems.includes(key) ? 'You’ve been through this system' : 'Not visited yet'}>
+                      <span className={flaggedSystems.has(key) ? 'sysDot flag' : visitedSystems.includes(key) ? 'sysDot done' : 'sysDot'} />{SYSTEM_META[key].label}
                     </button>
                   ))}
                 </div>
@@ -3021,6 +3033,23 @@ function App() {
               </div>
             );
           })()}
+          {/* The journey rail: every page ends with where you came from and
+              where the build order goes next — a gentle hand through the
+              whole design, ending at Review. */}
+          {(() => {
+            const order = SYSTEM_GROUPS.flatMap((group) => group.keys);
+            const at = order.indexOf(systemView);
+            const prev = order[at - 1];
+            const next = order[at + 1];
+            return (
+              <div className="systemRail">
+                {prev ? <button type="button" onClick={() => setSystemView(prev)}>← {SYSTEM_META[prev].label}</button> : <span />}
+                {next
+                  ? <button type="button" className="railNext" onClick={() => setSystemView(next)}>Next: {SYSTEM_META[next].label} →</button>
+                  : <button type="button" className="railNext" onClick={() => setConsoleView('review')}>Review the design →</button>}
+              </div>
+            );
+          })()}
         </section>}
 
         {appMode === 'design' && consoleView === 'os' && <section className="panelBlock consolePanel projectOS">
@@ -3300,7 +3329,9 @@ function App() {
               ))}
               {floorCount(spec) < 3 && <button className="addFloor" onClick={addStorey} title="Add a storey">+ Floor</button>}
             </div>}
-            <div className="changeBadge" key={`${spec.revision}-${selectedRoom}`} title={`Rev ${spec.revision}: ${lastModelChange}`}><Sparkles size={14} /> Rev {spec.revision}: {lastModelChange}</div>
+            {/* keyed on the revision ONLY — re-pulsing on every selection made
+                the calmest corner of the bar twitch constantly */}
+            <div className="changeBadge" key={spec.revision} title={`Rev ${spec.revision}: ${lastModelChange}`}><Sparkles size={14} /> Rev {spec.revision}: {lastModelChange}</div>
             {viewMode === '3d' && webglOK && <button className={`layersToggle${layersOpen ? ' open' : ''}${hiddenLayerCount > 0 || modelLayers.xray ? ' filtered' : ''}`} onClick={() => setLayersOpen((open) => !open)} title="Show / hide model layers">
               <Layers size={14} /> Layers{hiddenLayerCount > 0 ? ` · ${hiddenLayerCount} off` : modelLayers.xray ? ' · x-ray' : ''}
             </button>}
