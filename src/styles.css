@@ -2683,21 +2683,21 @@ textarea,
 
 /* A warm editorial serif for the identity moments; working UI stays sans. */
 h1 {
-  font-family: 'Fraunces', Georgia, serif;
+  font-family: var(--font-hand);
   font-weight: 600;
   letter-spacing: 0;
   font-size: 20px;
 }
 
 .projectIdentity input {
-  font-family: 'Fraunces', Georgia, serif;
+  font-family: var(--font-hand);
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
 .checksSummary strong,
 .statGrid .stateStat strong {
-  font-family: 'Fraunces', Georgia, serif;
+  font-family: var(--font-hand);
   font-weight: 600;
 }
 
@@ -2763,7 +2763,7 @@ button:active:not(:disabled) {
 
 /* North badge reads as a compass point. */
 .northBadge {
-  font-family: 'Fraunces', Georgia, serif;
+  font-family: var(--font-hand);
   font-weight: 700;
 }
 
@@ -2814,7 +2814,7 @@ textarea:focus-visible {
 .chatBubble.studio, .chatBubble.expertMsg { border-bottom-left-radius: 4px; }
 
 .chatBubble b {
-  font-family: 'Fraunces', Georgia, serif;
+  font-family: var(--font-hand);
   font-weight: 600;
   color: var(--plum, #26424C);
 }
@@ -3129,7 +3129,7 @@ button.ghost.saveButton {
 }
 
 .welcomeCard h2 {
-  font-family: 'Fraunces', Georgia, serif;
+  font-family: var(--font-hand);
   font-weight: 600;
   font-size: 23px;
   letter-spacing: -0.01em;
@@ -3161,7 +3161,7 @@ button.ghost.saveButton {
   border-radius: 8px;
   padding: 9px 12px;
   font-size: 15px;
-  font-family: 'Fraunces', Georgia, serif;
+  font-family: var(--font-hand);
 }
 
 .welcomeChoices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -3319,7 +3319,7 @@ button.ghost.saveButton {
 .planSvg { width: 100%; height: 100%; display: block; touch-action: none; user-select: none; -webkit-user-select: none; }
 .planNorth {
   position: absolute; top: 10px; right: 12px;
-  font-family: 'Fraunces', Georgia, serif; font-weight: 700; font-size: 13px;
+  font-family: var(--font-hand); font-weight: 700; font-size: 13px;
   color: var(--plum, #26424C); background: rgba(255,255,255,0.9);
   border: 1px solid var(--line2, #CAC8BB); border-radius: 7px; padding: 3px 9px; line-height: 1.1; text-align: center;
 }
@@ -3544,7 +3544,7 @@ button.ghost.saveButton {
    scope (defined earlier) — this only warms the surrounding chrome.
    ============================================================================ */
 
-:root { --font-display: 'Fraunces', Georgia, 'Times New Roman', serif; }
+:root { --font-display: var(--font-hand); }
 
 /* -- Warm earthen tokens for the three matte columns -- */
 .leftPanel,
@@ -4117,7 +4117,7 @@ button.danger:hover,
   width: min(100%, 1040px);
 }
 .detailTitle {
-  font-family: 'Fraunces', Georgia, serif;
+  font-family: var(--font-hand);
   font-size: 19px;
   font-weight: 600;
   color: #26424C;
@@ -4740,3 +4740,41 @@ button.ghost.saveButton {
 }
 .detailEmpty .drawnBent { color: #B9B2A0; }
 .brand { align-items: center; gap: 10px; }
+
+/* ==== ONE HAND, SEPIA INK (2026-07-11, Daniel: apply the font across the
+   app; ink brown, teal stays the accent) ====
+   The whole app now letters in the drafting hand — controls, tabs, notes,
+   chat, everything. Ink shifts from charcoal to dark sepia (what drafting
+   ink ages to on vellum); slate/teal remains the one "act here" accent. */
+:root {
+  --font-ui: var(--font-hand);
+  --font-display: var(--font-hand);
+  font-family: 'Architects Daughter', 'Segoe Print', 'Comic Sans MS', cursive;
+}
+body { letter-spacing: 0.004em; }
+
+.leftPanel,
+.workspace,
+.rightPanel {
+  color: #3A2F24;
+  --ink: #3A2F24;
+  --ink2: #675A48;
+  --ink3: #8F8371;
+  --muted: #8F8371;
+}
+/* The paper-scope chips follow the ink shift too */
+.workspace .modelBar .changeBadge,
+.workspace .modelBar .layersToggle { color: #675A48; }
+.modelBar .viewModeToggle button, .modelBar .floorTabs button { color: #675A48; }
+.selChipWrap.inDock .selChip, .selChipWrap.inDock .selChip b,
+.selChipWrap.inDock .selMenu button { color: #3A2F24; }
+.selChipWrap.inDock .selChip .selDetail,
+.selChipWrap.inDock .selMenu button small,
+.selChipWrap.inDock .selMenu .selMenuEyebrow { color: #8F8371; }
+
+/* Handwriting needs a touch more air than type */
+.systemNote { line-height: 1.6; }
+.pickRowMain small, .roomPickRow small { line-height: 1.45; }
+
+/* Headings keep slate for hierarchy — brown body, slate heads, teal actions */
+.sectionHead, .blockTitle { color: #26424C; }
