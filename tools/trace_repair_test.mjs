@@ -1,6 +1,6 @@
 // Deterministic tests for the trace verify/repair decision + merge logic,
 // plus the offline (local) planner's honesty rules.
-import { traceLooksIncomplete, scrubDeferralSummary, mergeTracePlans, repairTraceGeometry, repairTowerStorey, localPlan, promptNeedsDrawing, cleanTraceElements, describeModelForAudit, sanitizeAuditOperations, scrubDeadOperations, manifestGaps }
+import { traceLooksIncomplete, scrubDeferralSummary, mergeTracePlans, repairTraceGeometry, repairTowerStorey, localPlan, promptNeedsDrawing, cleanTraceElements, describeModelForAudit, sanitizeAuditOperations, filterOpsForPass, scrubDeadOperations, manifestGaps }
   from '../backend/planner.mjs';
 
 let pass = 0, fail = 0;
@@ -327,6 +327,26 @@ ok(dimlessCheck.unmeasuredElements === true && dimlessCheck.unmeasuredElementNam
   ok(withManifest.incomplete && withManifest.missingRooms === true && withManifest.lowOpenings === true, 'traceLooksIncomplete + manifest flags the same plan incomplete');
   const withoutManifest = traceLooksIncomplete(gapPlan, { rooms: [], shell: {} });
   ok(!withoutManifest.incomplete && withoutManifest.gaps === null, 'same plan without a manifest stays complete (old behavior preserved)');
+}
+
+// ---- Staged-read pass filtering + audit removal cap ----
+{
+  const ops = [
+    { type: 'add_room', name: 'Kitchen', w: 10, d: 12 },
+    { type: 'add_opening', wall: 'south', widthFt: 3 },
+    { type: 'set_shell', field: 'w', value: '40' },
+    null
+  ];
+  const roomsOnly = filterOpsForPass(ops, ['add_room']);
+  ok(roomsOnly.length === 1 && roomsOnly[0].name === 'Kitchen', 'pass filter keeps only the whitelisted op types');
+  ok(filterOpsForPass(ops, ['set_shell', 'set_roof']).length === 1, 'structure pass filter drops rooms and openings');
+  ok(filterOpsForPass(null, ['add_room']).length === 0, 'pass filter tolerates a missing op list');
+}
+{
+  const removals = Array.from({ length: 9 }, (_, i) => ({ type: 'remove_object', targetId: 'o' + i }));
+  const kept = sanitizeAuditOperations([{ type: 'move_object', targetId: 'kitchen', x: 1, y: 1 }, ...removals]);
+  ok(kept.filter((o) => o.type === 'remove_object').length === 4, 'audit rounds cap removals at 4');
+  ok(kept.some((o) => o.type === 'move_object'), 'non-removal corrections survive the removal cap');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

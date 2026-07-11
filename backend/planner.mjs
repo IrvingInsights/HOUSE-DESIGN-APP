@@ -776,15 +776,18 @@ export async function extractDrawingManifest({ attachmentParts }) {
   const prompt = {
     text: 'Inventory the attached construction drawing set. List sheet names/numbers you can see, count storeys above grade, whether there is a basement level, every room NAME labeled on the floor plans (each once), and total exterior windows and doors (from schedules if present, else count the plans). Report only what the drawings show.'
   };
-  try {
-    const res = await callGemini({ parts: [prompt, ...attachmentParts], responseSchema: geminiSchema(manifestSchema) });
-    if (!res?.ok) return null;
-    const manifest = JSON.parse(res.text);
-    if (!manifest || typeof manifest !== 'object' || !Array.isArray(manifest.roomNames) || !manifest.roomNames.length) return null;
-    return manifest;
-  } catch {
-    return null;
+  // One retry — a flaky first inventory call shouldn't silently cost the
+  // whole checklist (it did, on the Columbia set).
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const res = await callGemini({ parts: [prompt, ...attachmentParts], responseSchema: geminiSchema(manifestSchema) });
+      if (!res?.ok) continue;
+      const manifest = JSON.parse(res.text);
+      if (!manifest || typeof manifest !== 'object' || !Array.isArray(manifest.roomNames) || !manifest.roomNames.length) continue;
+      return manifest;
+    } catch { /* retry once, then give up */ }
   }
+  return null;
 }
 
 // One focused repair call: hand the model what it already produced and the
@@ -857,9 +860,13 @@ const AUDIT_OP_TYPES = new Set([
   'set_shell', 'set_roof', 'set_roof_profile', 'set_wall_side',
   'set_wall_height', 'set_footprint', 'move_wall_edge', 'set_frame', 'set_overhang'
 ]);
-export function sanitizeAuditOperations(ops, cap = 20) {
+export function sanitizeAuditOperations(ops, cap = 20, removeCap = 4) {
+  // Corrections may prune, but never gut: an over-eager audit round once
+  // removed a whole house's openings down to 3. Cap removals per round.
+  let removals = 0;
   return (Array.isArray(ops) ? ops : [])
     .filter((op) => op && typeof op === 'object' && AUDIT_OP_TYPES.has(op.type))
+    .filter((op) => op.type !== 'remove_object' || ++removals <= removeCap)
     .slice(0, cap);
 }
 
@@ -893,7 +900,7 @@ ${describeModelForAudit(working)}
 
 Emit operations that FIX what differs from the drawing:
 - a room/opening/element whose size or position is off by 1 ft or more: move_object / resize_object / update_object with its exact id from the list above
-- anything the drawing shows that is missing (add it); anything in the model the drawing does NOT show (remove_object by id)
+- anything the drawing shows that is missing (add it). Remove something ONLY when CERTAIN the drawing does not show it — for a misplaced window or door, MOVE it (update_object) instead of removing it; a real house always has more than a handful of openings
 - wrong storey count, wall heights, roof type or fall direction, footprint shape
 Rules: correct EXISTING items by id — never re-add something already listed. If the model is faithful to the drawing, return ZERO operations. At most 20 operations, most important first. summary = one short line naming what you corrected. Never invent detail the drawing does not show.`
     };
@@ -969,6 +976,90 @@ export function mergeTracePlans(plan, extra, sourceSpec, alreadyNames, options =
   const openings = merged.operations.filter((o) => o.type === 'add_opening').length;
   merged.summary = `Traced the drawing: ${rooms} room${rooms === 1 ? '' : 's'}, ${openings} opening${openings === 1 ? '' : 's'} (completed in two passes).`;
   return merged;
+}
+
+// ---- STAGED READ: four focused specialist passes over the same drawing
+// set instead of one giant gulp — how a human traces. Each pass has a
+// narrow mandate and a WHITELISTED op vocabulary; the merged plan then runs
+// the same repair + audit chain. Job mode only (the async budget pays for
+// the extra calls); any structural failure returns null = classic one-call
+// trace, so this can only improve things, never lose a turn. ----
+const TRACE_CONVENTIONS = 'Coordinates: FEET; origin at the shell\'s northwest corner; x increases east, y increases south. Read the dimension strings — never estimate something that is dimensioned. Report only what the drawings show.';
+
+const TRACE_PASSES = [
+  {
+    key: 'structure',
+    note: 'Reading the structure (outline, heights, storeys)…',
+    required: true,
+    types: ['set_shell', 'set_footprint', 'set_roof', 'set_roof_profile', 'set_wall_height', 'set_site', 'set_utility', 'set_overhang'],
+    text: `STRUCTURE PASS — read ONLY the building structure from the attached drawings: the floor plans for the outline, the elevations/sections for heights and storeys, the site plan for topography.
+Emit ONLY these operation types: set_shell (fields w and d = the overall conditioned footprint from the dimension strings; also field storeys, wallHeightFt, upperStoreyHeightFt, basementHeightFt when the sections/elevations show them), set_footprint (JSON corner list, ONLY if the outline is not a plain rectangle), set_roof (roofType, pitch), set_roof_profile (sheds only — different south/north heights), set_wall_height, set_site (slopeFt/slopeDir/gradeFt from contours or spot elevations, zip if shown), set_utility (foundationType; basement = set_shell basementHeightFt), set_overhang.
+No rooms, no openings, no elements in this pass.`
+  },
+  {
+    key: 'rooms',
+    note: 'Reading the rooms, level by level…',
+    required: true,
+    types: ['add_room'],
+    text: `ROOMS PASS — emit ONE add_room per labeled room on EVERY level of the attached floor plans, with its real name and MEASURED x, y, w, d in feet. level 1 = ground floor, 2 = upper floor, -1 = basement.
+A room without measured w and d is not traced — measure every one from the plan and its dimension strings.
+ONLY add_room operations.`
+  },
+  {
+    key: 'openings',
+    note: 'Reading the windows and doors…',
+    required: false,
+    types: ['add_opening'],
+    text: `OPENINGS PASS — emit ONE add_opening per EXTERIOR window and door: wall (north|south|east|west), openingType (window, picture, awning, clerestory, door, french, slider, dutch, barn, bay, skylight), widthFt, positionFt (distance along that wall from its west end for north/south walls, from its north end for east/west walls).
+Use the window/door SCHEDULE when the set has one; otherwise count the symbols on the plans. Every drawn exterior opening, exactly once.
+ONLY add_opening operations.`
+  },
+  {
+    key: 'elements',
+    note: 'Reading stairs, decks, chimneys, interior walls…',
+    required: false,
+    types: ['add_element'],
+    text: `ELEMENTS PASS — emit add_element operations, each at its MEASURED plan position and size, for: stairs (name containing 'Stairs', level = the floor it climbs FROM: 1 ground, -1 basement), decks/porches/patios (category deck|porch|patio), carports (category carport), chimneys and fireplaces (category chimney), and INTERIOR partition walls (category partition; w×d = the wall run with the long side the run; widthFt = its doorway width, positionFt = doorway distance along the run).
+ONLY add_element operations.`
+  }
+];
+
+// Pure: keep only the pass's whitelisted op types. Exported for tests.
+export function filterOpsForPass(ops, types) {
+  const allowed = new Set(types);
+  return (Array.isArray(ops) ? ops : []).filter((op) => op && allowed.has(op.type));
+}
+
+async function stagedTracePlan({ attachmentParts, geminiResponseSchema, note }) {
+  const collected = { structure: [], rooms: [], openings: [], elements: [] };
+  for (const pass of TRACE_PASSES) {
+    note?.(pass.note);
+    let res;
+    try {
+      res = await callGemini({ parts: [{ text: `${pass.text}\n${TRACE_CONVENTIONS}` }, ...attachmentParts], responseSchema: geminiResponseSchema });
+    } catch {
+      res = null;
+    }
+    let ops = null;
+    if (res?.ok) {
+      try { ops = filterOpsForPass(JSON.parse(res.text)?.operations, pass.types); } catch { ops = null; }
+    }
+    if (ops === null || (pass.required && !ops.length)) {
+      if (pass.required) return null; // structural pass failed — classic trace
+      collected[pass.key] = [];
+      continue;
+    }
+    collected[pass.key] = ops;
+  }
+  const roomCount = collected.rooms.length;
+  if (roomCount < 2) return null;
+  return {
+    summary: `Traced in ${TRACE_PASSES.length} focused passes: ${roomCount} rooms, ${collected.openings.length} openings, ${collected.elements.length} elements.`,
+    operations: [...collected.structure, ...collected.rooms, ...collected.openings, ...collected.elements],
+    warnings: [],
+    assumptions: [],
+    questions: []
+  };
 }
 
 export async function aiPlan(payload) {
@@ -1109,13 +1200,24 @@ ${payload.prompt}`
     slimSchema.properties.operations.items.required = ['type'];
     const geminiResponseSchema = geminiSchema(slimSchema);
 
+    // Job-mode fresh traces read the set in FOCUSED PASSES first; anything
+    // less than a structural success falls through to the classic one call.
+    let plan = null;
+    if (freshTrace && payload.jobMode === true) {
+      const stagedParts = geminiParts(content.filter((c) => c.type === 'input_image'));
+      if (stagedParts.length) {
+        plan = await stagedTracePlan({ attachmentParts: stagedParts, geminiResponseSchema, note });
+        if (plan) plan.warnings.push('Read the set in four focused passes (structure, rooms, openings, elements).');
+        else note?.('Focused passes came up short — reading the whole set in one pass instead…');
+      }
+    }
+    if (!plan) {
     let res = await callGemini({ parts: geminiParts(content), responseSchema: geminiResponseSchema });
     if (!res.ok) {
       const fallback = localPlan(payload);
       fallback.warnings.unshift(`AI planner unavailable: ${res.status} ${res.errorText.slice(0, 160)}`);
       return fallback;
     }
-    let plan;
     try {
       plan = JSON.parse(res.text);
     } catch {
@@ -1133,6 +1235,7 @@ ${payload.prompt}`
         fallback.warnings.unshift('AI planner returned unreadable JSON twice — try again, or break the request into smaller steps.');
         return fallback;
       }
+    }
     }
     // A FRESH drawing takeoff must be complete — verify and repair a punted
     // pass. Follow-up edits skip this (repairing an edit re-adds duplicates).
