@@ -52,6 +52,25 @@ if (import.meta.hot) {
   });
 }
 
+// The brand mark: a hand-drawn timber BENT (posts, tie beam, rafters, knee
+// braces) — the Salvetti frame sheets' signature gesture. Strokes overshoot
+// the apex and bow slightly, like pencil on vellum. currentColor so each
+// surface inks it its own way.
+function DrawnBent({ size = 40 }) {
+  return (
+    <svg className="drawnBent" width={size} height={size} viewBox="0 0 48 44" fill="none" aria-hidden="true">
+      <path d="M 5 21.5 Q 14.5 12.5 25.2 5.4" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" />
+      <path d="M 23 5.8 Q 33.5 11.5 43.2 21.9" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" />
+      <path d="M 9.6 20.2 Q 9.3 29 9.7 37.2" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" />
+      <path d="M 38.4 20.6 Q 38.7 29 38.3 37.4" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" />
+      <path d="M 7.8 22.8 Q 24 21.9 40.2 22.9" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+      <path d="M 9.7 28.6 L 15.4 22.9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M 38.3 28.9 L 32.6 23" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M 3.2 39.2 Q 24 38.3 44.8 39.4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.55" />
+    </svg>
+  );
+}
+
 // One consistent "there's more here" affordance for every system page: the
 // plain controls stay visible, the finer grain folds behind this. Native
 // <details> — no state to manage, keyboard/AT-friendly for free.
@@ -2094,7 +2113,7 @@ function App() {
       <aside className="leftPanel">
         <div className="leftScroll">
         <div className="brand">
-          <div className="brandMark" aria-hidden="true"><span className="brandGable" /></div>
+          <div className="brandMark" aria-hidden="true"><DrawnBent size={38} /></div>
           <div>
             <h1>Natural Building</h1>
           </div>
@@ -3364,7 +3383,7 @@ function App() {
                     <p className="detailHint">Drawn from the live design — edit the fields in the left bar and the joint redraws. Pick another wall, the roof, or an opening (the chip above lists them all).</p>
                   </>
                 ) : (
-                  <div className="detailEmpty">Select a wall, the roof, or a window/door — its connection detail draws here at full size.</div>
+                  <div className="detailEmpty"><DrawnBent size={64} /><span>Select a wall, the roof, or a window/door — its connection detail draws here at full size.</span></div>
                 )}
               </div>
             );
@@ -3865,7 +3884,7 @@ function App() {
         <div className="welcomeOverlay">
           <div className={`welcomeCard${(!welcomeIsFirstRun || previousDesigns.length > 0) ? ' threeCol' : ''}`}>
             <div className="welcomeSide">
-            <div className="welcomeMark" aria-hidden="true"><span className="brandGable" /></div>
+            <div className="welcomeMark" aria-hidden="true"><DrawnBent size={56} /></div>
             <h2>Natural Building</h2>
             <p className="welcomeIntro">A design studio for natural homes — straw bale, cob, timber — that keeps a real building model with live cost, code checks, and carbon while you work.</p>
             <div className="welcomeHow">

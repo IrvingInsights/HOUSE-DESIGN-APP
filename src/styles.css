@@ -4717,3 +4717,26 @@ button.ghost.saveButton {
 
 /* Live dimension ghost while dragging — a penciled measurement */
 .dimensionBadge { font-family: var(--font-hand); }
+
+/* ==== The drawn bent — identity lockup (2026-07-11) ====
+   No badge box: the mark is drawn straight onto the paper, inked slate in
+   the brand, soft ink in empty states. */
+.brandMark {
+  background: none !important;
+  box-shadow: none;
+  border: none;
+  width: auto;
+  height: auto;
+  color: #26424C;
+}
+.welcomeMark { background: none !important; box-shadow: none; border: none; color: #26424C; }
+.welcomeMark .drawnBent { display: block; margin: 0 auto; }
+.detailEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink3, #83887B);
+}
+.detailEmpty .drawnBent { color: #B9B2A0; }
+.brand { align-items: center; gap: 10px; }
