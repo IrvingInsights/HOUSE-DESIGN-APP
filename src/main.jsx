@@ -956,7 +956,7 @@ function App() {
     } else if (field === 'basementHeated') {
       operations.push({ type: 'set_shell', field, value: value === true || value === 'true' ? 'true' : 'false' });
     } else if (field === 'upperStoreyHeightFt') {
-      operations.push({ type: 'set_shell', field, value: String(numeric > 0 ? clamp(numeric, 6, 14) : 0) });
+      operations.push({ type: 'set_shell', field, value: String(numeric > 0 ? clamp(numeric, 3, 14) : 0) });
     } else if (field === 'southWallHeightFt' || field === 'northWallHeightFt') {
       operations.push({ type: 'set_wall_height', wall: field === 'southWallHeightFt' ? 'south' : 'north', h: clamp(numeric, 2, 24) });
     } else {
@@ -2273,7 +2273,7 @@ function App() {
                   <div key={plateEl.id}>
                     <div className="sectionHead">{floorLabel(spec, Number(plateEl.level))} — its own size, position, and height</div>
                     <div className="controlGrid">
-                      <label>Ceiling height (ft)<input type="number" step="0.5" min="6" max="14" value={storeyInfo(spec.shell).upperFt} onChange={(event) => updateShell('upperStoreyHeightFt', event.target.value)} /></label>
+                      <label>Ceiling height (ft)<input type="number" step="0.5" min="3" max="14" value={storeyInfo(spec.shell).upperFt} onChange={(event) => updateShell('upperStoreyHeightFt', event.target.value)} /></label>
                       <label>From west wall (ft)<input type="number" step="0.5" value={num(plateEl.x)} onChange={(event) => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: num(event.target.value), y: num(plateEl.y) }], 'Move the upper storey')} /></label>
                       <label>From north wall (ft)<input type="number" step="0.5" value={num(plateEl.y)} onChange={(event) => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: num(plateEl.x), y: num(event.target.value) }], 'Move the upper storey')} /></label>
                       <label>Width (ft)<input type="number" step="0.5" min="6" value={num(plateEl.w)} onChange={(event) => plateDispatch([{ type: 'resize_object', targetId: plateEl.id, w: Math.max(6, num(event.target.value)), d: num(plateEl.d) }], 'Resize the upper storey')} /></label>

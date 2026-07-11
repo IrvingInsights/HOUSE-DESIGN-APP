@@ -369,6 +369,26 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const wallProfile = wallAssemblyProfile(spec.systems.envelope);
       const wallT = wallProfile.thicknessFt;
 
+      // Underside of the roof at a plan point — interior walls and similar
+      // full-height elements stop here instead of stabbing through the roof.
+      // Exact for shed/flat (incl. the stepped plate), long-axis-ridge
+      // approximation for gable/hip.
+      const roofUnderAt = (px, pz) => {
+        const plateR = upperPlateRect(spec, 2);
+        const stepped = storeyLift > 0 && plateR && plateR.w * plateR.d < width * depth - 1;
+        const inPlateR = plateR && px >= plateR.x && px <= plateR.x + plateR.w && pz >= plateR.y && pz <= plateR.y + plateR.d;
+        const lift = stepped ? (inPlateR ? storeyLift : 0) : storeyLift;
+        if (roofSpec.roofType === 'shed') {
+          const nH = roofSpec.northWallHeightFt; const sH = roofSpec.southWallHeightFt;
+          return nH + (sH - nH) * clamp(depth > 0 ? pz / depth : 0, 0, 1) + lift;
+        }
+        if (roofSpec.roofType === 'flat') return roofSpec.highWallHeightFt + lift + 0.2;
+        const eave = roofSpec.highWallHeightFt + lift;
+        const alongX = width >= depth;
+        const distEdge = Math.max(0, alongX ? Math.min(pz, depth - pz) : Math.min(px, width - px));
+        return eave + distEdge * (Number(spec.shell.roofPitch) || 0.32);
+      };
+
       const slabMat = new THREE.MeshStandardMaterial({ color: 0xc0b49b, roughness: 0.92, map: grainTexture('earth'), bumpMap: bumpTexture('earth'), bumpScale: 0.2 });
       const wallMat = new THREE.MeshStandardMaterial({ color: wallProfile.color, roughness: 0.88, map: grainTexture('plaster'), bumpMap: bumpTexture('plaster'), bumpScale: 0.12 });
       const roofMat = new THREE.MeshStandardMaterial({ color: 0x8a938f, roughness: 0.5, metalness: 0.22, map: grainTexture('metal'), bumpMap: bumpTexture('metal'), bumpScale: 0.16, envMap: envTex, envMapIntensity: 0.35, side: THREE.DoubleSide });
@@ -604,17 +624,47 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           }
         });
         // With a plate, upper bands ring IT — same cardinal ids as a rectangle.
+        // On a SHED the tower's walls follow the roof planes: bottom sits on
+        // the low wing plane UNDER the tower at that wall, top meets the
+        // lifted upper plane. A flat band at max wall height used to float
+        // above the roof on the south (the gap) and stab through the upper
+        // roof on the north.
         if (storeyLift > 0 && hasPlate) {
           const p = plate2;
+          // Ground wing plane (no lift), slightly sunk so the band always
+          // reads as MEETING the roof rather than hovering a sliver above it.
+          const wingTopAt = (zz) => (shed
+            ? roofSpec.northWallHeightFt + (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) * clamp(depth > 0 ? zz / depth : 0, 0, 1)
+            : Math.max(1, (wallResolved.north.heightFt || 10)));
+          const TUCK = 0.45;
           WALL_SIDES.forEach((side) => {
             if (omittedWalls.has(side) || wallResolved[side].omitted) return;
             const u = wallUpper[side];
             const tU = u.thicknessFt;
-            const groundH = Math.max(1, (shed ? Math.max(northWallHeight, southWallHeight) : wallResolved[side].heightFt + storeyLift) - storeyLift);
-            const upperMesh = side === 'north' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + tU / 2, wallMatOf(u))
-              : side === 'south' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + p.d - tU / 2, wallMatOf(u))
-              : side === 'west' ? box(tU, storeyLift, p.d, p.x + tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u))
-              : box(tU, storeyLift, p.d, p.x + p.w - tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u));
+            let upperMesh;
+            if (shed) {
+              if (side === 'north' || side === 'south') {
+                const zz = side === 'north' ? p.y : p.y + p.d;
+                const yBot = wingTopAt(zz) - TUCK;
+                upperMesh = box(p.w, storeyLift + TUCK, tU, p.x + p.w / 2, yBot + (storeyLift + TUCK) / 2, side === 'north' ? p.y + tU / 2 : p.y + p.d - tU / 2, wallMatOf(u));
+              } else {
+                // E/W: the band follows the slope — a parallelogram, i.e. a
+                // box laid along the plane's angle (both planes share it).
+                const z0 = p.y; const z1 = p.y + p.d;
+                const y0 = wingTopAt(z0) - TUCK + (storeyLift + TUCK) / 2;
+                const y1 = wingTopAt(z1) - TUCK + (storeyLift + TUCK) / 2;
+                const len = Math.hypot(z1 - z0, y1 - y0);
+                const xAt = side === 'west' ? p.x + tU / 2 : p.x + p.w - tU / 2;
+                upperMesh = box(tU, storeyLift + TUCK, len, xAt, (y0 + y1) / 2, (z0 + z1) / 2, wallMatOf(u));
+                upperMesh.rotation.x = -Math.atan2(y1 - y0, z1 - z0);
+              }
+            } else {
+              const groundH = Math.max(1, (wallResolved[side].heightFt + storeyLift) - storeyLift);
+              upperMesh = side === 'north' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + tU / 2, wallMatOf(u))
+                : side === 'south' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + p.d - tU / 2, wallMatOf(u))
+                : side === 'west' ? box(tU, storeyLift, p.d, p.x + tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u))
+                : box(tU, storeyLift, p.d, p.x + p.w - tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u));
+            }
             wallMeshSpecs.push({ side, storey: 'upper', meshes: [upperMesh] });
           });
         }
@@ -826,17 +876,21 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // along axisIsZ from s0..s1 following planeAt(spanPos), at stations
         // across b0..b1.
         const rOC = Math.max(1, fm.rafterOCFt || 2);
+        // Rafters carry the deck from BELOW it: top of rafter at the roof
+        // plane minus the slab thickness. Riding the plane itself left half
+        // of every member poking through the roof surface.
+        const DECK = 0.34;
         const rafterRun = (b0, b1, planeAt, axisIsZ, s0, s1) => {
           const count = Math.max(1, Math.round((b1 - b0) / rOC));
           for (let i = 0; i <= count; i += 1) {
             const at = clamp(b0 + ((b1 - b0) * i) / count, b0 + fm.rafterW, b1 - fm.rafterW);
-            slopeMemberAxis(axisIsZ, s0, planeAt(s0) - fm.rafterH / 2, s1, planeAt(s1) - fm.rafterH / 2, at, fm.rafterW, fm.rafterH);
+            slopeMemberAxis(axisIsZ, s0, planeAt(s0) - DECK - fm.rafterH / 2, s1, planeAt(s1) - DECK - fm.rafterH / 2, at, fm.rafterW, fm.rafterH);
           }
         };
         // Rafter pairs for a gable over one rect (ridge along the longer
         // axis, matching makeGableSegment).
         const gableRafters = (x0, x1, z0, z1, eave) => {
-          const base = eave + 0.25;
+          const base = eave + 0.25 - DECK;
           const alongX = (x1 - x0) >= (z1 - z0);
           const ridgeY = base + (Math.min(x1 - x0, z1 - z0) / 2) * pitchF;
           if (alongX) {
@@ -863,13 +917,13 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           for (let i = 0; i <= rCount; i += 1) {
             const at = clamp((bayRun * i) / rCount, fm.rafterW, bayRun - fm.rafterW);
             if (roofSpec.roofType === 'gable') {
-              const peakY = hLead + Math.max(0.3, gRise - 0.25) - fm.rafterH / 2;
-              const eaveY = hLead + 0.25 - fm.rafterH / 2;
+              const peakY = hLead + Math.max(0.3, gRise - 0.25) - DECK - fm.rafterH / 2;
+              const eaveY = hLead + 0.25 - DECK - fm.rafterH / 2;
               slopeMember(-oLead, eaveY, span / 2, peakY, at, fm.rafterW, fm.rafterH);
               slopeMember(span / 2, peakY, span + oTail, eaveY, at, fm.rafterW, fm.rafterH);
             } else {
-              const y0 = hLead + 0.12 - fm.rafterH / 2;
-              const y1 = hTail + 0.12 - fm.rafterH / 2;
+              const y0 = hLead + 0.12 - DECK - fm.rafterH / 2;
+              const y1 = hTail + 0.12 - DECK - fm.rafterH / 2;
               const slope = (y1 - y0) / Math.max(0.01, span);
               slopeMember(-oLead, y0 - slope * oLead, span + oTail, y1 + slope * oTail, at, fm.rafterW, fm.rafterH);
             }
@@ -1146,7 +1200,13 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const alongX = element.w >= element.d;
           const runLen = alongX ? element.w : element.d;
           const thick = alongX ? element.d : element.w;
-          const hWall = Math.max(2, Number(element.h) || 8);
+          // A partition never pokes through the roof: cap its height at the
+          // roof underside over its own run (sampled at both ends — a wall
+          // crossing the shed slope takes the lower value).
+          const capA = roofUnderAt(element.x, element.y);
+          const capB = roofUnderAt(element.x + element.w, element.y + element.d);
+          const roofCap = Math.max(2.2, Math.min(capA, capB) - elevation - 0.15);
+          const hWall = Math.min(Math.max(2, Number(element.h) || 8), roofCap);
           elementHeight = hWall;
           const segBox = (s0, s1, y0, y1) => {
             const len = s1 - s0;
@@ -1205,6 +1265,74 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const plateHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
             mesh = box(element.w, elementHeight, element.d, element.x + element.w / 2, elevation + elementHeight / 2, element.y + element.d / 2, plateHandle);
           }
+        } else if (element.category === 'greenhouse') {
+          // An attached greenhouse is PART of the timber frame, not a pad:
+          // kneewall, posts and rafters in the frame's timber, glazing walls
+          // and a glazed lean-to roof falling away from the house.
+          const ghPart = (m) => { m.userData.roomId = element.id; m.userData.generated = true; group.add(m); return m; };
+          const kneeMat = new THREE.MeshStandardMaterial({ color: wallProfile.color, roughness: 0.88, map: grainTexture('plaster'), bumpMap: bumpTexture('plaster'), bumpScale: 0.12 });
+          const gaps = {
+            south: Math.abs(element.y - depth),
+            north: Math.abs(element.y + element.d),
+            east: Math.abs(element.x - width),
+            west: Math.abs(element.x + element.w)
+          };
+          const attach = Object.keys(gaps).reduce((a, b) => (gaps[a] <= gaps[b] ? a : b));
+          const alongX = attach === 'south' || attach === 'north';
+          const run0 = alongX ? element.x : element.y;
+          const run1 = alongX ? element.x + element.w : element.y + element.d;
+          const crossH = attach === 'south' ? element.y : attach === 'north' ? element.y + element.d : attach === 'east' ? element.x : element.x + element.w;
+          const crossO = attach === 'south' ? element.y + element.d : attach === 'north' ? element.y : attach === 'east' ? element.x + element.w : element.x;
+          const runLen = run1 - run0;
+          const crossLen = Math.abs(crossO - crossH);
+          const kneeH = 1.8;
+          const hOut = 6.5;
+          const hIn = gaps[attach] < 4
+            ? Math.max(hOut + 1, Math.min(roofUnderAt(alongX ? (run0 + run1) / 2 : crossH, alongX ? crossH : (run0 + run1) / 2) - 0.4, hOut + crossLen * 0.55))
+            : hOut + crossLen * 0.35;
+          // plan-space point from (run, cross) coordinates
+          const P = (r, c) => (alongX ? [r, c] : [c, r]);
+          const T = 0.35; // timber
+          const postN = Math.max(2, Math.ceil(runLen / 5) + 1);
+          for (let i = 0; i < postN; i += 1) {
+            const r = run0 + ((runLen) * i) / (postN - 1);
+            const [pxo, pzo] = P(clamp(r, run0 + T / 2, run1 - T / 2), crossO + (crossO > crossH ? -T / 2 : T / 2));
+            ghPart(box(T, hOut, T, pxo, elevation + hOut / 2, pzo, frameMat));
+          }
+          // plate along the outer edge + ledger against the house
+          const [pcx, pcz] = P((run0 + run1) / 2, crossO + (crossO > crossH ? -T / 2 : T / 2));
+          ghPart(box(alongX ? runLen : T, 0.4, alongX ? T : runLen, pcx, elevation + hOut - 0.2, pcz, frameMat));
+          const [lcx, lcz] = P((run0 + run1) / 2, crossH + (crossO > crossH ? T / 2 : -T / 2));
+          ghPart(box(alongX ? runLen : T, 0.4, alongX ? T : runLen, lcx, elevation + hIn - 0.2, lcz, frameMat));
+          // rafters house→outer, then the glazed roof plane on the same slope
+          const slopeLen = Math.hypot(crossLen, hIn - hOut);
+          const rot = Math.atan2(hIn - hOut, crossLen) * (crossO > crossH ? 1 : -1);
+          for (let i = 0; i < postN; i += 1) {
+            const r = clamp(run0 + (runLen * i) / (postN - 1), run0 + T / 2, run1 - T / 2);
+            const [rcx, rcz] = P(r, (crossH + crossO) / 2);
+            const raf = box(alongX ? 0.3 : slopeLen, 0.4, alongX ? slopeLen : 0.3, rcx, elevation + (hIn + hOut) / 2 - 0.25, rcz, frameMat);
+            if (alongX) raf.rotation.x = rot; else raf.rotation.z = rot;
+            ghPart(raf);
+          }
+          const roofGlass = box(alongX ? runLen - 0.1 : slopeLen, 0.1, alongX ? slopeLen : runLen - 0.1, ...(() => { const [gx, gz] = P((run0 + run1) / 2, (crossH + crossO) / 2); return [gx, elevation + (hIn + hOut) / 2, gz]; })(), glassMat);
+          if (alongX) roofGlass.rotation.x = rot; else roofGlass.rotation.z = rot;
+          ghPart(roofGlass);
+          // kneewall + glazing on the OUTER face and both ENDS (house face open)
+          const face = (r0, r1, cross, isEnd) => {
+            const fLen = isEnd ? crossLen - T : r1 - r0;
+            const [fx, fz] = isEnd ? P(cross, (crossH + crossO) / 2) : P((r0 + r1) / 2, cross + (crossO > crossH ? -T / 2 : T / 2));
+            const along = isEnd ? !alongX : alongX;
+            ghPart(box(along ? fLen : 0.3, kneeH, along ? 0.3 : fLen, fx, elevation + kneeH / 2, fz, kneeMat));
+            const glassH = (isEnd ? (hIn + hOut) / 2 : hOut) - kneeH - 0.35;
+            if (glassH > 0.5) ghPart(box(along ? fLen - 0.15 : 0.16, glassH, along ? 0.16 : fLen - 0.15, fx, elevation + kneeH + glassH / 2, fz, glassMat));
+          };
+          face(run0, run1, crossO, false);
+          face(null, null, run0 + T / 2, true);
+          face(null, null, run1 - T / 2, true);
+          // full-volume invisible handle = the select/drag target
+          const ghHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
+          mesh = box(element.w, hIn, element.d, element.x + element.w / 2, elevation + hIn / 2, element.y + element.d / 2, ghHandle);
+          elementHeight = hIn;
         } else if (/stair/i.test(element.name || '') && !/ladder/i.test(element.name || '')) {
           // A real stair run: treads and risers climbing the storey (or out of
           // the basement), not a floating box. The invisible full-volume box
@@ -1852,6 +1980,23 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
       geometry.computeVertexNormals();
+      // Box-projected UVs in feet — without them the standing-seam (or any)
+      // texture never rendered on stepped/L roof pieces: they read as flat
+      // untextured gray next to the seamed legacy gable.
+      const pos = geometry.getAttribute('position');
+      const nor = geometry.getAttribute('normal');
+      const uvs = new Float32Array(pos.count * 2);
+      // The metal tile draws 12 seams and the material repeats it 3× per UV
+      // unit — 36 seams per unit. One unit = 48 ft puts a standing seam every
+      // 16 inches, which is what a real roof does.
+      const UV_SCALE = 1 / 48;
+      for (let i = 0; i < pos.count; i += 1) {
+        const nx = Math.abs(nor.getX(i)); const ny = Math.abs(nor.getY(i)); const nz = Math.abs(nor.getZ(i));
+        if (ny >= nx && ny >= nz) { uvs[i * 2] = pos.getX(i) * UV_SCALE; uvs[i * 2 + 1] = pos.getZ(i) * UV_SCALE; }
+        else if (nx >= nz) { uvs[i * 2] = pos.getZ(i) * UV_SCALE; uvs[i * 2 + 1] = pos.getY(i) * UV_SCALE; }
+        else { uvs[i * 2] = pos.getX(i) * UV_SCALE; uvs[i * 2 + 1] = pos.getY(i) * UV_SCALE; }
+      }
+      geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
       const mesh = new THREE.Mesh(geometry, material);
       mesh.castShadow = true;
       mesh.receiveShadow = true;

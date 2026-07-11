@@ -559,7 +559,7 @@ export function storeyInfo(shell = {}) {
   // Upper storeys carry their OWN height (shell.upperStoreyHeightFt) — a 10'
   // ground floor under an 8' second storey is normal construction. Absent =
   // same as the ground (legacy designs unchanged).
-  const upperFt = Math.min(14, Math.max(6, Number(shell.upperStoreyHeightFt || baseWallFt)));
+  const upperFt = Math.min(14, Math.max(3, Number(shell.upperStoreyHeightFt || baseWallFt)));
   return { storeys, baseWallFt, upperFt, extraFt: (storeys - 1) * upperFt };
 }
 
@@ -2357,7 +2357,7 @@ export function applyStructuredDesignPlan(currentSpec, plan) {
       else if (field === 'basementHeated') next.shell.basementHeated = String(operation.value) === 'true' || operation.value === true;
       else if (field === 'upperStoreyHeightFt') {
         const v = Number(operation.value) || 0;
-        if (v > 0) next.shell.upperStoreyHeightFt = clamp(v, 6, 14);
+        if (v > 0) next.shell.upperStoreyHeightFt = clamp(v, 3, 14);
         else delete next.shell.upperStoreyHeightFt;
       }
       else if (field === 'overhangFt') {

@@ -1013,7 +1013,7 @@ export function applyBimOperations(currentSpec, plan) {
       else if (field === 'basementHeated') next.shell.basementHeated = String(operation.value) === 'true' || operation.value === true;
       else if (field === 'upperStoreyHeightFt') {
         const v = Number(operation.value) || 0;
-        if (v > 0) next.shell.upperStoreyHeightFt = clamp(v, 6, 14);
+        if (v > 0) next.shell.upperStoreyHeightFt = clamp(v, 3, 14);
         else delete next.shell.upperStoreyHeightFt;
       }
       else if (field === 'overhangFt') {
