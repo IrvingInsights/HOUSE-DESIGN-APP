@@ -698,25 +698,30 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           group.add(addEdges(m));
           return m;
         };
-        // A member along a slope in the span plane: a box rotated to follow
-        // the run from (a0,y0) to (a1,y1), where `a` is the span coordinate.
-        // spanIsZ: shed bents span north-south (z); gable bents span east-west (x).
+        // A member along a slope: axisIsZ says which plan axis it follows —
+        // the run goes from (a0,y0) to (a1,y1) in that axis at cross-position
+        // `at`. spanIsZ: shed bents span north-south (z); gable east-west (x).
         const spanIsZ = roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat';
-        const slopeMember = (a0, y0, a1, y1, at, thickAcross, thickDeep) => {
+        const slopeMemberAxis = (axisIsZ, a0, y0, a1, y1, at, thickAcross, thickDeep) => {
           const len = Math.hypot(a1 - a0, y1 - y0);
           const ang = Math.atan2(y1 - y0, a1 - a0);
-          const m = spanIsZ
+          const m = axisIsZ
             ? box(thickAcross, thickDeep, len, at, (y0 + y1) / 2, (a0 + a1) / 2, frameMat)
             : box(len, thickDeep, thickAcross, (a0 + a1) / 2, (y0 + y1) / 2, at, frameMat);
-          if (spanIsZ) m.rotation.x = -ang; else m.rotation.z = ang;
+          if (axisIsZ) m.rotation.x = -ang; else m.rotation.z = ang;
           return framePart(m);
         };
-        const straight = (a0, a1, y, at, w, h) => framePart(spanIsZ
-          ? box(w, h, a1 - a0, at, y, (a0 + a1) / 2, frameMat)
-          : box(a1 - a0, h, w, (a0 + a1) / 2, y, at, frameMat));
-        const postAt = (a, at, h, pw) => framePart(spanIsZ
-          ? box(pw, h, pw, at, h / 2, a, frameMat)
-          : box(pw, h, pw, a, h / 2, at, frameMat));
+        const slopeMember = (a0, y0, a1, y1, at, w, h) => slopeMemberAxis(spanIsZ, a0, y0, a1, y1, at, w, h);
+        // A level member along the BAY direction (b0..b1) at span-position
+        // `at` — plate beams and joists. This once had its axes swapped, so on
+        // a non-square plan the plates and loft joists rendered OUTSIDE the
+        // house (a beam floating 11 ft east of a 24×36 shed).
+        const straight = (b0, b1, y, at, w, h) => framePart(spanIsZ
+          ? box(b1 - b0, h, w, (b0 + b1) / 2, y, at, frameMat)
+          : box(w, h, b1 - b0, at, y, (b0 + b1) / 2, frameMat));
+        const postAt = (a, at, h, pw, yBase = 0) => framePart(spanIsZ
+          ? box(pw, h, pw, at, yBase + h / 2, a, frameMat)
+          : box(pw, h, pw, a, yBase + h / 2, at, frameMat));
 
         const span = spanIsZ ? depth : width;
         const bayRun = spanIsZ ? width : depth;
@@ -728,11 +733,19 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         const oAllF = resolveOverhangs(spec.shell);
         const oLead = spanIsZ ? oAllF.north : oAllF.west;
         const oTail = spanIsZ ? oAllF.south : oAllF.east;
-        // Eave heights at the two span ends (storey lift already included).
-        const hLead = spanIsZ ? northWallHeight : wallHeight;
-        const hTail = spanIsZ ? southWallHeight : wallHeight;
-        const gRise = roofSpec.roofType === 'gable' ? depth * Number(spec.shell.roofPitch || 0.32) : 0;
         const baseWallFt = Number(spec.shell.wallHeightFt || 10);
+        const pitchF = Number(spec.shell.roofPitch || 0.32);
+        // THE FRAME STANDS WHERE THE BUILDING STANDS. When the upper storey
+        // covers only its extent plate, the perimeter walls are GROUND height
+        // and the lift happens over the plate alone — posts, joists, and
+        // rafters up there, low wing rafters over the remainder. (Mirrors the
+        // stepped-roof logic below; a full-footprint storey lifts everything.)
+        const plateF = upperPlateRect(spec, 2);
+        const stepsF = storeyLift > 0 && plateF && plateF.w * plateF.d < width * depth - 1;
+        const liftPerim = stepsF ? 0 : storeyLift;
+        const hLead = (spanIsZ ? roofSpec.northWallHeightFt : roofSpec.highWallHeightFt) + liftPerim;
+        const hTail = (spanIsZ ? roofSpec.southWallHeightFt : roofSpec.highWallHeightFt) + liftPerim;
+        const gRise = roofSpec.roofType === 'gable' ? depth * pitchF : 0;
         const hasBents = !fm.studs && fm.postW > 0;
         const bay = hasBents
           ? clamp(Number(spec.frame?.baySpacingFt) || fm.spacingFt || 8, 4, 16)
@@ -751,8 +764,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         straight(fm.postW / 2, bayRun - fm.postW / 2, postH(hLead) + fm.plateH / 2, aLead, fm.postW + 0.1, fm.plateH);
         straight(fm.postW / 2, bayRun - fm.postW / 2, postH(hTail) + fm.plateH / 2, aTail, fm.postW + 0.1, fm.plateH);
 
-        // Tie / crossbeam per bent + knee braces + loft joists — timber types.
-        const tieH = storeyLift > 0 ? baseWallFt : (roofSpec.roofType !== 'shed' && hasBents ? Math.min(hLead, hTail) - fm.plateH : 0);
+        // Tie / crossbeam per bent + knee braces — timber types. With a
+        // PARTIAL upper storey there is no full-span tie at loft height (it
+        // would slice through the low wing roofs); the loft structure lives
+        // over the plate instead (below).
+        const tieH = storeyLift > 0 && !stepsF ? baseWallFt : (roofSpec.roofType !== 'shed' && hasBents ? Math.min(hLead, hTail) - fm.plateH : 0);
         if (hasBents && tieH > 2) {
           stations.forEach((at) => {
             framePart(spanIsZ
@@ -764,7 +780,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               slopeMember(aTail - rise - fm.postW / 2, tieH - fm.crossH, aTail - fm.postW / 2, tieH - fm.crossH - rise, at, fm.braceW, fm.braceW);
             }
           });
-          if (storeyLift > 0) {
+          if (storeyLift > 0 && !stepsF) {
             // loft joists ride the ties, running the bay direction
             const jCount = Math.max(2, Math.floor((aTail - aLead) / 4));
             for (let j = 1; j < jCount; j += 1) {
@@ -774,22 +790,142 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           }
         }
 
-        // Rafters at o.c. following the roof plane, plumb ends past the walls.
+        // Rafters ride the same planes the roof draws. rafterRun lays members
+        // along axisIsZ from s0..s1 following planeAt(spanPos), at stations
+        // across b0..b1.
         const rOC = Math.max(1, fm.rafterOCFt || 2);
-        const rCount = Math.max(1, Math.round(bayRun / rOC));
-        for (let i = 0; i <= rCount; i += 1) {
-          const at = clamp((bayRun * i) / rCount, fm.rafterW, bayRun - fm.rafterW);
-          if (roofSpec.roofType === 'gable') {
-            const peakY = wallHeight + Math.max(0.3, gRise - 0.25) - fm.rafterH / 2;
-            const eaveY = wallHeight + 0.25 - fm.rafterH / 2;
-            slopeMember(-oLead, eaveY, span / 2, peakY, at, fm.rafterW, fm.rafterH);
-            slopeMember(span / 2, peakY, span + oTail, eaveY, at, fm.rafterW, fm.rafterH);
-          } else {
-            const y0 = hLead + 0.12 - fm.rafterH / 2;
-            const y1 = hTail + 0.12 - fm.rafterH / 2;
-            const slope = (y1 - y0) / Math.max(0.01, span);
-            slopeMember(-oLead, y0 - slope * oLead, span + oTail, y1 + slope * oTail, at, fm.rafterW, fm.rafterH);
+        const rafterRun = (b0, b1, planeAt, axisIsZ, s0, s1) => {
+          const count = Math.max(1, Math.round((b1 - b0) / rOC));
+          for (let i = 0; i <= count; i += 1) {
+            const at = clamp(b0 + ((b1 - b0) * i) / count, b0 + fm.rafterW, b1 - fm.rafterW);
+            slopeMemberAxis(axisIsZ, s0, planeAt(s0) - fm.rafterH / 2, s1, planeAt(s1) - fm.rafterH / 2, at, fm.rafterW, fm.rafterH);
           }
+        };
+        // Rafter pairs for a gable over one rect (ridge along the longer
+        // axis, matching makeGableSegment).
+        const gableRafters = (x0, x1, z0, z1, eave) => {
+          const base = eave + 0.25;
+          const alongX = (x1 - x0) >= (z1 - z0);
+          const ridgeY = base + (Math.min(x1 - x0, z1 - z0) / 2) * pitchF;
+          if (alongX) {
+            const zm = (z0 + z1) / 2;
+            const count = Math.max(1, Math.round((x1 - x0) / rOC));
+            for (let i = 0; i <= count; i += 1) {
+              const at = clamp(x0 + ((x1 - x0) * i) / count, x0 + fm.rafterW, x1 - fm.rafterW);
+              slopeMemberAxis(true, z0, base - fm.rafterH / 2, zm, ridgeY - fm.rafterH / 2, at, fm.rafterW, fm.rafterH);
+              slopeMemberAxis(true, zm, ridgeY - fm.rafterH / 2, z1, base - fm.rafterH / 2, at, fm.rafterW, fm.rafterH);
+            }
+          } else {
+            const xm = (x0 + x1) / 2;
+            const count = Math.max(1, Math.round((z1 - z0) / rOC));
+            for (let i = 0; i <= count; i += 1) {
+              const at = clamp(z0 + ((z1 - z0) * i) / count, z0 + fm.rafterW, z1 - fm.rafterW);
+              slopeMemberAxis(false, x0, base - fm.rafterH / 2, xm, ridgeY - fm.rafterH / 2, at, fm.rafterW, fm.rafterH);
+              slopeMemberAxis(false, xm, ridgeY - fm.rafterH / 2, x1, base - fm.rafterH / 2, at, fm.rafterW, fm.rafterH);
+            }
+          }
+        };
+
+        if (!stepsF) {
+          const rCount = Math.max(1, Math.round(bayRun / rOC));
+          for (let i = 0; i <= rCount; i += 1) {
+            const at = clamp((bayRun * i) / rCount, fm.rafterW, bayRun - fm.rafterW);
+            if (roofSpec.roofType === 'gable') {
+              const peakY = hLead + Math.max(0.3, gRise - 0.25) - fm.rafterH / 2;
+              const eaveY = hLead + 0.25 - fm.rafterH / 2;
+              slopeMember(-oLead, eaveY, span / 2, peakY, at, fm.rafterW, fm.rafterH);
+              slopeMember(span / 2, peakY, span + oTail, eaveY, at, fm.rafterW, fm.rafterH);
+            } else {
+              const y0 = hLead + 0.12 - fm.rafterH / 2;
+              const y1 = hTail + 0.12 - fm.rafterH / 2;
+              const slope = (y1 - y0) / Math.max(0.01, span);
+              slopeMember(-oLead, y0 - slope * oLead, span + oTail, y1 + slope * oTail, at, fm.rafterW, fm.rafterH);
+            }
+          }
+        } else {
+          // STEPPED: loft floor + upper bents over the plate, wing rafters
+          // over the remainder — the same segment split the roof uses.
+          const plateEl = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === 2);
+          const plateZ = Number(plateEl?.z) || baseWallFt;
+          const pSpan0 = (spanIsZ ? plateF.y : plateF.x) + fm.postW / 2;
+          const pSpan1 = (spanIsZ ? plateF.y + plateF.d : plateF.x + plateF.w) - fm.postW / 2;
+          const pBay0 = (spanIsZ ? plateF.x : plateF.y) + fm.postW / 2;
+          const pBay1 = (spanIsZ ? plateF.x + plateF.w : plateF.y + plateF.d) - fm.postW / 2;
+          // Loft rim + joists at the plate's own elevation, over the plate only.
+          straight(pBay0, pBay1, plateZ + 0.28, pSpan0, 0.34, 0.55);
+          straight(pBay0, pBay1, plateZ + 0.28, pSpan1, 0.34, 0.55);
+          const jCount = Math.max(2, Math.floor((pSpan1 - pSpan0) / 4));
+          for (let j = 1; j < jCount; j += 1) {
+            straight(pBay0, pBay1, plateZ + 0.28, pSpan0 + ((pSpan1 - pSpan0) * j) / jCount, 0.34, 0.55);
+          }
+          // The lifted plane the upper roof rides (shed slope or level eave).
+          const upperEaveAt = (spanPos) => {
+            if (roofSpec.roofType === 'shed') {
+              const z0 = -oAllF.north, z1 = depth + oAllF.south;
+              const nH = roofSpec.northWallHeightFt + storeyLift;
+              const sH = roofSpec.southWallHeightFt + storeyLift;
+              return nH + (sH - nH) * clamp((spanPos - z0) / Math.max(0.01, z1 - z0), 0, 1);
+            }
+            return roofSpec.highWallHeightFt + storeyLift;
+          };
+          // Upper posts + plates on the plate's two span-end edges.
+          const upBays = Math.max(1, Math.ceil((pBay1 - pBay0) / bay));
+          for (let i = 0; i <= upBays; i += 1) {
+            const at = pBay0 + ((pBay1 - pBay0) * i) / upBays;
+            postAt(pSpan0, at, Math.max(1, upperEaveAt(pSpan0) - fm.plateH - plateZ), fm.postW, plateZ);
+            postAt(pSpan1, at, Math.max(1, upperEaveAt(pSpan1) - fm.plateH - plateZ), fm.postW, plateZ);
+          }
+          straight(pBay0, pBay1, upperEaveAt(pSpan0) - fm.plateH / 2, pSpan0, fm.postW + 0.1, fm.plateH);
+          straight(pBay0, pBay1, upperEaveAt(pSpan1) - fm.plateH / 2, pSpan1, fm.postW + 0.1, fm.plateH);
+          // Upper roof rafters over the plate.
+          if (roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat') {
+            rafterRun(pBay0, pBay1, (zz) => upperEaveAt(zz) + 0.12, spanIsZ, pSpan0 - 0.35, pSpan1 + 0.35);
+          } else {
+            gableRafters(plateF.x, plateF.x + plateF.w, plateF.y, plateF.y + plateF.d, roofSpec.highWallHeightFt + storeyLift);
+          }
+          // Wing rafters over the remainder rects, on the SAME falling planes
+          // as the roof's makeStepRoofPlane (high against the upper block).
+          const groundEave = roofSpec.highWallHeightFt;
+          const inPlateF = (px, py) => px > plateF.x + 0.01 && px < plateF.x + plateF.w - 0.01 && py > plateF.y + 0.01 && py < plateF.y + plateF.d - 0.01;
+          const insideRect = (px, py) => px > 0.01 && px < width - 0.01 && py > 0.01 && py < depth - 0.01;
+          subtractRect({ x: 0, y: 0, w: width, d: depth }, plateF).forEach((rect) => {
+            const overlapX = rect.x < plateF.x + plateF.w && rect.x + rect.w > plateF.x;
+            const overlapY = rect.y < plateF.y + plateF.d && rect.y + rect.d > plateF.y;
+            const touch = Math.abs(rect.y + rect.d - plateF.y) < 0.05 && overlapX ? 'south'
+              : Math.abs(rect.y - (plateF.y + plateF.d)) < 0.05 && overlapX ? 'north'
+              : Math.abs(rect.x + rect.w - plateF.x) < 0.05 && overlapY ? 'east'
+              : Math.abs(rect.x - (plateF.x + plateF.w)) < 0.05 && overlapY ? 'west'
+              : (Math.abs((rect.x + rect.w / 2) - (plateF.x + plateF.w / 2)) > Math.abs((rect.y + rect.d / 2) - (plateF.y + plateF.d / 2))
+                ? ((rect.x + rect.w / 2) < (plateF.x + plateF.w / 2) ? 'east' : 'west')
+                : ((rect.y + rect.d / 2) < (plateF.y + plateF.d / 2) ? 'south' : 'north'));
+            const probe = 0.4;
+            const oSide = {};
+            for (const side of ['north', 'south', 'east', 'west']) {
+              const [px, py] = side === 'north' ? [rect.x + rect.w / 2, rect.y - probe]
+                : side === 'south' ? [rect.x + rect.w / 2, rect.y + rect.d + probe]
+                : side === 'west' ? [rect.x - probe, rect.y + rect.d / 2]
+                : [rect.x + rect.w + probe, rect.y + rect.d / 2];
+              if (inPlateF(px, py)) oSide[side] = 0.35;
+              else if (insideRect(px, py)) oSide[side] = 0.05;
+              else oSide[side] = oAllF[side];
+            }
+            const x0 = rect.x - oSide.west, x1 = rect.x + rect.w + oSide.east;
+            const z0 = rect.y - oSide.north, z1 = rect.y + rect.d + oSide.south;
+            const topY = groundEave + 0.25;
+            if (touch === 'north' || touch === 'south') {
+              const drop = Math.max(0.1, (z1 - z0) * pitchF);
+              const planeAt = (zz) => (touch === 'north'
+                ? topY - ((zz - z0) / Math.max(0.01, z1 - z0)) * drop
+                : topY - ((z1 - zz) / Math.max(0.01, z1 - z0)) * drop);
+              rafterRun(rect.x, rect.x + rect.w, planeAt, true, z0, z1);
+            } else {
+              const drop = Math.max(0.1, (x1 - x0) * pitchF);
+              const planeAt = (xx) => (touch === 'west'
+                ? topY - ((xx - x0) / Math.max(0.01, x1 - x0)) * drop
+                : topY - ((x1 - xx) / Math.max(0.01, x1 - x0)) * drop);
+              rafterRun(rect.y, rect.y + rect.d, planeAt, false, x0, x1);
+            }
+          });
         }
       }
 
@@ -2118,6 +2254,9 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       controls.update();
       composer.render();
       sceneRef.current = { renderer, scene, camera, controls };
+      // Dev/test handle: lets automated checks measure real member geometry
+      // (e.g. "no frame member outside the building") without screenshots.
+      if (typeof window !== 'undefined') window.__nbScene = scene;
       requestAnimationFrame(animate);
     }
 
