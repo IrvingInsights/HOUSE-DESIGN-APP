@@ -115,12 +115,22 @@ function App() {
   const [inspectorDock, setInspectorDock] = useState(null);
   const [selMenuOpen, setSelMenuOpen] = useState(false);
   // The chat column is toggle-able — hidden, the model gets its width.
+  // It STARTS closed (the model is the star); once the user chooses, their
+  // choice sticks. Messages arriving while it's closed badge the Chat button.
   const [chatOpen, setChatOpen] = useState(() => {
-    try { return window.localStorage.getItem('nbChatOpen') !== '0'; } catch { return true; }
+    try {
+      const stored = window.localStorage.getItem('nbChatOpen');
+      return stored === null ? false : stored !== '0';
+    } catch { return false; }
   });
   useEffect(() => {
     try { window.localStorage.setItem('nbChatOpen', chatOpen ? '1' : '0'); } catch { /* private mode */ }
   }, [chatOpen]);
+  // Unread badge: count messages that arrive while the chat is closed, so a
+  // reply or confirmation never lands unseen. Restores don't count.
+  const [chatUnread, setChatUnread] = useState(0);
+  const chatRestoringRef = useRef(false);
+  const prevChatLenRef = useRef(null);
   // The Inspector is PINNED to the bottom of the left column (no scroll-to-
   // find-it — the old smooth-scroll bridge was cancelled by the 3D rebuild
   // that fires on the same selection, so tapping a wall looked like a no-op).
@@ -234,6 +244,7 @@ function App() {
     setSpec(snapshot.spec);
     setPrompt(snapshot.prompt || DEFAULT_PROMPT);
     setSelectedRoom(snapshot.selectedRoom || snapshot.spec.rooms[0]?.id || 'great');
+    chatRestoringRef.current = true; // a restored history is not "unread"
     setChatMessages(cleanSavedChatMessages(snapshot.chatMessages));
     setChatTarget(snapshot.chatTarget || 'design');
     setAddToTarget(snapshot.addToTarget || 'auto');
@@ -506,6 +517,17 @@ function App() {
     if (!savedAt) setSavedAt(now);
     return () => window.clearTimeout(autosaveTimerRef.current);
   }, [projectId, spec, selectedRoom, libraryActionMode, chatMessages, chatTarget, addToTarget, selectedExpertId, expertQuestion, prompt, operationAudit, projectBrain, modelLayers, buildProgress]);
+
+  useEffect(() => {
+    const prev = prevChatLenRef.current;
+    prevChatLenRef.current = chatMessages.length;
+    if (chatRestoringRef.current) { chatRestoringRef.current = false; return; }
+    if (prev === null) return;
+    if (!chatOpen && chatMessages.length > prev) setChatUnread((n) => n + (chatMessages.length - prev));
+  }, [chatMessages, chatOpen]);
+  useEffect(() => {
+    if (chatOpen) setChatUnread(0);
+  }, [chatOpen]);
 
   useEffect(() => {
     const stream = chatStreamRef.current;
@@ -3245,7 +3267,7 @@ function App() {
             <button className="ghost" title="Start a new design" onClick={() => setWelcomeOpen(true)}><Plus size={16} /> New</button>
             <button className="ghost backButton" onClick={goBackRevision} disabled={history.length === 0}><Undo2 size={16} /> Undo</button>
             <button className="ghost saveButton" onClick={saveHouseState}><Save size={16} /> Save</button>
-            <button className="ghost" title={chatOpen ? 'Hide the Studio chat — the model gets the room' : 'Show the Studio chat'} onClick={() => setChatOpen((open) => !open)}><Send size={16} /> {chatOpen ? 'Hide chat' : 'Chat'}</button>
+            <button className="ghost chatToggle" title={chatOpen ? 'Hide the Studio chat — the model gets the room' : 'Show the Studio chat'} onClick={() => setChatOpen((open) => !open)}><Send size={16} /> {chatOpen ? 'Hide chat' : 'Chat'}{!chatOpen && chatUnread > 0 && <span className="chatUnread">{chatUnread > 9 ? '9+' : chatUnread}</span>}</button>
             <div className="exportMenu">
               <button className="ghost" onClick={() => setExportMenuOpen((open) => !open)} title="Export the design"><Download size={16} /> Export ▾</button>
               {exportMenuOpen && (

@@ -205,7 +205,7 @@ html, body {
   min-height: 32px;
   padding: 0 6px;
   gap: 4px;
-  font-size: 11px;
+  font-size: 12px;
   background: rgba(251, 250, 244, 0.86);
   color: var(--evergreen);
   border: 1px solid var(--line);
@@ -241,7 +241,7 @@ html, body {
   background: rgba(251, 250, 244, 0.82);
   color: var(--ink);
   box-shadow: none;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .consoleTabs button {
@@ -407,7 +407,7 @@ textarea {
 .studioHint {
   margin: -3px 0 8px;
   color: #74776f;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.3;
 }
 
@@ -567,7 +567,7 @@ textarea {
   width: 100%;
   display: grid;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .attachmentTray {
@@ -648,7 +648,7 @@ textarea {
 
 .statGrid span {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: #6d726d;
 }
 
@@ -909,7 +909,7 @@ textarea {
 
 .miniHead {
   margin-bottom: 6px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   color: var(--evergreen);
   text-transform: uppercase;
@@ -1012,7 +1012,7 @@ textarea {
   align-items: center;
   gap: 7px;
   margin-bottom: 8px;
-  font-size: 11px;
+  font-size: 12px;
   color: #6d726d;
 }
 
@@ -1165,7 +1165,7 @@ textarea {
 .nudgeControls button {
   min-height: 30px;
   padding: 0 6px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .assembly {
@@ -1178,7 +1178,7 @@ textarea {
 .assembly em {
   grid-column: 1 / -1;
   font-style: normal;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   color: var(--evergreen);
   text-transform: uppercase;
@@ -1220,7 +1220,7 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 11px;
+  font-size: 12px;
   color: #6d726d;
 }
 
@@ -1321,7 +1321,7 @@ textarea {
 .outputCards small {
   color: inherit;
   opacity: 0.72;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .libraryMode {
@@ -1410,7 +1410,7 @@ textarea {
 .elementCard span {
   display: block;
   color: #6d726d;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
 }
 
@@ -1424,7 +1424,7 @@ textarea {
 .elementActions button {
   min-height: 28px;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .elementActions button:first-child {
@@ -1607,7 +1607,7 @@ textarea {
   border-radius: 999px;
   color: var(--muted);
   background: var(--ivory);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 750;
 }
 
@@ -1673,7 +1673,7 @@ textarea {
   padding: 8px;
   border-top: 1px solid var(--line);
   color: var(--ink2);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
   white-space: pre-wrap;
 }
@@ -1763,7 +1763,7 @@ textarea {
 
   .brand p,
   .topBar p {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .panelBlock {
@@ -1790,7 +1790,7 @@ textarea {
     grid-template-columns: 1fr;
     gap: 4px;
     padding: 6px;
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .chatStream {
@@ -1852,7 +1852,7 @@ textarea {
     left: 10px;
     bottom: 10px;
     min-height: 28px;
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .changeBadge {
@@ -1860,7 +1860,7 @@ textarea {
     top: 10px;
     max-width: calc(100% - 64px);
     min-height: 28px;
-    font-size: 11px;
+    font-size: 12px;
     padding: 5px 8px;
   }
 
@@ -1870,7 +1870,7 @@ textarea {
     min-height: 28px;
     max-width: calc(100% - 20px);
     padding: 0 8px;
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .northBadge {
@@ -1898,7 +1898,7 @@ textarea {
 
   .selectedSummary {
     min-height: 26px;
-    font-size: 11px;
+    font-size: 12px;
     padding: 4px 6px;
   }
 
@@ -2423,15 +2423,15 @@ textarea,
 .wallSideCell { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; }
 .wallSideLabel { font-weight: 600; opacity: .85; }
 .wallSideCell input { width: 100%; text-align: center; }
-.wallSideUnit { font-size: 11px; opacity: .6; }
+.wallSideUnit { font-size: 12px; opacity: .6; }
 .wallSideList { display: flex; flex-direction: column; gap: 10px; margin: 10px 0 0; }
 .wallSideCard { border: 1px solid rgba(128,128,128,.28); border-radius: 8px; padding: 10px; }
 .wallSideCard.omitted { opacity: .6; }
 .wallSideCardHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
-.wallOmitToggle { flex-direction: row !important; align-items: center; gap: 5px; font-size: 11px; opacity: .8; }
+.wallOmitToggle { flex-direction: row !important; align-items: center; gap: 5px; font-size: 12px; opacity: .8; }
 .wallOmitToggle input { width: auto; }
-.wallSideMeta { font-size: 11px; opacity: .7; margin: 6px 0 0; }
-.pitchHint { font-style: normal; font-size: 11px; color: var(--ink3, #868A7C); font-weight: 500; margin-left: 4px; }
+.wallSideMeta { font-size: 12px; opacity: .7; margin: 6px 0 0; }
+.pitchHint { font-style: normal; font-size: 12px; color: var(--ink3, #868A7C); font-weight: 500; margin-left: 4px; }
 
 /* Grouped system nav + status dots (dependency web v1) */
 .systemNav { margin: 8px 0 12px; }
@@ -2480,14 +2480,14 @@ textarea,
   padding: 9px 11px;
   min-width: 0;
 }
-.readKey { display: block; font-size: 11px; color: var(--ink3, #868A7C); font-weight: 600; letter-spacing: 0.02em; }
+.readKey { display: block; font-size: 12px; color: var(--ink3, #868A7C); font-weight: 600; letter-spacing: 0.02em; }
 .readValue { display: block; font-size: 17px; letter-spacing: -0.02em; margin-top: 2px; font-variant-numeric: tabular-nums; }
-.readValue small { font-size: 11px; color: var(--ink3, #868A7C); font-weight: 500; }
-.readNote { display: block; font-size: 11px; color: var(--ink2, #565A4F); margin-top: 3px; line-height: 1.35; }
+.readValue small { font-size: 12px; color: var(--ink3, #868A7C); font-weight: 500; }
+.readNote { display: block; font-size: 12px; color: var(--ink2, #565A4F); margin-top: 3px; line-height: 1.35; }
 .feedsRow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 12px; }
 .feedsRow .systemNavEyebrow { padding: 0 2px; }
 .feedTag {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   background: var(--raise, #fff);
   border: 1px solid var(--line, #DBD9CE);
@@ -2539,7 +2539,7 @@ textarea,
   right: 8px;
   min-height: 26px;
   padding: 0 9px;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 /* Outdoors page: toggleable homestead items */
@@ -2569,8 +2569,8 @@ textarea,
   box-shadow: inset 0 0 0 1px #3C6472;
 }
 .outdoorItem b { display: block; font-size: 13px; font-weight: 600; }
-.outdoorItem small { display: block; color: var(--ink2, #565A4F); font-size: 11.5px; line-height: 1.35; margin-top: 2px; font-weight: 400; }
-.outdoorItem .outdoorCost { display: block; margin-top: 4px; font-size: 11.5px; font-weight: 600; color: var(--ink3, #868A7C); }
+.outdoorItem small { display: block; color: var(--ink2, #565A4F); font-size: 12px; line-height: 1.35; margin-top: 2px; font-weight: 400; }
+.outdoorItem .outdoorCost { display: block; margin-top: 4px; font-size: 12px; font-weight: 600; color: var(--ink3, #868A7C); }
 .outdoorItem.on .outdoorCost { color: var(--plum, #26424C); }
 
 /* Model-view layers panel */
@@ -2618,7 +2618,7 @@ textarea,
 .viewFilterBadge button {
   min-height: 24px;
   padding: 0 10px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   border-radius: 20px;
   background: var(--raise, #fff);
@@ -3146,7 +3146,7 @@ button.ghost.saveButton {
 .welcomeName { display: block; margin-bottom: 14px; }
 .welcomeName span {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.09em;
   text-transform: uppercase;
   font-weight: 600;
@@ -3232,7 +3232,7 @@ button.ghost.saveButton {
 }
 .geoResults button:hover { border-color: var(--active-line, #7FA8B5); background: var(--active, #33434B); color: var(--plum, #A9C6D0); }
 .geoResults button b { display: block; font-size: 13.5px; font-weight: 600; }
-.geoResults button small { display: block; font-size: 11.5px; color: var(--ink3); margin-top: 1px; }
+.geoResults button small { display: block; font-size: 12px; color: var(--ink3); margin-top: 1px; }
 
 /* Design | Build mode switch */
 .modeTabs {
@@ -3272,7 +3272,7 @@ button.ghost.saveButton {
 .phaseCard summary::-webkit-details-marker { display: none; }
 .phaseCard summary input { accent-color: #3C6472; width: 15px; height: 15px; flex: none; }
 .phaseTitle { font-size: 13px; font-weight: 600; flex: 1; min-width: 0; }
-.phaseMeta { font-size: 11px; color: var(--ink3); flex: none; white-space: nowrap; }
+.phaseMeta { font-size: 12px; color: var(--ink3); flex: none; white-space: nowrap; }
 .phaseBody { padding: 2px 12px 10px 33px; }
 .phaseBody p { font-size: 12px; line-height: 1.45; color: var(--ink2); margin-bottom: 4px; }
 .phaseBody b { color: var(--plum); font-weight: 600; }
@@ -3281,13 +3281,13 @@ button.ghost.saveButton {
 .takeoffRow { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; background: var(--raise); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; }
 .takeoffRow span { font-size: 12.5px; font-weight: 600; }
 .takeoffRow b { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--plum); text-align: right; }
-.takeoffRow small { grid-column: 1 / -1; font-size: 11px; color: var(--ink3); }
+.takeoffRow small { grid-column: 1 / -1; font-size: 12px; color: var(--ink3); }
 
 .maintList { display: flex; flex-direction: column; gap: 5px; }
 .maintRow { display: flex; gap: 9px; align-items: flex-start; background: var(--raise); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; }
 .maintInterval { flex: none; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--warn, #D9B36A); padding-top: 2px; min-width: 52px; }
 .maintRow b { display: block; font-size: 12.5px; }
-.maintRow small { display: block; font-size: 11.5px; color: var(--ink2); line-height: 1.4; }
+.maintRow small { display: block; font-size: 12px; color: var(--ink2); line-height: 1.4; }
 
 /* A numeric control that has gone per-side: shows the range, not an input */
 .mixedField {
@@ -3349,7 +3349,7 @@ button.ghost.saveButton {
   border-radius: 8px; box-shadow: 0 8px 20px rgba(34,37,31,0.12);
 }
 .floorTabs button {
-  min-height: 24px; padding: 2px 10px; font-size: 11.5px; font-weight: 600;
+  min-height: 24px; padding: 2px 10px; font-size: 12px; font-weight: 600;
   border-radius: 6px; background: transparent; border: none; color: var(--ink2, #565A4F); box-shadow: none;
 }
 .floorTabs button:hover { background: var(--sage, #E2ECEE); color: var(--plum, #26424C); }
@@ -3380,7 +3380,7 @@ button.ghost.saveButton {
 .roomAddChip:hover { border-color: var(--active-line, #7FA8B5); background: var(--active, #33434B); }
 .roomAddChip.fixture { border-style: dashed; }
 .roomAddChip b { display: block; font-size: 13px; font-weight: 600; }
-.roomAddChip small { display: block; font-size: 11px; color: var(--ink3, #939A90); margin-top: 1px; }
+.roomAddChip small { display: block; font-size: 12px; color: var(--ink3, #939A90); margin-top: 1px; }
 
 .roomPickList { display: flex; flex-direction: column; gap: 5px; }
 .roomPickRow {
@@ -3402,7 +3402,7 @@ button.ghost.saveButton {
 .roomPickRow:hover { border-color: var(--line2, #4B554F); }
 .roomPickRow.active { border-color: var(--active-line, #7FA8B5); background: var(--active, #33434B); color: var(--plum, #A9C6D0); }
 .roomPickRow span { font-size: 13px; font-weight: 600; }
-.roomPickRow small { font-size: 11px; color: var(--ink3, #939A90); white-space: nowrap; }
+.roomPickRow small { font-size: 12px; color: var(--ink3, #939A90); white-space: nowrap; }
 
 .docChipIcon {
   width: 30px;
@@ -3419,7 +3419,7 @@ button.ghost.saveButton {
 .issueActions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 .issueActions button {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11px; font-weight: 600; line-height: 1;
+  font-size: 12px; font-weight: 600; line-height: 1;
   padding: 5px 9px; border-radius: 999px; cursor: pointer;
 }
 .issueJump {
@@ -3445,7 +3445,7 @@ button.ghost.saveButton {
   text-align: center;
 }
 .costHead strong { display: block; font-size: 16px; color: var(--ink, #EAE8DD); }
-.costHead span { display: block; font-size: 11px; color: var(--ink3, #939A90); margin-top: 2px; }
+.costHead span { display: block; font-size: 12px; color: var(--ink3, #939A90); margin-top: 2px; }
 
 .costRows { display: flex; flex-direction: column; gap: 2px; }
 .costRow {
@@ -3468,7 +3468,7 @@ button.ghost.saveButton {
 .costBar { height: 7px; border-radius: 999px; background: var(--line, #3D4642); overflow: hidden; }
 .costBarFill { display: block; height: 100%; border-radius: 999px; background: var(--active-line, #7FA8B5); }
 .costRowAmt { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.costRowPct { font-size: 11px; color: var(--ink3, #939A90); text-align: right; font-variant-numeric: tabular-nums; }
+.costRowPct { font-size: 12px; color: var(--ink3, #939A90); text-align: right; font-variant-numeric: tabular-nums; }
 
 .costTotals { margin: 12px 0 4px; border-top: 2px solid var(--line2, #4B554F); }
 .costTotalRow { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 6px; font-size: 13px; }
@@ -3494,7 +3494,7 @@ button.ghost.saveButton {
 .diyToggle.on { border-color: var(--good, #86C79A); background: var(--good-bg, #2C3A31); }
 .diyToggle input { grid-row: 1 / 3; }
 .diyToggle span { font-size: 13px; font-weight: 600; color: var(--ink, #EAE8DD); }
-.diyToggle small { grid-column: 2; font-size: 11px; color: var(--ink3, #939A90); }
+.diyToggle small { grid-column: 2; font-size: 12px; color: var(--ink3, #939A90); }
 .diyToggle.on small { color: var(--good, #86C79A); }
 
 .costCeiling {
@@ -3510,7 +3510,7 @@ button.ghost.saveButton {
 /* Opening-type pickers — inspector (per-wall) + Windows page (2026-07-08) */
 .addOpeningPick {
   display: flex; flex-direction: column; gap: 3px;
-  font-size: 11px; color: var(--ink3, #939A90); font-weight: 600;
+  font-size: 12px; color: var(--ink3, #939A90); font-weight: 600;
 }
 .addOpeningPick select {
   font-size: 12px; padding: 5px 7px; border-radius: 6px;
@@ -3770,7 +3770,7 @@ button.danger:hover,
 }
 .selMenu button:hover { background: #F1F0E9; }
 .selMenu button.active { background: #E2ECEE; color: #26424C; font-weight: 600; }
-.selMenu button small { color: #868A7C; font-size: 11px; white-space: nowrap; }
+.selMenu button small { color: #868A7C; font-size: 12px; white-space: nowrap; }
 
 /* ---- 2D connection details (parametric joint sections) ---- */
 .jointDetail {
@@ -3796,7 +3796,7 @@ button.danger:hover,
   border: 1px solid var(--line, #423931);
   border-radius: 8px;
 }
-.jointNote { font-size: 11px; color: var(--ink3, #978C79); margin: 8px 0 0; line-height: 1.5; }
+.jointNote { font-size: 12px; color: var(--ink3, #978C79); margin: 8px 0 0; line-height: 1.5; }
 
 /* ---- Zen minimization: 3 tiles, ⋯ overflow tab, Export menu ---- */
 .statGrid.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -3839,7 +3839,7 @@ button.danger:hover,
 .pickRowMain:hover:not(:disabled) { background: var(--panel-3, #221C17); }
 .pickRowMain:disabled { cursor: default; }
 .pickRowMain strong { font-size: 13px; font-weight: 600; }
-.pickRowMain small { font-size: 11px; color: var(--ink3, #978C79); }
+.pickRowMain small { font-size: 12px; color: var(--ink3, #978C79); }
 .pickRowToggle {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
   padding: 4px 10px; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
@@ -3950,7 +3950,7 @@ button.danger:hover,
   background: var(--clay, #B4623F); border: 1px solid var(--clay, #B4623F); color: #FBF3EA;
 }
 .welcomeContinue b { font-size: 14.5px; }
-.welcomeContinue small { font-size: 11.5px; opacity: 0.85; }
+.welcomeContinue small { font-size: 12px; opacity: 0.85; }
 .welcomeContinue:hover { filter: brightness(1.07); }
 .welcomeDivider {
   display: flex; align-items: center; gap: 10px;
@@ -4027,7 +4027,7 @@ button.danger:hover,
 }
 .welcomePrevRow:hover { border-color: #C88A5B; background: #3A2C22; }
 .welcomePrevRow b { font-size: 13.5px; }
-.welcomePrevRow small { font-size: 11px; color: #978C79; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.welcomePrevRow small { font-size: 12px; color: #978C79; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* the AI-planning indicator in the chat window: sweep bar + wheel + dots */
 .planningBar {
@@ -4139,7 +4139,7 @@ button.danger:hover,
   display: flex; align-items: center; gap: 8px; max-width: 100%;
 }
 .selChipWrap.inDock .selChip b { color: var(--ink, #ECE4D6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.selChipWrap.inDock .selChip .selDetail { font-size: 11px; color: var(--ink3, #978C79); white-space: nowrap; }
+.selChipWrap.inDock .selChip .selDetail { font-size: 12px; color: var(--ink3, #978C79); white-space: nowrap; }
 .selChipWrap.inDock .selChip:hover, .selChipWrap.inDock .selChip.open { border-color: var(--clay, #B4623F); }
 .selChipWrap.inDock .selMenu {
   position: absolute; left: 0; right: auto; top: calc(100% + 6px);
@@ -4175,7 +4175,7 @@ button.danger:hover,
   border-radius: 12px; padding: 4px 8px; box-shadow: 0 8px 20px rgba(34, 37, 31, 0.12);
 }
 .viewGizmo button {
-  min-height: 24px; padding: 2px 10px; font-size: 11.5px; font-weight: 700;
+  min-height: 24px; padding: 2px 10px; font-size: 12px; font-weight: 700;
   border-radius: 9px; background: transparent; border: none; color: #565A4F; box-shadow: none;
 }
 .viewGizmo button:hover { background: #E2ECEE; color: #22251F; }
@@ -4212,7 +4212,7 @@ button.danger:hover,
   border-radius: 8px; border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.03); color: var(--ink); font-size: 14px;
 }
-.readOnlyDim small { color: var(--ink3); font-size: 11.5px; }
+.readOnlyDim small { color: var(--ink3); font-size: 12px; }
 .inlineLink {
   background: none !important; border: none; padding: 0; margin: 0;
   color: var(--active-line); text-decoration: underline; cursor: pointer;
@@ -4346,6 +4346,25 @@ button.danger:hover,
 .fineTune > summary::-webkit-details-marker { display: none; }
 .fineTune > summary .ftArrow { transition: transform 140ms ease; display: inline-block; }
 .fineTune[open] > summary .ftArrow { transform: rotate(90deg); }
-.fineTune > summary small { font-weight: 500; font-size: 11.5px; color: var(--ink3, #8E8474); }
+.fineTune > summary small { font-weight: 500; font-size: 12px; color: var(--ink3, #8E8474); }
 .fineTune > summary:hover { color: var(--straw, #C9A24B); }
 .fineTuneBody { padding: 0 12px 10px; }
+
+/* Chat starts closed (the model is the star) — messages that arrive while
+   it's closed badge the Chat button so nothing lands unseen. */
+.chatToggle { position: relative; }
+.chatUnread {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--clay, #B4623F);
+  color: #FBF6EE;
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1;
+}
