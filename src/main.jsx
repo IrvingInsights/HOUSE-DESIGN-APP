@@ -30,7 +30,7 @@ import {
 } from './engine.js';
 import { createIfcSummary, createDrawingSetHtml } from './docExports.js';
 import { JointDetail, PlanView } from './planView.jsx';
-import { ThreeScene } from './threeScene.jsx';
+import { ThreeScene, webglAvailable } from './threeScene.jsx';
 import './styles.css';
 
 // Vite announces a dev full-reload BEFORE it happens. Mark it so the opening
@@ -70,7 +70,9 @@ function App() {
   const [moreTabsOpen, setMoreTabsOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [appMode, setAppMode] = useState('design');
-  const [viewMode, setViewMode] = useState('3d');
+  // No graphics acceleration (WebGL off) → the app starts in the Plan view
+  // instead of a broken 3D pane; the 3D tab stays clickable and explains.
+  const [viewMode, setViewMode] = useState(() => (webglAvailable() ? '3d' : 'plan'));
   // Camera flight requests + the section-cut slider — deliberately plain
   // state (not persisted): a fresh open always starts whole and unsliced.
   const [viewRequest, setViewRequest] = useState(null);

@@ -4185,3 +4185,13 @@ button.danger:hover,
 }
 .viewGizmo .cutSlider span { font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #77715F; }
 .viewGizmo .cutSlider input[type='range'] { width: 92px; accent-color: #3C6472; }
+
+/* 3D-unavailable fallback pane (WebGL off): the message sits on the light
+   model stage, matching the paper look of the scene it replaces. */
+.sceneFallback {
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  background: #e9e1cf; color: #3a3f36; padding: 28px;
+}
+.sceneFallback > div { max-width: 420px; }
+.sceneFallback b { display: block; font-size: 15px; margin-bottom: 8px; color: #22251F; }
+.sceneFallback p { font-size: 13px; line-height: 1.5; }

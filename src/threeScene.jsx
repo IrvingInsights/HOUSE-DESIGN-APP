@@ -19,6 +19,28 @@ import {
   WALL_SIDES, resolveWallSide
 } from './engine.js';
 
+// Some browsers run with graphics acceleration (WebGL) turned off — locked-
+// down review VMs, remote desktops, old drivers. Without this probe the
+// renderer constructor THROWS inside the effect and React unmounts the whole
+// app into a blank page. Probe once, cache, and let the UI degrade to Plan.
+// `?no3d` in the URL forces the fallback so it can be tested anywhere.
+let webglProbe = null;
+export function webglAvailable() {
+  if (webglProbe !== null) return webglProbe;
+  try {
+    if (typeof window !== 'undefined' && /[?&]no3d\b/.test(window.location.search)) {
+      webglProbe = false;
+      return webglProbe;
+    }
+    const probe = document.createElement('canvas');
+    webglProbe = Boolean(window.WebGLRenderingContext
+      && (probe.getContext('webgl2') || probe.getContext('webgl') || probe.getContext('experimental-webgl')));
+  } catch {
+    webglProbe = false;
+  }
+  return webglProbe;
+}
+
 // The section-cut clip plane: keeps everything north of the cut line
 // (z ≤ cutZ). Slider 1 = whole model, sliding down slices from the south.
 function cutPlanes(spec, cut) {
@@ -73,7 +95,9 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
   }, [sectionCut, spec]);
 
   useEffect(() => {
+    if (!webglAvailable()) return undefined; // fallback pane rendered below
     const mount = mountRef.current;
+    if (!mount) return undefined;
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xe9e1cf);
     // Faint atmospheric falloff so the site melts into the paper backdrop.
@@ -86,7 +110,16 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       camera.position.set(36, 42, 42);
     }
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+    } catch {
+      // probe passed but the context still failed (exhausted GPU contexts,
+      // driver hiccup) — degrade to the same message instead of crashing React
+      mount.textContent = 'The 3D view could not start in this browser — graphics acceleration (WebGL) is unavailable. The Plan and Detail views work fully.';
+      mount.classList.add('sceneFallback');
+      return () => { mount.classList.remove('sceneFallback'); mount.textContent = ''; };
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(mount.clientWidth, mount.clientHeight);
     renderer.shadowMap.enabled = true;
@@ -2146,6 +2179,16 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     };
   }, [spec, selectedRoom, layers]);
 
+  if (!webglAvailable()) {
+    return (
+      <div className="scene sceneFallback" aria-label="3D view unavailable">
+        <div>
+          <b>The 3D view needs graphics acceleration (WebGL), and this browser has it turned off.</b>
+          <p>Everything else works — design in the Plan view and tap parts there; the Detail view still draws construction sections. To see the 3D model, turn on hardware acceleration in the browser settings or open the app in another browser.</p>
+        </div>
+      </div>
+    );
+  }
   return <div className="scene" ref={mountRef} aria-label="Interactive 3D BIM model" />;
 }
 
