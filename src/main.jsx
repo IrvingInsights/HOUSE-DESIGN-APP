@@ -3244,6 +3244,28 @@ function App() {
         </header>
 
         <div className="modelShell">
+          {/* Real toolbar ABOVE the view — the rev chip, view switch, floor
+              tabs, Layers and compass used to float over the model and hid
+              plan content underneath. Only transient things still float. */}
+          <div className="modelBar">
+            <div className="viewModeToggle">
+              <button className={viewMode === '3d' ? 'active' : ''} onClick={() => setViewMode('3d')}>3D</button>
+              <button className={viewMode === 'plan' ? 'active' : ''} onClick={() => setViewMode('plan')}>Plan</button>
+              <button className={viewMode === 'detail' ? 'active' : ''} title="Connection details — how the selected part is built" onClick={() => setViewMode('detail')}>Detail</button>
+            </div>
+            {viewMode !== 'detail' && (viewMode !== '3d' || webglOK) && (viewMode === 'plan' || floorCount(spec) > 1 || basementInfo(spec.shell).present) && <div className="floorTabs">
+              {[...(basementInfo(spec.shell).present ? [BASEMENT_LEVEL] : []), ...Array.from({ length: floorCount(spec) }, (_, i) => i + 1)].map((floor) => (
+                <button key={floor} className={activeFloor === floor ? 'active' : ''} onClick={() => setActiveFloor(floor)} title={`${floorLabel(spec, floor)} — view & edit this floor`}>{floor === 1 ? 'Ground' : floorLabel(spec, floor).replace(' floor', '')}</button>
+              ))}
+              {floorCount(spec) < 3 && <button className="addFloor" onClick={addStorey} title="Add a storey">+ Floor</button>}
+            </div>}
+            <div className="changeBadge" key={`${spec.revision}-${selectedRoom}`} title={`Rev ${spec.revision}: ${lastModelChange}`}><Sparkles size={14} /> Rev {spec.revision}: {lastModelChange}</div>
+            {viewMode === '3d' && webglOK && <button className={`layersToggle${layersOpen ? ' open' : ''}${hiddenLayerCount > 0 || modelLayers.xray ? ' filtered' : ''}`} onClick={() => setLayersOpen((open) => !open)} title="Show / hide model layers">
+              <Layers size={14} /> Layers{hiddenLayerCount > 0 ? ` · ${hiddenLayerCount} off` : modelLayers.xray ? ' · x-ray' : ''}
+            </button>}
+            {viewMode === '3d' && webglOK && <div className="northBadge" title="North">N</div>}
+          </div>
+          <div className="modelStage">
           {viewMode === 'detail' ? (() => {
             // Connection details live in the preview — the drawing gets the big
             // canvas, and picking another part redraws it in place.
@@ -3313,20 +3335,6 @@ function App() {
               </label>
             </div>
           )}
-          <div className="viewModeToggle">
-            <button className={viewMode === '3d' ? 'active' : ''} onClick={() => setViewMode('3d')}>3D</button>
-            <button className={viewMode === 'plan' ? 'active' : ''} onClick={() => setViewMode('plan')}>Plan</button>
-            <button className={viewMode === 'detail' ? 'active' : ''} title="Connection details — how the selected part is built" onClick={() => setViewMode('detail')}>Detail</button>
-          </div>
-          {viewMode !== 'detail' && (viewMode !== '3d' || webglOK) && (viewMode === 'plan' || floorCount(spec) > 1 || basementInfo(spec.shell).present) && <div className="floorTabs">
-            {[...(basementInfo(spec.shell).present ? [BASEMENT_LEVEL] : []), ...Array.from({ length: floorCount(spec) }, (_, i) => i + 1)].map((floor) => (
-              <button key={floor} className={activeFloor === floor ? 'active' : ''} onClick={() => setActiveFloor(floor)} title={`${floorLabel(spec, floor)} — view & edit this floor`}>{floor === 1 ? 'Ground' : floorLabel(spec, floor).replace(' floor', '')}</button>
-            ))}
-            {floorCount(spec) < 3 && <button className="addFloor" onClick={addStorey} title="Add a storey">+ Floor</button>}
-          </div>}
-          {viewMode === '3d' && webglOK && <button className={`layersToggle${layersOpen ? ' open' : ''}${hiddenLayerCount > 0 || modelLayers.xray ? ' filtered' : ''}`} onClick={() => setLayersOpen((open) => !open)} title="Show / hide model layers">
-            <Layers size={14} /> Layers{hiddenLayerCount > 0 ? ` · ${hiddenLayerCount} off` : modelLayers.xray ? ' · x-ray' : ''}
-          </button>}
           {(hiddenLayerCount > 0 || modelLayers.xray) && (
             <div className="viewFilterBadge">
               <span>
@@ -3383,7 +3391,6 @@ function App() {
             );
           })()}
           {viewMode === '3d' && webglOK && <div className="viewBadge"><Camera size={15} /> drag rooms, drag corner handles to resize</div>}
-          <div className="changeBadge" key={`${spec.revision}-${selectedRoom}`}><Sparkles size={14} /> Rev {spec.revision}: {lastModelChange}</div>
           {backendDown && (
             <div className="offlineBanner">
               <strong>The design engine has stopped — edits aren’t saving.</strong>
@@ -3396,9 +3403,9 @@ function App() {
               <span>{dimensionPreview.mode === 'resize' ? 'Resizing' : 'Moving'} · {dimensionPreview.w}' x {dimensionPreview.d}' · X {dimensionPreview.x}' Y {dimensionPreview.y}'</span>
             </div>
           )}
-          {viewMode === '3d' && webglOK && <div className="northBadge">N</div>}
           {/* The selector moved into the left panel (BIM Inspector header) —
               the model stays a pure tap-to-select surface. */}
+          </div>
         </div>
 
         {inspectorDock && createPortal(<div className="lowerDeck">

@@ -4243,3 +4243,40 @@ button.danger:hover,
   line-height: 1.45;
 }
 .offlineBanner strong { font-size: 13px; color: #8f3520; }
+
+/* ---- Model toolbar (2026-07-11): the rev chip, 3D|Plan|Detail switch,
+   floor tabs, Layers and the compass moved OUT of the floating overlays
+   into a real bar above the view — they can no longer cover plan or model
+   content. Only transient things still float (dimension ghost, offline
+   banner, layers dropdown, view gizmo, partial-view cue). ---- */
+.modelShell { display: flex; flex-direction: column; }
+.modelBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.modelStage { position: relative; flex: 1 1 auto; min-height: 0; }
+.modelBar .viewModeToggle,
+.modelBar .floorTabs,
+.modelBar .layersToggle,
+.modelBar .northBadge,
+.modelBar .changeBadge {
+  position: static;
+  transform: none;
+}
+.modelBar .changeBadge {
+  flex: 1 1 120px;
+  min-width: 0;
+  max-width: none;
+  overflow: hidden;
+  white-space: nowrap;
+  justify-content: flex-start;
+}
+.modelBar .northBadge { width: 34px; height: 34px; min-height: 34px; flex: 0 0 auto; }
+.modelBar .layersToggle { flex: 0 0 auto; }
+/* Dropdown + alerts anchor just under the bar now that it is real. */
+.layersPanel { top: 10px; right: 12px; max-height: calc(100% - 24px); }
+.offlineBanner { top: 12px; }

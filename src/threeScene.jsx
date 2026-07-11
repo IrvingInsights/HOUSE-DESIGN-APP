@@ -2372,17 +2372,37 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
   }, [spec, selectedRoom, layers]);
 
   if (!webglAvailable()) {
+    // Say WHY, and fix what's one click fixable. ?no3d is a testing switch —
+    // it lingers in browser history and autocompletes back into the address
+    // bar, which reads as "my 3D broke" (it did, for Daniel, 2026-07-11).
+    const forcedOff = typeof window !== 'undefined' && /[?&]no3d\b/.test(window.location.search);
     return (
       <div className="scene sceneFallback" aria-label="3D view unavailable">
         <div>
-          <b>The 3D view needs graphics acceleration (WebGL), and this browser has it turned off.</b>
-          <p>Everything else works — design in the Plan view and tap parts there; the Detail view still draws construction sections. To see the 3D model, turn on hardware acceleration in the browser settings or open the app in another browser.</p>
-          {onFallbackNav && (
-            <div className="fallbackNav">
-              <button type="button" onClick={() => onFallbackNav('plan')}>Return to Plan</button>
-              <button type="button" className="secondary" onClick={() => onFallbackNav('detail')}>Open Detail</button>
-            </div>
+          {forcedOff ? (
+            <>
+              <b>3D is switched off by this page’s web address (it ends in “no3d”, a testing switch).</b>
+              <p>Your browser is fine — the address just told the app to skip the 3D view. One click brings it back.</p>
+            </>
+          ) : (
+            <>
+              <b>The 3D view needs graphics acceleration (WebGL), and this browser has it turned off.</b>
+              <p>Everything else works — design in the Plan view and tap parts there; the Detail view still draws construction sections. This is often temporary: fully close and reopen the browser, then press Try 3D again. If it persists, turn on hardware acceleration in the browser settings (Chrome: Settings → System) or open the app in another browser.</p>
+            </>
           )}
+          <div className="fallbackNav">
+            {forcedOff ? (
+              <button type="button" onClick={() => {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('no3d');
+                window.location.href = url.toString();
+              }}>Turn 3D back on</button>
+            ) : (
+              <button type="button" onClick={() => window.location.reload()}>Try 3D again</button>
+            )}
+            {onFallbackNav && <button type="button" className="secondary" onClick={() => onFallbackNav('plan')}>Return to Plan</button>}
+            {onFallbackNav && <button type="button" className="secondary" onClick={() => onFallbackNav('detail')}>Open Detail</button>}
+          </div>
         </div>
       </div>
     );
