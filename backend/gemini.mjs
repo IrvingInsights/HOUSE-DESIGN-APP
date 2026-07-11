@@ -48,7 +48,21 @@ export async function callGemini({ parts, responseSchema, model = GEMINI_MODEL }
   if (responseSchema) {
     // A full drawing takeoff can be dozens of operations — give the model
     // room (and keep it literal: low temperature for tracing work).
-    body.generationConfig = { responseMimeType: 'application/json', responseSchema, maxOutputTokens: 32768, temperature: 0.2 };
+    // thinkingBudget 0: flash THINKS by default and thinking tokens bill at
+    // the expensive output rate on every planner call — it drained a $25
+    // prepayment in a day of tracing, stretched staged passes to 100-250s,
+    // and starved the JSON reply into "unreadable" truncation. Structured
+    // extraction against a schema doesn't need it. GEMINI_THINKING_BUDGET
+    // overrides if a future model benefits. Chat calls (no schema) keep the
+    // model's default.
+    const thinkingBudget = Number(process.env.GEMINI_THINKING_BUDGET ?? 0);
+    body.generationConfig = {
+      responseMimeType: 'application/json',
+      responseSchema,
+      maxOutputTokens: 32768,
+      temperature: 0.2,
+      thinkingConfig: { thinkingBudget }
+    };
   }
 
   let response;
