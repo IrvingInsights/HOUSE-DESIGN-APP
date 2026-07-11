@@ -1,6 +1,6 @@
 // Deterministic tests for the trace verify/repair decision + merge logic,
 // plus the offline (local) planner's honesty rules.
-import { traceLooksIncomplete, scrubDeferralSummary, mergeTracePlans, repairTraceGeometry, repairTowerStorey, localPlan, promptNeedsDrawing, cleanTraceElements }
+import { traceLooksIncomplete, scrubDeferralSummary, mergeTracePlans, repairTraceGeometry, repairTowerStorey, localPlan, promptNeedsDrawing, cleanTraceElements, describeModelForAudit, sanitizeAuditOperations }
   from '../backend/planner.mjs';
 
 let pass = 0, fail = 0;
@@ -219,6 +219,31 @@ const dimlessCheck = traceLooksIncomplete({
   ]
 }, { rooms: [], elements: [], shell: {} });
 ok(dimlessCheck.unmeasuredElements === true && dimlessCheck.unmeasuredElementNames.length === 3, 'dimensionless elements flagged for the repair pass');
+
+// ---- Audit-loop deterministic parts (the Gemini call itself is stochastic;
+// only the snapshot + sanitizer are unit-testable). ----
+{
+  const snap = describeModelForAudit({
+    shell: { widthFt: 24, depthFt: 28, roofType: 'shed', southWallHeightFt: 17, northWallHeightFt: 10, storeys: 2 },
+    rooms: [{ id: 'kitchen', name: 'Kitchen', x: 2, y: 3, w: 10, d: 11, level: 1 }],
+    openings: [{ wall: 'south', type: 'window', widthFt: 5, x: 4 }],
+    elements: [{ id: 'stairs', category: 'structure', name: 'Stairs', x: 11, y: 13, w: 3, d: 7 }]
+  });
+  ok(snap.includes('kitchen | Kitchen | 2,3 | 10x11 | L1'), 'audit snapshot lists rooms with ids and dims');
+  ok(snap.includes('opening-0 | south | window | 5 | 4'), 'audit snapshot lists openings as targetable ids');
+  ok(snap.includes('stairs | structure | Stairs'), 'audit snapshot lists elements');
+  ok(snap.includes('south wall 17 ft, north wall 10 ft'), 'audit snapshot carries the shed heights');
+}
+{
+  const fixes = sanitizeAuditOperations([
+    { type: 'move_object', targetId: 'kitchen', x: 3, y: 3 },
+    { type: 'set_site', field: 'zip', value: '00000' },
+    null,
+    ...Array.from({ length: 30 }, (_, i) => ({ type: 'resize_object', targetId: 'r' + i, w: 10, d: 10 }))
+  ]);
+  ok(fixes.length === 20, 'audit fixes cap at 20 per round');
+  ok(fixes[0].type === 'move_object' && !fixes.some((o) => o.type === 'set_site'), 'non-corrective op types are dropped');
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

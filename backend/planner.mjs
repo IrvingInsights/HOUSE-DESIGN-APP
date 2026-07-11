@@ -2,6 +2,7 @@ import { OPENAI_IMAGE_MAX, OPENAI_PLANNER_MODEL } from './config.mjs';
 import { callGemini, geminiParts, geminiSchema, hasGemini } from './gemini.mjs';
 import { getCached, makeCacheKey, setCached } from './cache.mjs';
 import { slugify } from './utils.mjs';
+import { applyBimOperations } from './bim-core.mjs';
 
 const operationSchema = {
   type: 'object',
@@ -704,6 +705,101 @@ Do NOT restate the shell or footprint unless the earlier value is wrong. NEVER d
   return mergeTracePlans(plan, extra, sourceSpec, already, { allowShellDims: check.badGeometry });
 }
 
+// ---- The trace CYCLE: build → compare against the drawing → fix → compare
+// again. The one-shot trace (plus the incompleteness repair above) catches
+// what's MISSING; this loop catches what's WRONG — a room traced 4 ft short,
+// a window on the wrong wall — by simulating the applied model server-side
+// and showing the AI its own result next to the drawing it traced.
+
+// Compact, id-bearing snapshot of the model — what the audit pass reads.
+// Pure + exported for unit tests.
+export function describeModelForAudit(spec) {
+  const s = spec.shell || {};
+  const lines = [];
+  lines.push(`Shell: ${s.widthFt}x${s.depthFt} ft, roof ${s.roofType || 'gable'}${s.roofType === 'shed' ? ` (south wall ${s.southWallHeightFt} ft, north wall ${s.northWallHeightFt} ft)` : ` (wall height ${s.wallHeightFt} ft)`}, storeys ${s.storeys || 1}${Number(s.basementHeightFt) > 0 ? `, basement ${s.basementHeightFt} ft` : ''}.`);
+  if (Array.isArray(s.footprint) && s.footprint.length) {
+    lines.push(`Footprint corners (ft): ${s.footprint.map((p) => `(${p[0]},${p[1]})`).join(' ')}`);
+  }
+  lines.push('ROOMS (id | name | x,y | w x d ft | level):');
+  (spec.rooms || []).forEach((r) => lines.push(`  ${r.id} | ${r.name} | ${r.x},${r.y} | ${r.w}x${r.d} | L${r.level || 1}`));
+  lines.push('OPENINGS (targetId | wall | type | width ft | position ft along wall):');
+  (spec.openings || []).forEach((o, i) => lines.push(`  opening-${i} | ${o.wall} | ${o.type} | ${o.widthFt} | ${o.wall === 'north' || o.wall === 'south' ? (o.x ?? 0) : (o.y ?? 0)}`));
+  lines.push('ELEMENTS (id | category | name | x,y | w x d ft | level):');
+  (spec.elements || []).forEach((e) => lines.push(`  ${e.id} | ${e.category || 'custom'} | ${e.name} | ${e.x},${e.y} | ${e.w}x${e.d} | L${e.level || 1}`));
+  return lines.join('\n');
+}
+
+// The audit reply may only CORRECT — cap the flood and drop anything the
+// backend wouldn't honor anyway. Pure + exported for unit tests.
+const AUDIT_OP_TYPES = new Set([
+  'move_object', 'resize_object', 'update_object', 'remove_object',
+  'add_room', 'add_opening', 'dedupe_openings', 'add_element',
+  'set_shell', 'set_roof', 'set_roof_profile', 'set_wall_side',
+  'set_wall_height', 'set_footprint', 'move_wall_edge', 'set_frame', 'set_overhang'
+]);
+export function sanitizeAuditOperations(ops, cap = 20) {
+  return (Array.isArray(ops) ? ops : [])
+    .filter((op) => op && typeof op === 'object' && AUDIT_OP_TYPES.has(op.type))
+    .slice(0, cap);
+}
+
+const AUDIT_ROUNDS = 2;
+// The browser waits on this one request — past ~5 minutes it gives up while
+// the server keeps working, which reads as "the engine died". Budget the
+// loop: a round only STARTS while total planning time is under this.
+const AUDIT_TIME_BUDGET_MS = 200 * 1000;
+async function auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt = Date.now(), force = false }) {
+  if (!attachmentParts?.length) return plan;
+  if (!(plan.operations || []).length && !force) return plan;
+  plan.operations ||= [];
+  let working;
+  try {
+    working = plan.operations.length
+      ? applyBimOperations(sourceSpec, { operations: plan.operations }).spec
+      : structuredClone(sourceSpec); // audit-only: check the model as it stands
+  } catch {
+    return plan; // simulation failed — ship the plan as-is rather than stall
+  }
+  for (let round = 1; round <= AUDIT_ROUNDS; round += 1) {
+    if (Date.now() - startedAt > AUDIT_TIME_BUDGET_MS) {
+      plan.warnings = [...(plan.warnings || []), `Self-check stopped after ${round - 1} round${round === 2 ? '' : 's'} — a large drawing set uses the time up; say "re-check the trace against the drawing" to run another pass.`];
+      break;
+    }
+    const auditText = {
+      text: `AUDIT PASS — you already traced the attached drawing(s) into a BIM model. Below is the model EXACTLY as it stands after your trace. Compare it against the drawings and correct real discrepancies.
+
+${describeModelForAudit(working)}
+
+Emit operations that FIX what differs from the drawing:
+- a room/opening/element whose size or position is off by 1 ft or more: move_object / resize_object / update_object with its exact id from the list above
+- anything the drawing shows that is missing (add it); anything in the model the drawing does NOT show (remove_object by id)
+- wrong storey count, wall heights, roof type or fall direction, footprint shape
+Rules: correct EXISTING items by id — never re-add something already listed. If the model is faithful to the drawing, return ZERO operations. At most 20 operations, most important first. summary = one short line naming what you corrected. Never invent detail the drawing does not show.`
+    };
+    let res;
+    try {
+      res = await callGemini({ parts: [auditText, ...attachmentParts], responseSchema: geminiSchema(operationSchema) });
+    } catch { break; }
+    if (!res?.ok) break;
+    let verdict;
+    try { verdict = JSON.parse(res.text); } catch { break; }
+    const fixes = sanitizeAuditOperations(verdict?.operations);
+    if (!fixes.length) {
+      plan.warnings = [...(plan.warnings || []), round === 1
+        ? 'Self-check: compared the model against the drawing — it matches.'
+        : `Self-check round ${round}: no further corrections needed.`];
+      break;
+    }
+    plan.operations = [...plan.operations, ...fixes];
+    plan.warnings = [...(plan.warnings || []),
+      `Self-check round ${round}: corrected ${fixes.length} discrepanc${fixes.length === 1 ? 'y' : 'ies'} against the drawing${verdict?.summary ? ` — ${String(verdict.summary).slice(0, 140)}` : ''}.`];
+    try {
+      working = applyBimOperations(sourceSpec, { operations: plan.operations }).spec;
+    } catch { break; }
+  }
+  return plan;
+}
+
 // Merge a repair pass into the first plan: append the missing rooms/openings/
 // storeys, drop repeated rooms (by name), never let the repair restate the
 // shell or footprint. Pure + exported so the dedup logic is unit-tested.
@@ -756,6 +852,7 @@ export function mergeTracePlans(plan, extra, sourceSpec, alreadyNames, options =
 
 export async function aiPlan(payload) {
   if (!hasGemini() && !process.env.OPENAI_API_KEY) return localPlan(payload);
+  const startedAt = Date.now();
 
   const cacheKey = makeCacheKey({
     kind: 'planner',
@@ -792,7 +889,10 @@ export async function aiPlan(payload) {
   const existingOpenings = (sourceSpec.openings || []).length;
   const promptText = String(payload.prompt || '');
   const asksForTrace = /\b(re-?trace|trace|take ?off|start (?:this|the|a) design from|build (?:it|this|the (?:house|model|design)) from|read the (?:drawing|plans?|pdf)|from the (?:attached|drawing|plans?|pdf)|rebuild from|match the drawings?|everything must match)\b/i.test(promptText);
-  const freshTrace = hasAttachments && (asksForTrace || (existingRooms <= 1 && existingOpenings <= 2));
+  // "Re-check the trace against the drawing" = audit-only: compare the model
+  // as it stands to the drawing and fix discrepancies — NOT a full re-trace.
+  const asksAudit = /\b(re-?check|audit|verify|double-?check)\b[^.?!]*\b(trace|traced|drawing|plans?|pdf|model)\b/i.test(promptText);
+  const freshTrace = hasAttachments && !asksAudit && (asksForTrace || (existingRooms <= 1 && existingOpenings <= 2));
   const traceMandate = freshTrace ? `
 A DRAWING OR DOCUMENT IS ATTACHED. Your job is a COMPLETE takeoff, not a summary:
 1. set_shell from the overall plan dimensions: ONE op carrying BOTH numbers — w AND d (e.g. w:40.5, d:23, field:'', value:''). Never set only one dimension. Read dimension strings; if none, scale from a labeled element like a 3'-0" door and record that in assumptions. If the drawing shows multiple above-grade storeys, also set_shell field:'storeys'.
@@ -921,6 +1021,19 @@ ${payload.prompt}`
       plan = repairTraceGeometry(plan, sourceSpec);
       plan = repairTowerStorey(plan, sourceSpec);
       plan = cleanTraceElements(plan, sourceSpec);
+      // CYCLE until faithful: simulate the applied model, show the AI its own
+      // result next to the drawing, take its corrections, check again.
+      plan = await auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt });
+      plan = repairTraceGeometry(plan, sourceSpec);
+    } else if (asksAudit && sendAttachments) {
+      // Audit-only ask ("re-check the trace against the drawing"): compare
+      // the CURRENT model to the drawing and emit only the corrections.
+      const attachmentParts = geminiParts(content.filter((c) => c.type === 'input_image'));
+      plan = await auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt, force: true });
+      plan = repairTraceGeometry(plan, sourceSpec);
+      if (!(plan.operations || []).length && !String(plan.summary || '').trim()) {
+        plan.summary = 'Checked the model against the drawing — no discrepancies worth correcting.';
+      }
     }
     return setCached(cacheKey, { source: 'ai-planner-gemini', ...plan }, 3 * 60 * 1000);
   }
