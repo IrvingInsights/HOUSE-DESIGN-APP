@@ -2596,7 +2596,7 @@ function App() {
               <div className="controlGrid">
                 <label>Type
                   <select value={basementInfo(spec.shell).present ? 'basement' : utilitiesOf(spec).foundationType} onChange={(event) => setFoundationChoice(event.target.value)}>
-                    <option value="rubble" style={{ color: '#2f7d46' }}>🌿 Rubble trench — drained gravel, low cost, low carbon</option>
+                    <option value="rubble" style={greenOptStyle({ green: true })}>🌿 Rubble trench — drained gravel, low cost, low carbon</option>
                     <option value="stemwall">Stem wall — perimeter wall on footing</option>
                     <option value="slab">Insulated slab — simple, the most concrete</option>
                     <option value="basement">Basement — a full storey below grade</option>
@@ -2855,7 +2855,7 @@ function App() {
                   <select value={utilitiesOf(spec).waterSource} onChange={(event) => updateUtility('waterSource', event.target.value)}>
                     <option value="well">Drilled well — reliable, needs a pump</option>
                     <option value="spring">Spring — cheap if the land has one</option>
-                    <option value="catchment" style={{ color: '#2f7d46' }}>🌿 Rain catchment — roof + rain</option>
+                    <option value="catchment" style={greenOptStyle({ green: true })}>🌿 Rain catchment — roof + rain</option>
                     <option value="town">Town main — simplest</option>
                   </select>
                 </label>
@@ -2872,7 +2872,7 @@ function App() {
                 <label>Method
                   <select value={utilitiesOf(spec).wasteMethod} onChange={(event) => updateUtility('wasteMethod', event.target.value)}>
                     <option value="septic">Septic + leach field — conventional</option>
-                    <option value="composting" style={{ color: '#2f7d46' }}>🌿 Composting toilet + greywater</option>
+                    <option value="composting" style={greenOptStyle({ green: true })}>🌿 Composting toilet + greywater</option>
                     <option value="reedbed">Reed bed / constructed wetland</option>
                   </select>
                 </label>
@@ -2908,7 +2908,7 @@ function App() {
               <div className="controlGrid">
                 <label>Source
                   <select value={utilitiesOf(spec).heatSource} onChange={(event) => updateUtility('heatSource', event.target.value)}>
-                    <option value="rocket_mass" style={{ color: '#2f7d46' }}>🌿 Rocket mass heater — wood, huge mass, very DIY</option>
+                    <option value="rocket_mass" style={greenOptStyle({ green: true })}>🌿 Rocket mass heater — wood, huge mass, very DIY</option>
                     <option value="masonry">Masonry heater — wood, slow steady radiant</option>
                     <option value="wood_stove">Wood stove — simple, familiar</option>
                     <option value="minisplit">Electric mini-split — no wood, draws power</option>
