@@ -1,9 +1,16 @@
 @echo off
 rem Natural Building — start the design studio (http://127.0.0.1:5184/)
+rem Keep this window open while you design. If the engine ever stops,
+rem this window restarts it by itself.
 cd /d "%~dp0"
 if not exist node_modules (
   echo First run: installing dependencies...
   call npm install
 )
+:run
 node server.mjs
-pause
+echo(
+echo The design engine stopped ^(details above^). Restarting in 3 seconds...
+echo Close this window if you meant to quit.
+timeout /t 3 /nobreak >nul
+goto run

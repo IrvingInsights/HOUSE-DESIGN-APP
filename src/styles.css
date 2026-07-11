@@ -4220,3 +4220,26 @@ button.danger:hover,
 }
 .sceneFallback .fallbackNav { display: flex; gap: 10px; margin-top: 14px; justify-content: center; }
 .sceneFallback .fallbackNav button { padding: 8px 18px; }
+
+/* Engine-offline banner — floats over the bright model like the other
+   overlays, so it pins its own light-surface colors (two-scope rule). */
+.offlineBanner {
+  position: absolute;
+  left: 50%;
+  top: 56px;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: min(560px, calc(100% - 36px));
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(251, 245, 240, 0.97);
+  border: 1.5px solid #ae452f;
+  color: #7c2d1c;
+  box-shadow: 0 14px 34px rgba(62, 55, 45, 0.25);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.offlineBanner strong { font-size: 13px; color: #8f3520; }

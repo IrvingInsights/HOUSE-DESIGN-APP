@@ -36,6 +36,16 @@ import './styles.css';
 // Vite announces a dev full-reload BEFORE it happens. Mark it so the opening
 // card can tell a code-edit reload (stay out of the way) from the user opening
 // or refreshing the app themselves (always show the front door).
+// A fetch that never reached the server at all (the engine window was closed,
+// crashed, or the machine restarted) — different from a server that answered
+// with an error. Browsers word it differently: Chrome "Failed to fetch",
+// Firefox "NetworkError…", Safari "Load failed".
+function isConnectionError(error) {
+  return /failed to fetch|networkerror|load failed|connection refused|network request failed/i.test(String(error?.message || error));
+}
+
+const ENGINE_OFFLINE_NOTICE = 'I can’t reach the design engine, so changes aren’t saving right now — your last edit didn’t stick. The engine window (the one that says "running at http://127.0.0.1:5184") has stopped. Start it again by double-clicking start.bat in the app folder (Start Mac.command on a Mac), then reload this page. Your design is safe on disk. I’ll say the moment I can reach it again.';
+
 if (import.meta.hot) {
   import.meta.hot.on('vite:beforeFullReload', () => {
     try { window.sessionStorage.setItem('nbHmrReload', '1'); } catch { /* storage blocked — card just reopens */ }
@@ -177,6 +187,10 @@ function App() {
   const chatStreamRef = useRef(null);
   const autosaveTimerRef = useRef(null);
   const backendReadyRef = useRef(false);
+  // One outage = ONE chat notice + a banner, never a chat reply per failed
+  // drag (a dead engine once made the chat "respond" to every model move).
+  const backendDownRef = useRef(false);
+  const [backendDown, setBackendDown] = useState(false);
 
   const issues = useMemo(() => detectIssues(spec), [spec]);
   const council = useMemo(() => runCouncil(spec), [spec]);
@@ -326,6 +340,39 @@ function App() {
     }
   }
 
+  function markBackendDown(noticeText = ENGINE_OFFLINE_NOTICE) {
+    const firstTime = !backendDownRef.current;
+    backendDownRef.current = true;
+    setBackendDown(true);
+    if (firstTime && noticeText) {
+      setChatMessages((items) => [...items, { role: 'studio', speaker: 'Studio', text: noticeText }]);
+    }
+    return firstTime;
+  }
+
+  function clearBackendDown(announce = false) {
+    if (!backendDownRef.current) return;
+    backendDownRef.current = false;
+    setBackendDown(false);
+    if (announce) {
+      setChatMessages((items) => [...items, { role: 'studio', speaker: 'Studio', text: 'The design engine is back — changes are saving again. Redo your last edit if it didn’t stick.' }]);
+    }
+  }
+
+  // While the engine is down, quietly knock every few seconds so the app
+  // recovers by itself the moment the user restarts it — no reload needed.
+  useEffect(() => {
+    if (!backendDown) return undefined;
+    let cancelled = false;
+    const timer = window.setInterval(async () => {
+      try {
+        const response = await fetch('/api/projects/current');
+        if (!cancelled && response.ok) clearBackendDown(true);
+      } catch { /* still down — keep knocking */ }
+    }, 4000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [backendDown]);
+
   async function applyBackendOperations({
     operations,
     promptText,
@@ -367,9 +414,14 @@ function App() {
     } catch (error) {
       // A change must never vanish silently — say so where the user is looking.
       setLastModelChange(`"${promptText}" did not apply — the design service didn't respond. Try it again.`);
-      setChatMessages((items) => [...items, { role: 'studio', speaker: 'Studio', text: `"${promptText}" didn't save (${error?.message || 'no response'}). Nothing changed — try it once more.` }]);
+      if (isConnectionError(error)) {
+        markBackendDown();
+      } else {
+        setChatMessages((items) => [...items, { role: 'studio', speaker: 'Studio', text: `"${promptText}" didn't save (${error?.message || 'no response'}). Nothing changed — try it once more.` }]);
+      }
       return null;
     }
+    clearBackendDown();
     const report = result.report;
     rememberRevision();
     setSpec(report.spec);
@@ -664,6 +716,18 @@ function App() {
       ]);
       setRevisionLog((items) => [`No change: Planner could not turn "${submittedPrompt}" into a safe BIM operation.`, ...items]);
     } catch (error) {
+      if (isConnectionError(error)) {
+        // The engine itself is unreachable — nothing about the request or the
+        // drawing failed. Say exactly that, with the way out; never pretend
+        // this was "a conversation prompt, not a BIM edit".
+        markBackendDown(null);
+        setChatMessages((items) => [
+          ...items,
+          { role: 'studio', speaker: 'Studio', text: `I couldn’t reach the design engine, so nothing was changed — this isn’t about your drawing or your request. The engine window (the one that says "running at http://127.0.0.1:5184") has stopped. Start it again by double-clicking start.bat in the app folder (Start Mac.command on a Mac), then reload this page. Your design is safe on disk.${attachedImages.length ? ' After the reload, re-attach the drawing and send your message again.' : ''}` }
+        ]);
+        setRevisionLog((items) => [`No change: design engine unreachable for "${submittedPrompt}".`, ...items]);
+        return;
+      }
       const report = applyNaturalLanguageDesign(submittedPrompt, spec, attachedImages, addToTarget, selected);
       if (isConsultativePrompt(submittedPrompt, attachedImages)) {
         const reply = buildStudioConversationResponse(submittedPrompt, spec, selected, issues, attachedImages);
@@ -3320,6 +3384,12 @@ function App() {
           })()}
           {viewMode === '3d' && webglOK && <div className="viewBadge"><Camera size={15} /> drag rooms, drag corner handles to resize</div>}
           <div className="changeBadge" key={`${spec.revision}-${selectedRoom}`}><Sparkles size={14} /> Rev {spec.revision}: {lastModelChange}</div>
+          {backendDown && (
+            <div className="offlineBanner">
+              <strong>The design engine has stopped — edits aren’t saving.</strong>
+              <span>Double-click start.bat in the app folder (Start Mac.command on a Mac). This notice disappears by itself once it’s back.</span>
+            </div>
+          )}
           {viewMode === '3d' && dimensionPreview && (
             <div className="dimensionBadge">
               <Ruler size={15} />
