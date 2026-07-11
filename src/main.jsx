@@ -52,6 +52,18 @@ if (import.meta.hot) {
   });
 }
 
+// One consistent "there's more here" affordance for every system page: the
+// plain controls stay visible, the finer grain folds behind this. Native
+// <details> — no state to manage, keyboard/AT-friendly for free.
+function FineTune({ label, hint, children }) {
+  return (
+    <details className="fineTune">
+      <summary><span className="ftArrow" aria-hidden="true">▸</span>{label}{hint ? <small>{hint}</small> : null}</summary>
+      <div className="fineTuneBody">{children}</div>
+    </details>
+  );
+}
+
 function App() {
   const initialSaved = loadSavedDashboardState();
   const [projectId, setProjectId] = useState(() => initialSaved?.projectId || 'current-project');
@@ -109,16 +121,10 @@ function App() {
   useEffect(() => {
     try { window.localStorage.setItem('nbChatOpen', chatOpen ? '1' : '0'); } catch { /* private mode */ }
   }, [chatOpen]);
-  // When the SELECTION changes (tap in the model, plan, chip, or a summary
-  // row), bring the docked editor into view — it sits below the system page in
-  // the left bar's general→specific sequence, so it may be off-screen.
-  const lastSelectedScrollRef = useRef(null);
-  useEffect(() => {
-    if (lastSelectedScrollRef.current === null) { lastSelectedScrollRef.current = selectedRoom; return; }
-    if (lastSelectedScrollRef.current === selectedRoom) return;
-    lastSelectedScrollRef.current = selectedRoom;
-    if (inspectorDock) inspectorDock.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [selectedRoom, inspectorDock]);
+  // The Inspector is PINNED to the bottom of the left column (no scroll-to-
+  // find-it — the old smooth-scroll bridge was cancelled by the 3D rebuild
+  // that fires on the same selection, so tapping a wall looked like a no-op).
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [dimensionPreview, setDimensionPreview] = useState(null);
   const [savedAt, setSavedAt] = useState(() => initialSaved?.savedAt || '');
   const [libraryActionMode, setLibraryActionMode] = useState(() => initialSaved?.libraryActionMode || 'apply');
@@ -2052,6 +2058,7 @@ function App() {
   return (
     <main className={chatOpen ? 'app' : 'app chatClosed'}>
       <aside className="leftPanel">
+        <div className="leftScroll">
         <div className="brand">
           <div className="brandMark" aria-hidden="true"><span className="brandGable" /></div>
           <div>
@@ -2220,7 +2227,12 @@ function App() {
                   <p className="systemNote">The ground storey is the shell itself: Width / Length / Wall height above are its controls, and each side can differ on the <b>Walls</b> page.</p>
                 </div>
               )}
-              {(spec.elements || []).filter((el) => el.category === 'floor' && Number(el.level || 1) > 1).map((plateEl) => {
+              {(() => {
+                const plates = (spec.elements || []).filter((el) => el.category === 'floor' && Number(el.level || 1) > 1);
+                if (!plates.length) return null;
+                return (
+                <FineTune label={plates.length > 1 ? 'Fine-tune — each upper storey' : 'Fine-tune — the upper storey'} hint="its exact size, position, and ceiling height">
+                {plates.map((plateEl) => {
                 const plateDispatch = (ops, label) => applyBackendOperations({ operations: ops, promptText: label, logPrefix: 'Storey', nextSelectedId: plateEl.id });
                 const num = (v) => Number(v) || 0;
                 return (
@@ -2240,8 +2252,11 @@ function App() {
                     <p className="systemNote">The upper storey covers only this rectangle — walls ring it and the roof steps down over the rest. Its wall construction has its own section on the <b>Walls</b> page; its frame on the <b>Frame</b> page. Also draggable on the <b>{floorLabel(spec, Number(plateEl.level))}</b> Plan tab.</p>
                   </div>
                 );
-              })}
-              <div className="sectionHead">Footprint shape</div>
+                })}
+                </FineTune>
+                );
+              })()}
+              <FineTune label="Fine-tune — footprint shape" hint="L-shapes, notches, moving a wall">
               {hasCustomFootprint(spec) ? (
                 <>
                   <div className="controlGrid">
@@ -2258,6 +2273,7 @@ function App() {
                 <p className="systemNote">The plan is a plain rectangle. To make an <b>L-shape or notch</b>: tap a wall (model, Plan, or the Walls page), press <b>Split into 3</b> in the inspector, then drag the middle segment in the Plan view — or just ask the assistant ("make this an L with a 16×13 porch notch on the southeast corner").</p>
               )}
               <p className="systemNote">Footprint: {spec.shell.widthFt} × {spec.shell.depthFt} ft = {fmtNum(Math.round(derived.floor))} sf{floorCount(spec) > 1 ? ` · ${fmtNum(derived.heatedFloor)} sf heated across ${floorCount(spec)} storeys` : ''}. Each added storey gets an <b>extent plate</b> — switch to that floor in the Plan and resize it to put the storey over only part of the building (the roof steps down over the rest). Per-wall heights and systems live on the <b>Walls</b> page; put a room upstairs by setting its Level in the inspector.</p>
+              </FineTune>
             </div>
             );
           })()}
@@ -2383,10 +2399,10 @@ function App() {
                   <input type="checkbox" checked={utilitiesOf(spec).diyWalls} onChange={(event) => updateUtility('diyWalls', event.target.checked)} />
                   <span>I'll raise the walls myself (sweat equity — walls are the most DIY-able system)</span>
                 </label>
-                <p className="systemNote">While all sides share one height you can set it here; once a side differs, set its height by tapping that wall below.</p>
+                <p className="systemNote">While all sides share one height you can set it here; once a side differs, set its height by tapping that wall under Fine-tune below.</p>
 
-                <div className="sectionHead">{storeyInfo(spec.shell).storeys > 1 ? 'Ground storey — each side' : 'Each side'}</div>
-                <p className="systemNote">Tap a wall — here or in the model — to edit that side (system, height, thickness, finishes) in the Inspector below. Toggle a side open for no wall there.</p>
+                <FineTune label={storeyInfo(spec.shell).storeys > 1 ? 'Fine-tune — wall by wall, ground & upper' : 'Fine-tune — wall by wall'} hint="each side's system, height, thickness, finishes">
+                <p className="systemNote">Tap a wall — here or in the model — to edit that side in the Inspector below. Tick “no wall” to leave a side open to an attached greenhouse or porch.</p>
                 <div className="pickList">
                   {resolvedSides.map(({ side, r }) => {
                     // On a custom footprint a facing can have several segments —
@@ -2401,11 +2417,11 @@ function App() {
                       <div key={side} className={`pickRow${r.omitted ? ' muted' : ''}${rowActive ? ' active' : ''}`}>
                         <button type="button" className="pickRowMain" onClick={() => selectObject(rowTarget)} disabled={r.omitted}>
                           <strong>{WALL_SIDE_LABELS[side]}{facingSections.length > 1 ? ` (${facingSections.length} segments)` : ''}</strong>
-                          <small>{r.omitted ? 'open — no wall' : `${r.assembly.label} · ${r.heightFt}′ · ${r.thicknessFt.toFixed(2)}′ · ${spec.openings.filter((opening) => opening.wall === side).length} opening(s)`}</small>
+                          <small>{r.omitted ? 'no wall on this side' : `${r.assembly.label} · ${r.heightFt}′ · ${r.thicknessFt.toFixed(2)}′ · ${spec.openings.filter((opening) => opening.wall === side).length} opening(s)`}</small>
                         </button>
-                        <label className="pickRowToggle" title="No wall on this side">
+                        <label className="pickRowToggle" title="Leave this side without a wall (open to a greenhouse, porch, or the outdoors)">
                           <input type="checkbox" checked={r.omitted} onChange={(event) => updateWallSide(side, 'omitted', event.target.checked)} />
-                          <span>open</span>
+                          <span>no wall</span>
                         </label>
                       </div>
                     );
@@ -2443,6 +2459,7 @@ function App() {
                     </>
                   );
                 })()}
+                </FineTune>
               </div>
             );
           })()}
@@ -2481,7 +2498,7 @@ function App() {
               </div>
               <p className="systemNote">Search by name for real coordinates and last year's actual rainfall, or fine-tune by hand. Latitude sets sun angles; rain decides whether the roof can supply water. Orientation is how far the south face is turned off true south — the further you rotate, the less winter sun your south glass gathers.</p>
 
-              <div className="sectionHead">Topography — the lay of the land</div>
+              <FineTune label="Fine-tune — topography" hint="sloped land, walkout basements">
               <div className="controlGrid">
                 <label>Fall across the house (ft)
                   <input type="number" step="0.5" min="0" max="60" value={Number(siteOf(spec).slopeFt) || 0} onChange={(event) => updateSite('slopeFt', event.target.value)} />
@@ -2501,6 +2518,7 @@ function App() {
               <p className="systemNote">{(Number(siteOf(spec).slopeFt) || 0) > 0
                 ? <>The land falls <b>{siteOf(spec).slopeFt}′ toward the {siteOf(spec).slopeDir}</b> across the footprint — the model's terrain slopes to match and the foundation steps down to meet grade, exposing up to <b>{maxFoundationExposureFt(spec).toFixed(1)}′</b> of wall on the downhill side{maxFoundationExposureFt(spec) >= 6 ? ' (a walkout/daylight basement condition)' : ''}. Drawings and sections read this same grade line.</>
                 : 'Flat site. Give it a fall in feet (from a survey, contour lines, or pacing it off) and the terrain, foundation, and future drawings will follow the real ground.'}</p>
+              </FineTune>
 
               <div className="sectionHead">Outbuildings</div>
               <div className="roomAddGrid">
@@ -2582,7 +2600,7 @@ function App() {
                 </>
               )}
 
-              <div className="sectionHead">Foundation runs — under specific walls</div>
+              <FineTune label="Fine-tune — runs under specific walls" hint="a strip under a greenhouse wall, heater, or bearing partition">
               <p className="systemNote">The perimeter above carries the outside walls. Heavy INTERIOR lines need their own strip — the wall between the house and an attached greenhouse, a mass heater, a bearing partition. Drop a run, then drag and stretch it under the wall it carries in the <b>Plan</b> view.</p>
               <div className="roomAddGrid">
                 {FOUNDATION_RUN_PRESETS.map((preset) => (
@@ -2613,6 +2631,7 @@ function App() {
                   </div>
                 );
               })()}
+              </FineTune>
             </div>
           )}
 
@@ -2660,7 +2679,7 @@ function App() {
                   <span>I'll raise the frame myself (sweat equity)</span>
                 </label>
 
-                <div className="sectionHead">Where materials are reclaimed</div>
+                <FineTune label="Fine-tune — where materials are reclaimed" hint="salvage cuts cost and embodied carbon">
                 <p className="systemNote">Mark each material system you're building from salvaged stock — it flows straight into cost and embodied carbon.</p>
                 <div className="reclaimedGrid">
                   {[['frame', 'Frame timber'], ['walls', 'Wall materials'], ['flooring', 'Flooring'], ['windows', 'Windows & doors'], ['roof', 'Roofing']].map(([key, label]) => (
@@ -2673,6 +2692,7 @@ function App() {
                 {savings.count > 0
                   ? <p className="systemNote"><b>♺ Reclaimed materials are saving</b> about {fmtMoney(savings.cost)} and {(savings.carbon / 1000).toFixed(1)} t CO₂e versus buying everything new.</p>
                   : <p className="systemNote">Nothing marked reclaimed yet. Salvaged windows, timber, and roofing are the biggest, cheapest carbon wins on a natural build.</p>}
+                </FineTune>
 
                 <div className="sectionHead">Frame drawings</div>
                 <p className="systemNote">Shop-drawing sheets of THIS frame — elevation views with posts, plates, braces, and rafters called out and dimensioned, a frame plan, and a member takeoff. Print at 11×17.</p>
@@ -2924,7 +2944,7 @@ function App() {
               <div className="breakOpenRow">
                 <div className="sectionHead">Overhang</div>
                 <button className="breakOpen" onClick={() => setOverhangBreakOpen((open) => !open)}>
-                  {overhangBreakOpen ? '▾ one value all around' : '▸ break open per side (N/S/E/W)'}
+                  {overhangBreakOpen ? '▾ one value all around' : '▸ fine-tune per side (N/S/E/W)'}
                 </button>
               </div>
               {!overhangBreakOpen ? (
@@ -2980,12 +3000,6 @@ function App() {
             );
           })()}
         </section>}
-
-        {/* The inspector docks BELOW the system page (portal target): the left
-            bar reads general → specific — verdict, mode, view, navigate, design
-            the system, then the selected object. Tapping anything in the model
-            scrolls this into view. */}
-        {appMode === 'design' && consoleView === 'systems' && <div className="inspectorDock" ref={setInspectorDock} />}
 
         {appMode === 'design' && consoleView === 'os' && <section className="panelBlock consolePanel projectOS">
             <div className="blockTitle"><ClipboardCheck size={16} /> Project Plan</div>
@@ -3204,7 +3218,12 @@ function App() {
               </>
             )}
         </section>}
+        </div>
 
+        {/* The Inspector — the single per-object editor — is PINNED here at
+            the bottom of the left column, always in view when something is
+            selected. Fine grain is one glance away, never a scroll away. */}
+        {appMode === 'design' && consoleView === 'systems' && <div className={`inspectorDock${inspectorOpen ? '' : ' collapsed'}`} ref={setInspectorDock} />}
       </aside>
 
       <section className="workspace">
@@ -3411,13 +3430,15 @@ function App() {
         {inspectorDock && createPortal(<div className="lowerDeck">
           <section className="bimEditor">
             <div className="bimEditorHead">
-              <div>
-                <div className="sectionHead"><Grid3X3 size={17} /> BIM Inspector</div>
-                <nav className="inspectorTabs" aria-label="BIM inspector">
+              <div className="bimEditorHeadRow">
+                <div className="sectionHead"><Grid3X3 size={17} /> BIM Inspector
+                  <button type="button" className="dockCollapse" title={inspectorOpen ? 'Tuck the editor away' : 'Open the editor'} onClick={() => setInspectorOpen((open) => !open)}>{inspectorOpen ? '▾ hide' : '▴ edit'}</button>
+                </div>
+                {inspectorOpen && <nav className="inspectorTabs" aria-label="BIM inspector">
                   <button className={inspectorView === 'inspect' ? 'active' : ''} onClick={() => setInspectorView('inspect')}>Selected</button>
                   <button className={inspectorView === 'schedule' ? 'active' : ''} onClick={() => setInspectorView('schedule')}>Schedule</button>
                   <button className={inspectorView === 'assemblies' ? 'active' : ''} onClick={() => setInspectorView('assemblies')}>Library</button>
-                </nav>
+                </nav>}
               </div>
               {(() => {
                 // The SELECTOR lives here in the left panel (Daniel's ask):
