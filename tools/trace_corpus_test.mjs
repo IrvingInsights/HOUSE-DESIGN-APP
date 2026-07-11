@@ -153,5 +153,7 @@ for (const file of pdfs) {
   console.log(`  -> ${checks.length - fails.length}/${checks.length} in ${Math.round((Date.now() - t0) / 1000)}s`);
   totalFail += fails.length;
 }
-console.log(`\n${totalFail === 0 ? 'CORPUS CLEAN' : `${totalFail} invariant failure(s)`} across ${pdfs.length} set(s)${skipped ? ` (${skipped} skipped on rate limits — re-run those later)` : ''}`);
+const tested = pdfs.length - skipped;
+console.log(`\n${tested === 0 ? 'NOTHING TESTED — the AI service refused every set (quota); try again after it resets'
+  : totalFail === 0 ? `CORPUS CLEAN across ${tested} tested set(s)` : `${totalFail} invariant failure(s) across ${tested} tested set(s)`}${skipped && tested ? ` (${skipped} skipped on rate limits — re-run those later)` : ''}`);
 process.exit(totalFail ? 1 : 0);
