@@ -390,5 +390,28 @@ ok(dimlessCheck.unmeasuredElements === true && dimlessCheck.unmeasuredElementNam
   ok(part.x + part.w <= 36.01 && part.x >= 0 && part.y >= 0, 'stray partition clamped into the shell');
 }
 
+// ---- Effective-position geometry rescue (grow sees where rooms END UP) ----
+{
+  const plan = { operations: [
+    { type: 'set_shell', w: 30, d: 24 },
+    { type: 'add_room', name: 'Bedroom 1', x: 2, y: 2, w: 12, d: 10 },
+    { type: 'move_object', targetId: 'bedroom-1', x: 34, y: 20 }
+  ], warnings: [] };
+  repairTraceGeometry(plan, { shell: { widthFt: 30, depthFt: 24 } });
+  const shellOp = plan.operations.find((o) => o.type === 'set_shell');
+  ok(Number(shellOp.w) >= 46, 'shell grows to cover a room the audit MOVED (' + shellOp.w + ')');
+}
+{
+  const plan = { operations: [
+    { type: 'set_shell', w: 36, d: 28 },
+    { type: 'add_room', name: 'Kitchen', x: 2, y: 2, w: 12, d: 10 },
+    { type: 'add_element', category: 'partition', name: 'Hall Partition', x: 4, y: 8, w: 10, d: 0.45 },
+    { type: 'move_object', targetId: 'hall-partition', x: 70, y: -9 }
+  ], warnings: [] };
+  repairTraceGeometry(plan, { shell: { widthFt: 36, depthFt: 28 } });
+  const mv = plan.operations.find((o) => o.type === 'move_object');
+  ok(mv.x <= 35 && mv.y >= 0, 'a move aimed at a partition clamps into the shell');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

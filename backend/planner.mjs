@@ -683,8 +683,31 @@ export function repairTraceGeometry(plan, sourceSpec) {
     }
     plan.warnings = [...(plan.warnings || []), 'Takeoff coordinates were re-anchored to the northwest corner.'];
   }
-  const extentW = Math.ceil(Math.max(...scan.map((o) => num(o.x) + Math.max(1, num(o.w)))) * 2) / 2;
-  const extentD = Math.ceil(Math.max(...scan.map((o) => num(o.y) + Math.max(1, num(o.d)))) * 2) / 2;
+  // EFFECTIVE final rects (corpus class fix): the audit corrects by MOVING
+  // rooms after they're added — the grow must see where each room ENDS UP,
+  // not where it started. Track each add_room through later move/resize ops.
+  const effectiveRects = new Map();
+  for (const o of scan) {
+    effectiveRects.set(normName(o.name), { x: num(o.x), y: num(o.y), w: Math.max(1, num(o.w)), d: Math.max(1, num(o.d)) });
+  }
+  for (const op of ops) {
+    if (op.type !== 'move_object' && op.type !== 'resize_object' && op.type !== 'update_object') continue;
+    const key = normName(String(op.name || op.targetId || '').replace(/-/g, ' '));
+    const r = effectiveRects.get(key);
+    if (!r) continue;
+    if (op.type === 'move_object') {
+      if (Number.isFinite(Number(op.x))) r.x = num(op.x);
+      if (Number.isFinite(Number(op.y))) r.y = num(op.y);
+    } else if (op.type === 'resize_object') {
+      if (num(op.w)) r.w = num(op.w);
+      if (num(op.d)) r.d = num(op.d);
+    } else if (op.type === 'update_object' && ['x', 'y', 'w', 'd'].includes(op.field) && Number.isFinite(Number(op.value))) {
+      r[op.field] = num(op.value);
+    }
+  }
+  const finalRects = [...effectiveRects.values()];
+  const extentW = Math.ceil(Math.max(...finalRects.map((r) => r.x + r.w)) * 2) / 2;
+  const extentD = Math.ceil(Math.max(...finalRects.map((r) => r.y + r.d)) * 2) / 2;
   // What shell does the plan intend? set_shell carries w/d directly and/or
   // field widthFt/depthFt value pairs; fall back to the current model.
   let shellW = 0;
@@ -732,12 +755,22 @@ export function repairTraceGeometry(plan, sourceSpec) {
     return { w, d };
   })();
   if (shellWNow.w > 4 && shellWNow.d > 4) {
+    const partNames = new Set();
     for (const op of ops) {
       if (op.type !== 'add_element' || op.category !== 'partition') continue;
+      partNames.add(normName(op.name));
       const w = Math.min(num(op.w) || 1, shellWNow.w);
       const d = Math.min(num(op.d) || 1, shellWNow.d);
       op.x = Math.max(0, Math.min(num(op.x), shellWNow.w - w));
       op.y = Math.max(0, Math.min(num(op.y), shellWNow.d - d));
+    }
+    // …and the moves the audit aims at them (same class: corrections that
+    // relocate a partition must not relocate it into the yard).
+    for (const op of ops) {
+      if (op.type !== 'move_object') continue;
+      if (!partNames.has(normName(String(op.name || op.targetId || '').replace(/-/g, ' ')))) continue;
+      if (Number.isFinite(Number(op.x))) op.x = Math.max(0, Math.min(num(op.x), shellWNow.w - 1));
+      if (Number.isFinite(Number(op.y))) op.y = Math.max(0, Math.min(num(op.y), shellWNow.d - 1));
     }
   }
   return plan;
