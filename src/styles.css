@@ -4385,3 +4385,30 @@ button.danger:hover,
   box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.35);
 }
 .planFit:hover { border-color: #3C6472; background: var(--sage, #E2ECEE); }
+
+/* Plan framing: House (working size) | Site (everything) — shown only when
+   the site actually extends beyond the house frame. */
+.planFrameToggle {
+  position: absolute;
+  top: 10px;
+  right: 64px;
+  display: flex;
+  gap: 0;
+  padding: 2px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--line2, #CAC8BB);
+  border-radius: 16px;
+  box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.35);
+}
+.planFrameToggle button {
+  min-height: 22px;
+  padding: 1px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--ink2, #565A4F);
+  box-shadow: none;
+}
+.planFrameToggle button.active { background: #3C6472; color: #fff; }

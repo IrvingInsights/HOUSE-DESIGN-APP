@@ -186,14 +186,20 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
   const buildingContext = ['foundation', 'shell', 'frame', 'flooring', 'roof'].includes(context);
   const siteContext = context === 'site' || context === 'outdoors';
 
-  // The plan must SHOW everything it holds: patios, a carport 40 ft out, the
-  // greenhouse below the south wall. Fit the view to the whole floor's
-  // content (the old house-only viewBox cut the site off and drew the rest
-  // oversized), and let the user zoom (wheel) / pan (drag the ground) / Fit.
+  // Two honest framings, no shrunken default: HOUSE (the working view — the
+  // shell at full size, like the plan always drew) and SITE (everything —
+  // patios, the greenhouse, a carport 40 ft out). The plan opens on House;
+  // one tap reframes; anything beyond the frame announces itself with a
+  // labeled edge arrow so nothing is ever silently cut off. Wheel zooms at
+  // the cursor, dragging the ground pans.
   const planLevelFilter = (el) => (el.category === 'floor'
     ? (activeFloor > 1 && Number(el.level || 1) === activeFloor)
     : (Number(el.level || 1) === activeFloor || (/stair|ladder/i.test(el.name || '')
       && Number(el.level || 1) === (activeFloor === 1 && basementInfo(spec.shell).present ? BASEMENT_LEVEL : activeFloor - 1))));
+  const houseBox = (() => {
+    const m = Math.max(6, Math.round(Math.max(W, D) * 0.14));
+    return { x: -m, y: -m, w: W + m * 2, h: D + m * 2 };
+  })();
   const fitBox = (() => {
     let minX = 0; let minY = 0; let maxX = W; let maxY = D;
     for (const el of (spec.elements || []).filter(planLevelFilter)) {
@@ -204,12 +210,19 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
     const margin = Math.max(4, Math.round(Math.max(maxX - minX, maxY - minY) * 0.08));
     return { x: minX - margin, y: minY - margin, w: (maxX - minX) + margin * 2, h: (maxY - minY) + margin * 2 };
   })();
+  // Is there anything out there beyond the house frame worth switching for?
+  const siteBeyondHouse = fitBox.x < houseBox.x - 1 || fitBox.y < houseBox.y - 1
+    || fitBox.x + fitBox.w > houseBox.x + houseBox.w + 1 || fitBox.y + fitBox.h > houseBox.y + houseBox.h + 1;
+  const [planFrame, setPlanFrame] = useState(siteContext ? 'site' : 'house');
   const [viewOverride, setViewOverride] = useState(null);
   const [panDrag, setPanDrag] = useState(null);
-  const vb = viewOverride || fitBox;
+  const vb = viewOverride || (planFrame === 'site' && siteBeyondHouse ? fitBox : houseBox);
   const vbRef = useRef(vb); vbRef.current = vb;
   const fitBoxRef = useRef(fitBox); fitBoxRef.current = fitBox;
-  useEffect(() => { setViewOverride(null); }, [activeFloor, context]);
+  useEffect(() => {
+    setPlanFrame(siteContext ? 'site' : 'house');
+    setViewOverride(null);
+  }, [activeFloor, context, siteContext]);
   // Wheel = zoom at the cursor. Manual listener: React's onWheel can't
   // preventDefault (passive), and the page must not scroll instead.
   useEffect(() => {
@@ -608,9 +621,46 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
         {/* dimensions */}
         <text x={W / 2} y={-1.2} textAnchor="middle" fontSize={2} fill="var(--ink2)">{W}′</text>
         <text x={-1.2} y={D / 2} textAnchor="middle" fontSize={2} fill="var(--ink2)" transform={`rotate(-90 ${-1.2} ${D / 2})`}>{D}′</text>
+        {/* Anything living beyond this frame gets a labeled edge arrow — the
+            site is never silently cut off. Tap an arrow to reframe to Site. */}
+        {(() => {
+          const byEdge = { left: [], right: [], top: [], bottom: [] };
+          for (const el of (spec.elements || []).filter(planLevelFilter)) {
+            if (!el.name) continue;
+            const x = Number(el.x) || 0; const y = Number(el.y) || 0;
+            const w = Number(el.w) || 4; const d = Number(el.d) || 4;
+            const out = x + w < vb.x || x > vb.x + vb.w || y + d < vb.y || y > vb.y + vb.h;
+            if (!out) continue;
+            const cx = x + w / 2; const cy = y + d / 2;
+            if (cx > vb.x + vb.w) byEdge.right.push(el.name);
+            else if (cx < vb.x) byEdge.left.push(el.name);
+            else if (cy > vb.y + vb.h) byEdge.bottom.push(el.name);
+            else byEdge.top.push(el.name);
+          }
+          const fs = vb.w / 34;
+          const inset = fs * 0.9;
+          const goSite = () => { setPlanFrame('site'); setViewOverride(null); };
+          const chip = (key, x, y, anchor, text) => (
+            <text key={key} x={x} y={y} textAnchor={anchor} fontSize={fs} fontWeight="700" fill="var(--plum, #26424C)"
+              paintOrder="stroke" stroke="rgba(251,250,244,0.9)" strokeWidth={fs * 0.3}
+              style={{ cursor: 'pointer' }} onClick={goSite}>{text}</text>
+          );
+          const listOf = (names) => names.slice(0, 3).join(' · ') + (names.length > 3 ? ` +${names.length - 3}` : '');
+          return [
+            byEdge.right.length > 0 && chip('e-r', vb.x + vb.w - inset, vb.y + vb.h * 0.45, 'end', `${listOf(byEdge.right)} →`),
+            byEdge.left.length > 0 && chip('e-l', vb.x + inset, vb.y + vb.h * 0.55, 'start', `← ${listOf(byEdge.left)}`),
+            byEdge.bottom.length > 0 && chip('e-b', vb.x + vb.w / 2, vb.y + vb.h - inset, 'middle', `${listOf(byEdge.bottom)} ↓`),
+            byEdge.top.length > 0 && chip('e-t', vb.x + vb.w / 2, vb.y + inset * 1.6, 'middle', `↑ ${listOf(byEdge.top)}`)
+          ].filter(Boolean);
+        })()}
       </svg>
       <div className="planNorth">▲ N</div>
-      {viewOverride && <button type="button" className="planFit" title="Show everything again" onClick={() => setViewOverride(null)}>⤢ Fit all</button>}
+      {siteBeyondHouse && (
+        <div className="planFrameToggle">
+          <button type="button" className={!viewOverride && planFrame === 'house' ? 'active' : ''} title="Frame the house at working size" onClick={() => { setPlanFrame('house'); setViewOverride(null); }}>House</button>
+          <button type="button" className={!viewOverride && planFrame === 'site' ? 'active' : ''} title="Frame everything — patios, outbuildings, the whole site" onClick={() => { setPlanFrame('site'); setViewOverride(null); }}>Site</button>
+        </div>
+      )}
       <div className="planHint">{buildingContext && onMoveEdge ? `${PLAN_CONTEXT_LABEL[context] || 'Footprint'} · drag a wall edge to move that wall · corner dot resizes the whole plan` : PLAN_CONTEXT_LABEL[context] || `${floorLabel(spec, activeFloor)} plan · drag to move, drag corners to resize (½ ft snap)`} · scroll to zoom · drag the ground to pan</div>
     </div>
   );
