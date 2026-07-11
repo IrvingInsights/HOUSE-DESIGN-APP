@@ -101,7 +101,14 @@ function scoreTrace({ spec, plan }) {
 
 const current = await get('http://127.0.0.1:5184/api/projects/current');
 let totalFail = 0;
+let skipped = 0;
+let first = true;
 for (const file of pdfs) {
+  if (!first) {
+    console.log('  (pausing 90s between sets to stay under API rate limits)');
+    await new Promise((r) => setTimeout(r, 90000));
+  }
+  first = false;
   console.log(`\n=== ${file} ===`);
   const b64 = fs.readFileSync(path.join(CORPUS, file)).toString('base64');
   const spec = structuredClone(current.state.spec);
@@ -129,11 +136,22 @@ for (const file of pdfs) {
   }
   if (job.status !== 'done') { console.log(`  JOB ${job.status}: ${job.error || ''}`); totalFail += 1; continue; }
 
+  // An API refusal (rate limit / quota) is not a pipeline failure — report
+  // it as SKIPPED instead of failing invariants the trace never got to run.
+  const planWarnings = job.result.plan?.warnings || [];
+  const refused = planWarnings.some((w) => /planner unavailable|429|quota|rate.?limit/i.test(w))
+    || String(job.result.plan?.source || '').startsWith('local');
+  if (refused) {
+    console.log(`  SKIPPED — the AI service refused (rate limit/quota). Re-run later: node tools/trace_corpus_test.mjs --only ${file.replace('.pdf', '')}`);
+    skipped += 1;
+    continue;
+  }
+
   const checks = scoreTrace({ spec: job.result.report.spec, plan: job.result.plan });
   const fails = checks.filter((c) => !c.pass);
   checks.forEach((c) => console.log(`  ${c.pass ? 'ok  ' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`));
   console.log(`  -> ${checks.length - fails.length}/${checks.length} in ${Math.round((Date.now() - t0) / 1000)}s`);
   totalFail += fails.length;
 }
-console.log(`\n${totalFail === 0 ? 'CORPUS CLEAN' : `${totalFail} invariant failure(s)`} across ${pdfs.length} set(s)`);
+console.log(`\n${totalFail === 0 ? 'CORPUS CLEAN' : `${totalFail} invariant failure(s)`} across ${pdfs.length} set(s)${skipped ? ` (${skipped} skipped on rate limits — re-run those later)` : ''}`);
 process.exit(totalFail ? 1 : 0);
