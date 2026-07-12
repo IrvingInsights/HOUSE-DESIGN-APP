@@ -5,7 +5,7 @@ import { pushToBlender, exportIfcViaBlender } from './blenderBridge.js';
 import { createFrameDrawingSetHtml } from './frameDrawings.js';
 import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES,
-  resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, polygonArea, maxFoundationExposureFt, basementInfo, BASEMENT_LEVEL,
+  resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, maxFoundationExposureFt, basementInfo, BASEMENT_LEVEL,
   PARTITION_TYPES, CLADDING_TYPES
 } from '../backend/bim-core.mjs';
 import {
@@ -1025,6 +1025,8 @@ function App() {
       operations.push({ type: 'set_wall_height', wall: field === 'southWallHeightFt' ? 'south' : 'north', h: clamp(numeric, 2, 24) });
     } else if (field === 'budgetCeiling') {
       operations.push({ type: 'set_shell', field, value: String(clamp(numeric, 0, 10000000)) });
+    } else if (field === 'greenhouseCostSf') {
+      operations.push({ type: 'set_shell', field, value: String(clamp(numeric, 5, 500)) });
     } else if (field.startsWith('sweat') && field.endsWith('Frac')) {
       operations.push({ type: 'set_shell', field, value: String(clamp(numeric, 0, 1)) });
     } else {
@@ -1065,6 +1067,21 @@ function App() {
       promptText: `Set ${level > 1 ? 'upper ' : ''}${side} wall ${field}`,
       logPrefix: 'Wall edit',
       nextSelectedId: level > 1 ? `wall-${side}-u${level === 2 ? '' : level}` : `wall-${side}`
+    });
+  }
+
+  // One SECTION of a split wall gets its own construction — a timber-frame
+  // section beside straw-clay infill sections on the same side. The backend
+  // keys the override by the plan edge (e0, e1, …) and it follows the wall
+  // through splits and moves.
+  function updateWallSegment(edgeKey, field, rawValue, selectId) {
+    let value = rawValue;
+    if (field === 'thicknessFt') value = clamp(Number(rawValue), 0.2, 3.5);
+    void applyBackendOperations({
+      operations: [{ type: 'set_wall_side', wall: edgeKey, field, value }],
+      promptText: `Set wall section ${edgeKey} ${field}`,
+      logPrefix: 'Wall edit',
+      nextSelectedId: selectId || `wall-${edgeKey}`
     });
   }
 
@@ -1372,13 +1389,26 @@ function App() {
         });
       }
       else if (field === 'w') updateShell(wall.side === 'north' || wall.side === 'south' ? 'widthFt' : 'depthFt', value);
-      else if (field === 'thickness') updateWallSide(wall.side, 'thicknessFt', value, lvl);
-      else if (field === 'assembly') updateWallSide(wall.side, 'assembly', value, lvl);
-      else if (field === 'cladding') updateWallSide(wall.side, 'cladding', value, lvl);
-      else if (field === 'sunGlazing') updateWallSide(wall.side, 'sunGlazing', value, lvl);
-      else if (field === 'sunGlazingTiltDeg') updateWallSide(wall.side, 'sunGlazingTiltDeg', value, lvl);
-      else if (field === 'interiorFinish') updateWallSide(wall.side, 'interiorFinish', value, lvl);
-      else if (field === 'exteriorFinish') updateWallSide(wall.side, 'exteriorFinish', value, lvl);
+      else {
+        // Construction edits: when this wall is ONE SECTION of a side that
+        // has several (a split wall), the edit lands on just this section —
+        // so a side can mix a frame section with infill sections. A side
+        // with a single section edits the whole side, as always.
+        const facingSections = wallSections.filter((item) => item.side === wall.side && (item.level || 1) === lvl).length;
+        const segmentEdit = wall.edgeKey && facingSections > 1
+          && ['thickness', 'assembly', 'cladding', 'interiorFinish', 'exteriorFinish'].includes(field);
+        if (segmentEdit) {
+          const segField = field === 'thickness' ? 'thicknessFt' : field;
+          updateWallSegment(wall.edgeKey, segField, value, wall.id);
+        }
+        else if (field === 'thickness') updateWallSide(wall.side, 'thicknessFt', value, lvl);
+        else if (field === 'assembly') updateWallSide(wall.side, 'assembly', value, lvl);
+        else if (field === 'cladding') updateWallSide(wall.side, 'cladding', value, lvl);
+        else if (field === 'sunGlazing') updateWallSide(wall.side, 'sunGlazing', value, lvl);
+        else if (field === 'sunGlazingTiltDeg') updateWallSide(wall.side, 'sunGlazingTiltDeg', value, lvl);
+        else if (field === 'interiorFinish') updateWallSide(wall.side, 'interiorFinish', value, lvl);
+        else if (field === 'exteriorFinish') updateWallSide(wall.side, 'exteriorFinish', value, lvl);
+      }
       return;
     }
     const object = spec.rooms.find((item) => item.id === selectedRoom) || (spec.elements || []).find((item) => item.id === selectedRoom);
@@ -2383,17 +2413,17 @@ function App() {
                 );
               })()}
               <FineTune label="Fine-tune — footprint shape" hint="L-shapes, notches, moving a wall">
-              {hasCustomFootprint(spec) ? (
+              {hasSegmentedFootprint(spec) ? (
                 <>
                   <div className="controlGrid">
                     <label>Outline
                       <div className="mixedField"><span>{footprintPolygon(spec).length} corners · {fmtNum(Math.round(polygonArea(footprintPolygon(spec))))} sf inside {spec.shell.widthFt} × {spec.shell.depthFt} ft</span></div>
                     </label>
                     <label>Back to a rectangle
-                      <button type="button" className="secondary" title="Straighten the outline back to the full bounding rectangle" onClick={() => applyBackendOperations({ operations: [{ type: 'set_footprint', value: 'rect' }], promptText: 'Reset footprint to rectangle', logPrefix: 'Footprint' })}>Reset outline</button>
+                      <button type="button" className="secondary" title="Straighten the outline back to the full bounding rectangle — split walls become whole again" onClick={() => applyBackendOperations({ operations: [{ type: 'set_footprint', value: 'rect' }], promptText: 'Reset footprint to rectangle', logPrefix: 'Footprint' })}>Reset outline</button>
                     </label>
                   </div>
-                  <p className="systemNote">The plan is an L / custom shape. <b>Drag any wall edge in the Plan view</b> to move that wall; tap a wall and use <b>Split into 3</b> in the inspector to add another jog. Width/Length above scale the whole outline.</p>
+                  <p className="systemNote">{hasCustomFootprint(spec) ? 'The plan is an L / custom shape.' : 'A wall is split into sections (the outline is still a rectangle).'} <b>Drag any wall edge in the Plan view</b> to move that wall; tap a wall and use <b>Split into 3</b> in the inspector to add another jog. Each section can run its own construction from the inspector. Width/Length above scale the whole outline.</p>
                 </>
               ) : (
                 <p className="systemNote">The plan is a plain rectangle. To make an <b>L-shape or notch</b>: tap a wall (model, Plan, or the Walls page), press <b>Split into 3</b> in the inspector, then drag the middle segment in the Plan view — or just ask the assistant ("make this an L with a 16×13 porch notch on the southeast corner").</p>
@@ -2561,7 +2591,15 @@ function App() {
                       <div key={side} className={`pickRow${r.omitted ? ' muted' : ''}${rowActive ? ' active' : ''}`}>
                         <button type="button" className="pickRowMain" onClick={() => selectObject(rowTarget)} disabled={r.omitted}>
                           <strong>{WALL_SIDE_LABELS[side]}{facingSections.length > 1 ? ` (${facingSections.length} segments)` : ''}</strong>
-                          <small>{r.omitted ? 'no wall on this side' : `${r.assembly.label} · ${r.heightFt}′ · ${r.thicknessFt.toFixed(2)}′ · ${spec.openings.filter((opening) => opening.wall === side).length} opening(s)`}</small>
+                          <small>{r.omitted ? 'no wall on this side'
+                            : (() => {
+                              // A split side can mix constructions per section
+                              // (frame beside infill) — say so instead of
+                              // pretending the first one speaks for all.
+                              const segLabels = [...new Set(facingSections.map((wall) => wall.assembly))];
+                              const label = segLabels.length > 1 ? `mixed: ${segLabels.join(' + ')}` : r.assembly.label;
+                              return `${label} · ${r.heightFt}′ · ${r.thicknessFt.toFixed(2)}′ · ${spec.openings.filter((opening) => opening.wall === side).length} opening(s)`;
+                            })()}</small>
                         </button>
                         <label className="pickRowToggle" title="Leave this side without a wall (open to a greenhouse, porch, or the outdoors)">
                           <input type="checkbox" checked={r.omitted} onChange={(event) => updateWallSide(side, 'omitted', event.target.checked)} />
@@ -3317,6 +3355,9 @@ function App() {
                   <label>Frame sweat share (0-1)
                     <NumField step="0.05" min="0" max="1" value={spec.shell.sweatFrameFrac ?? 0.6} onChange={(event) => updateShell('sweatFrameFrac', event.target.value)} />
                   </label>
+                  <label>Greenhouse cost ($/sf)
+                    <NumField step="2.5" min="5" max="500" value={spec.shell.greenhouseCostSf ?? 62.5} onChange={(event) => updateShell('greenhouseCostSf', event.target.value)} />
+                  </label>
                 </div>
               </details>
 
@@ -3792,6 +3833,9 @@ function App() {
             {inspectorView === 'inspect' && (
               <div className="editorPane fullPane">
                 {selectedIsWall && <p className="elementNote">{selected?.note}</p>}
+                {selectedIsWall && selected?.edgeKey && wallSections.filter((item) => item.side === selected.side && (item.level || 1) === (selected.level || 1)).length > 1 && (
+                  <p className="elementNote">This is one section of the {WALL_SIDE_LABELS[selected.side]?.toLowerCase() || selected.side} wall — system, thickness, and finishes here change <b>just this section</b>, so one side can mix a frame section with infill sections.</p>
+                )}
                 {selectedIsElement && <p className="elementNote">{selected?.note}</p>}
                 {selectedIsSpecial && <p className="elementNote">{selected?.note}</p>}
                 {!selectedIsElement && !selectedIsWall && !selectedIsSpecial && <div className="modelEditHint"><Camera size={15} /> Drag the room body to move it. Drag green corner cubes in the model to resize; dimensions appear live.</div>}
@@ -3813,7 +3857,7 @@ function App() {
                   </label>}
                   {selectedIsWall && <label>Interior finish<input type="text" value={selected?.interiorFinish || ''} onChange={(event) => updateSelectedRoom('interiorFinish', event.target.value)} /></label>}
                   {selectedIsWall && <label>Exterior cladding
-                    <select value={resolveWallSide(spec, selected.side, selected.level || 1).cladding} onChange={(event) => updateSelectedRoom('cladding', event.target.value)}>
+                    <select value={resolveWallSide(spec, selected.side, selected.level || 1, selected.edgeKey || null).cladding} onChange={(event) => updateSelectedRoom('cladding', event.target.value)}>
                       {Object.entries(CLADDING_TYPES).map(([key, c]) => <option key={key} value={key} style={greenOptStyle(c)}>{greenLeaf(c)}{c.label}{c.costPsf ? ` (+$${c.costPsf}/sf)` : ''}</option>)}
                     </select>
                   </label>}

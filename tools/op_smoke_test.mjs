@@ -6,9 +6,9 @@
 //   node tools/op_smoke_test.mjs          # headless op sweep
 //   node tools/op_smoke_test.mjs --http   # + live-server sanity (server must run)
 import {
-  applyBimOperations, footprintPolygon, polygonArea, hasCustomFootprint,
+  applyBimOperations, footprintPolygon, polygonArea, hasCustomFootprint, hasSegmentedFootprint,
   WALL_ASSEMBLIES, FRAME_TYPES, FLOORING_TYPES, SUBFLOOR_TYPES, OPENING_TYPES,
-  gradeElevationAt, maxFoundationExposureFt, resolveWallSide,
+  gradeElevationAt, maxFoundationExposureFt, resolveWallSide, footprintEdges,
   basementInfo, BASEMENT_LEVEL, PARTITION_TYPES
 } from '../backend/bim-core.mjs';
 
@@ -388,6 +388,56 @@ async function httpSanity() {
   const out2 = apply(freshSpec(), [{ type: 'add_element', category: 'shed', name: 'Garden Shed', w: 8, d: 6 }]);
   const shed = out2.spec.elements.find((el) => el.name === 'Garden Shed');
   ok(shed && shed.x >= 36, 'unplaced OUTDOOR element still parks beside the house', `x=${shed?.x}`);
+}
+
+// --- per-segment wall construction (frame vs infill sections) ----------------
+{
+  // Split the east wall into 3 coplanar sections. The outline stays a
+  // rectangle, but the stored footprint means the wall now has pieces.
+  let out = apply(freshSpec(), [{ type: 'split_wall_edge', wall: 'east' }]);
+  ok(hasSegmentedFootprint(out.spec) && !hasCustomFootprint(out.spec), 'split-but-rectangular outline counts as segmented, not custom');
+  let eastEdges = footprintEdges(out.spec).filter((edge) => edge.facing === 'east');
+  ok(eastEdges.length === 3, 'east wall splits into 3 sections', `${eastEdges.length}`);
+
+  // The middle section becomes a timber-frame bay; its neighbours stay bale.
+  const middle = eastEdges[1];
+  out = apply(out.spec, [{ type: 'set_wall_side', wall: middle.key, field: 'assembly', value: 'framed' }]);
+  ok(resolveWallSide(out.spec, 'east', 1, middle.key).assemblyKey === 'framed', 'middle section runs its own construction');
+  ok(resolveWallSide(out.spec, 'east', 1, eastEdges[0].key).assemblyKey === 'straw-bale', 'outer sections keep the side construction');
+  ok(resolveWallSide(out.spec, 'east').assemblyKey === 'straw-bale', 'the side itself is untouched');
+
+  // wall-eN target form + per-section thickness.
+  out = apply(out.spec, [{ type: 'set_wall_side', wall: `wall-${middle.key}`, field: 'thicknessFt', value: 0.6 }]);
+  ok(near(resolveWallSide(out.spec, 'east', 1, middle.key).thicknessFt, 0.6), 'wall-eN target form works');
+
+  // Height stays a side-wide concept — a section height is rejected honestly.
+  const rej = apply(out.spec, [{ type: 'set_wall_side', wall: middle.key, field: 'heightFt', value: 14 }]);
+  ok(rej.rejectedOperations.length === 1 && rej.warnings.length >= 1, 'section height is rejected (side-wide field)');
+
+  // The override FOLLOWS its wall when edges renumber (split another wall).
+  const midSpan = (Math.min(middle.y0, middle.y1) + Math.max(middle.y0, middle.y1)) / 2;
+  out = apply(out.spec, [{ type: 'split_wall_edge', wall: 'north' }]);
+  const eastNow = footprintEdges(out.spec).filter((edge) => edge.facing === 'east');
+  const midNow = eastNow.find((edge) => Math.abs((edge.y0 + edge.y1) / 2 - midSpan) < 0.1);
+  ok(midNow && resolveWallSide(out.spec, 'east', 1, midNow.key).assemblyKey === 'framed', 'section construction follows the wall through renumbering', midNow?.key);
+  ok(eastNow.filter((edge) => edge !== midNow).every((edge) => resolveWallSide(out.spec, 'east', 1, edge.key).assemblyKey === 'straw-bale'), 'neighbour sections stay side-built after renumbering');
+
+  // Moving the middle section out (an east bump) keeps its construction.
+  out = apply(out.spec, [{ type: 'move_wall_edge', field: midNow.key, value: 4 }]);
+  const eastAfterMove = footprintEdges(out.spec).filter((edge) => edge.facing === 'east');
+  const bumped = eastAfterMove.find((edge) => Math.abs((edge.y0 + edge.y1) / 2 - midSpan) < 0.1);
+  ok(bumped && resolveWallSide(out.spec, 'east', 1, bumped.key).assemblyKey === 'framed', 'section construction survives moving that wall out', bumped?.key);
+
+  // Reset to a rectangle clears section overrides (walls are whole again).
+  out = apply(out.spec, [{ type: 'set_footprint', value: 'rect' }]);
+  ok(!out.spec.wallSegments, 'plain rectangle clears section overrides');
+
+  // Clearing the assembly hands one section back to its side.
+  let out2 = apply(freshSpec(), [{ type: 'split_wall_edge', wall: 'east' }]);
+  const mid2 = footprintEdges(out2.spec).filter((edge) => edge.facing === 'east')[1];
+  out2 = apply(out2.spec, [{ type: 'set_wall_side', wall: mid2.key, field: 'assembly', value: 'framed' }]);
+  out2 = apply(out2.spec, [{ type: 'set_wall_side', wall: mid2.key, field: 'assembly', value: '' }]);
+  ok(resolveWallSide(out2.spec, 'east', 1, mid2.key).assemblyKey === 'straw-bale' && !out2.spec.wallSegments, 'assembly "" hands the section back to its side');
 }
 
 const wantHttp = process.argv.includes('--http');

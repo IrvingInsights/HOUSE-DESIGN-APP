@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   OPENING_TYPES, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES, resolveInsulation, footprintPolygon,
-  footprintEdges, hasCustomFootprint, edgeForOpening, basementInfo, BASEMENT_LEVEL
+  footprintEdges, hasSegmentedFootprint, edgeForOpening, basementInfo, BASEMENT_LEVEL
 } from '../backend/bim-core.mjs';
 import { Grid3X3, Plus } from 'lucide-react';
 import {
@@ -262,7 +262,9 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
     setViewOverride({ ...panDrag.orig, x: panDrag.orig.x - dx, y: panDrag.orig.y - dy });
   }
   function endPan() { setPanDrag(null); }
-  const fpCustom = hasCustomFootprint(spec);
+  // Segmented = stored outline (a custom shape OR a split-but-still-rectangular
+  // one): each wall piece draws and drags as its own edge with its own grip.
+  const fpCustom = hasSegmentedFootprint(spec);
   const fpPoly = footprintPolygon(spec);
   const fpEdgesList = footprintEdges(spec);
   // In a building context the footprint is the subject; dim the room fill so it

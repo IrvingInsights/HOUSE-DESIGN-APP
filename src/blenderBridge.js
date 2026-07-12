@@ -9,7 +9,7 @@
 // north, origin at SW corner). The Dashboard uses site coords centered on the
 // house (x east, y north). Translate by centering.
 
-import { OPENING_TYPES, WALL_SIDES, resolveWallSide, hasCustomFootprint, footprintPolygon, footprintEdges, polygonArea } from '../backend/bim-core.mjs';
+import { OPENING_TYPES, WALL_SIDES, resolveWallSide, hasSegmentedFootprint, footprintPolygon, footprintEdges, polygonArea } from '../backend/bim-core.mjs';
 
 const BLENDER_URL = 'http://localhost:8000';
 
@@ -86,11 +86,11 @@ export function specToDashboardState(spec) {
   // rectangle-based, so Blender/IFC model the BOUNDING RECTANGLE for now —
   // an honest one-increment lag. The real outline and per-edge wall segments
   // ride along so the add-on can pick them up when it learns the edge walk.
-  const customFootprint = hasCustomFootprint(spec);
+  const customFootprint = hasSegmentedFootprint(spec);
   const footprint = customFootprint ? footprintPolygon(spec) : null;
   const wallSegments = customFootprint
     ? footprintEdges(spec).map((edge) => {
-      const r = resolveWallSide(spec, edge.facing);
+      const r = resolveWallSide(spec, edge.facing, 1, edge.key);
       return {
         key: edge.key,
         facing: edge.facing,

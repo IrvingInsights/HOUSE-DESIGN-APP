@@ -143,7 +143,27 @@ export function wallAssemblyKeyFromText(text) {
 // Resolve the effective spec for one wall side, falling back from per-side
 // override -> global shell/envelope defaults. This is the single reader the
 // UI, the 3D build, the schedule, and the Blender bridge all go through.
-export function resolveWallSide(spec, side, level = 1) {
+export function resolveWallSide(spec, side, level = 1, edgeKey = null) {
+  // Per-segment construction: a split wall's pieces can differ (a timber-frame
+  // section beside straw-clay infill). spec.wallSegments is keyed by the plan
+  // edge (e0, e1, …) and overrides construction only — height and omit stay
+  // side-level concepts. MUST mirror the engine.js copy exactly.
+  const overlaySegment = (base) => {
+    const seg = edgeKey ? (spec.wallSegments || {})[edgeKey] : null;
+    if (!seg) return base;
+    const segAssemblyKey = seg.assembly && WALL_ASSEMBLIES[seg.assembly] ? seg.assembly : base.assemblyKey;
+    const segAssembly = WALL_ASSEMBLIES[segAssemblyKey] || base.assembly;
+    return {
+      ...base,
+      assemblyKey: segAssemblyKey,
+      assembly: segAssembly,
+      thicknessFt: Number(seg.thicknessFt ?? (seg.assembly ? segAssembly.thicknessFt : base.thicknessFt)),
+      interiorFinish: seg.interiorFinish || base.interiorFinish,
+      exteriorFinish: seg.exteriorFinish || base.exteriorFinish,
+      cladding: CLADDING_TYPES[seg.cladding] ? seg.cladding : base.cladding,
+      segmentKey: edgeKey
+    };
+  };
   const shell = spec.shell || {};
   const w = (spec.walls || {})[side] || {};
   const assemblyKey = w.assembly && WALL_ASSEMBLIES[w.assembly] ? w.assembly : wallAssemblyKeyFromText(shell && spec.systems ? spec.systems.envelope : '');
@@ -167,14 +187,14 @@ export function resolveWallSide(spec, side, level = 1) {
     cladding: CLADDING_TYPES[w.cladding] ? w.cladding : 'render',
     omitted: Boolean(w.omitted) || omittedSet.has(side)
   };
-  if (level <= 1) return ground;
+  if (level <= 1) return overlaySegment(ground);
   // Upper storeys: per-side overrides in spec.wallsUpper fall back to the
   // ground wall — so an upper storey can run a different construction
   // (light straw-clay over cob, framed over bale) without re-stating everything.
   const u = (spec.wallsUpper || {})[side] || {};
   const upperKey = u.assembly && WALL_ASSEMBLIES[u.assembly] ? u.assembly : ground.assemblyKey;
   const upperAssembly = WALL_ASSEMBLIES[upperKey] || ground.assembly;
-  return {
+  return overlaySegment({
     ...ground,
     level,
     assemblyKey: upperKey,
@@ -183,7 +203,7 @@ export function resolveWallSide(spec, side, level = 1) {
     interiorFinish: u.interiorFinish || ground.interiorFinish,
     exteriorFinish: u.exteriorFinish || ground.exteriorFinish,
     cladding: CLADDING_TYPES[u.cladding] ? u.cladding : ground.cladding
-  };
+  });
 }
 
 // --- Footprint polygon model (the geometry pass) -----------------------------
@@ -314,6 +334,16 @@ export function hasCustomFootprint(spec) {
   return Boolean(normalized && !isRectFootprint(normalized));
 }
 
+// True when the outline is STORED — truly custom, OR a rectangle whose wall
+// has been split into coplanar segments (collinear points, nothing moved yet).
+// Wall sections, plan edge grips, and 3D wall runs branch on THIS, so a
+// just-split wall shows its pieces (each can run its own construction).
+// hasCustomFootprint stays "really not a rectangle" for shape-dependent math
+// (roof decomposition, plates, containment checks).
+export function hasSegmentedFootprint(spec) {
+  return Boolean(normalizeFootprint(spec?.shell?.footprint));
+}
+
 const FACING_BY_NORMAL = { '0,-1': 'north', '0,1': 'south', '1,0': 'east', '-1,0': 'west' };
 
 // Walls are the edges of the polygon. Each edge knows its facing direction —
@@ -347,6 +377,45 @@ export function footprintEdges(spec) {
     });
   }
   return edges;
+}
+
+// Per-segment construction overrides (spec.wallSegments) are keyed by edge
+// index, and footprint ops renumber edges. Carry each override onto the new
+// edge(s) covering the old edge's span — a split's children all inherit, and
+// unrelated edges keep theirs. dx/dy = the translation anchorFootprint applied
+// (old edge coords live in the pre-anchor frame).
+export function remapWallSegments(next, oldEdges, dx = 0, dy = 0) {
+  const segs = next.wallSegments;
+  if (!segs || Object.keys(segs).length === 0) return true;
+  if (!hasSegmentedFootprint(next)) {
+    // Back to a plain rectangle — the cardinal sides own construction again.
+    delete next.wallSegments;
+    return true;
+  }
+  const newEdges = footprintEdges(next);
+  const remapped = {};
+  for (const [key, override] of Object.entries(segs)) {
+    const old = oldEdges.find((edge) => edge.key === key);
+    if (!old) continue;
+    const axis = old.horizontal ? 'x' : 'y';
+    const shift = old.horizontal ? dx : dy;
+    const lo = Math.min(old[`${axis}0`], old[`${axis}1`]) + shift;
+    const hi = Math.max(old[`${axis}0`], old[`${axis}1`]) + shift;
+    const cross = old.horizontal ? old.y0 + dy : old.x0 + dx;
+    const candidates = newEdges.filter((edge) => {
+      if (edge.facing !== old.facing || edge.horizontal !== old.horizontal) return false;
+      const mid = (edge[`${axis}0`] + edge[`${axis}1`]) / 2;
+      return mid >= lo - 0.05 && mid <= hi + 0.05;
+    });
+    // Prefer edges still on the old wall line; a moved wall (new cross
+    // position) keeps its override via the span-only fallback.
+    const exact = candidates.filter((edge) => Math.abs((old.horizontal ? edge.y0 : edge.x0) - cross) <= 0.06);
+    for (const edge of (exact.length ? exact : candidates)) remapped[edge.key] = { ...override };
+  }
+  const kept = Object.keys(remapped).length;
+  if (kept) next.wallSegments = remapped;
+  else delete next.wallSegments;
+  return kept > 0 || Object.keys(segs).length === 0;
 }
 
 export function pointInFootprint(vertices, x, y) {
@@ -1182,6 +1251,35 @@ export function applyBimOperations(currentSpec, plan) {
     }
 
     if (operation.type === 'set_wall_side') {
+      // A wall SECTION target (e2 or wall-e2) sets construction on just that
+      // piece of a split wall — a frame section beside infill sections.
+      const rawWall = String(operation.wall || '');
+      const segMatch = rawWall.match(/^(?:wall-)?(e\d+)(?:-u\d*)?$/);
+      if (segMatch) {
+        const segKey = segMatch[1];
+        const field = operation.field;
+        const constructionFields = ['assembly', 'thicknessFt', 'cladding', 'interiorFinish', 'exteriorFinish'];
+        if (!constructionFields.includes(field)) {
+          warnings.push(`Wall sections take construction fields only (assembly, thickness, finishes) — ${field} applies to the whole side. Target the side (north/south/east/west) instead.`);
+          rejectedOperations.push(operation);
+          continue;
+        }
+        if (field === 'assembly' && (operation.value === '' || operation.value === 'inherit')) {
+          // Clearing the assembly hands the section back to its side.
+          if (next.wallSegments) delete next.wallSegments[segKey];
+          if (next.wallSegments && Object.keys(next.wallSegments).length === 0) delete next.wallSegments;
+          actions.push(`Wall section ${segKey} matches its side again.`);
+          continue;
+        }
+        next.wallSegments ||= {};
+        next.wallSegments[segKey] ||= {};
+        if (field === 'assembly') next.wallSegments[segKey].assembly = WALL_ASSEMBLIES[operation.value] ? operation.value : 'framed';
+        else if (field === 'thicknessFt') next.wallSegments[segKey].thicknessFt = clamp(Number(operation.value), 0.2, 3.5);
+        else if (field === 'cladding') next.wallSegments[segKey].cladding = CLADDING_TYPES[operation.value] ? operation.value : 'render';
+        else next.wallSegments[segKey][field] = String(operation.value || '');
+        actions.push(`Set wall section ${segKey} ${field} to ${operation.value}.`);
+        continue;
+      }
       const side = WALL_SIDES.includes(operation.wall) ? operation.wall : 'south';
       const field = operation.field;
       // Upper-storey walls keep their own overrides — construction can vary
@@ -1239,6 +1337,7 @@ export function applyBimOperations(currentSpec, plan) {
         : Array.isArray(operation.value) ? operation.value : null;
       if (operation.value === 'rect' || operation.value === '' || (Array.isArray(raw) && raw.length === 0)) {
         delete next.shell.footprint;
+        if (next.wallSegments) { delete next.wallSegments; actions.push('Wall sections match their sides again (plain rectangle).'); }
         actions.push('Reset the footprint to a plain rectangle.');
         continue;
       }
@@ -1248,7 +1347,14 @@ export function applyBimOperations(currentSpec, plan) {
         rejectedOperations.push(operation);
         continue;
       }
+      const hadSegments = Boolean(next.wallSegments && Object.keys(next.wallSegments).length);
+      const oldEdges = hadSegments ? footprintEdges(next) : null;
       anchorFootprint(next, normalized);
+      // A wholesale new outline: carry section constructions best-effort by
+      // matching old wall spans; say so when they can't follow.
+      if (hadSegments && !remapWallSegments(next, oldEdges)) {
+        warnings.push('The wall-section constructions could not follow the new outline and were reset to their sides.');
+      }
       actions.push(`Set the footprint outline (${normalized.length} corners, ${Math.round(polygonArea(normalized))} sf).`);
       continue;
     }
@@ -1335,7 +1441,12 @@ export function applyBimOperations(currentSpec, plan) {
         rejectedOperations.push(operation);
         continue;
       }
+      // anchorFootprint slides the outline back to the origin — remember the
+      // shift so section constructions can follow their walls to the new keys.
+      const movedDx = -Math.min(...moved.map((point) => point[0]));
+      const movedDy = -Math.min(...moved.map((point) => point[1]));
       anchorFootprint(next, moved);
+      remapWallSegments(next, edges, movedDx, movedDy);
       const edge = edges[edgeIndex];
       actions.push(`Moved the ${edge.facing} wall ${edge.facingSeq > 1 ? `(segment ${edge.facingSeq}) ` : ''}${offset > 0 ? 'out' : 'in'} ${Math.abs(offset)} ft.`);
       continue;
@@ -1371,7 +1482,10 @@ export function applyBimOperations(currentSpec, plan) {
         rejectedOperations.push(operation);
         continue;
       }
+      const splitDx = -Math.min(...result.map((point) => point[0]));
+      const splitDy = -Math.min(...result.map((point) => point[1]));
       anchorFootprint(next, result);
+      remapWallSegments(next, edges, splitDx, splitDy);
       const edge = edges[edgeIndex];
       actions.push(nudge
         ? `Split the ${edge.facing} wall and moved its middle ${nudge > 0 ? 'out' : 'in'} ${Math.abs(nudge)} ft.`

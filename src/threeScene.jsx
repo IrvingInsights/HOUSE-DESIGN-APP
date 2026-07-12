@@ -10,7 +10,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { FRAME_MEMBERS } from './frameDrawings.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
-  OPENING_TYPES, resolveFrameType, footprintPolygon, footprintEdges, hasCustomFootprint, polygonArea, decomposeFootprint, subtractRect,
+  OPENING_TYPES, resolveFrameType, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, decomposeFootprint, subtractRect,
   subtractRectFromFootprint, pointInFootprint, edgeForOpening, gradeElevationAt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES
 } from '../backend/bim-core.mjs';
 import {
@@ -519,8 +519,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const plate2 = upperPlateRect(spec, 2) || { x: 0, y: 0, w: width, d: depth };
       const wallMeshSpecs = [];
       const customFp = hasCustomFootprint(spec);
+      // Walls branch on the SEGMENTED check (a just-split rectangle already
+      // has separate wall runs); roofs/rings/frames keep customFp — a
+      // rectangle-shaped outline uses the verbatim legacy shape math.
+      const segFp = hasSegmentedFootprint(spec);
       const fpPoly = customFp ? footprintPolygon(spec) : null;
-      const fpEdges = customFp ? footprintEdges(spec) : null;
+      const fpEdges = segFp ? footprintEdges(spec) : null;
       // Openings cut REAL holes: each wall run is built as pieces around its
       // openings (full-height stretches between them, a band under each sill,
       // a header above). Gap positions are collected per wall side — or per
@@ -533,7 +537,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
         let key;
         let along;
-        if (customFp) {
+        if (segFp) {
           const e = edgeForOpening(spec, opening);
           if (!e) return;
           key = e.key;
@@ -546,7 +550,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // Corrupt or legacy data can put an opening OFF its wall (negative or
         // past the end) — old traces did exactly that. Clamp it onto the wall
         // so the assembly never floats in the yard.
-        if (!customFp) {
+        if (!segFp) {
           const wallLen = (opening.wall === 'north' || opening.wall === 'south') ? width : depth;
           along = clamp(along, 0.2, Math.max(0.2, wallLen - w - 0.2));
         }
@@ -587,17 +591,19 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           }
         }
       };
-      if (customFp) {
-        // Custom footprint: one wall per polygon edge, thickness inward.
-        // Construction resolves by facing, so every north-facing segment wears
-        // the 'north' wall system. Under a shed roof the eave line runs
+      if (segFp) {
+        // Stored footprint: one wall per polygon edge, thickness inward.
+        // Construction resolves by facing with per-segment overrides, so a
+        // split wall can mix systems. Under a shed roof the eave line runs
         // north→south: horizontal segments seat at their own y, vertical
         // segments rake between their two end heights.
         const shed = roofSpec.roofType === 'shed';
         const eaveAt = (yy) => northWallHeight + (southWallHeight - northWallHeight) * clamp(depth > 0 ? yy / depth : 0, 0, 1);
         const hasPlate = Boolean(upperPlateRect(spec, 2));
         fpEdges.forEach((edge) => {
-          const rG = wallResolved[edge.facing];
+          // Resolve per SEGMENT — a split wall can mix constructions
+          // (frame sections beside infill sections on the same facing).
+          const rG = resolveWallSide(spec, edge.facing, 1, edge.key);
           if (rG.omitted || omittedWalls.has(edge.facing)) return;
           const t = rG.thicknessFt;
           const midX = (edge.x0 + edge.x1) / 2;
@@ -630,7 +636,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // No extent plate: the upper band rides this same edge.
           for (let level = 2; level <= Math.ceil(storeys); level++) {
             if (upperFt > 0) {
-              const u = resolveWallSide(spec, edge.facing, level);
+              const u = resolveWallSide(spec, edge.facing, level, edge.key);
               const tU = u.thicknessFt;
               const ux = midX - edge.nx * (tU / 2);
               const uy = midY - edge.ny * (tU / 2);

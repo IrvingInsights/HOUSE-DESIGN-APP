@@ -1,7 +1,7 @@
 // Design engine: tables, spec logic, deriveDesign, detectIssues, planners (moved verbatim from main.jsx, JOB 0 split).
 import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES,
-  resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint,
+  resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint,
   basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt
 } from '../backend/bim-core.mjs';
 import { Box, Building2, ClipboardCheck, Leaf, PenTool, Sparkles, Tractor, TreePine, Wrench } from 'lucide-react';
@@ -1441,12 +1441,13 @@ export function getWallSections(spec) {
   };
   const { storeys, extraFt, upperFt } = storeyInfo(spec.shell);
 
-  // Custom footprint: walls are the POLYGON EDGES (id wall-e0, wall-e1, …).
-  // Construction is still keyed by facing (all north-facing edges share the
-  // 'north' wall settings), so every editor keeps working through side.
-  if (hasCustomFootprint(spec)) {
+  // Stored footprint (custom shape OR a split-but-still-rectangular outline):
+  // walls are the POLYGON EDGES (id wall-e0, wall-e1, …). Construction keys by
+  // facing, with optional per-SEGMENT overrides (spec.wallSegments), so a side
+  // can mix a frame section with infill sections.
+  if (hasSegmentedFootprint(spec)) {
     const edgeSection = (edge, level) => {
-      const r = resolveWallSide(spec, edge.facing, level);
+      const r = resolveWallSide(spec, edge.facing, level, edge.key);
       if (r.omitted) return null;
       const upper = level > 1;
       const heightFt = upper ? upperFt : r.heightFt;
@@ -1870,7 +1871,27 @@ export function wallAssemblyKeyFromText(text) {
   return 'framed';
 }
 
-export function resolveWallSide(spec, side, level = 1) {
+export function resolveWallSide(spec, side, level = 1, edgeKey = null) {
+  // Per-segment construction: a split wall's pieces can differ (a timber-frame
+  // section beside straw-clay infill). spec.wallSegments is keyed by the plan
+  // edge (e0, e1, …) and overrides construction only — height and omit stay
+  // side-level concepts. MUST mirror the bim-core copy exactly.
+  const overlaySegment = (base) => {
+    const seg = edgeKey ? (spec.wallSegments || {})[edgeKey] : null;
+    if (!seg) return base;
+    const segAssemblyKey = seg.assembly && WALL_ASSEMBLIES[seg.assembly] ? seg.assembly : base.assemblyKey;
+    const segAssembly = WALL_ASSEMBLIES[segAssemblyKey] || base.assembly;
+    return {
+      ...base,
+      assemblyKey: segAssemblyKey,
+      assembly: segAssembly,
+      thicknessFt: Number(seg.thicknessFt ?? (seg.assembly ? segAssembly.thicknessFt : base.thicknessFt)),
+      interiorFinish: seg.interiorFinish || base.interiorFinish,
+      exteriorFinish: seg.exteriorFinish || base.exteriorFinish,
+      cladding: CLADDING_TYPES[seg.cladding] ? seg.cladding : base.cladding,
+      segmentKey: edgeKey
+    };
+  };
   const shell = spec.shell || {};
   const w = (spec.walls || {})[side] || {};
   const assemblyKey = w.assembly && WALL_ASSEMBLIES[w.assembly] ? w.assembly : wallAssemblyKeyFromText(spec.systems?.envelope);
@@ -1894,13 +1915,13 @@ export function resolveWallSide(spec, side, level = 1) {
     cladding: CLADDING_TYPES[w.cladding] ? w.cladding : 'render',
     omitted: Boolean(w.omitted) || omittedSet.has(side)
   };
-  if (level <= 1) return ground;
+  if (level <= 1) return overlaySegment(ground);
   // Upper storeys: spec.wallsUpper per-side overrides fall back to the ground
   // wall — MUST mirror the bim-core copy exactly.
   const u = (spec.wallsUpper || {})[side] || {};
   const upperKey = u.assembly && WALL_ASSEMBLIES[u.assembly] ? u.assembly : ground.assemblyKey;
   const upperAssembly = WALL_ASSEMBLIES[upperKey] || ground.assembly;
-  return {
+  return overlaySegment({
     ...ground,
     level,
     assemblyKey: upperKey,
@@ -1909,7 +1930,7 @@ export function resolveWallSide(spec, side, level = 1) {
     interiorFinish: u.interiorFinish || ground.interiorFinish,
     exteriorFinish: u.exteriorFinish || ground.exteriorFinish,
     cladding: CLADDING_TYPES[u.cladding] ? u.cladding : ground.cladding
-  };
+  });
 }
 
 // True when any side carries a per-wall override (drives the "mixed" hint).
@@ -3401,7 +3422,18 @@ export function deriveDesign(spec, wallSections) {
   // decking, and metal over the covered footprint, ~$14/sf.
   const canopyCost = (spec.elements || []).filter((element) => element.roofType && element.category !== 'foundation' && element.category !== 'floor')
     .reduce((sum, element) => sum + (Number(element.w) * Number(element.d) || 0) * 14, 0);
-  const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => sum + (outdoorItemPresent(spec, item) ? item.cost : 0), 0) + outbuildingCost + canopyCost;
+  // The greenhouse prices by its REAL footprint (a budget variable, $/sf) —
+  // a stretched greenhouse shouldn't cost the same as the 12x8 default.
+  const greenhouseCostSf = Number(spec.shell?.greenhouseCostSf ?? 62.5);
+  const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => {
+    if (!outdoorItemPresent(spec, item)) return sum;
+    if (item.key === 'greenhouse') {
+      return sum + (spec.elements || [])
+        .filter((element) => element.name === item.name)
+        .reduce((s, element) => s + Math.max(24, (Number(element.w) || item.w) * (Number(element.d) || item.d)) * greenhouseCostSf, 0);
+    }
+    return sum + item.cost;
+  }, 0) + outbuildingCost + canopyCost;
 
   // Floor assembly = finished floor over the whole heated area + the structural
   // subfloor deck under the ground floor (a slab foundation is its own deck, so
