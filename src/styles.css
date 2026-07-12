@@ -4841,3 +4841,41 @@ body,
 .leftPanel button.secondary:hover,
 .workspace button.secondary:hover,
 .rightPanel button.secondary:hover { border-color: #8A6F4E; color: #4A3A26; }
+
+/* ==== LIGHT TAN SURFACES (2026-07-12, Daniel: replace the white parts with
+   a light tan; keep the sage parts sage) ====
+   The sage ground, dock, and green-leaning panels stay exactly as they are.
+   Everything that read WHITE — cards, inputs, toolbar chips, floating
+   pills — warms to a light tan family, still a step lighter than the sage
+   ground so the value structure holds. */
+.leftPanel,
+.workspace,
+.rightPanel {
+  --ivory: #F8F3E6;
+  --raise: #FBF7EC;
+  --field: #FBF7EC;
+  --card: #F8F3E6;
+}
+
+/* Chrome chips that pinned white literals */
+.modelBar .viewModeToggle,
+.modelBar .floorTabs,
+.workspace .modelBar .changeBadge,
+.workspace .modelBar .northBadge,
+.workspace .modelBar .layersToggle {
+  background: #F8F3E6;
+}
+.selChipWrap.inDock .selChip { background: #F8F3E6; }
+.selChipWrap.inDock .selMenu { background: #FBF7EC; }
+
+/* Paper-scope floats that read white on the plan/scene */
+.planNorth,
+.planFrameToggle,
+.planFit,
+.viewBadge,
+.changeBadge,
+.dimensionBadge { background: rgba(248, 243, 230, 0.94); }
+.viewGizmo { background: rgba(248, 243, 230, 0.95); }
+.layersPanel { background: rgba(250, 246, 236, 0.97); }
+.selMenu { background: rgba(250, 246, 236, 0.98); }
+.planFrameToggle button.active { background: var(--slate); color: #fff; }
