@@ -71,6 +71,35 @@ function DrawnBent({ size = 40 }) {
   );
 }
 
+// Numbers you can actually TYPE: every numeric field used to commit on each
+// keystroke, so typing "18" dispatched "1", the clamp snapped it to a
+// minimum, and the correction fought the next digit (Daniel: "can't simply
+// add digits — snaps to numbers I don't want"). NumField keeps a local
+// draft while focused and commits ONCE on blur/Enter (Escape reverts).
+// Same value/onChange signature as a plain input — a drop-in for all 40.
+function NumField({ value, onChange, ...rest }) {
+  const [draft, setDraft] = useState(null);
+  return (
+    <input
+      type="number"
+      {...rest}
+      value={draft ?? (value ?? '')}
+      onFocus={() => setDraft(String(value ?? ''))}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        if (draft !== null && draft !== '' && String(draft) !== String(value ?? '')) {
+          onChange?.({ target: { value: draft } });
+        }
+        setDraft(null);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur();
+        else if (event.key === 'Escape') { setDraft(null); event.currentTarget.blur(); }
+      }}
+    />
+  );
+}
+
 // One consistent "there's more here" affordance for every system page: the
 // plain controls stay visible, the finer grain folds behind this. Native
 // <details> — no state to manage, keyboard/AT-friendly for free.
@@ -2261,8 +2290,8 @@ function App() {
 
               <div className="sectionHead">Overall shape</div>
               <div className="controlGrid">
-                <label>Width (ft)<input type="number" value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
-                <label>Length (ft)<input type="number" value={spec.shell.depthFt} onChange={(event) => updateShell('depthFt', event.target.value)} /></label>
+                <label>Width (ft)<NumField value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
+                <label>Length (ft)<NumField value={spec.shell.depthFt} onChange={(event) => updateShell('depthFt', event.target.value)} /></label>
                 {shellHeightsMixed ? (
                   <label>Wall height
                     <div className="mixedField">
@@ -2270,7 +2299,7 @@ function App() {
                     </div>
                   </label>
                 ) : (
-                  <label>Wall height (ft)<input type="number" value={shellHeights[0] ?? spec.shell.wallHeightFt} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
+                  <label>Wall height (ft)<NumField value={shellHeights[0] ?? spec.shell.wallHeightFt} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
                 )}
                 <label>Storeys
                   <div className="storeyControl">
@@ -2284,7 +2313,7 @@ function App() {
                 <div>
                   <div className="sectionHead">Basement — its own controls</div>
                   <div className="controlGrid">
-                    <label>Ceiling height (ft)<input type="number" step="0.5" min="6" max="12" value={basementInfo(spec.shell).heightFt} onChange={(event) => updateShell('basementHeightFt', event.target.value)} /></label>
+                    <label>Ceiling height (ft)<NumField step="0.5" min="6" max="12" value={basementInfo(spec.shell).heightFt} onChange={(event) => updateShell('basementHeightFt', event.target.value)} /></label>
                     <label className="diyToggle"><input type="checkbox" checked={spec.shell.basementHeated !== false} onChange={(event) => updateShell('basementHeated', event.target.checked)} /><span>Heated space</span></label>
                   </div>
                   <p className="systemNote">The basement spans the whole footprint (it IS the foundation) — lay out its rooms on the <b>Basement</b> Plan tab. More on the Foundation page.</p>
@@ -2308,11 +2337,11 @@ function App() {
                   <div key={plateEl.id}>
                     <div className="sectionHead">{floorLabel(spec, Number(plateEl.level))} — its own size, position, and height</div>
                     <div className="controlGrid">
-                      <label>Ceiling height (ft)<input type="number" step="0.5" min="3" max="14" value={storeyInfo(spec.shell).upperFt} onChange={(event) => updateShell('upperStoreyHeightFt', event.target.value)} /></label>
-                      <label>From west wall (ft)<input type="number" step="0.5" value={num(plateEl.x)} onChange={(event) => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: num(event.target.value), y: num(plateEl.y) }], 'Move the upper storey')} /></label>
-                      <label>From north wall (ft)<input type="number" step="0.5" value={num(plateEl.y)} onChange={(event) => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: num(plateEl.x), y: num(event.target.value) }], 'Move the upper storey')} /></label>
-                      <label>Width (ft)<input type="number" step="0.5" min="6" value={num(plateEl.w)} onChange={(event) => plateDispatch([{ type: 'resize_object', targetId: plateEl.id, w: Math.max(6, num(event.target.value)), d: num(plateEl.d) }], 'Resize the upper storey')} /></label>
-                      <label>Depth (ft)<input type="number" step="0.5" min="6" value={num(plateEl.d)} onChange={(event) => plateDispatch([{ type: 'resize_object', targetId: plateEl.id, w: num(plateEl.w), d: Math.max(6, num(event.target.value)) }], 'Resize the upper storey')} /></label>
+                      <label>Ceiling height (ft)<NumField step="0.5" min="3" max="14" value={storeyInfo(spec.shell).upperFt} onChange={(event) => updateShell('upperStoreyHeightFt', event.target.value)} /></label>
+                      <label>From west wall (ft)<NumField step="0.5" value={num(plateEl.x)} onChange={(event) => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: num(event.target.value), y: num(plateEl.y) }], 'Move the upper storey')} /></label>
+                      <label>From north wall (ft)<NumField step="0.5" value={num(plateEl.y)} onChange={(event) => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: num(plateEl.x), y: num(event.target.value) }], 'Move the upper storey')} /></label>
+                      <label>Width (ft)<NumField step="0.5" min="6" value={num(plateEl.w)} onChange={(event) => plateDispatch([{ type: 'resize_object', targetId: plateEl.id, w: Math.max(6, num(event.target.value)), d: num(plateEl.d) }], 'Resize the upper storey')} /></label>
+                      <label>Depth (ft)<NumField step="0.5" min="6" value={num(plateEl.d)} onChange={(event) => plateDispatch([{ type: 'resize_object', targetId: plateEl.id, w: num(plateEl.w), d: Math.max(6, num(event.target.value)) }], 'Resize the upper storey')} /></label>
                     </div>
                     <div className="storeyControl">
                       <button type="button" className="secondary" title="Cover the whole ground floor" onClick={() => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: 0.01, y: 0.01 }, { type: 'resize_object', targetId: plateEl.id, w: Number(spec.shell.widthFt), d: Number(spec.shell.depthFt) }], 'Match the storey to the ground floor')}>Match ground floor</button>
@@ -2434,7 +2463,7 @@ function App() {
                       </div>
                     </label>
                   ) : (
-                    <label>Height (ft)<input type="number" min="7" max="40" value={sharedHeight} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
+                    <label>Height (ft)<NumField min="7" max="40" value={sharedHeight} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
                   )}
                   <label>Width<span className="readOnlyDim">{spec.shell.widthFt}′ <small>north/south walls</small></span></label>
                   <label>Length<span className="readOnlyDim">{spec.shell.depthFt}′ <small>east/west walls</small></span></label>
@@ -2561,16 +2590,16 @@ function App() {
               )}
               {siteOf(spec).placeName && <p className="systemNote">Current place: <b>{siteOf(spec).placeName}</b> — {siteOf(spec).latitudeDeg}° latitude, {siteOf(spec).rainInYr}" of rain a year.</p>}
               <div className="controlGrid">
-                <label>Latitude (°)<input type="number" step="0.5" min="0" max="70" value={siteOf(spec).latitudeDeg} onChange={(event) => updateSite('latitudeDeg', event.target.value)} /></label>
-                <label>Yearly rain (in)<input type="number" min="0" max="200" value={siteOf(spec).rainInYr} onChange={(event) => updateSite('rainInYr', event.target.value)} /></label>
-                <label>Orientation off south (°) <em className="pitchHint">{(() => { const a = Number(siteOf(spec).azimuthDeg) || 0; return a === 0 ? 'due south' : `${Math.abs(a)}° ${a < 0 ? 'east' : 'west'} of south · ${Math.round(derived.solarFactor * 100)}% sun`; })()}</em><input type="number" step="5" min="-90" max="90" value={Number(siteOf(spec).azimuthDeg) || 0} onChange={(event) => updateSite('azimuthDeg', event.target.value)} /></label>
+                <label>Latitude (°)<NumField step="0.5" min="0" max="70" value={siteOf(spec).latitudeDeg} onChange={(event) => updateSite('latitudeDeg', event.target.value)} /></label>
+                <label>Yearly rain (in)<NumField min="0" max="200" value={siteOf(spec).rainInYr} onChange={(event) => updateSite('rainInYr', event.target.value)} /></label>
+                <label>Orientation off south (°) <em className="pitchHint">{(() => { const a = Number(siteOf(spec).azimuthDeg) || 0; return a === 0 ? 'due south' : `${Math.abs(a)}° ${a < 0 ? 'east' : 'west'} of south · ${Math.round(derived.solarFactor * 100)}% sun`; })()}</em><NumField step="5" min="-90" max="90" value={Number(siteOf(spec).azimuthDeg) || 0} onChange={(event) => updateSite('azimuthDeg', event.target.value)} /></label>
               </div>
               <p className="systemNote">Search by name for real coordinates and last year's actual rainfall, or fine-tune by hand. Latitude sets sun angles; rain decides whether the roof can supply water. Orientation is how far the south face is turned off true south — the further you rotate, the less winter sun your south glass gathers.</p>
 
               <FineTune label="Fine-tune — topography" hint="sloped land, walkout basements">
               <div className="controlGrid">
                 <label>Fall across the house (ft)
-                  <input type="number" step="0.5" min="0" max="60" value={Number(siteOf(spec).slopeFt) || 0} onChange={(event) => updateSite('slopeFt', event.target.value)} />
+                  <NumField step="0.5" min="0" max="60" value={Number(siteOf(spec).slopeFt) || 0} onChange={(event) => updateSite('slopeFt', event.target.value)} />
                 </label>
                 <label>Downhill direction
                   <select value={siteOf(spec).slopeDir || 'south'} onChange={(event) => updateSite('slopeDir', event.target.value)} disabled={!(Number(siteOf(spec).slopeFt) > 0)}>
@@ -2581,7 +2610,7 @@ function App() {
                   </select>
                 </label>
                 <label>Floor above grade, uphill (ft)
-                  <input type="number" step="0.25" min="0" max="12" value={Number(siteOf(spec).gradeFt ?? 1.5)} onChange={(event) => updateSite('gradeFt', event.target.value)} />
+                  <NumField step="0.25" min="0" max="12" value={Number(siteOf(spec).gradeFt ?? 1.5)} onChange={(event) => updateSite('gradeFt', event.target.value)} />
                 </label>
               </div>
               <p className="systemNote">{(Number(siteOf(spec).slopeFt) || 0) > 0
@@ -2622,8 +2651,8 @@ function App() {
             <div className="systemPage">
               <div className="sectionHead">Foundation size</div>
               <div className="controlGrid">
-                <label>Width (ft)<input type="number" value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
-                <label>Length (ft)<input type="number" value={spec.shell.depthFt} onChange={(event) => updateShell('depthFt', event.target.value)} /></label>
+                <label>Width (ft)<NumField value={spec.shell.widthFt} onChange={(event) => updateShell('widthFt', event.target.value)} /></label>
+                <label>Length (ft)<NumField value={spec.shell.depthFt} onChange={(event) => updateShell('depthFt', event.target.value)} /></label>
               </div>
               <p className="systemNote">The foundation carries the building footprint — <b>{spec.shell.widthFt} × {spec.shell.depthFt} ft = {Math.round(Number(spec.shell.widthFt) * Number(spec.shell.depthFt))} sf</b>, {Math.round(2 * (Number(spec.shell.widthFt) + Number(spec.shell.depthFt)))} ft of perimeter. Set it here, on Shell, or on Walls — they all stay in step.</p>
 
@@ -2638,7 +2667,7 @@ function App() {
                   </select>
                 </label>
                 {!basementInfo(spec.shell).present && utilitiesOf(spec).foundationType === 'stemwall' && (
-                  <label>Stem wall height (ft)<input type="number" step="0.25" min="0.5" max="6" value={utilitiesOf(spec).stemwallHeightFt ?? 1.5} onChange={(event) => updateUtility('stemwallHeightFt', event.target.value)} /></label>
+                  <label>Stem wall height (ft)<NumField step="0.25" min="0.5" max="6" value={utilitiesOf(spec).stemwallHeightFt ?? 1.5} onChange={(event) => updateUtility('stemwallHeightFt', event.target.value)} /></label>
                 )}
                 <label>Insulation
                   <select value={utilitiesOf(spec).foundationInsulation || 'perimeter'} onChange={(event) => updateUtility('foundationInsulation', event.target.value)}>
@@ -2658,7 +2687,7 @@ function App() {
                 <>
                   <div className="sectionHead">Basement — foundation and storey in one</div>
                   <div className="controlGrid">
-                    <label>Ceiling height (ft)<input type="number" step="0.5" min="6" max="12" value={basementInfo(spec.shell).heightFt} onChange={(event) => updateShell('basementHeightFt', event.target.value)} /></label>
+                    <label>Ceiling height (ft)<NumField step="0.5" min="6" max="12" value={basementInfo(spec.shell).heightFt} onChange={(event) => updateShell('basementHeightFt', event.target.value)} /></label>
                     <label>Finished space<input value={`${Math.round(derived.basementRoomArea)} sf of rooms`} readOnly /></label>
                   </div>
                   <label className="diyToggle">
@@ -2720,7 +2749,7 @@ function App() {
                       </select>
                     </label>
                     {resolveFrameType(spec, 1) !== 'load-bearing' && (
-                      <label>Bay spacing (ft, post to post)<input type="number" step="0.5" min="4" max="16" value={Number(spec.frame?.baySpacingFt) || 8} onChange={(event) => applyBackendOperations({ operations: [{ type: 'set_frame', field: 'baySpacingFt', value: String(clamp(Number(event.target.value) || 8, 4, 16)) }], promptText: 'Set frame bay spacing', logPrefix: 'Frame' })} /></label>
+                      <label>Bay spacing (ft, post to post)<NumField step="0.5" min="4" max="16" value={Number(spec.frame?.baySpacingFt) || 8} onChange={(event) => applyBackendOperations({ operations: [{ type: 'set_frame', field: 'baySpacingFt', value: String(clamp(Number(event.target.value) || 8, 4, 16)) }], promptText: 'Set frame bay spacing', logPrefix: 'Frame' })} /></label>
                     )}
                   </div>
                 ) : (
@@ -2894,7 +2923,7 @@ function App() {
                     <option value="town">Town main — simplest</option>
                   </select>
                 </label>
-                <label>Storage tank (gal)<input type="number" min="0" max="50000" step="100" value={utilitiesOf(spec).tankGal} onChange={(event) => updateUtility('tankGal', event.target.value)} /></label>
+                <label>Storage tank (gal)<NumField min="0" max="50000" step="100" value={utilitiesOf(spec).tankGal} onChange={(event) => updateUtility('tankGal', event.target.value)} /></label>
               </div>
               <p className="systemNote">A well adds a pump to your power load. Catchment leans on the roof area and your site's rainfall — the readouts below show whether it covers the household.</p>
             </div>
@@ -2912,7 +2941,7 @@ function App() {
                   </select>
                 </label>
                 {utilitiesOf(spec).wasteMethod === 'septic' && (
-                  <label>Well → septic distance (ft)<input type="number" min="0" max="2000" step="5" value={utilitiesOf(spec).wellSepticFt} onChange={(event) => updateUtility('wellSepticFt', event.target.value)} /></label>
+                  <label>Well → septic distance (ft)<NumField min="0" max="2000" step="5" value={utilitiesOf(spec).wellSepticFt} onChange={(event) => updateUtility('wellSepticFt', event.target.value)} /></label>
                 )}
               </div>
               <p className="systemNote">A septic field must sit at least 100 ft from a well, and bedrooms size the field. Composting sidesteps most of that.</p>
@@ -2930,8 +2959,8 @@ function App() {
                     <option value="gridtie">Grid only — simplest, no battery</option>
                   </select>
                 </label>
-                <label>Panels <em className="pitchHint">{Number(utilitiesOf(spec).panelCount) > 0 ? 'manual' : `auto ≈ ${derived.panels}`}</em><input type="number" min="0" max="200" step="1" placeholder={`auto (${derived.panels})`} value={Number(utilitiesOf(spec).panelCount) || ''} onChange={(event) => updateUtility('panelCount', event.target.value || 0)} /></label>
-                <label>Battery (kWh) <em className="pitchHint">{Number(utilitiesOf(spec).batteryOverrideKwh) > 0 ? 'manual' : `auto ≈ ${derived.batteryKwh}`}</em><input type="number" min="0" max="500" step="1" placeholder={`auto (${derived.batteryKwh})`} value={Number(utilitiesOf(spec).batteryOverrideKwh) || ''} onChange={(event) => updateUtility('batteryOverrideKwh', event.target.value || 0)} /></label>
+                <label>Panels <em className="pitchHint">{Number(utilitiesOf(spec).panelCount) > 0 ? 'manual' : `auto ≈ ${derived.panels}`}</em><NumField min="0" max="200" step="1" placeholder={`auto (${derived.panels})`} value={Number(utilitiesOf(spec).panelCount) || ''} onChange={(event) => updateUtility('panelCount', event.target.value || 0)} /></label>
+                <label>Battery (kWh) <em className="pitchHint">{Number(utilitiesOf(spec).batteryOverrideKwh) > 0 ? 'manual' : `auto ≈ ${derived.batteryKwh}`}</em><NumField min="0" max="500" step="1" placeholder={`auto (${derived.batteryKwh})`} value={Number(utilitiesOf(spec).batteryOverrideKwh) || ''} onChange={(event) => updateUtility('batteryOverrideKwh', event.target.value || 0)} /></label>
               </div>
               <p className="systemNote">The well pump and an electric heater land here as loads; panels and battery are auto-sized against your roof and your site's sun — leave the fields blank for auto, or type a number to override. Roof holds ~{derived.panelRoom} panels.</p>
             </div>
@@ -2970,7 +2999,7 @@ function App() {
                     <option value="hip">Hip</option>
                   </select>
                 </label>
-                <label>Pitch <em className="pitchHint">≈ {Math.round(Number(spec.shell.roofPitch || 0.32) * 12)}:12</em><input type="number" step="0.01" value={spec.shell.roofPitch} onChange={(event) => updateShell('roofPitch', event.target.value)} /></label>
+                <label>Pitch <em className="pitchHint">≈ {Math.round(Number(spec.shell.roofPitch || 0.32) * 12)}:12</em><NumField step="0.01" value={spec.shell.roofPitch} onChange={(event) => updateShell('roofPitch', event.target.value)} /></label>
                 <label>Insulation <em className="pitchHint">R-{derived.roofR}</em>
                   <select value={resolveInsulation(utilitiesOf(spec).roofInsulation, 'cellulose')} onChange={(event) => updateUtility('roofInsulation', event.target.value)}>
                     {Object.entries(INSULATION_TYPES).map(([key, ins]) => <option key={key} value={key} style={greenOptStyle(ins)}>{greenLeaf(ins)}{ins.label} (R≈{ins.r})</option>)}
@@ -3004,7 +3033,7 @@ function App() {
                           <option value="south">South — high north wall</option>
                         </select>
                       </label>
-                      <label>Fall, high eave to low (ft)<input type="number" step="0.5" min="0.5" max="12" value={fallNow} onChange={(event) => setShedFall(drainsNow || 'north', event.target.value)} /></label>
+                      <label>Fall, high eave to low (ft)<NumField step="0.5" min="0.5" max="12" value={fallNow} onChange={(event) => setShedFall(drainsNow || 'north', event.target.value)} /></label>
                     </div>
                     {drainsNow === '' && <p className="systemNote">Both eaves are level right now — this “shed” is flat and won't drain. Pick a direction (or set a fall) and the wall heights follow.</p>}
                   </>
@@ -3018,14 +3047,14 @@ function App() {
               </div>
               {!overhangBreakOpen ? (
                 <div className="controlGrid">
-                  <label>Overhang (ft)<input type="number" step="0.5" min="0" max="12" value={resolveOverhangs(spec.shell).split ? '' : resolveOverhangs(spec.shell).all} placeholder={resolveOverhangs(spec.shell).split ? 'mixed — break open' : undefined} onChange={(event) => updateOverhang('all', event.target.value)} /></label>
+                  <label>Overhang (ft)<NumField step="0.5" min="0" max="12" value={resolveOverhangs(spec.shell).split ? '' : resolveOverhangs(spec.shell).all} placeholder={resolveOverhangs(spec.shell).split ? 'mixed — break open' : undefined} onChange={(event) => updateOverhang('all', event.target.value)} /></label>
                 </div>
               ) : (
                 <div className="wallSideGrid">
                   {WALL_SIDES.map((side) => (
                     <label key={side} className="wallSideCell">
                       <span className="wallSideLabel">{WALL_SIDE_LABELS[side]}</span>
-                      <input type="number" step="0.5" min="0" max="12" value={resolveOverhangs(spec.shell)[side]} onChange={(event) => updateOverhang(side, event.target.value)} />
+                      <NumField step="0.5" min="0" max="12" value={resolveOverhangs(spec.shell)[side]} onChange={(event) => updateOverhang(side, event.target.value)} />
                       <span className="wallSideUnit">ft</span>
                     </label>
                   ))}
@@ -3684,13 +3713,13 @@ function App() {
                 {!selectedIsElement && !selectedIsWall && !selectedIsSpecial && <div className="modelEditHint"><Camera size={15} /> Drag the room body to move it. Drag green corner cubes in the model to resize; dimensions appear live.</div>}
                 <div className={selectedIsWall ? 'liveEdit wallEdit' : 'liveEdit'}>
                   <label>Name<input value={selected?.name || ''} onChange={(event) => updateSelectedRoom('name', event.target.value)} /></label>
-                  <label>{selectedIsWall ? 'Length' : 'Width'}<input type="number" value={selectedIsWall ? selected?.lengthFt || 0 : selected?.w || 0} disabled={selectedIsRoof || selectedIsGrid} title={selected?.edgeKey ? 'Length of this segment — its jog corners slide along the wall line.' : undefined} onChange={(event) => updateSelectedRoom('w', event.target.value)} /></label>
+                  <label>{selectedIsWall ? 'Length' : 'Width'}<NumField value={selectedIsWall ? selected?.lengthFt || 0 : selected?.w || 0} disabled={selectedIsRoof || selectedIsGrid} title={selected?.edgeKey ? 'Length of this segment — its jog corners slide along the wall line.' : undefined} onChange={(event) => updateSelectedRoom('w', event.target.value)} /></label>
                   {selectedIsWall && selected?.edgeKey && (() => {
                     const edge = footprintEdges(spec)[Number(String(selected.edgeKey).replace(/^e/, ''))];
                     const startAt = edge ? Math.min(edge.horizontal ? edge.x0 : edge.y0, edge.horizontal ? edge.x1 : edge.y1) : 0;
-                    return <label>Starts at (ft along wall)<input type="number" step="0.5" value={startAt} onChange={(event) => updateSelectedRoom('startFt', event.target.value)} /></label>;
+                    return <label>Starts at (ft along wall)<NumField step="0.5" value={startAt} onChange={(event) => updateSelectedRoom('startFt', event.target.value)} /></label>;
                   })()}
-                  <label>{selectedIsWall ? 'Thickness' : 'Depth'}<input type="number" step={selectedIsWall ? 0.05 : undefined} value={selectedIsWall ? selected?.thicknessFt ?? modeledWallProfile.thicknessFt : selected?.d || 0} disabled={selectedIsOpening || selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom(selectedIsWall ? 'thickness' : 'd', event.target.value)} /></label>
+                  <label>{selectedIsWall ? 'Thickness' : 'Depth'}<NumField step={selectedIsWall ? 0.05 : undefined} value={selectedIsWall ? selected?.thicknessFt ?? modeledWallProfile.thicknessFt : selected?.d || 0} disabled={selectedIsOpening || selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom(selectedIsWall ? 'thickness' : 'd', event.target.value)} /></label>
                   {selectedIsWall && <label>System
                     <select value={selected?.assemblyKey || 'framed'} onChange={(event) => updateSelectedRoom('assembly', event.target.value)}>
                       {Object.values(WALL_ASSEMBLIES).map((assembly) => (
@@ -3707,7 +3736,7 @@ function App() {
                   {selectedIsWall && (selected?.level || 1) === 1 && (
                     <label>Move in/out (ft)
                       <span className="wallMoveRow">
-                        <input type="number" step="0.5" value={wallMoveFt} onChange={(event) => setWallMoveFt(Number(event.target.value))} />
+                        <NumField step="0.5" value={wallMoveFt} onChange={(event) => setWallMoveFt(Number(event.target.value))} />
                         <button type="button" className="secondary" title="Negative pulls the wall inward" onClick={() => moveSelectedWall(wallMoveFt)}>Move</button>
                         <button type="button" className="secondary" title="Split this wall into three segments, then move the middle to shape an L or a notch" onClick={splitSelectedWall}>Split into 3</button>
                       </span>
@@ -3719,16 +3748,16 @@ function App() {
                       <label>Sun glazing above (greenhouse face)
                         <span className="wallMoveRow">
                           <input type="checkbox" checked={rW.sunGlazing} title="Angled glass from the top of this wall up to the eave, carried by the frame — drop the wall to a kneewall height first (e.g. 3')" onChange={(event) => updateSelectedRoom('sunGlazing', event.target.checked)} />
-                          {rW.sunGlazing && <input type="number" step="5" min="0" max="45" title="Glazing tilt in degrees from vertical — steeper aims lower winter sun" value={rW.sunGlazingTiltDeg} onChange={(event) => updateSelectedRoom('sunGlazingTiltDeg', event.target.value)} />}
+                          {rW.sunGlazing && <NumField step="5" min="0" max="45" title="Glazing tilt in degrees from vertical — steeper aims lower winter sun" value={rW.sunGlazingTiltDeg} onChange={(event) => updateSelectedRoom('sunGlazingTiltDeg', event.target.value)} />}
                           {rW.sunGlazing && <small>° from vertical</small>}
                         </span>
                       </label>
                     );
                   })()}
-                  {!selectedIsWall && <label>{selectedIsOpening ? 'Along Wall' : 'X'}<input type="number" value={selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? selected.x : selected.y) || 0 : selected?.x || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom(selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? 'x' : 'y') : 'x', event.target.value)} /></label>}
-                  {!selectedIsWall && !selectedIsOpening && <label>Y<input type="number" value={selected?.y || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom('y', event.target.value)} /></label>}
-                  {!selectedIsWall && !selectedIsSpecial && !selectedIsElement && (storeyInfo(spec.shell).storeys > 1 || basementInfo(spec.shell).present) && <label>Level ({basementInfo(spec.shell).present ? '-1 = basement' : 'floor'})<input type="number" min={basementInfo(spec.shell).present ? -1 : 1} max={Math.ceil(storeyInfo(spec.shell).storeys)} value={Number(selected?.level || 1)} onChange={(event) => updateSelectedRoom('level', event.target.value)} /></label>}
-                  {(selectedIsElement || selectedIsWall || selectedIsRoof) && <label>Height<input type="number" value={selected?.h || 1.2} disabled={selectedIsOpening || selectedIsPad || selectedIsGrid || (selectedIsWall && selected?.storey === 'upper') || (selectedIsWall && spec.shell.roofType === 'shed' && (selected?.side === 'east' || selected?.side === 'west'))} title={selectedIsWall && selected?.storey === 'upper' ? 'Upper wall height comes from the Storeys setting on the Shell page' : selectedIsWall && spec.shell.roofType === 'shed' && (selected?.side === 'east' || selected?.side === 'west') ? 'Raked wall — its ends follow the north and south walls' : undefined} onChange={(event) => updateSelectedRoom('h', event.target.value)} /></label>}
+                  {!selectedIsWall && <label>{selectedIsOpening ? 'Along Wall' : 'X'}<NumField value={selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? selected.x : selected.y) || 0 : selected?.x || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom(selectedIsOpening ? (selected.wall === 'north' || selected.wall === 'south' ? 'x' : 'y') : 'x', event.target.value)} /></label>}
+                  {!selectedIsWall && !selectedIsOpening && <label>Y<NumField value={selected?.y || 0} disabled={selectedIsRoof || selectedIsGrid} onChange={(event) => updateSelectedRoom('y', event.target.value)} /></label>}
+                  {!selectedIsWall && !selectedIsSpecial && !selectedIsElement && (storeyInfo(spec.shell).storeys > 1 || basementInfo(spec.shell).present) && <label>Level ({basementInfo(spec.shell).present ? '-1 = basement' : 'floor'})<NumField min={basementInfo(spec.shell).present ? -1 : 1} max={Math.ceil(storeyInfo(spec.shell).storeys)} value={Number(selected?.level || 1)} onChange={(event) => updateSelectedRoom('level', event.target.value)} /></label>}
+                  {(selectedIsElement || selectedIsWall || selectedIsRoof) && <label>Height<NumField value={selected?.h || 1.2} disabled={selectedIsOpening || selectedIsPad || selectedIsGrid || (selectedIsWall && selected?.storey === 'upper') || (selectedIsWall && spec.shell.roofType === 'shed' && (selected?.side === 'east' || selected?.side === 'west'))} title={selectedIsWall && selected?.storey === 'upper' ? 'Upper wall height comes from the Storeys setting on the Shell page' : selectedIsWall && spec.shell.roofType === 'shed' && (selected?.side === 'east' || selected?.side === 'west') ? 'Raked wall — its ends follow the north and south walls' : undefined} onChange={(event) => updateSelectedRoom('h', event.target.value)} /></label>}
                   {selectedIsOpening && <label>Wall
                     <select value={selected?.wall || 'south'} onChange={(event) => updateSelectedRoom('wall', event.target.value)}>
                       <option value="north">North</option>
@@ -3770,7 +3799,7 @@ function App() {
                         {Object.entries(FRAME_TYPES).map(([key, f]) => <option key={key} value={key} style={greenOptStyle(f)}>{greenLeaf(f)}{f.label}</option>)}
                       </select>
                     </label>
-                    <label>Bay spacing (ft, post to post)<input type="number" step="0.5" min="4" max="16" value={Number(spec.frame?.baySpacingFt) || 8} onChange={(event) => updateSelectedRoom('baySpacingFt', event.target.value)} /></label>
+                    <label>Bay spacing (ft, post to post)<NumField step="0.5" min="4" max="16" value={Number(spec.frame?.baySpacingFt) || 8} onChange={(event) => updateSelectedRoom('baySpacingFt', event.target.value)} /></label>
                   </>}
                   {selectedIsElement && selected?.category === 'partition' && <>
                     <label>Construction
@@ -3778,8 +3807,8 @@ function App() {
                         {Object.entries(PARTITION_TYPES).map(([key, p]) => <option key={key} value={key} style={greenOptStyle(p)}>{greenLeaf(p)}{p.label}</option>)}
                       </select>
                     </label>
-                    <label>Door width (ft, 0 = solid)<input type="number" step="0.5" min="0" max="8" value={Number(selected?.doorWFt || 0)} onChange={(event) => updateSelectedRoom('doorWFt', event.target.value)} /></label>
-                    {Number(selected?.doorWFt || 0) > 0 && <label>Door position along wall (ft)<input type="number" step="0.5" min="0" value={Number(selected?.doorAtFt || 0)} onChange={(event) => updateSelectedRoom('doorAtFt', event.target.value)} /></label>}
+                    <label>Door width (ft, 0 = solid)<NumField step="0.5" min="0" max="8" value={Number(selected?.doorWFt || 0)} onChange={(event) => updateSelectedRoom('doorWFt', event.target.value)} /></label>
+                    {Number(selected?.doorWFt || 0) > 0 && <label>Door position along wall (ft)<NumField step="0.5" min="0" value={Number(selected?.doorAtFt || 0)} onChange={(event) => updateSelectedRoom('doorAtFt', event.target.value)} /></label>}
                   </>}
                   {!selectedIsWall && !selectedIsSpecial && <label>{selectedIsElement ? 'Category' : 'Type'}
                     <select value={selectedIsElement ? selected?.category || 'storage' : selected?.type || 'living'} onChange={(event) => updateSelectedRoom(selectedIsElement ? 'category' : 'type', event.target.value)}>
