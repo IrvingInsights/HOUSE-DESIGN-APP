@@ -2,7 +2,7 @@
 import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES,
   resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint,
-  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims
+  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt
 } from '../backend/bim-core.mjs';
 import { Box, Building2, ClipboardCheck, Leaf, PenTool, Sparkles, Tractor, TreePine, Wrench } from 'lucide-react';
 
@@ -2594,7 +2594,16 @@ export function applyStructuredDesignPlan(currentSpec, plan) {
       changedIds.push(target.id);
       actions.push(operationDescription({ ...operation, name: target.name }, next));
     } else if (operation.type === 'update_object') {
-      if (operation.field) target[operation.field] = operation.value;
+      if (operation.field === 'level') {
+        // Mirror of bim-core: a level change is structural — numeric, clamped,
+        // storeys rise to meet it, z lands at the storey elevation.
+        let lvl = Math.round(Number(operation.value));
+        if (!Number.isFinite(lvl) || lvl === 0) lvl = 1;
+        lvl = Math.max(BASEMENT_LEVEL, Math.min(3, lvl));
+        target.level = lvl;
+        if (lvl > Number(next.shell.storeys || 1)) next.shell.storeys = lvl;
+        target.z = lvl >= 2 ? storeyElevationFt(next.shell, lvl) : 0;
+      } else if (operation.field) target[operation.field] = operation.value;
       changedIds.push(target.id);
       actions.push(operationDescription({ ...operation, name: target.name }, next));
     } else if (operation.type === 'remove_object') {
@@ -2847,6 +2856,30 @@ export function normalizeRooms(spec) {
         return area(b) < area(a) ? b : a; // tie: the tighter fit wins
       });
       spec.elements = spec.elements.filter((el) => el.category !== 'floor' || Number(el.level || 1) !== lvl || el === keep);
+    }
+  }
+  // Mirror of bim-core: a storey's extent plate COVERS that storey's rooms
+  // (grow-only, clamped to the shell) — keep the two copies identical.
+  for (const plate of (spec.elements || []).filter((el) => el.category === 'floor')) {
+    const lvl = Number(plate.level || 1);
+    if (lvl < 2) continue;
+    const roomsAt = (spec.rooms || []).filter((room) => Number(room.level || 1) === lvl);
+    if (!roomsAt.length) continue;
+    const minX = Math.min(...roomsAt.map((r) => Number(r.x) || 0));
+    const minY = Math.min(...roomsAt.map((r) => Number(r.y) || 0));
+    const maxX = Math.max(...roomsAt.map((r) => (Number(r.x) || 0) + (Number(r.w) || 0)));
+    const maxY = Math.max(...roomsAt.map((r) => (Number(r.y) || 0) + (Number(r.d) || 0)));
+    const px = Number(plate.x) || 0;
+    const py = Number(plate.y) || 0;
+    const pw = Number(plate.w) || 1;
+    const pd = Number(plate.d) || 1;
+    const nx = Math.max(0, Math.min(px, minX));
+    const ny = Math.max(0, Math.min(py, minY));
+    const nw = Math.min(Number(spec.shell.widthFt) - nx, Math.max(px + pw, maxX) - nx);
+    const nd = Math.min(Number(spec.shell.depthFt) - ny, Math.max(py + pd, maxY) - ny);
+    if (nx !== px || ny !== py || Math.abs(nw - pw) > 0.01 || Math.abs(nd - pd) > 0.01) {
+      plate.x = Math.round(nx * 10) / 10; plate.y = Math.round(ny * 10) / 10;
+      plate.w = Math.round(Math.max(1, nw) * 10) / 10; plate.d = Math.round(Math.max(1, nd) * 10) / 10;
     }
   }
 

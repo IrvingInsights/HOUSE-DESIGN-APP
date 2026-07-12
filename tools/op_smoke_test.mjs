@@ -349,6 +349,35 @@ async function httpSanity() {
   ok(out.ok && JSON.stringify(out.report?.actions || []).includes('Moved the east wall'), 'http: move_wall_edge acknowledged', JSON.stringify(out.report?.actions || out.error || '').slice(0, 160));
 }
 
+// --- floor stacks: level is structural, plates stay sane ---------------------
+{
+  // "The tower is the 3rd floor": level update raises storeys + sets elevation
+  let s = freshSpec();
+  s.shell.storeys = 2;
+  s.rooms.push({ id: 'tower-studio', name: 'Tower Studio', x: 20, y: 18, w: 10, d: 8, level: 2, z: 10 });
+  let out = apply(s, [{ type: 'update_object', targetId: 'tower-studio', field: 'level', value: '3' }]);
+  const tw = out.spec.rooms.find((r) => r.id === 'tower-studio');
+  ok(tw.level === 3 && out.spec.shell.storeys === 3, 'update level 3 raises storeys to 3', `level=${tw.level} storeys=${out.spec.shell.storeys}`);
+  ok(tw.z === 20, 'level-3 room lands at the storey elevation (20)', `z=${tw.z}`);
+
+  // A floor plate for a phantom storey raises the count and gets a sane z
+  s = freshSpec();
+  s.shell.storeys = 2;
+  out = apply(s, [{ type: 'add_element', category: 'floor', name: 'Third Floor Plate', x: 20, y: 18, w: 10, d: 8, z: 34, level: 3 }]);
+  const plate3 = out.spec.elements.find((el) => el.category === 'floor' && Number(el.level) === 3);
+  ok(plate3 && out.spec.shell.storeys === 3, 'level-3 plate raises storeys', `storeys=${out.spec.shell.storeys}`);
+  ok(plate3 && plate3.z === 20, 'junk plate z (34) snapped to the storey elevation', `z=${plate3?.z}`);
+
+  // A degenerate plate grows to cover its storey's rooms (the 4x4-plate bug)
+  s = freshSpec();
+  s.shell.storeys = 2;
+  s.rooms.push({ id: 'tower-studio', name: 'Tower Studio', x: 14, y: 11, w: 10, d: 17, level: 2, z: 10 });
+  s.elements.push({ id: 'storey-2-extent', name: 'Storey 2 extent', category: 'floor', x: 14, y: 11, w: 4, d: 4, h: 0.35, z: 10, level: 2 });
+  out = apply(s, [{ type: 'move_object', targetId: 'tower-studio', x: 14, y: 11 }]);
+  const plate2 = out.spec.elements.find((el) => el.id === 'storey-2-extent');
+  ok(plate2 && plate2.w >= 10 && plate2.d >= 17, 'extent plate grows to cover its storey rooms', `${plate2?.w}x${plate2?.d}`);
+}
+
 const wantHttp = process.argv.includes('--http');
 (async () => {
   if (wantHttp) await httpSanity();

@@ -645,6 +645,32 @@ function normalizeRooms(spec) {
       spec.elements = spec.elements.filter((el) => el.category !== 'floor' || Number(el.level || 1) !== lvl || el === keep);
     }
   }
+  // A storey's extent plate COVERS that storey's rooms (grow-only, clamped to
+  // the shell). A degenerate 4x4 plate under a 10x17 tower room made the
+  // visible storey ignore every room drag — the walls and roof ring the
+  // plate, so the plate must follow the rooms.
+  for (const plate of (spec.elements || []).filter((el) => el.category === 'floor')) {
+    const lvl = Number(plate.level || 1);
+    if (lvl < 2) continue;
+    const roomsAt = (spec.rooms || []).filter((room) => Number(room.level || 1) === lvl);
+    if (!roomsAt.length) continue;
+    const minX = Math.min(...roomsAt.map((r) => Number(r.x) || 0));
+    const minY = Math.min(...roomsAt.map((r) => Number(r.y) || 0));
+    const maxX = Math.max(...roomsAt.map((r) => (Number(r.x) || 0) + (Number(r.w) || 0)));
+    const maxY = Math.max(...roomsAt.map((r) => (Number(r.y) || 0) + (Number(r.d) || 0)));
+    const px = Number(plate.x) || 0;
+    const py = Number(plate.y) || 0;
+    const pw = Number(plate.w) || 1;
+    const pd = Number(plate.d) || 1;
+    const nx = Math.max(0, Math.min(px, minX));
+    const ny = Math.max(0, Math.min(py, minY));
+    const nw = Math.min(Number(spec.shell.widthFt) - nx, Math.max(px + pw, maxX) - nx);
+    const nd = Math.min(Number(spec.shell.depthFt) - ny, Math.max(py + pd, maxY) - ny);
+    if (nx !== px || ny !== py || Math.abs(nw - pw) > 0.01 || Math.abs(nd - pd) > 0.01) {
+      plate.x = Math.round(nx * 10) / 10; plate.y = Math.round(ny * 10) / 10;
+      plate.w = Math.round(Math.max(1, nw) * 10) / 10; plate.d = Math.round(Math.max(1, nd) * 10) / 10;
+    }
+  }
 
   const roomMargin = Math.max(16, padExtension(spec.shell));
   spec.rooms = spec.rooms.map((room) => ({
@@ -970,6 +996,19 @@ export const parseWxD = (value) => {
   const m = /^\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*$/i.exec(String(value || ''));
   return m ? { w: Number(m[1]), d: Number(m[2]) } : null;
 };
+
+// Where a storey's floor sits. The ground storey's height is the LOW wall on
+// a shed (the plate rides the general ceiling, not the tall south face);
+// upper storeys use upperStoreyHeightFt when set, else the same base.
+export function storeyElevationFt(shell, lvl) {
+  const level = Number(lvl) || 1;
+  if (level <= 1) return 0;
+  const south = Number(shell?.southWallHeightFt || shell?.wallHeightFt || 10);
+  const north = Number(shell?.northWallHeightFt || shell?.wallHeightFt || 10);
+  const base = Math.max(6, Math.min(south, north, Number(shell?.wallHeightFt || 10)));
+  const upper = Number(shell?.upperStoreyHeightFt) > 0 ? Number(shell.upperStoreyHeightFt) : base;
+  return base + (level - 2) * upper;
+}
 
 // True when a set_shell op is dimension shorthand the w/d path must honor:
 // no field at all, or a junk field with a non-numeric value — in either case
@@ -1675,12 +1714,25 @@ export function applyBimOperations(currentSpec, plan) {
       // plate, never a sibling — duplicates made the walls ring one plate
       // while the roof stepped around another.
       if (placed.category === 'floor') {
-        const lvl = Number(placed.level || 1);
-        const existingPlate = next.elements.find((el) => el.category === 'floor' && Number(el.level || 1) === lvl);
+        const lvl = Math.max(2, Math.min(3, Number(placed.level || 1) || 2));
+        placed.level = lvl;
+        // A plate for a storey the house doesn't have yet raises the count —
+        // an orphan plate on a phantom level renders nowhere.
+        if (lvl > Number(next.shell.storeys || 1)) {
+          next.shell.storeys = lvl;
+          actions.push(`Raised the house to ${lvl} storeys so the ${placed.name || 'floor plate'} has its storey.`);
+        }
+        // z must be the storey's real elevation: planners emit junk like
+        // z=34 on a 20-ft house, or 0. A given z is trusted only below the
+        // NEXT storey's floor (deliberate raises like a loft absorbing
+        // headroom stay; nonsense above the house snaps down).
+        const elev = storeyElevationFt(next.shell, lvl);
+        if (!Number(placed.z) || Number(placed.z) >= storeyElevationFt(next.shell, lvl + 1)) placed.z = elev;
+        const existingPlate = next.elements.find((el) => el.category === 'floor' && Number(el.level || 1) === lvl && el.id !== placed.id);
         if (existingPlate) {
           existingPlate.x = placed.x; existingPlate.y = placed.y;
           existingPlate.w = placed.w; existingPlate.d = placed.d;
-          if (Number(placed.z)) existingPlate.z = Number(placed.z);
+          existingPlate.z = placed.z;
           changedIds.push(existingPlate.id);
           actions.push(`Reshaped the ${existingPlate.name} — one extent plate per storey.`);
           continue;
@@ -1758,6 +1810,20 @@ export function applyBimOperations(currentSpec, plan) {
           if (operation.field === 'name') opening.label = operation.value;
           else opening[operation.field] = operation.value;
         }
+      } else if (operation.field === 'level') {
+        // A level change is STRUCTURAL, not a string write: numeric, clamped,
+        // the storey count rises to meet it, and the object lands at its
+        // storey's elevation. ("Make the tower the 3rd floor" used to write
+        // level '3' onto a 2-storey house — nothing followed.)
+        let lvl = Math.round(Number(operation.value));
+        if (!Number.isFinite(lvl) || lvl === 0) lvl = 1;
+        lvl = Math.max(BASEMENT_LEVEL, Math.min(3, lvl));
+        target.level = lvl;
+        if (lvl > Number(next.shell.storeys || 1)) {
+          next.shell.storeys = lvl;
+          actions.push(`Raised the house to ${lvl} storeys so ${target.name} has its floor.`);
+        }
+        target.z = lvl >= 2 ? storeyElevationFt(next.shell, lvl) : 0;
       } else if (operation.field) target[operation.field] = operation.value;
       changedIds.push(target.id);
       actions.push(operationDescription({ ...operation, name: target.name }, next));
