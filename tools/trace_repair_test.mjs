@@ -588,6 +588,77 @@ const miniSpec = () => ({
   ok((plan.warnings || []).some((w) => /slid/.test(w)), 'the slide is announced honestly');
 }
 
+// --- the tiler (Phase 2): deterministic placement from hint arrangement ----
+{
+  const { placeTraceRooms } = await import('../backend/planner.mjs');
+  const empty = { rooms: [], shell: { widthFt: 30, depthFt: 24 } };
+  const mkPlan = (rooms, extra = []) => ({
+    warnings: [], assumptions: [],
+    operations: [
+      { type: 'set_shell', w: 30, d: 24 },
+      ...rooms.map((r) => ({ type: 'add_room', ...r })),
+      ...extra
+    ]
+  });
+  const layout = (plan) => plan.operations.filter((o) => o.type === 'add_room')
+    .map((o) => `${o.name}@${o.x},${o.y}(${o.w}x${o.d})`).sort().join(' | ');
+
+  // The drawing: two rows — Kitchen|Living on the north, Bed|Bath|Hall south.
+  const read1 = [
+    { name: 'Kitchen', x: 0.5, y: 0.2, w: 12, d: 10, level: 1 },
+    { name: 'Living', x: 13, y: 0, w: 18, d: 10, level: 1 },
+    { name: 'Bedroom', x: 0, y: 10.4, w: 14, d: 14, level: 1 },
+    { name: 'Bathroom', x: 14.2, y: 10, w: 6, d: 14, level: 1 },
+    { name: 'Hall', x: 21, y: 10.6, w: 10, d: 14, level: 1 }
+  ];
+  const out1 = placeTraceRooms(mkPlan(read1), empty);
+  const rooms1 = out1.operations.filter((o) => o.type === 'add_room');
+  ok(rooms1.every((r) => r.x >= 0 && r.y >= 0 && r.x + r.w <= 30.01 && r.y + r.d <= 24.01), 'tiled rooms sit inside the shell');
+  const noOverlap = rooms1.every((a) => rooms1.every((b) => a === b
+    || Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) <= 0
+    || Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y) <= 0));
+  ok(noOverlap, 'tiled rooms never overlap');
+  const kitchen = rooms1.find((r) => r.name === 'Kitchen');
+  const bath = rooms1.find((r) => r.name === 'Bathroom');
+  ok(kitchen.y === 0 && bath.y === 10, 'row structure preserved (kitchen north, bath south)');
+
+  // Same reads, JITTERED hints (±1.5 ft, different op order) → identical layout.
+  const read2 = [read1[3], read1[1], read1[4], read1[0], read1[2]].map((r, i) => ({
+    ...r, x: r.x + (i % 2 ? 1.2 : -0.9), y: r.y + (i % 2 ? -0.8 : 1.1)
+  }));
+  const out2 = placeTraceRooms(mkPlan(read2), empty);
+  ok(layout(out1) === layout(out2), 'jittered + reordered reads land the IDENTICAL layout');
+  const out1b = placeTraceRooms(mkPlan(read1), empty);
+  ok(layout(out1) === layout(out1b), 'same input twice = byte-identical layout');
+
+  // An over-wide row wraps below instead of poking through the east wall.
+  const wide = [
+    { name: 'A', x: 0, y: 0, w: 14, d: 8, level: 1 },
+    { name: 'B', x: 14, y: 0, w: 14, d: 8, level: 1 },
+    { name: 'C', x: 28, y: 0, w: 14, d: 8, level: 1 }
+  ];
+  const outWide = placeTraceRooms(mkPlan(wide), empty);
+  const c = outWide.operations.find((o) => o.type === 'add_room' && o.name === 'C');
+  ok(c.x === 0 && c.y === 8, 'overflowing row wraps to the next row');
+
+  // Audit move ops on tiled rooms fold in as hints and are consumed.
+  const moved = placeTraceRooms(mkPlan(read1, [{ type: 'move_object', name: 'Kitchen', x: 40, y: 40 }]), empty);
+  ok(!moved.operations.some((o) => o.type === 'move_object'), 'ground-room audit moves are consumed by the tiler');
+
+  // Upper-storey rooms keep their read positions (stacking information).
+  const withTower = [...read1, { name: 'Tower Studio', x: 14, y: 11, w: 10, d: 8, level: 3 }];
+  const outTower = placeTraceRooms(mkPlan(withTower), empty);
+  const tower = outTower.operations.find((o) => o.name === 'Tower Studio');
+  ok(tower.x === 14 && tower.y === 11, 'upper-storey rooms keep their read position');
+
+  // Gates: furnished designs and small plans are untouched.
+  const furnished = { rooms: [{ id: 'x', name: 'Existing' }], shell: { widthFt: 30, depthFt: 24 } };
+  const gated = placeTraceRooms(mkPlan(read1), furnished);
+  ok(gated.operations.find((o) => o.name === 'Kitchen').x === 0.5, 'furnished design: tiler stands down');
+  const tiny = placeTraceRooms(mkPlan(read1.slice(0, 2)), empty);
+  ok(tiny.operations.find((o) => o.name === 'Kitchen').x === 0.5, 'fewer than 3 rooms: tiler stands down');
+}
+
 // --- the referee (Phase 1): scoreTrace / plain-language report / capture ---
 {
   const { scoreTrace, formatPlainLanguageScore, autoCaptureTrace } = await import('../backend/planner.mjs');

@@ -1136,11 +1136,156 @@ export function separateOverlappingRooms(plan, sourceSpec) {
 // a greenhouse "room" below the south wall), so whatever runs after the first
 // trace must also run after the repair AND after the audit — running a subset
 // is how audit-added rooms escaped reclassification (corpus fl0-v6).
+// PHASE 2 — placement is not the AI's job. The reader is good at WHAT exists
+// (names, measured sizes, rough arrangement) and bad at exact coordinates.
+// This tiler treats the AI's x/y as HINTS only: they decide which row (band)
+// a room belongs to and its order within the row; the actual coordinates are
+// computed deterministically — rows stack north→south, rooms pack west→east,
+// wrapping to a new row when a row is full. Same reads → same layout, every
+// run; overlapping rooms and rooms outside the walls become impossible by
+// construction instead of rare.
+//
+// Scope guard: fires ONLY on a fresh trace (an empty design receiving 3+
+// rooms). Re-traces onto a furnished design keep today's behavior — the tiler
+// knows nothing about existing rooms and must not fight them.
+export function placeTraceRooms(plan, sourceSpec) {
+  const ops = plan.operations || [];
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const roomOps = ops.filter((o) => o.type === 'add_room');
+  if (roomOps.length < 3) return plan;
+  if ((sourceSpec?.rooms || []).length > 0) return plan;
+
+  // Shell dims: same convention as the other rescues (plan ops override spec).
+  let shellW = num(sourceSpec?.shell?.widthFt) || 36;
+  let shellD = num(sourceSpec?.shell?.depthFt) || 28;
+  for (const op of ops) {
+    if (op.type !== 'set_shell') continue;
+    if (num(op.w)) shellW = num(op.w);
+    if (num(op.d)) shellD = num(op.d);
+    if (op.field === 'widthFt' && num(op.value)) shellW = num(op.value);
+    if (op.field === 'depthFt' && num(op.value)) shellD = num(op.value);
+  }
+
+  // Working rects: sizes from add_room (resize ops fold in as truth), hint
+  // positions from add_room x/y with room-targeting move ops folded in as
+  // UPDATED hints — then those move ops are consumed, so a later audit nudge
+  // re-enters the tiler instead of overriding it at apply time.
+  const key = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const rects = roomOps.map((op, index) => ({
+    op, index,
+    name: String(op.name || `room ${index + 1}`),
+    level: num(op.level) || 1,
+    w: Math.max(3, num(op.w) || 10),
+    d: Math.max(3, num(op.d) || 10),
+    hx: num(op.x), hy: num(op.y)
+  }));
+  const byName = new Map(rects.map((r) => [key(r.name), r]));
+  const moveTarget = new Map();
+  for (const op of ops) {
+    if (op.type !== 'move_object' && op.type !== 'resize_object') continue;
+    const r = byName.get(key(String(op.name || op.targetId || '').replace(/-/g, ' ')));
+    if (!r) continue;
+    if (op.type === 'resize_object') {
+      if (num(op.w)) r.w = Math.max(3, num(op.w));
+      if (num(op.d)) r.d = Math.max(3, num(op.d));
+    } else {
+      if (Number.isFinite(Number(op.x))) r.hx = num(op.x);
+      if (Number.isFinite(Number(op.y))) r.hy = num(op.y);
+      moveTarget.set(op, r);
+    }
+  }
+
+  // Per level: band by hint rows, order in the row by hint x, then place.
+  // GROUND FLOOR AND BASEMENT ONLY — each fills its own full plate, so a
+  // fresh tiling is faithful. Upper-storey rooms stack over specific ground
+  // bays (the tower over the kitchen); their read positions ARE the stacking
+  // information, so they keep them (the other rescues still apply).
+  const levels = [...new Set(rects.map((r) => r.level))].sort((a, b) => a - b);
+  for (const level of levels) {
+    if (level > 1) continue;
+    const group = rects.filter((r) => r.level === level);
+    if (group.length < 2) continue;
+    // Deterministic scan order: north→south by hint center, then west→east,
+    // then name — the ORIGINAL op order never decides anything, so reads that
+    // list the same rooms in a different order still land identically.
+    const sorted = [...group].sort((a, b) => (a.hy + a.d / 2) - (b.hy + b.d / 2)
+      || (a.hx + a.w / 2) - (b.hx + b.w / 2)
+      || a.name.localeCompare(b.name)
+      || a.index - b.index);
+    // A room joins the current band when its hint y-interval overlaps the
+    // band ANCHOR's interval by ≥40% of the smaller depth. Anchoring (not
+    // union) keeps a run of small jitters from chaining two real rows
+    // into one.
+    const bands = [];
+    for (const r of sorted) {
+      const band = bands[bands.length - 1];
+      if (band) {
+        const anchor = band.anchor;
+        const ov = Math.min(anchor.hy + anchor.d, r.hy + r.d) - Math.max(anchor.hy, r.hy);
+        if (ov >= 0.4 * Math.min(anchor.d, r.d)) { band.rooms.push(r); continue; }
+      }
+      bands.push({ anchor: r, rooms: [r] });
+    }
+    // Shelf placement with wrap: a row that reads wider than the shell spills
+    // its overflow into a new row below rather than poking through the wall.
+    const shelves = [];
+    for (const band of bands) {
+      const ordered = [...band.rooms].sort((a, b) => (a.hx + a.w / 2) - (b.hx + b.w / 2)
+        || a.name.localeCompare(b.name) || a.index - b.index);
+      let shelf = { rooms: [], width: 0 };
+      shelves.push(shelf);
+      for (const r of ordered) {
+        if (shelf.rooms.length && shelf.width + r.w > shellW + 0.75) {
+          shelf = { rooms: [], width: 0 };
+          shelves.push(shelf);
+        }
+        shelf.rooms.push(r);
+        shelf.width += r.w;
+      }
+    }
+    let yCursor = 0;
+    let overflowFt = 0;
+    for (const shelf of shelves) {
+      if (!shelf.rooms.length) continue;
+      let xCursor = 0;
+      for (const r of shelf.rooms) {
+        r.px = Math.round(Math.min(xCursor, Math.max(0, shellW - r.w)) * 2) / 2;
+        r.py = Math.round(yCursor * 2) / 2;
+        xCursor += r.w;
+      }
+      yCursor += Math.max(...shelf.rooms.map((r) => r.d));
+    }
+    if (yCursor > shellD + 0.75) overflowFt = Math.round((yCursor - shellD) * 2) / 2;
+    if (overflowFt > 0) {
+      plan.warnings = [...(plan.warnings || []),
+        `The rooms as measured need about ${overflowFt} ft more depth than the ${shellW} × ${shellD} shell — check the shell size or the deepest rooms against the drawing.`];
+    }
+  }
+
+  // Write back: new coordinates on the add_room ops. A move op is consumed
+  // ONLY when its room was re-tiled (it already spoke through the hints);
+  // moves on rooms the tiler left alone (upper storeys) still apply.
+  const placedCount = rects.filter((r) => Number.isFinite(r.px)).length;
+  if (!placedCount) return plan;
+  plan.operations = ops
+    .filter((op) => !(moveTarget.has(op) && Number.isFinite(moveTarget.get(op).px)))
+    .map((op) => {
+      const r = rects.find((item) => item.op === op);
+      return r && Number.isFinite(r.px) ? { ...op, x: r.px, y: r.py, w: r.w, d: r.d } : op;
+    });
+  if (!(plan.assumptions || []).some((a) => /arranged by the app/i.test(a))) {
+    plan.assumptions = [...(plan.assumptions || []),
+      'Room positions were arranged by the app from the drawing\'s layout order — the reader\'s coordinates are hints, not authority.'];
+  }
+  return plan;
+}
+
 export function applyDeterministicRescues(plan, sourceSpec) {
   plan = scrubDeadOperations(plan);
   plan = reclassifyOutdoorRooms(plan);
   plan = repairBasementRooms(plan, sourceSpec);
   plan = repairTraceGeometry(plan, sourceSpec);
+  plan = placeTraceRooms(plan, sourceSpec);
   plan = separateOverlappingRooms(plan, sourceSpec);
   // separating rooms can push one against the shell edge — re-grow if needed
   plan = repairTraceGeometry(plan, sourceSpec);

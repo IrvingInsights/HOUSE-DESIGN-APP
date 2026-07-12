@@ -74,19 +74,31 @@ Move the corpus scorer INTO the trace pipeline. After every in-app trace:
 **Exit test:** Daniel attaches any drawing; the app itself tells him how good
 the read was; a bad read retries without him asking. No assistant involved.
 
-### Phase 2 — Take placement away from the AI (1–2 sessions)
-LLMs are good at reading *what exists* (room names, dimensions, which room
-touches which) and bad at emitting *coordinates*. Split the job:
-- Rooms pass returns a **room list + adjacency graph** (Kitchen 14×12,
-  touches Living on its east, on the north wall…), no x/y.
-- A **deterministic tiler** (extend the existing packRooms/arrangeRoomsPlan)
-  places the list inside the shell honoring adjacency + wall hints. Same
-  input → same output, forever.
-- AI coordinates become a *hint*, never the authority. The whole class of
-  "room floating in the yard / rooms piled up" becomes impossible, not rare.
+### Phase 2 — Take placement away from the AI — **built 2026-07-12**
+LLMs are good at reading *what exists* (room names, dimensions, arrangement)
+and bad at emitting *coordinates*. The job is split — with two deliberate
+deviations from the original sketch, decided during the build:
+- **No schema change.** The rooms pass still returns measured x/y — those ARE
+  the adjacency graph (they encode row membership and order). Asking the AI
+  for an explicit adjacency list would mean new schema fields, more tokens,
+  and a new class of read failures. Hints in, structure out.
+- `placeTraceRooms` (planner.mjs, inside applyDeterministicRescues so it
+  re-runs after every AI stage): bands rooms into rows by hint-y overlap
+  against the row's anchor, orders each row by hint-x, then shelf-places
+  west→east / north→south with wrap. Same reads → byte-identical layout;
+  op order and ±1.5 ft hint jitter change nothing (unit-proven). Overlaps
+  and rooms outside the walls are impossible by construction. Audit moves on
+  tiled rooms fold in as hints and are consumed, never applied raw.
+- **Ground floor + basement only.** Upper-storey rooms keep their read
+  positions — a tower stacks over a specific bay; its coordinates ARE the
+  stacking information. (Existing rescues still police them.)
+- Gated to fresh traces (empty design, 3+ rooms): re-traces onto a furnished
+  design must not fight the user's own layout.
 
-**Exit test:** 20 consecutive traces of one drawing produce the same room
-layout (names may vary on unlabeled plans; geometry may not).
+**Exit test:** `node tools/trace_stability_test.mjs <set> [runs]` — traces one
+drawing N times and separates READ variance (referee's problem) from LAYOUT
+variance (placement bug): every pair of runs with the same read MUST land the
+identical layout. Run with 20 when declaring the phase done-done.
 
 ### ~~Phase 3 — Trust UI~~ CUT (Daniel, 2026-07-12: "don't want to bloat the thing")
 No compare view, no new surface. What it was for is covered without new UI:
