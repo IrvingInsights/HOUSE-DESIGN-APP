@@ -43,7 +43,7 @@ export function geminiSchema(schema) {
 }
 
 // Single entry point for both planner and studio. Returns { ok, status, errorText, text }.
-export async function callGemini({ parts, responseSchema, model = GEMINI_MODEL }) {
+export async function callGemini({ parts, responseSchema, model = GEMINI_MODEL, maxOutputTokens = 32768 }) {
   const body = { contents: [{ role: 'user', parts }] };
   if (responseSchema) {
     // A full drawing takeoff can be dozens of operations — give the model
@@ -59,7 +59,7 @@ export async function callGemini({ parts, responseSchema, model = GEMINI_MODEL }
     body.generationConfig = {
       responseMimeType: 'application/json',
       responseSchema,
-      maxOutputTokens: 32768,
+      maxOutputTokens,
       temperature: 0.2,
       thinkingConfig: { thinkingBudget }
     };

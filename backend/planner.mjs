@@ -1153,6 +1153,36 @@ ONLY add_element operations.`
   }
 ];
 
+// A pass-specific response schema: ONLY the fields that pass emits. The
+// full ~24-field op schema invited a degeneration failure — the model
+// looped digits inside one of the many zero-filled number fields until it
+// hit the token cap (evidence: a 33k-char reply ending in '000…').
+const PASS_FIELDS = {
+  structure: { field: { type: 'string' }, value: { type: 'string' }, w: { type: 'number' }, d: { type: 'number' }, wall: { type: 'string' }, roofType: { type: 'string' }, pitch: { type: 'number' }, southWallHeightFt: { type: 'number' }, northWallHeightFt: { type: 'number' }, h: { type: 'number' } },
+  rooms: { name: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, w: { type: 'number' }, d: { type: 'number' }, level: { type: 'number' } },
+  openings: { wall: { type: 'string' }, openingType: { type: 'string' }, widthFt: { type: 'number' }, positionFt: { type: 'number' } },
+  elements: { name: { type: 'string' }, category: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, w: { type: 'number' }, d: { type: 'number' }, h: { type: 'number' }, level: { type: 'number' }, widthFt: { type: 'number' }, positionFt: { type: 'number' }, construction: { type: 'string' } }
+};
+export function passResponseSchema(passKey, types) {
+  return geminiSchema({
+    type: 'object',
+    additionalProperties: false,
+    required: ['operations'],
+    properties: {
+      summary: { type: 'string' },
+      operations: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['type'],
+          properties: { type: { type: 'string', enum: types }, ...(PASS_FIELDS[passKey] || {}) }
+        }
+      }
+    }
+  });
+}
+
 // Pure: keep only the pass's whitelisted op types. Exported for tests.
 export function filterOpsForPass(ops, types) {
   const allowed = new Set(types);
@@ -1165,7 +1195,10 @@ async function stagedTracePlan({ attachmentParts, geminiResponseSchema, note }) 
     note?.(pass.note);
     let res;
     try {
-      res = await callGemini({ parts: [{ text: `${pass.text}\n${TRACE_CONVENTIONS}` }, ...attachmentParts], responseSchema: geminiResponseSchema });
+      // Pass-specific schema + tight cap: the full 24-field op schema invited
+      // a digit-loop degeneration (33k chars of '0' logged) — fewer number
+      // fields to loop in, and any future loop dies at 8k tokens in seconds.
+      res = await callGemini({ parts: [{ text: `${pass.text}\n${TRACE_CONVENTIONS}` }, ...attachmentParts], responseSchema: passResponseSchema(pass.key, pass.types), maxOutputTokens: 8192 });
     } catch {
       res = null;
     }
@@ -1182,9 +1215,9 @@ async function stagedTracePlan({ attachmentParts, geminiResponseSchema, note }) 
       // Unreadable usually means the reply outran the token cap — one retry
       // asking for a tighter list (the classic single call retries the same).
       try {
-        res = await callGemini({ parts: [{ text: `Your previous reply was truncated or unreadable. Same task again, but reply with FEWER, tighter operations — at most 30, the most important first, short reason strings.
+        res = await callGemini({ parts: [{ text: `Your previous reply was truncated or unreadable. Same task again, but reply with FEWER, tighter operations — at most 30, the most important first.
 ${pass.text}
-${TRACE_CONVENTIONS}` }, ...attachmentParts], responseSchema: geminiResponseSchema });
+${TRACE_CONVENTIONS}` }, ...attachmentParts], responseSchema: passResponseSchema(pass.key, pass.types), maxOutputTokens: 8192 });
       } catch { res = null; }
       if (res?.ok) {
         try {
