@@ -3,6 +3,7 @@ import { callGemini, geminiParts, geminiSchema, hasGemini } from './gemini.mjs';
 import { getCached, makeCacheKey, setCached } from './cache.mjs';
 import { slugify } from './utils.mjs';
 import { applyBimOperations } from './bim-core.mjs';
+import fs from 'node:fs';
 
 const operationSchema = {
   type: 'object',
@@ -764,13 +765,18 @@ export function repairTraceGeometry(plan, sourceSpec) {
       op.x = Math.max(0, Math.min(num(op.x), shellWNow.w - w));
       op.y = Math.max(0, Math.min(num(op.y), shellWNow.d - d));
     }
-    // …and the moves the audit aims at them (same class: corrections that
-    // relocate a partition must not relocate it into the yard).
+    // …and the moves/updates the audit aims at them (same class: corrections
+    // that relocate a partition must not relocate it into the yard).
     for (const op of ops) {
-      if (op.type !== 'move_object') continue;
-      if (!partNames.has(normName(String(op.name || op.targetId || '').replace(/-/g, ' ')))) continue;
-      if (Number.isFinite(Number(op.x))) op.x = Math.max(0, Math.min(num(op.x), shellWNow.w - 1));
-      if (Number.isFinite(Number(op.y))) op.y = Math.max(0, Math.min(num(op.y), shellWNow.d - 1));
+      const targetsPartition = partNames.has(normName(String(op.name || op.targetId || '').replace(/-/g, ' ')));
+      if (!targetsPartition) continue;
+      if (op.type === 'move_object') {
+        if (Number.isFinite(Number(op.x))) op.x = Math.max(0, Math.min(num(op.x), shellWNow.w - 1));
+        if (Number.isFinite(Number(op.y))) op.y = Math.max(0, Math.min(num(op.y), shellWNow.d - 1));
+      } else if (op.type === 'update_object' && (op.field === 'x' || op.field === 'y') && Number.isFinite(Number(op.value))) {
+        const cap = op.field === 'x' ? shellWNow.w - 1 : shellWNow.d - 1;
+        op.value = Math.max(0, Math.min(num(op.value), cap));
+      }
     }
   }
   return plan;
@@ -1192,6 +1198,14 @@ ${TRACE_CONVENTIONS}` }, ...attachmentParts], responseSchema: geminiResponseSche
       // Say exactly HOW a pass came up short — "the call failed",
       // "unreadable reply", and "wrong op types" point at different fixes.
       const why = !res?.ok ? 'the call failed' : ops === null ? 'unreadable reply' : raw > 0 ? `${raw} ops of the wrong type` : 'empty reply';
+      if (ops === null && res?.ok) {
+        // Keep the evidence: WHY do staged replies still truncate with
+        // thinking off? The tail of the raw text is the diagnosis.
+        try {
+          fs.appendFileSync('.data/server-errors.log', `${new Date().toISOString()} staged-pass-unreadable ${pass.key} len=${res.text?.length || 0} tail=${JSON.stringify(String(res.text || '').slice(-300))}
+`);
+        } catch { /* logging never breaks tracing */ }
+      }
       note?.(`${pass.key} pass came up short (${why})${pass.required ? ' — falling back to a whole-set read…' : ', continuing…'}`);
       if (pass.required) return null; // structural pass failed — classic trace
       collected[pass.key] = [];
