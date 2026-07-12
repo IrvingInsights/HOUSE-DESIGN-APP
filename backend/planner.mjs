@@ -2,7 +2,7 @@ import { OPENAI_IMAGE_MAX, OPENAI_PLANNER_MODEL } from './config.mjs';
 import { callGemini, geminiParts, geminiSchema, hasGemini } from './gemini.mjs';
 import { getCached, makeCacheKey, setCached } from './cache.mjs';
 import { slugify } from './utils.mjs';
-import { applyBimOperations } from './bim-core.mjs';
+import { applyBimOperations, isDimensionShorthandShellOp, shellShorthandDims, parseWxD } from './bim-core.mjs';
 import fs from 'node:fs';
 
 const operationSchema = {
@@ -660,6 +660,20 @@ export function repairBasementRooms(plan, sourceSpec) {
   return plan;
 }
 
+// A set_footprint op's polygon, or null when it isn't one ('rect' resets to
+// the legacy rectangle and keeps the current dims).
+const parseFootprintCorners = (value) => {
+  if (Array.isArray(value)) return value.length >= 3 ? value : null;
+  const text = String(value || '').trim();
+  if (!text || text === 'rect') return null;
+  try {
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) && parsed.length >= 3 ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
 export function repairTraceGeometry(plan, sourceSpec) {
   const ops = plan.operations || [];
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -709,16 +723,31 @@ export function repairTraceGeometry(plan, sourceSpec) {
   const finalRects = [...effectiveRects.values()];
   const extentW = Math.ceil(Math.max(...finalRects.map((r) => r.x + r.w)) * 2) / 2;
   const extentD = Math.ceil(Math.max(...finalRects.map((r) => r.y + r.d)) * 2) / 2;
-  // What shell does the plan intend? set_shell carries w/d directly and/or
-  // field widthFt/depthFt value pairs; fall back to the current model.
+  // What shell does the plan intend? Walk the ops IN ORDER, mirroring exactly
+  // what the engine will honor (last write wins): dimension-shorthand set_shell
+  // ops (shared predicate — junk-field ops the field ladder would swallow do
+  // NOT count as intent unless the engine honors them), widthFt/depthFt field
+  // writes, and set_footprint polygons whose bbox becomes the shell.
   let shellW = 0;
   let shellD = 0;
   for (const op of ops) {
+    if (op.type === 'set_footprint') {
+      const corners = parseFootprintCorners(op.value);
+      if (corners) {
+        const xs = corners.map((c) => num(c[0]));
+        const ys = corners.map((c) => num(c[1]));
+        shellW = Math.max(...xs) - Math.min(...xs);
+        shellD = Math.max(...ys) - Math.min(...ys);
+      }
+      continue;
+    }
     if (op.type !== 'set_shell') continue;
-    if (num(op.w)) shellW = num(op.w);
-    if (num(op.d)) shellD = num(op.d);
-    if (op.field === 'widthFt' && num(op.value)) shellW = num(op.value);
-    if (op.field === 'depthFt' && num(op.value)) shellD = num(op.value);
+    if (isDimensionShorthandShellOp(op)) {
+      const dims = shellShorthandDims(op);
+      if (dims.w) shellW = dims.w;
+      if (dims.d) shellD = dims.d;
+    } else if (op.field === 'widthFt' && num(op.value)) shellW = num(op.value);
+    else if (op.field === 'depthFt' && num(op.value)) shellD = num(op.value);
   }
   if (!shellW) shellW = num(sourceSpec?.shell?.widthFt);
   if (!shellD) shellD = num(sourceSpec?.shell?.depthFt);
@@ -727,9 +756,37 @@ export function repairTraceGeometry(plan, sourceSpec) {
   if (needW || needD) {
     let fixedInPlace = false;
     for (const op of ops) {
+      // A footprint outline smaller than the rooms: stretch its far edges out
+      // to the needed extent (preserves drawn jogs; the polygon is anchored at
+      // the origin, so max-x/max-y points ARE the east/south walls).
+      if (op.type === 'set_footprint') {
+        const corners = parseFootprintCorners(op.value);
+        if (!corners) continue;
+        const xs = corners.map((c) => num(c[0]));
+        const ys = corners.map((c) => num(c[1]));
+        const maxX = Math.max(...xs);
+        const maxY = Math.max(...ys);
+        const stretched = corners.map(([x, y]) => [
+          needW && Math.abs(num(x) - maxX) < 0.26 ? Math.max(num(x), needW) : num(x),
+          needD && Math.abs(num(y) - maxY) < 0.26 ? Math.max(num(y), needD) : num(y)
+        ]);
+        if (JSON.stringify(stretched) !== JSON.stringify(corners.map(([x, y]) => [num(x), num(y)]))) {
+          op.value = JSON.stringify(stretched);
+          fixedInPlace = true;
+        }
+        continue;
+      }
       if (op.type !== 'set_shell') continue;
-      if (needW && (num(op.w) || op.field === 'widthFt')) { if (num(op.w)) op.w = needW; if (op.field === 'widthFt') op.value = needW; fixedInPlace = true; }
-      if (needD && (num(op.d) || op.field === 'depthFt')) { if (num(op.d)) op.d = needD; if (op.field === 'depthFt') op.value = needD; fixedInPlace = true; }
+      // Only edit ops the ENGINE will honor — growing a junk op it ignores
+      // logs "shell grown" while the model stays small (fl0-v6 stray-room bug).
+      if (isDimensionShorthandShellOp(op)) {
+        if (needW) op.w = needW;
+        if (needD) op.d = needD;
+        // w/d now carry the truth; a stale "24x28" value string must not win.
+        if (parseWxD(op.value)) op.value = '';
+        fixedInPlace = true;
+      } else if (op.field === 'widthFt' && needW) { op.value = needW; fixedInPlace = true; }
+      else if (op.field === 'depthFt' && needD) { op.value = needD; fixedInPlace = true; }
     }
     // No set_shell to correct: prepend one so rooms never clamp against the
     // old, smaller shell while they're being added.
@@ -872,6 +929,21 @@ export function scrubDeadOperations(plan) {
     plan.operations = kept;
     plan.warnings = [...(plan.warnings || []), `Dropped ${dropped} empty operation${dropped === 1 ? '' : 's'} the AI emitted without content.`];
   }
+  return plan;
+}
+
+// THE deterministic rescue chain, in one place so every AI stage gets the
+// same treatment after it: the audit loop merges brand-new ops (it once added
+// a greenhouse "room" below the south wall), so whatever runs after the first
+// trace must also run after the repair AND after the audit — running a subset
+// is how audit-added rooms escaped reclassification (corpus fl0-v6).
+export function applyDeterministicRescues(plan, sourceSpec) {
+  plan = scrubDeadOperations(plan);
+  plan = reclassifyOutdoorRooms(plan);
+  plan = repairBasementRooms(plan, sourceSpec);
+  plan = repairTraceGeometry(plan, sourceSpec);
+  plan = repairTowerStorey(plan, sourceSpec);
+  plan = cleanTraceElements(plan, sourceSpec);
   return plan;
 }
 
@@ -1454,17 +1526,13 @@ ${payload.prompt}`
       plan = repairTraceGeometry(plan, sourceSpec);
       note?.('Completeness check…');
       plan = await repairTraceIfNeeded(plan, { attachmentParts, sourceSpec, manifest });
-      plan = scrubDeadOperations(plan);
-      plan = reclassifyOutdoorRooms(plan);
-      plan = repairBasementRooms(plan, sourceSpec);
-      plan = repairTraceGeometry(plan, sourceSpec);
-      plan = repairTowerStorey(plan, sourceSpec);
-      plan = cleanTraceElements(plan, sourceSpec);
+      plan = applyDeterministicRescues(plan, sourceSpec);
       // CYCLE until faithful: simulate the applied model, show the AI its own
       // result next to the drawing, take its corrections, check again.
       plan = await auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt, budgetMs: auditBudgetMs, note });
-      plan = repairBasementRooms(plan, sourceSpec);
-      plan = repairTraceGeometry(plan, sourceSpec);
+      // The audit merges NEW ops (it added a greenhouse "room" once) — every
+      // deterministic rescue must run again on them, not just a subset.
+      plan = applyDeterministicRescues(plan, sourceSpec);
       // Surface the index honestly: what the sheets list vs what got traced.
       if (manifest) {
         const finalGaps = manifestGaps(plan, sourceSpec, manifest);
@@ -1478,7 +1546,7 @@ ${payload.prompt}`
       // the CURRENT model to the drawing and emit only the corrections.
       const attachmentParts = geminiParts(content.filter((c) => c.type === 'input_image'));
       plan = await auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt, force: true, budgetMs: auditBudgetMs, note });
-      plan = repairTraceGeometry(plan, sourceSpec);
+      plan = applyDeterministicRescues(plan, sourceSpec);
       if (!(plan.operations || []).length && !String(plan.summary || '').trim()) {
         plan.summary = 'Checked the model against the drawing — no discrepancies worth correcting.';
       }

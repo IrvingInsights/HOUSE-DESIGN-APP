@@ -1,7 +1,8 @@
 // Deterministic tests for the trace verify/repair decision + merge logic,
 // plus the offline (local) planner's honesty rules.
-import { traceLooksIncomplete, scrubDeferralSummary, mergeTracePlans, repairTraceGeometry, repairTowerStorey, localPlan, promptNeedsDrawing, cleanTraceElements, describeModelForAudit, sanitizeAuditOperations, filterOpsForPass, reclassifyOutdoorRooms, repairBasementRooms, scrubDeadOperations, manifestGaps }
+import { traceLooksIncomplete, scrubDeferralSummary, mergeTracePlans, repairTraceGeometry, repairTowerStorey, localPlan, promptNeedsDrawing, cleanTraceElements, describeModelForAudit, sanitizeAuditOperations, filterOpsForPass, reclassifyOutdoorRooms, repairBasementRooms, scrubDeadOperations, manifestGaps, applyDeterministicRescues }
   from '../backend/planner.mjs';
+import { applyBimOperations, isDimensionShorthandShellOp } from '../backend/bim-core.mjs';
 
 let pass = 0, fail = 0;
 const ok = (c, l) => { if (c) { pass++; console.log('  ok  ' + l); } else { fail++; console.log('FAIL  ' + l); } };
@@ -411,6 +412,81 @@ ok(dimlessCheck.unmeasuredElements === true && dimlessCheck.unmeasuredElementNam
   repairTraceGeometry(plan, { shell: { widthFt: 36, depthFt: 28 } });
   const mv = plan.operations.find((o) => o.type === 'move_object');
   ok(mv.x <= 35 && mv.y >= 0, 'a move aimed at a partition clamps into the shell');
+}
+
+// ---- Junk-field set_shell = dimension shorthand (corpus fl0-v6 class) ------
+// The audit emits set_shell ops like {field:'dimensions', value:'24x28', w:24,
+// d:36}. The field ladder used to swallow them silently while the trace repair
+// "grew" them — the shell stayed small and a room landed outside it.
+const miniSpec = () => ({
+  projectName: 'T', revision: 1,
+  shell: { widthFt: 24, depthFt: 28, wallHeightFt: 10, southWallHeightFt: 10, northWallHeightFt: 10, roofType: 'gable', roofPitch: 0.32, storeys: 1 },
+  systems: { envelope: 'straw bale' }, rooms: [], elements: [], openings: [], levels: [], walls: {}, notes: ''
+});
+{
+  ok(isDimensionShorthandShellOp({ type: 'set_shell', w: 24, d: 36 }), 'shorthand: bare w/d');
+  ok(isDimensionShorthandShellOp({ type: 'set_shell', field: 'dimensions', value: '24x28', w: 24, d: 36 }), 'shorthand: junk field + w/d');
+  ok(isDimensionShorthandShellOp({ type: 'set_shell', field: 'dimensions', value: '24x28' }), 'shorthand: junk field + WxD value only');
+  ok(!isDimensionShorthandShellOp({ type: 'set_shell', field: 'storeys', value: 2, w: 24, d: 28 }), 'NOT shorthand: real field keeps the ladder');
+  ok(!isDimensionShorthandShellOp({ type: 'set_shell', field: 'roofType', value: 'shed' }), 'NOT shorthand: no dimensions at all');
+}
+{
+  const r = applyBimOperations(miniSpec(), { operations: [
+    { type: 'set_shell', field: 'dimensions', value: '24x28', w: 24, d: 36, h: 8, wall: 'none' }
+  ] });
+  ok(r.spec.shell.widthFt === 24 && r.spec.shell.depthFt === 36, `engine honors junk-field set_shell w/d (${r.spec.shell.widthFt}x${r.spec.shell.depthFt})`);
+  const r2 = applyBimOperations(miniSpec(), { operations: [
+    { type: 'set_shell', field: 'dimensions', value: '30x34' }
+  ] });
+  ok(r2.spec.shell.widthFt === 30 && r2.spec.shell.depthFt === 34, 'engine parses a "WxD" value when w/d are absent');
+}
+// The real fl0-v6 failing shape end-to-end: structure pass set_shell +
+// rect set_footprint, measured rooms filling 24x28, then the audit appends a
+// junk set_shell and a room hanging past the south wall. After the repair,
+// APPLYING the plan must leave every ground room inside the shell.
+{
+  const plan = { operations: [
+    { type: 'set_shell', w: 24, wall: 'straw_bale' },
+    { type: 'set_footprint', value: '[[0,0],[24,0],[24,28],[0,28]]' },
+    { type: 'add_room', name: 'GREAT ROOM', x: 0, y: 20, w: 16, d: 8 },
+    { type: 'add_room', name: 'MASTER BEDROOM', x: 12, y: 0, w: 12, d: 17 },
+    { type: 'set_shell', field: 'dimensions', value: '24x28', w: 24, d: 28, h: 8, wall: 'none' },
+    { type: 'add_room', name: 'KITCHEN', x: 12, y: 17, w: 12, d: 19 }
+  ], warnings: [] };
+  repairTraceGeometry(plan, miniSpec());
+  const applied = applyBimOperations(miniSpec(), plan);
+  const shell = applied.spec.shell;
+  const stray = (applied.spec.rooms || []).filter((r) => Number(r.level || 1) === 1
+    && (r.x < -0.5 || r.y < -0.5 || r.x + r.w > shell.widthFt + 0.5 || r.y + r.d > shell.depthFt + 0.5));
+  ok(stray.length === 0, `applied fl0-v6 shape: no room outside the ${shell.widthFt}x${shell.depthFt} shell (${stray.map((r) => r.name).join(', ') || 'clean'})`);
+  ok(shell.depthFt >= 36, `shell actually grew to hold the audit-added room (${shell.depthFt})`);
+}
+// Footprint smaller than the rooms: the far edge stretches out to enclose,
+// and interior jogs stay exactly where the drawing put them.
+{
+  const plan = { operations: [
+    { type: 'set_footprint', value: '[[0,0],[24,0],[24,14],[18,14],[18,28],[0,28]]' },
+    { type: 'add_room', name: 'Studio', x: 2, y: 24, w: 14, d: 10 }
+  ], warnings: [] };
+  repairTraceGeometry(plan, miniSpec());
+  const corners = JSON.parse(plan.operations.find((o) => o.type === 'set_footprint').value);
+  ok(Math.max(...corners.map((c) => c[1])) >= 34, 'footprint south edge stretched to enclose the room');
+  ok(corners.some((c) => c[0] === 18 && c[1] === 14), 'interior jog corner untouched by the stretch');
+  const applied = applyBimOperations(miniSpec(), plan);
+  ok(applied.spec.shell.depthFt >= 34, `footprint-driven shell depth encloses the room (${applied.spec.shell.depthFt})`);
+}
+// The full rescue chain runs after the audit: an audit-added greenhouse
+// "room" must come out reclassified as an outdoor element, not a stray room.
+{
+  const plan = { operations: [
+    { type: 'set_shell', w: 24, d: 28 },
+    { type: 'add_room', name: 'GREAT ROOM', x: 0, y: 20, w: 16, d: 8 },
+    { type: 'add_room', name: 'SOLAR GREENHOUSE', x: 2, y: 28, w: 18, d: 8, level: 1 }
+  ], warnings: [] };
+  applyDeterministicRescues(plan, miniSpec());
+  const roomAdds = plan.operations.filter((o) => o.type === 'add_room');
+  ok(!roomAdds.some((o) => /greenhouse/i.test(o.name)), 'audit-added greenhouse is not a room after the rescue chain');
+  ok(plan.operations.some((o) => o.type === 'add_element' && /greenhouse/i.test(o.name || '')), 'greenhouse reclassified to an outdoor element');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

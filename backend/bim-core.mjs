@@ -957,6 +957,40 @@ export function resolveFrameType(spec, level = 1) {
   return FRAME_TYPES[key] ? key : (FRAME_TYPES[frame.type] ? frame.type : 'load-bearing');
 }
 
+// Field names the set_shell ladder actually understands. Anything else riding
+// in `field` is planner/audit noise (field:'dimensions', value:'24x28') — and
+// when such an op carries real w/d numbers it MEANS "the shell is W x D".
+// Ignoring it silently was the corpus fl0-v6 stray-room bug: the trace repair
+// grew a set_shell op the engine then threw away.
+const SHELL_FIELD_NAMES = new Set(['widthFt', 'depthFt', 'wallHeightFt', 'padExtensionFt', 'storeys',
+  'basementHeightFt', 'basementHeated', 'upperStoreyHeightFt', 'overhangFt', 'roofType',
+  'designApproach', 'projectName', 'sitePad']);
+
+export const parseWxD = (value) => {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*$/i.exec(String(value || ''));
+  return m ? { w: Number(m[1]), d: Number(m[2]) } : null;
+};
+
+// True when a set_shell op is dimension shorthand the w/d path must honor:
+// no field at all, or a junk field with a non-numeric value — in either case
+// carrying dimensions as w/d numbers or a "24x28"-style value string.
+export function isDimensionShorthandShellOp(operation) {
+  if (!operation || operation.type !== 'set_shell') return false;
+  const hasDims = Number(operation.w) > 0 || Number(operation.d) > 0 || Boolean(parseWxD(operation.value));
+  if (!hasDims) return false;
+  if (!operation.field) return true;
+  return !SHELL_FIELD_NAMES.has(operation.field) && !Number.isFinite(Number(operation.value));
+}
+
+// The dimensions a shorthand op carries (w/d numbers win over the value string).
+export function shellShorthandDims(operation) {
+  const viaValue = parseWxD(operation?.value) || { w: 0, d: 0 };
+  return {
+    w: Number(operation?.w) > 0 ? Number(operation.w) : viaValue.w,
+    d: Number(operation?.d) > 0 ? Number(operation.d) : viaValue.d
+  };
+}
+
 export function applyBimOperations(currentSpec, plan) {
   const next = structuredClone(currentSpec);
   next.rooms ||= [];
@@ -982,10 +1016,13 @@ export function applyBimOperations(currentSpec, plan) {
 
     if (operation.type === 'set_shell' || operation.type === 'add_pad_extension') {
       // Planners (and people) naturally say "the shell is 40.5 × 23" — accept
-      // w/d numbers directly when no single field is named.
-      if (operation.type === 'set_shell' && !operation.field && (Number(operation.w) > 0 || Number(operation.d) > 0)) {
-        if (Number(operation.w) > 0 && !scaleFootprintAxis(next, 'x', clamp(Number(operation.w), 18, 120))) next.shell.widthFt = clamp(Number(operation.w), 18, 120);
-        if (Number(operation.d) > 0 && !scaleFootprintAxis(next, 'y', clamp(Number(operation.d), 18, 120))) next.shell.depthFt = clamp(Number(operation.d), 18, 120);
+      // w/d numbers directly when no single field is named, or when the field
+      // is junk the ladder below would silently swallow (audit ops arrive as
+      // field:'dimensions', value:'24x28' with the real numbers in w/d).
+      if (operation.type === 'set_shell' && isDimensionShorthandShellOp(operation)) {
+        const dims = shellShorthandDims(operation);
+        if (dims.w > 0 && !scaleFootprintAxis(next, 'x', clamp(dims.w, 18, 120))) next.shell.widthFt = clamp(dims.w, 18, 120);
+        if (dims.d > 0 && !scaleFootprintAxis(next, 'y', clamp(dims.d, 18, 120))) next.shell.depthFt = clamp(dims.d, 18, 120);
         if (Number(operation.h) > 0) {
           const h = clamp(Number(operation.h), 7, 40);
           next.shell.wallHeightFt = h;

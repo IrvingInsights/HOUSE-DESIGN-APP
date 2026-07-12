@@ -2,7 +2,7 @@
 import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES,
   resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint,
-  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES
+  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims
 } from '../backend/bim-core.mjs';
 import { Box, Building2, ClipboardCheck, Leaf, PenTool, Sparkles, Tractor, TreePine, Wrench } from 'lucide-react';
 
@@ -2337,6 +2337,16 @@ export function applyStructuredDesignPlan(currentSpec, plan) {
     }
 
     if (operation.type === 'set_shell' || operation.type === 'add_pad_extension') {
+      // Dimension shorthand first (mirrors bim-core): w/d numbers with no
+      // field, or a junk field ('dimensions') the ladder would swallow.
+      if (operation.type === 'set_shell' && isDimensionShorthandShellOp(operation)) {
+        const dims = shellShorthandDims(operation);
+        if (dims.w > 0) next.shell.widthFt = clamp(dims.w, 18, 120);
+        if (dims.d > 0) next.shell.depthFt = clamp(dims.d, 18, 120);
+        if (Number(operation.h) > 0) next.shell.wallHeightFt = clamp(Number(operation.h), 7, 32);
+        actions.push(`Set shell to ${next.shell.widthFt}' x ${next.shell.depthFt}'.`);
+        continue;
+      }
       const field = operation.field || 'padExtensionFt';
       const numeric = Number(operation.value || operation.w);
       if (operation.field === 'widthFt') next.shell.widthFt = clamp(numeric, 18, 120);
