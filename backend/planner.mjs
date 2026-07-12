@@ -1,10 +1,11 @@
-import { OPENAI_IMAGE_MAX, OPENAI_PLANNER_MODEL } from './config.mjs';
+import { GEMINI_PRO_MODEL, OPENAI_IMAGE_MAX, OPENAI_PLANNER_MODEL } from './config.mjs';
 import { callGemini, geminiParts, geminiSchema, hasGemini } from './gemini.mjs';
 import { getCached, makeCacheKey, setCached } from './cache.mjs';
 import { slugify } from './utils.mjs';
-import { applyBimOperations, isDimensionShorthandShellOp, shellShorthandDims, parseWxD } from './bim-core.mjs';
+import { applyBimOperations, isDimensionShorthandShellOp, shellShorthandDims, parseWxD, scoreTraceSpecChecks } from './bim-core.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 const operationSchema = {
   type: 'object',
@@ -1228,7 +1229,7 @@ Do NOT restate the shell or footprint unless the earlier value is wrong. NEVER d
   const res = await callGemini({
     parts: [repairText, ...attachmentParts],
     responseSchema: geminiSchema(operationSchema),
-    model: escalate ? 'gemini-1.5-pro' : undefined
+    model: escalate ? GEMINI_PRO_MODEL : undefined
   });
   if (!res.ok) return scrubDeferralSummary(plan);
   let extra;
@@ -1317,7 +1318,7 @@ Rules: correct EXISTING items by id — never re-add something already listed. I
       res = await callGemini({
         parts: [auditText, ...attachmentParts],
         responseSchema: geminiSchema(operationSchema),
-        model: escalate ? 'gemini-1.5-pro' : undefined
+        model: escalate ? GEMINI_PRO_MODEL : undefined
       });
     } catch { break; }
     if (!res?.ok) break;
@@ -1483,7 +1484,7 @@ async function stagedTracePlan({ attachmentParts, geminiResponseSchema, note, es
       // Pass-specific schema + tight cap: the full 24-field op schema invited
       // a digit-loop degeneration (33k chars of '0' logged) — fewer number
       // fields to loop in, and any future loop dies at 8k tokens in seconds.
-      const model = (escalate && (pass.key === 'rooms' || pass.key === 'openings')) ? 'gemini-1.5-pro' : undefined;
+      const model = (escalate && (pass.key === 'rooms' || pass.key === 'openings')) ? GEMINI_PRO_MODEL : undefined;
       res = await callGemini({ parts: [{ text: `${pass.text}\n${TRACE_CONVENTIONS}` }, ...attachmentParts], responseSchema: passResponseSchema(pass.key, pass.types), maxOutputTokens: 8192, model });
     } catch {
       res = null;
@@ -1501,7 +1502,7 @@ async function stagedTracePlan({ attachmentParts, geminiResponseSchema, note, es
       // Unreadable usually means the reply outran the token cap — one retry
       // asking for a tighter list (the classic single call retries the same).
       try {
-        const model = (escalate && (pass.key === 'rooms' || pass.key === 'openings')) ? 'gemini-1.5-pro' : undefined;
+        const model = (escalate && (pass.key === 'rooms' || pass.key === 'openings')) ? GEMINI_PRO_MODEL : undefined;
         res = await callGemini({ parts: [{ text: `Your previous reply was truncated or unreadable. Same task again, but reply with FEWER, tighter operations — at most 30, the most important first.
 ${pass.text}
 ${TRACE_CONVENTIONS}` }, ...attachmentParts], responseSchema: passResponseSchema(pass.key, pass.types), maxOutputTokens: 8192, model });
@@ -1700,7 +1701,7 @@ ${payload.prompt}`
           }
         }
         if (!takeoffPlan) {
-          let res = await callGemini({ parts: geminiParts(content), responseSchema: geminiResponseSchema, model: escalate ? 'gemini-1.5-pro' : undefined });
+          let res = await callGemini({ parts: geminiParts(content), responseSchema: geminiResponseSchema, model: escalate ? GEMINI_PRO_MODEL : undefined });
           if (!res.ok) {
             const fallback = localPlan(payload);
             fallback.warnings.unshift(`AI planner unavailable: ${res.status} ${res.errorText.slice(0, 160)}`);
@@ -1714,7 +1715,7 @@ ${payload.prompt}`
             res = await callGemini({
               parts: [{ text: 'Your previous response was truncated mid-JSON. Reply again with FEWER, higher-level operations (at most 30, most important first) and shorter reason strings.' }, ...geminiParts(content)],
               responseSchema: geminiResponseSchema,
-              model: escalate ? 'gemini-1.5-pro' : undefined
+              model: escalate ? GEMINI_PRO_MODEL : undefined
             });
             try {
               takeoffPlan = res.ok ? JSON.parse(res.text) : null;
@@ -1786,6 +1787,14 @@ ${payload.prompt}`
 
         const scoreMessage = formatPlainLanguageScore(checks);
         plan.summary = `${scoreMessage}\n\n${plan.summary || ''}`;
+        // Ride the score on the plan: applyBimOperations stamps it onto the
+        // design (spec.traceReview) so the doubts show as Review flags.
+        plan.traceScore = {
+          when: new Date().toISOString(),
+          passed: passedCount,
+          total: totalChecks,
+          checks
+        };
       }
     } else {
       let res = await callGemini({ parts: geminiParts(content), responseSchema: geminiResponseSchema });
@@ -1858,67 +1867,14 @@ export function scoreTrace(spec, plan) {
     targetPlan = spec.plan;
   }
 
-  const checks = [];
-  const rooms = targetSpec.rooms || [];
-  const openings = targetSpec.openings || [];
-  const shellW = Number(targetSpec.shell?.widthFt) || 0;
-  const shellD = Number(targetSpec.shell?.depthFt) || 0;
+  // The spec-derived invariants live in bim-core (scoreTraceSpecChecks) so the
+  // Review panel can re-run them live against the current design. This fixes a
+  // real bug too: the old inline copies read `spec.` instead of `targetSpec.`
+  // in the basement and partition checks, so those passed vacuously whenever
+  // scoreTrace was called with the ({ spec, plan }) object form (the corpus
+  // test calls it exactly that way).
+  const checks = scoreTraceSpecChecks(targetSpec);
   const add = (name, pass, detail = '') => checks.push({ name, pass, detail });
-
-  add('traced at least 2 rooms', rooms.length >= 2, `${rooms.length} rooms`);
-
-  // Placeholder signature: most rooms sharing one identical size
-  const sizes = new Map();
-  rooms.forEach((r) => { const k = `${r.w}x${r.d}`; sizes.set(k, (sizes.get(k) || 0) + 1); });
-  const biggestShare = rooms.length ? Math.max(...sizes.values()) / rooms.length : 0;
-  add('rooms individually measured (no placeholder run)', rooms.length < 4 || biggestShare < 0.6,
-    `${Math.round(biggestShare * 100)}% share one size`);
-
-  // Ground rooms inside the shell
-  const strays = rooms.filter((r) => Number(r.level || 1) === 1
-    && (r.x < -0.5 || r.y < -0.5 || r.x + r.w > shellW + 0.5 || r.y + r.d > shellD + 0.5));
-  add('every ground-floor room inside the shell', strays.length === 0, strays.map((r) => r.name).join(', '));
-
-  // Rooms tile the plan — they never sit on top of each other
-  const overlapNames = new Set();
-  for (let i = 0; i < rooms.length; i += 1) {
-    for (let j = i + 1; j < rooms.length; j += 1) {
-      const a = rooms[i];
-      const b = rooms[j];
-      if (Number(a.level || 1) !== Number(b.level || 1)) continue;
-      const ov = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x))
-        * Math.max(0, Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y));
-      if (ov > 0.35 * Math.min(a.w * a.d, b.w * b.d)) { overlapNames.add(a.name); overlapNames.add(b.name); }
-    }
-  }
-  add("rooms don't pile on each other", overlapNames.size === 0, [...overlapNames].join(', '));
-
-  // A dwelling's rooms tile most of its floor plate — sparse coverage means
-  // enclosed spaces were skipped (the unlabeled-plan failure mode).
-  const groundCover = rooms.filter((r) => Number(r.level || 1) === 1).reduce((sum, r) => sum + r.w * r.d, 0);
-  const coverPct = shellW > 0 && shellD > 0 ? groundCover / (shellW * shellD) : 1;
-  add('rooms cover the floor plan (no skipped spaces)', coverPct >= 0.45, `${Math.round(coverPct * 100)}% of the shell`);
-
-  // Rooms named for the basement live below grade (when a basement exists)
-  const basement = Number(spec.shell?.basementHeightFt) > 0;
-  const misleveled = rooms.filter((r) => /basement/i.test(r.name || '') && Number(r.level || 1) !== -1);
-  add('basement-named rooms on the basement level', !basement || misleveled.length === 0, misleveled.map((r) => r.name).join(', '));
-
-  // Openings sanity floor: any dwelling has a door and windows
-  add('a believable number of openings', openings.length >= Math.max(4, Math.min(rooms.length, 8)), `${openings.length} openings`);
-
-  // Openings positioned within their wall
-  const badPos = openings.filter((o) => {
-    const along = o.wall === 'north' || o.wall === 'south' ? Number(o.x) || 0 : Number(o.y) || 0;
-    const wallLen = o.wall === 'north' || o.wall === 'south' ? shellW : shellD;
-    return o.wall !== 'roof' && (along < -0.5 || along + (Number(o.widthFt) || 3) > wallLen + 1);
-  });
-  add('openings sit within their walls', badPos.length === 0, `${badPos.length} out of range`);
-
-  // Partitions inside the shell
-  const strayParts = (spec.elements || []).filter((e) => e.category === 'partition'
-    && (e.x < -0.5 || e.y < -0.5 || e.x + e.w > shellW + 1 || e.y + e.d > shellD + 1));
-  add('interior walls inside the shell', strayParts.length === 0, strayParts.map((e) => e.name).join(', '));
 
   // Shell agrees with the drawing's own dimension strings (when indexed)
   const idx = (targetPlan?.warnings || []).find((w) => /drawing index/i.test(w)) || '';
@@ -1959,11 +1915,17 @@ export function formatPlainLanguageScore(checks) {
   return `Read your drawing — ${passed} of ${total} checks passed. (${details || 'some items may sit wrong'}; tap Review to see them.)`;
 }
 
-export function autoCaptureTrace(attachedImages, plan, spec, checks) {
+export function autoCaptureTrace(attachedImages, plan, spec, checks, baseDir = process.cwd()) {
+  // Every real trace quietly builds the regression corpus. Captures live in
+  // trace-corpus/captured/ — a SUBFOLDER, because the corpus sweep runs every
+  // PDF in the top-level folder and would otherwise re-run (and pay for)
+  // every capture on every sweep. Curating a capture into the corpus = moving
+  // its PDF up one level. The same drawing traced twice keeps ONE pdf (content
+  // hash in the name) and one result json per run.
   try {
-    const corpusDir = path.join(process.cwd(), '.data', 'trace-corpus');
-    if (!fs.existsSync(corpusDir)) {
-      fs.mkdirSync(corpusDir, { recursive: true });
+    const capturedDir = path.join(baseDir, '.data', 'trace-corpus', 'captured');
+    if (!fs.existsSync(capturedDir)) {
+      fs.mkdirSync(capturedDir, { recursive: true });
     }
 
     for (const image of (attachedImages || [])) {
@@ -1973,15 +1935,18 @@ export function autoCaptureTrace(attachedImages, plan, spec, checks) {
         const buffer = Buffer.from(match[1], 'base64');
 
         const cleanName = slugify(image.name.replace(/\.[^/.]+$/, ''));
+        const hash = createHash('sha256').update(buffer).digest('hex').slice(0, 8);
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const pdfFilename = `${cleanName}-${timestamp}.pdf`;
-        const jsonFilename = `${cleanName}-${timestamp}.result.json`;
+        const pdfFilename = `${cleanName}-${hash}.pdf`;
+        const jsonFilename = `${cleanName}-${hash}-${timestamp}.result.json`;
 
-        fs.writeFileSync(path.join(corpusDir, pdfFilename), buffer);
+        const pdfPath = path.join(capturedDir, pdfFilename);
+        if (!fs.existsSync(pdfPath)) fs.writeFileSync(pdfPath, buffer);
 
         const meta = {
           when: new Date().toISOString(),
           originalName: image.name,
+          pdf: pdfFilename,
           score: {
             passed: checks.filter(c => c.pass).length,
             total: checks.length,
@@ -1990,7 +1955,7 @@ export function autoCaptureTrace(attachedImages, plan, spec, checks) {
           plan,
           spec
         };
-        fs.writeFileSync(path.join(corpusDir, jsonFilename), JSON.stringify(meta, null, 2));
+        fs.writeFileSync(path.join(capturedDir, jsonFilename), JSON.stringify(meta, null, 2));
       }
     }
   } catch (error) {

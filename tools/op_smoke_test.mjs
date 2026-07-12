@@ -440,6 +440,18 @@ async function httpSanity() {
   ok(resolveWallSide(out2.spec, 'east', 1, mid2.key).assemblyKey === 'straw-bale' && !out2.spec.wallSegments, 'assembly "" hands the section back to its side');
 }
 
+// --- trace referee score rides the plan onto the design -----------------------
+{
+  const score = { when: '2026-07-12T00:00:00Z', passed: 9, total: 11, checks: [
+    { name: 'traced at least 2 rooms', pass: true, detail: '5 rooms' },
+    { name: "rooms don't pile on each other", pass: false, detail: 'Kitchen, Living' }
+  ] };
+  const out = applyBimOperations(freshSpec(), { operations: [{ type: 'set_shell', field: 'widthFt', value: '40' }], traceScore: score });
+  ok(out.spec.traceReview?.passed === 9 && out.spec.traceReview?.checks?.length === 2, 'plan.traceScore stamps spec.traceReview');
+  const again = applyBimOperations(out.spec, { operations: [{ type: 'set_shell', field: 'depthFt', value: '30' }] });
+  ok(again.spec.traceReview?.passed === 9, 'traceReview survives ordinary edits (until the next trace)');
+}
+
 const wantHttp = process.argv.includes('--http');
 (async () => {
   if (wantHttp) await httpSanity();

@@ -588,5 +588,55 @@ const miniSpec = () => ({
   ok((plan.warnings || []).some((w) => /slid/.test(w)), 'the slide is announced honestly');
 }
 
+// --- the referee (Phase 1): scoreTrace / plain-language report / capture ---
+{
+  const { scoreTrace, formatPlainLanguageScore, autoCaptureTrace } = await import('../backend/planner.mjs');
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const os = await import('node:os');
+
+  // Object-form call ({spec, plan}) must judge the SAME spec as (spec, plan) —
+  // the old inline checks read the wrong variable and passed vacuously.
+  const badSpec = {
+    shell: { widthFt: 30, depthFt: 20, basementHeightFt: 8 },
+    rooms: [
+      { name: 'Basement Den', x: 2, y: 2, w: 10, d: 8, level: 1 },
+      { name: 'Kitchen', x: 14, y: 2, w: 10, d: 8, level: 1 },
+      { name: 'Living', x: 2, y: 11, w: 22, d: 8, level: 1 }
+    ],
+    openings: [{ wall: 'south', x: 2, widthFt: 3 }, { wall: 'south', x: 8, widthFt: 3 }, { wall: 'north', x: 2, widthFt: 3 }, { wall: 'east', y: 2, widthFt: 3 }],
+    elements: [{ name: 'Hall Wall', category: 'partition', x: 55, y: 2, w: 8, d: 0.5 }]
+  };
+  const plainPlan = { warnings: [], operations: [] };
+  const twoArg = scoreTrace(badSpec, plainPlan);
+  const objForm = scoreTrace({ spec: badSpec, plan: plainPlan });
+  const nameOf = (checks, name) => checks.find((c) => c.name === name);
+  ok(!nameOf(twoArg, 'basement-named rooms on the basement level').pass, 'referee catches mis-leveled basement room (two-arg)');
+  ok(!nameOf(objForm, 'basement-named rooms on the basement level').pass, 'referee catches it in OBJECT form too (was vacuous)');
+  ok(!nameOf(objForm, 'interior walls inside the shell').pass, 'referee catches stray partition in object form (was vacuous)');
+
+  // Plain-language report: clean and doubtful wordings
+  const clean = objForm.map((c) => ({ ...c, pass: true }));
+  ok(/of \d+ checks passed\.$/.test(formatPlainLanguageScore(clean)), 'clean read reports plainly');
+  ok(/tap Review to see them/.test(formatPlainLanguageScore(objForm)), 'doubtful read points at Review');
+
+  // Auto-capture: PDFs land in captured/ (NOT the sweep folder), dedupe by
+  // content hash, one result json per run.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-capture-'));
+  const fakePdf = Buffer.from('%PDF-1.4 fake for capture test').toString('base64');
+  const img = [{ name: 'My Plan.pdf', src: `data:application/pdf;base64,${fakePdf}` }];
+  autoCaptureTrace(img, plainPlan, badSpec, objForm, tmp);
+  await new Promise((r) => setTimeout(r, 5)); // distinct run timestamps
+  autoCaptureTrace(img, plainPlan, badSpec, objForm, tmp);
+  const capDir = path.join(tmp, '.data', 'trace-corpus', 'captured');
+  const sweepDir = path.join(tmp, '.data', 'trace-corpus');
+  const captured = fs.readdirSync(capDir);
+  const topLevelPdfs = fs.readdirSync(sweepDir).filter((f) => f.endsWith('.pdf'));
+  ok(captured.filter((f) => f.endsWith('.pdf')).length === 1, 'same drawing captured twice keeps ONE pdf (hash dedupe)');
+  ok(captured.filter((f) => f.endsWith('.result.json')).length === 2, 'both runs keep their result json');
+  ok(topLevelPdfs.length === 0, 'captures stay OUT of the corpus sweep folder');
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

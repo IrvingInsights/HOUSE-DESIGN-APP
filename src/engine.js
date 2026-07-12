@@ -2,7 +2,8 @@
 import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES,
   resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint,
-  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt
+  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt,
+  scoreTraceSpecChecks
 } from '../backend/bim-core.mjs';
 import { Box, Building2, ClipboardCheck, Leaf, PenTool, Sparkles, Tractor, TreePine, Wrench } from 'lucide-react';
 
@@ -2972,6 +2973,39 @@ export function repairNorthBandRooms(spec) {
 
 export function detectIssues(spec) {
   const issues = [];
+
+  // Drawing-read doubts: the trace stamped its referee score on the design
+  // (spec.traceReview). The spec-derived checks are RE-RUN live so a doubt
+  // the user has since fixed drops off Review by itself; plan-only doubts
+  // (drawing index mismatch, self-check drift) stay until the next trace.
+  if (spec.traceReview && Array.isArray(spec.traceReview.checks)) {
+    const failedAtTrace = spec.traceReview.checks.filter((c) => !c.pass);
+    if (failedAtTrace.length) {
+      const liveNow = new Map(scoreTraceSpecChecks(spec).map((c) => [c.name, c]));
+      const DOUBT_TEXT = {
+        'traced at least 2 rooms': { title: 'The drawing read found very few rooms', fix: 'Check the plan against your drawing — add the missing rooms on the Rooms page, or attach the drawing again and ask for a re-trace.' },
+        'rooms individually measured (no placeholder run)': { title: 'Several rooms came back the same default size', fix: 'The reader may not have measured every room. Check their sizes against the drawing and correct any in the Inspector.' },
+        'every ground-floor room inside the shell': { title: 'The drawing read left rooms outside the walls', fix: 'Drag the strays inside in the Plan view, or grow the shell on the Shell page.' },
+        "rooms don't pile on each other": { title: 'The drawing read overlapped some rooms', fix: 'Drag the overlapping rooms apart in the Plan view — the names are in the detail.' },
+        'rooms cover the floor plan (no skipped spaces)': { title: 'The drawing read may have skipped spaces', fix: 'Rooms cover little of the floor plan. Compare against the drawing and add what is missing on the Rooms page.' },
+        'basement-named rooms on the basement level': { title: 'Basement rooms ended up on the wrong level', fix: 'Set their Level to -1 in the Inspector, or ask the assistant to move them down.' },
+        'a believable number of openings': { title: 'The drawing read may have missed windows or doors', fix: 'Check each wall against the drawing and add missing openings on the Windows page.' },
+        'openings sit within their walls': { title: 'Some openings sit off their walls', fix: 'Drag them along the wall in the Plan view, or correct their position in the Inspector.' },
+        'interior walls inside the shell': { title: 'Interior walls landed outside the building', fix: 'Drag the partition walls inside in the Plan view.' },
+        'shell matches the drawing index (or no index)': { title: "The shell size disagrees with the drawing's own dimensions", fix: 'Compare the Shell page width/length with the dimension strings on the drawing and set whichever is right.' },
+        'self-check converging (fixes not growing)': { title: 'The drawing read kept correcting itself', fix: 'The read may be shaky — check the plan against the drawing, or attach it again for a fresh trace.' }
+      };
+      failedAtTrace.forEach((check) => {
+        const live = liveNow.get(check.name);
+        if (live && live.pass) return; // fixed since the trace — auto-cleared
+        const text = DOUBT_TEXT[check.name] || { title: check.name, fix: 'Check this against your drawing.' };
+        const detail = (live ? live.detail : check.detail) || '';
+        const system = /opening|window|door/i.test(check.name) ? 'windows' : /shell|index/i.test(check.name) ? 'shell' : /interior wall/i.test(check.name) ? 'walls' : 'rooms';
+        issues.push({ severity: 'warning', title: text.title, owner: 'Drawing reader', system, fix: `${detail ? `${detail}. ` : ''}${text.fix}` });
+      });
+    }
+  }
+
   const customFpCheck = hasCustomFootprint(spec);
   const fpPolyCheck = customFpCheck ? footprintPolygon(spec) : null;
   const enclosedRooms = spec.rooms.filter((room) => (customFpCheck

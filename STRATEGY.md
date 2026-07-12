@@ -51,7 +51,16 @@ prompt tweak is the losing game we've been playing. The winning game is
 
 ## The three moves
 
-### Phase 1 — The app referees itself (next session, ~1 session)
+### Phase 1 — The app referees itself — **DONE 2026-07-12**
+Shipped: server-side scoreTrace after every trace; below 10/11 the takeoff
+re-runs once on the pro model tier (GEMINI_PRO_MODEL, rolling alias);
+plain-language score opens the chat reply; doubts stamp `spec.traceReview`
+and surface as Review flags (spec-derived ones re-check live and auto-clear
+when fixed; plan-only ones persist until the next trace); every real trace
+auto-captures to `.data/trace-corpus/captured/` (hash-deduped, out of the
+sweep folder — curation = move a PDF up one level). Verified: 287 unit
+checks + a live corpus set end-to-end (10/11, score in summary, capture
+written). Original spec follows for reference:
 Move the corpus scorer INTO the trace pipeline. After every in-app trace:
 - Score the result against the invariants **server-side**.
 - Below the gate (10/11): **auto-retry** the weak passes once, escalating the

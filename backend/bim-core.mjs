@@ -379,6 +379,77 @@ export function footprintEdges(spec) {
   return edges;
 }
 
+// Spec-derived trace invariants — the referee's checks that can be recomputed
+// from the CURRENT spec at any time. The planner's scoreTrace() adds its
+// plan-derived checks (drawing index match, self-check convergence) on top;
+// detectIssues re-runs THESE live so a doubt the user has since fixed
+// auto-clears from Review instead of nagging forever.
+export function scoreTraceSpecChecks(spec) {
+  const checks = [];
+  const rooms = spec.rooms || [];
+  const openings = spec.openings || [];
+  const shellW = Number(spec.shell?.widthFt) || 0;
+  const shellD = Number(spec.shell?.depthFt) || 0;
+  const add = (name, pass, detail = '') => checks.push({ name, pass, detail });
+
+  add('traced at least 2 rooms', rooms.length >= 2, `${rooms.length} rooms`);
+
+  // Placeholder signature: most rooms sharing one identical size
+  const sizes = new Map();
+  rooms.forEach((r) => { const k = `${r.w}x${r.d}`; sizes.set(k, (sizes.get(k) || 0) + 1); });
+  const biggestShare = rooms.length ? Math.max(...sizes.values()) / rooms.length : 0;
+  add('rooms individually measured (no placeholder run)', rooms.length < 4 || biggestShare < 0.6,
+    `${Math.round(biggestShare * 100)}% share one size`);
+
+  // Ground rooms inside the shell
+  const strays = rooms.filter((r) => Number(r.level || 1) === 1
+    && (r.x < -0.5 || r.y < -0.5 || r.x + r.w > shellW + 0.5 || r.y + r.d > shellD + 0.5));
+  add('every ground-floor room inside the shell', strays.length === 0, strays.map((r) => r.name).join(', '));
+
+  // Rooms tile the plan — they never sit on top of each other
+  const overlapNames = new Set();
+  for (let i = 0; i < rooms.length; i += 1) {
+    for (let j = i + 1; j < rooms.length; j += 1) {
+      const a = rooms[i];
+      const b = rooms[j];
+      if (Number(a.level || 1) !== Number(b.level || 1)) continue;
+      const ov = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x))
+        * Math.max(0, Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y));
+      if (ov > 0.35 * Math.min(a.w * a.d, b.w * b.d)) { overlapNames.add(a.name); overlapNames.add(b.name); }
+    }
+  }
+  add("rooms don't pile on each other", overlapNames.size === 0, [...overlapNames].join(', '));
+
+  // A dwelling's rooms tile most of its floor plate — sparse coverage means
+  // enclosed spaces were skipped (the unlabeled-plan failure mode).
+  const groundCover = rooms.filter((r) => Number(r.level || 1) === 1).reduce((sum, r) => sum + r.w * r.d, 0);
+  const coverPct = shellW > 0 && shellD > 0 ? groundCover / (shellW * shellD) : 1;
+  add('rooms cover the floor plan (no skipped spaces)', coverPct >= 0.45, `${Math.round(coverPct * 100)}% of the shell`);
+
+  // Rooms named for the basement live below grade (when a basement exists)
+  const basement = Number(spec.shell?.basementHeightFt) > 0;
+  const misleveled = rooms.filter((r) => /basement/i.test(r.name || '') && Number(r.level || 1) !== -1);
+  add('basement-named rooms on the basement level', !basement || misleveled.length === 0, misleveled.map((r) => r.name).join(', '));
+
+  // Openings sanity floor: any dwelling has a door and windows
+  add('a believable number of openings', openings.length >= Math.max(4, Math.min(rooms.length, 8)), `${openings.length} openings`);
+
+  // Openings positioned within their wall
+  const badPos = openings.filter((o) => {
+    const along = o.wall === 'north' || o.wall === 'south' ? Number(o.x) || 0 : Number(o.y) || 0;
+    const wallLen = o.wall === 'north' || o.wall === 'south' ? shellW : shellD;
+    return o.wall !== 'roof' && (along < -0.5 || along + (Number(o.widthFt) || 3) > wallLen + 1);
+  });
+  add('openings sit within their walls', badPos.length === 0, `${badPos.length} out of range`);
+
+  // Partitions inside the shell
+  const strayParts = (spec.elements || []).filter((e) => e.category === 'partition'
+    && (e.x < -0.5 || e.y < -0.5 || e.x + e.w > shellW + 1 || e.y + e.d > shellD + 1));
+  add('interior walls inside the shell', strayParts.length === 0, strayParts.map((e) => e.name).join(', '));
+
+  return checks;
+}
+
 // Per-segment construction overrides (spec.wallSegments) are keyed by edge
 // index, and footprint ops renumber edges. Carry each override onto the new
 // edge(s) covering the old edge's span — a split's children all inherit, and
@@ -1961,6 +2032,17 @@ export function applyBimOperations(currentSpec, plan) {
   if (actions.length) {
     next.revision += 1;
     normalizeRooms(next);
+  }
+
+  // A drawing trace carries its referee score — stamp it on the design so the
+  // Review panel can show the doubts. Each new trace overwrites the last.
+  if (plan?.traceScore && Array.isArray(plan.traceScore.checks)) {
+    next.traceReview = {
+      when: plan.traceScore.when || null,
+      passed: Number(plan.traceScore.passed) || 0,
+      total: Number(plan.traceScore.total) || plan.traceScore.checks.length,
+      checks: plan.traceScore.checks.map((c) => ({ name: String(c.name || ''), pass: Boolean(c.pass), detail: String(c.detail || '') }))
+    };
   }
 
   return {
