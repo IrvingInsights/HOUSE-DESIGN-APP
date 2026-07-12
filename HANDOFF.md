@@ -84,11 +84,11 @@ revision snapshots. Public repo: github.com/IrvingInsights/HOUSE-DESIGN-APP.
 ## State at handoff (2026-07-12)
 
 - All three unit suites green (113 + 111 + 41).
-- Corpus at handoff: columbia-rev1 11/11, columbia-st 11/11 (fresh full
-  read); fl0-carport and fl0-v6 were mid-sweep — re-run
-  `node tools/trace_corpus_test.mjs` for the current truth.
-  (columbia-st.pdf and columbia-rev1.pdf are byte-identical duplicates —
-  safe to delete one.)
+- **Corpus at handoff: CLEAN — all 4 sets 11/11 hands-off** (columbia-rev1
+  5s cached / columbia-st 241s fresh / fl0-carport 175s / fl0-v6 181s,
+  full sweep 2026-07-12). This is the baseline; a change that breaks it is
+  a regression. (columbia-st.pdf and columbia-rev1.pdf are byte-identical
+  duplicates — safe to delete one.)
 - MVP ≈ 95% by feature list; the gate is trace trustworthiness (STRATEGY.md
   Phase 1) and then 2–3 testers' first hour.
 - Daniel's live design: whatever `/api/projects/current` says — see rule
