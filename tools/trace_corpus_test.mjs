@@ -151,6 +151,13 @@ for (const file of pdfs) {
   const fails = checks.filter((c) => !c.pass);
   checks.forEach((c) => console.log(`  ${c.pass ? 'ok  ' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`));
   console.log(`  -> ${checks.length - fails.length}/${checks.length} in ${Math.round((Date.now() - t0) / 1000)}s`);
+  if (fails.length) {
+    // Evidence on failure: the full spec + plan that failed, on disk — one
+    // dump replaces a diagnosis round (the digit-loop lesson).
+    const dump = path.join(CORPUS, `${file.replace('.pdf', '')}.lastfail.json`);
+    fs.writeFileSync(dump, JSON.stringify({ when: new Date().toISOString(), fails, spec: job.result.report.spec, plan: job.result.plan }, null, 2));
+    console.log(`  evidence: ${dump}`);
+  }
   totalFail += fails.length;
 }
 const tested = pdfs.length - skipped;
