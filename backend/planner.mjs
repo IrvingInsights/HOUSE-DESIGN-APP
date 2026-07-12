@@ -517,8 +517,52 @@ export function traceLooksIncomplete(plan, sourceSpec, manifest = null) {
   // usually PROVES it read the dimension strings; the numbers just never made
   // it into the operation. Name each such room so the repair pass re-measures.
   const zeroSized = roomOps.filter((o) => !Number(o.w) || !Number(o.d));
-  const unmeasuredRooms = zeroSized.length > 0;
-  const unmeasuredRoomNames = zeroSized.map((o) => o.name).filter(Boolean);
+  // DEFAULT-SIZE RUNS: three-plus rooms at literally 10x10 (the backend's own
+  // default) is the same laziness with the numbers written down — a real plan
+  // never has three identical default-sized rooms in a row. (Columbia REV1:
+  // Bedroom/Bathroom/Bedroom all 10x10 slipped past the absent-dims check.)
+  const defaultSized = roomOps.filter((o) => Number(o.w) === 10 && Number(o.d) === 10);
+  const suspectRooms = [...zeroSized, ...(defaultSized.length >= 3 ? defaultSized : [])];
+  const unmeasuredRooms = suspectRooms.length > 0;
+  const unmeasuredRoomNames = [...new Set(suspectRooms.map((o) => o.name).filter(Boolean))];
+  // OVERLAPPING ROOMS: rooms share walls — they never sit on top of each
+  // other. Heavy overlap between same-level rooms means positions are fiction.
+  const effRects = roomOps.map((o) => ({ name: o.name, level: Number(o.level) || 1, x: Number(o.x) || 0, y: Number(o.y) || 0, w: Number(o.w) || 10, d: Number(o.d) || 10 }));
+  const overlapNames = new Set();
+  for (let i = 0; i < effRects.length; i += 1) {
+    for (let j = i + 1; j < effRects.length; j += 1) {
+      const a = effRects[i];
+      const b = effRects[j];
+      if (a.level !== b.level) continue;
+      const ov = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x))
+        * Math.max(0, Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y));
+      if (ov > 0.35 * Math.min(a.w * a.d, b.w * b.d)) { overlapNames.add(a.name); overlapNames.add(b.name); }
+    }
+  }
+  const overlappingRooms = overlapNames.size > 0;
+  const overlappingRoomNames = [...overlapNames].filter(Boolean);
+  // SPARSE COVERAGE: a dwelling's rooms tile most of its floor plate. Traced
+  // ground rooms covering under 45% of the shell means enclosed spaces were
+  // skipped — the failure mode of UNLABELED as-built plans (Columbia REV1:
+  // no room names on the sheets, the AI read 2 rooms and stopped).
+  let planShellW = Number(sourceSpec.shell?.widthFt) || 0;
+  let planShellD = Number(sourceSpec.shell?.depthFt) || 0;
+  for (const o of ops) {
+    if (o.type !== 'set_shell') continue;
+    if (Number(o.w) > 0) planShellW = Number(o.w);
+    if (Number(o.d) > 0) planShellD = Number(o.d);
+    if (o.field === 'widthFt' && Number(o.value) > 0) planShellW = Number(o.value);
+    if (o.field === 'depthFt' && Number(o.value) > 0) planShellD = Number(o.value);
+  }
+  const groundArea = effRects.filter((r) => r.level === 1).reduce((sum, r) => sum + r.w * r.d, 0)
+    + (sourceSpec.rooms || []).filter((r) => Number(r.level || 1) === 1).reduce((sum, r) => sum + (Number(r.w) || 0) * (Number(r.d) || 0), 0);
+  const sparseRooms = planShellW > 12 && planShellD > 12 && (addRooms + (sourceSpec.rooms || []).length) > 0
+    && groundArea < 0.45 * planShellW * planShellD;
+  // OPENINGS FLOOR: any dwelling has a door and windows in proportion to its
+  // rooms — the same floor the corpus scores. Zero already flagged; a handful
+  // on an 8-room house is an under-read, not a traced set.
+  const totalOpenings = addOpenings + (sourceSpec.openings || []).length;
+  const fewOpenings = totalOpenings > 0 && totalOpenings < Math.max(4, Math.min(totalRooms, 8));
   // MANIFEST cross-check: rooms the drawing's own index lists that the takeoff
   // lacks, or an opening count far short of the schedules.
   const gaps = manifest ? manifestGaps(plan, sourceSpec, manifest) : null;
@@ -526,12 +570,23 @@ export function traceLooksIncomplete(plan, sourceSpec, manifest = null) {
   const lowOpenings = Boolean(gaps && gaps.lowOpenings);
   const shellDeviation = Boolean(gaps && gaps.shellDeviation);
   return {
-    incomplete: deferred || addOpenings === 0 || totalRooms < 2 || noStair || badGeometry || unmeasuredElements || unmeasuredRooms || missingRooms || lowOpenings || shellDeviation,
+    incomplete: deferred || addOpenings === 0 || totalRooms < 2 || noStair || badGeometry || unmeasuredElements || unmeasuredRooms || overlappingRooms || sparseRooms || fewOpenings || missingRooms || lowOpenings || shellDeviation,
     addRooms, addOpenings, totalRooms, deferred, noStair, badGeometry,
     unmeasuredElements, unmeasuredElementNames,
     unmeasuredRooms, unmeasuredRoomNames,
+    overlappingRooms, overlappingRoomNames,
+    sparseRooms, fewOpenings,
     missingRooms, lowOpenings, gaps
   };
+}
+
+// A drawing index that "found" almost nothing is a MISREAD, and worse than no
+// index at all: "takeoff covers 2 of 2 rooms" suppresses every completeness
+// repair. Fewer than 3 named rooms = distrust it entirely.
+export function sanitizeManifest(manifest) {
+  if (!manifest || !Array.isArray(manifest.roomNames)) return null;
+  if (manifest.roomNames.filter((n) => String(n).trim()).length < 3) return null;
+  return manifest;
 }
 
 // Deterministic tower rescue: when a takeoff says storeys > 1 but leaves the
@@ -991,6 +1046,89 @@ export function scrubDeadOperations(plan) {
   return plan;
 }
 
+// Overlapping same-level rooms slide apart by the minimal translation — the
+// deterministic answer to a net the AI repair keeps missing on unlabeled
+// plans (its estimated rects collide by a foot or two). TRACE-TIME ONLY:
+// this runs in the rescue chain, never on a user's own edits, so it can't
+// fight a hand-drag. Works on EFFECTIVE rects (adds folded through later
+// moves/resizes) and emits move_object ops so the engine applies the slide.
+export function separateOverlappingRooms(plan, sourceSpec) {
+  const ops = plan.operations || [];
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  let shellW = num(sourceSpec?.shell?.widthFt) || 36;
+  let shellD = num(sourceSpec?.shell?.depthFt) || 28;
+  for (const op of ops) {
+    if (op.type !== 'set_shell') continue;
+    if (num(op.w)) shellW = num(op.w);
+    if (num(op.d)) shellD = num(op.d);
+    if (op.field === 'widthFt' && num(op.value)) shellW = num(op.value);
+    if (op.field === 'depthFt' && num(op.value)) shellD = num(op.value);
+  }
+  const rects = new Map();
+  for (const o of ops.filter((o) => o.type === 'add_room')) {
+    rects.set(normName(o.name), { name: o.name, level: num(o.level) || 1, x: num(o.x), y: num(o.y), w: num(o.w) || 10, d: num(o.d) || 10 });
+  }
+  for (const op of ops) {
+    if (op.type !== 'move_object' && op.type !== 'resize_object') continue;
+    const r = rects.get(normName(String(op.name || op.targetId || '').replace(/-/g, ' ')));
+    if (!r) continue;
+    if (op.type === 'move_object') {
+      if (Number.isFinite(Number(op.x))) r.x = num(op.x);
+      if (Number.isFinite(Number(op.y))) r.y = num(op.y);
+    } else {
+      if (num(op.w)) r.w = num(op.w);
+      if (num(op.d)) r.d = num(op.d);
+    }
+  }
+  const slid = [];
+  const list = [...rects.values()];
+  for (let sweep = 0; sweep < 2; sweep += 1) {
+    for (let i = 0; i < list.length; i += 1) {
+      for (let j = 0; j < list.length; j += 1) {
+        if (i === j) continue;
+        const a = list[i];
+        const b = list[j];
+        if (a.level !== b.level) continue;
+        const ovW = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+        const ovD = Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y);
+        if (ovW <= 0 || ovD <= 0) continue;
+        if (ovW * ovD <= 0.35 * Math.min(a.w * a.d, b.w * b.d)) continue;
+        // slide the SMALLER room by the minimal translation that clears it
+        const mover = a.w * a.d <= b.w * b.d ? a : b;
+        const anchor = mover === a ? b : a;
+        const pushes = [
+          { dx: anchor.x - (mover.x + mover.w), dy: 0 },
+          { dx: (anchor.x + anchor.w) - mover.x, dy: 0 },
+          { dx: 0, dy: anchor.y - (mover.y + mover.d) },
+          { dx: 0, dy: (anchor.y + anchor.d) - mover.y }
+        ].sort((p, q) => (Math.abs(p.dx) + Math.abs(p.dy)) - (Math.abs(q.dx) + Math.abs(q.dy)));
+        for (const push of pushes) {
+          const nx = Math.max(0, Math.min(mover.x + push.dx, shellW - mover.w));
+          const ny = Math.max(0, Math.min(mover.y + push.dy, shellD - mover.d));
+          const cleared = !(Math.min(anchor.x + anchor.w, nx + mover.w) - Math.max(anchor.x, nx) > 0
+            && Math.min(anchor.y + anchor.d, ny + mover.d) - Math.max(anchor.y, ny) > 0);
+          if (cleared || push === pushes[pushes.length - 1]) {
+            if (nx !== mover.x || ny !== mover.y) {
+              mover.x = nx;
+              mover.y = ny;
+              slid.push(mover.name);
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+  if (slid.length) {
+    for (const name of new Set(slid)) {
+      const r = [...rects.values()].find((v) => v.name === name);
+      ops.push({ type: 'move_object', name, x: r.x || 0.01, y: r.y || 0.01 });
+    }
+    plan.warnings = [...(plan.warnings || []), `Rooms overlapped on the plan — slid ${[...new Set(slid)].join(', ')} to clear.`];
+  }
+  return plan;
+}
+
 // THE deterministic rescue chain, in one place so every AI stage gets the
 // same treatment after it: the audit loop merges brand-new ops (it once added
 // a greenhouse "room" below the south wall), so whatever runs after the first
@@ -1000,6 +1138,9 @@ export function applyDeterministicRescues(plan, sourceSpec) {
   plan = scrubDeadOperations(plan);
   plan = reclassifyOutdoorRooms(plan);
   plan = repairBasementRooms(plan, sourceSpec);
+  plan = repairTraceGeometry(plan, sourceSpec);
+  plan = separateOverlappingRooms(plan, sourceSpec);
+  // separating rooms can push one against the shell edge — re-grow if needed
   plan = repairTraceGeometry(plan, sourceSpec);
   plan = repairTowerStorey(plan, sourceSpec);
   plan = cleanTraceElements(plan, sourceSpec);
@@ -1075,6 +1216,9 @@ ${check.badGeometry ? `- YOUR ROOM GEOMETRY WAS NOT MEASURED (identical default 
 - Also re-check the shell: set_shell w and d must be the conditioned footprint's overall dimension strings from the drawing.` : ''}
 ${check.unmeasuredElements ? `- THESE ELEMENTS WERE EMITTED WITHOUT SIZES: ${check.unmeasuredElementNames.join(', ')}. For EACH one, emit resize_object (name, w, d) + move_object (name, x, y) with its REAL measured footprint and position from the plan — a stair is a stair-sized rectangle, a heater a heater-sized one; porches and decks have drawn outlines. Never leave an element at a default size.` : ''}
 ${check.unmeasuredRooms ? `- THESE ROOMS WERE ADDED WITHOUT MEASUREMENTS: ${check.unmeasuredRoomNames.join(', ')}. Your notes prove you read the dimension strings — for EACH, emit resize_object (name, w, d) + move_object (name, x, y) with its measured size and position in feet from the plan. A room without a size is not traced.` : ''}
+${check.overlappingRooms ? `- THESE ROOMS SIT ON TOP OF EACH OTHER: ${check.overlappingRoomNames.join(', ')}. Rooms share walls — they NEVER overlap. Re-read the floor plan and emit move_object (name, x, y) and resize_object (name, w, d) for each so they tile the plan the way the drawing shows.` : ''}
+${check.sparseRooms ? '- THE TRACED ROOMS COVER LESS THAN HALF THE FLOOR PLAN. Walk EVERY enclosed space on the plan, wall by wall — a dwelling\'s rooms tile nearly its whole floor plate. If the plan has NO room name labels, name each space from its fixtures (tub/toilet = Bathroom, counters/stove = Kitchen, large open space = Living, small enclosed rooms with doors = Bedrooms, washer/dryer = Laundry) and add a warning that names were inferred from fixtures.' : ''}
+${check.fewOpenings ? `- ONLY ${check.addOpenings} OPENINGS WERE READ for a ${check.totalRooms}-room dwelling. Re-read every exterior wall on the plans AND the elevation sheets (openings show clearly there) and emit an add_opening for every window and door you can see.` : ''}
 ${check.gaps && (check.missingRooms || check.lowOpenings || check.gaps.storeysShort) ? `- THE DRAWING'S OWN INDEX SAYS: rooms ${check.gaps.roomNames.join(', ')}; ~${check.gaps.windowCount} windows, ${check.gaps.doorCount} doors.${check.missingRooms ? ` Missing from your takeoff: ${check.gaps.missingRooms.join(', ')}. Add each with measured size and position.` : ''}${check.lowOpenings ? ` Only ${check.gaps.plannedOpenings} opening${check.gaps.plannedOpenings === 1 ? ' is' : 's are'} placed so far — trace the rest from the plans and schedules.` : ''}${check.gaps.storeysShort ? ` The index counts ${check.gaps.storeysAboveGrade} storeys above grade but the takeoff has fewer — set_shell field:'storeys' with the drawn count and put the upper-floor rooms on level 2.` : ''}` : ''}
 ${check.gaps?.shellDeviation ? `- THE DRAWING'S DIMENSION STRINGS say the CONDITIONED envelope is ${check.gaps.expectedW} x ${check.gaps.expectedD} ft, but the takeoff shell is ${check.gaps.plannedW} x ${check.gaps.plannedD} ft. Correct it with set_shell (w and d) — the shell is ONLY the enclosed heated building; carports, porches, and decks are add_element, never part of the shell.` : ''}
 Do NOT restate the shell or footprint unless the earlier value is wrong. NEVER defer, summarize, or write "future refinement" — emit the operations. Report final counts in summary.`
@@ -1260,7 +1404,8 @@ The shell is the CONDITIONED envelope only — exclude carports, porches, decks,
     note: 'Reading the rooms, level by level…',
     required: true,
     types: ['add_room'],
-    text: `ROOMS PASS — emit ONE add_room per labeled room on EVERY level of the attached floor plans, with its real name and MEASURED x, y, w, d in feet. level 1 = ground floor, 2 = upper floor, -1 = basement.
+    text: `ROOMS PASS — emit ONE add_room per ENCLOSED SPACE on EVERY level of the attached floor plans, with its name and MEASURED x, y, w, d in feet. level 1 = ground floor, 2 = upper floor, -1 = basement.
+Labeled plans: use the drawn names. UNLABELED plans (many as-builts have no room text): the rooms are still there as enclosed spaces — walk every one wall by wall and name it from its fixtures (tub/toilet = Bathroom, counter/stove run = Kitchen, washer/dryer = Laundry, the big open space = Living, small doored rooms = Bedrooms). Rooms tile the floor plate — if your rooms cover well under the plan's area, you missed spaces.
 A room without measured w and d is not traced — measure every one from the plan and its dimension strings.
 CONDITIONED indoor rooms ONLY — do NOT emit carports, porches, patios, decks, or greenhouses here (the elements pass covers them).
 ONLY add_room operations.`
@@ -1447,7 +1592,7 @@ A DRAWING OR DOCUMENT IS ATTACHED. Your job is a COMPLETE takeoff, not a summary
 5. STAIRS: a plan with two storeys or a basement ALWAYS shows a stair — ONE add_element named 'Stairs' (category 'structure') at its real plan position and size, level = the floor it climbs FROM (1 for ground up, -1 for basement up). Never skip it.
 6. INTERIOR WALLS: the wall lines between rooms are drawn on the plan — add_element category:'partition' for each interior wall RUN as drawn (x/y plus the run as w x d; thickness comes from construction). Where the plan shows a doorway between two rooms, put it on the partition with widthFt (door width) and positionFt (along the run) — interior doors belong to partitions, add_opening is ONLY for exterior walls. An open-concept plan legitimately has few partitions.
 7. A chimney or fireplace symbol: add_element category:'chimney' at its plan position (its flue is drawn through the roof automatically).
-RULES: If the plan shows 11 rooms, emit 11 add_room operations. MEASURE, never default: every room's x/y/w/d must be read from the plan — real rooms come in different sizes, so emitting many rooms with identical w x d is an ERROR, not a takeoff. All coordinates are ≥ 0 from the shell's northwest corner. The shell w x d is the CONDITIONED footprint's overall dimension strings; attached greenhouses, sunspaces, and covered outdoor areas drawn OUTSIDE the conditioned line are add_element items, NOT part of the shell. NEVER write "noted for future refinement" or defer anything — emit the operation instead. BASEMENTS ARE MODELED: a below-grade storey = set_shell field:'basementHeightFt' value:'8' (read the real height from the section if drawn) plus ONE add_room with level:-1 per basement room. A basement still does NOT count toward field:'storeys' (that's above-grade only). In the summary, report counts: "Traced: shell WxD, N rooms, M openings." If a page is illegible, say which page in warnings and keep going with the rest.
+RULES: If the plan shows 11 rooms, emit 11 add_room operations. MEASURE, never default: every room's x/y/w/d must be read from the plan — real rooms come in different sizes, so emitting many rooms with identical w x d is an ERROR, not a takeoff. UNLABELED PLANS: many as-built plans have NO room name text — the rooms are still there, drawn as enclosed spaces. Walk every enclosed space wall by wall, measure it against the overall dimension strings and the graphic scale, and NAME it from its fixtures (tub/toilet = Bathroom, counters/stove/sink run = Kitchen, washer/dryer = Laundry, the large open space = Living, small doored rooms = Bedrooms); add a warning that names were inferred from fixtures. Rooms tile the floor plate: if your rooms cover well under the shell's area, you missed spaces. All coordinates are ≥ 0 from the shell's northwest corner. The shell w x d is the CONDITIONED footprint's overall dimension strings; attached greenhouses, sunspaces, and covered outdoor areas drawn OUTSIDE the conditioned line are add_element items, NOT part of the shell. NEVER write "noted for future refinement" or defer anything — emit the operation instead. BASEMENTS ARE MODELED: a below-grade storey = set_shell field:'basementHeightFt' value:'8' (read the real height from the section if drawn) plus ONE add_room with level:-1 per basement room. A basement still does NOT count toward field:'storeys' (that's above-grade only). In the summary, report counts: "Traced: shell WxD, N rooms, M openings." If a page is illegible, say which page in warnings and keep going with the rest.
 THE SHELL IS THE CONDITIONED ENVELOPE — set_shell w/d (or set_footprint) covers ONLY the enclosed heated building read from its dimension strings. Carports, porches, decks, and detached structures are NEVER part of the shell: each is its own add_element (category carport/porch/deck) at its drawn position.
 MODEL WHAT THE DRAWING SHOWS — many documents are EXISTING conventional houses being modified, not natural builds. A framed house gets framed walls (set_wall_side field=assembly value=framed, or set_assembly), a slab stays a slab (set_utility foundationType), standard storeys stay standard, AND emit set_shell field:'designApproach' value:'standard' so the app's natural-building checks stand down for this design. Do NOT convert the building to natural systems unless the user asks. Mine EVERY page for usable data: dimension strings, room and door/window schedules, elevation heights (wall heights, storeys), roof type and pitch, site plans (lot, setbacks, orientation -> set_site), and existing-condition notes (put constraints the model can't express into warnings/assumptions so nothing is lost).
 ` : '';
@@ -1575,7 +1720,7 @@ ${payload.prompt}`
       // null manifest means every later step behaves exactly as before.
       note?.('Indexing the drawing set…');
       let manifest = null;
-      try { manifest = await extractDrawingManifest({ attachmentParts }); } catch { manifest = null; }
+      try { manifest = sanitizeManifest(await extractDrawingManifest({ attachmentParts })); } catch { manifest = null; }
       // Dead-op scrub first (fieldless updates, nameless rooms), then the
       // deterministic geometry rescue (origin + shell), then the AI repair
       // for anything missing or unmeasured, then rescue again in case the
@@ -1587,6 +1732,14 @@ ${payload.prompt}`
       note?.('Completeness check…');
       plan = await repairTraceIfNeeded(plan, { attachmentParts, sourceSpec, manifest });
       plan = applyDeterministicRescues(plan, sourceSpec);
+      // A hard set (an unlabeled as-built) can need a SECOND focused repair —
+      // one round fixed the room list but left sizes/openings under-read.
+      // repairTraceIfNeeded no-ops when the check is already clean.
+      if (traceLooksIncomplete(plan, sourceSpec, manifest).incomplete) {
+        note?.('Second completeness pass…');
+        plan = await repairTraceIfNeeded(plan, { attachmentParts, sourceSpec, manifest });
+        plan = applyDeterministicRescues(plan, sourceSpec);
+      }
       // CYCLE until faithful: simulate the applied model, show the AI its own
       // result next to the drawing, take its corrections, check again.
       plan = await auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt, budgetMs: auditBudgetMs, note });

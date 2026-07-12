@@ -3,6 +3,7 @@
 import { traceLooksIncomplete, scrubDeferralSummary, mergeTracePlans, repairTraceGeometry, repairTowerStorey, localPlan, promptNeedsDrawing, cleanTraceElements, describeModelForAudit, sanitizeAuditOperations, filterOpsForPass, reclassifyOutdoorRooms, repairBasementRooms, scrubDeadOperations, manifestGaps, applyDeterministicRescues }
   from '../backend/planner.mjs';
 import { applyBimOperations, isDimensionShorthandShellOp } from '../backend/bim-core.mjs';
+import { sanitizeManifest, separateOverlappingRooms } from '../backend/planner.mjs';
 
 let pass = 0, fail = 0;
 const ok = (c, l) => { if (c) { pass++; console.log('  ok  ' + l); } else { fail++; console.log('FAIL  ' + l); } };
@@ -505,6 +506,86 @@ const miniSpec = () => ({
   ok(!(gh.x < porch.x + porch.w && gh.x + gh.w > porch.x), 'greenhouse slid clear of the porch on the same face');
   const carport = plan.operations.find((o) => o.category === 'carport');
   ok(carport.x === 30 && carport.y === 3, 'freestanding carport not dragged to a wall');
+}
+
+// ---- Columbia REV1 nets: default-size runs, overlaps, misread manifest -----
+{
+  // Three rooms at literal 10x10 (the backend default) = unmeasured, even
+  // though dimensions were technically written down.
+  const lazy = { summary: 'Traced 6 rooms.', assumptions: [], warnings: [], operations: [
+    { type: 'add_room', name: 'Basement', x: 0, y: 0, w: 40.5, d: 23, level: -1 },
+    { type: 'add_room', name: 'Kitchen', x: 6.5, y: 0, w: 14.5, d: 12.5 },
+    { type: 'add_room', name: 'Living Room', x: 21, y: 0, w: 19.5, d: 12.5 },
+    { type: 'add_room', name: 'Bedroom', x: 2, y: 10.3, w: 10, d: 10 },
+    { type: 'add_room', name: 'Bathroom', x: 11.5, y: 10.3, w: 10, d: 10 },
+    { type: 'add_room', name: 'Bedroom 2', x: 16.75, y: 10.3, w: 10, d: 10 },
+    ...Array.from({ length: 8 }, () => ({ type: 'add_opening', wall: 'south', widthFt: 3 }))
+  ] };
+  const check = traceLooksIncomplete(lazy, { rooms: [], shell: {} });
+  ok(check.incomplete && check.unmeasuredRooms, 'three 10x10 default rooms flagged as unmeasured');
+  ok(check.unmeasuredRoomNames.includes('Bathroom'), 'default-sized rooms named for the repair pass');
+  ok(check.overlappingRooms && check.overlappingRoomNames.includes('Bathroom'), `overlapping rooms flagged (${check.overlappingRoomNames.join(', ')})`);
+}
+{
+  // Rooms that tile cleanly raise neither flag.
+  const clean = { summary: 'Traced.', assumptions: [], warnings: [], operations: [
+    { type: 'add_room', name: 'Kitchen', x: 0, y: 0, w: 14, d: 12 },
+    { type: 'add_room', name: 'Living', x: 14, y: 0, w: 12, d: 12 },
+    { type: 'add_room', name: 'Bed', x: 0, y: 12, w: 10, d: 10 },
+    ...Array.from({ length: 8 }, () => ({ type: 'add_opening', wall: 'south', widthFt: 3 }))
+  ] };
+  const check = traceLooksIncomplete(clean, { rooms: [], shell: {} });
+  ok(!check.unmeasuredRooms && !check.overlappingRooms, 'tiled, measured rooms pass both nets');
+}
+{
+  // A 2-room "index" is a misread — trust nothing rather than "covers 2 of 2".
+  ok(sanitizeManifest({ roomNames: ['KITCHEN', 'BATH'] }) === null, '2-room manifest distrusted');
+  ok(sanitizeManifest({ roomNames: ['A', 'B', 'C', 'D'] }) !== null, '4-room manifest kept');
+  ok(sanitizeManifest(null) === null, 'null manifest stays null');
+}
+{
+  // Two rooms on a 40x23 plan = enclosed spaces were skipped (unlabeled
+  // as-builts): sparse coverage flags incomplete even when nothing overlaps.
+  const sparse = { summary: 'Traced.', assumptions: [], warnings: [], operations: [
+    { type: 'set_shell', w: 40.5, d: 23 },
+    { type: 'add_room', name: 'Kitchen', x: 0, y: 0, w: 14, d: 12 },
+    { type: 'add_room', name: 'Living Room', x: 14, y: 0, w: 12, d: 12 },
+    ...Array.from({ length: 8 }, () => ({ type: 'add_opening', wall: 'south', widthFt: 3 }))
+  ] };
+  const check = traceLooksIncomplete(sparse, { rooms: [], shell: {} });
+  ok(check.incomplete && check.sparseRooms, 'two rooms on a 40x23 plan = sparse coverage flagged');
+  const full = { summary: 'Traced.', assumptions: [], warnings: [], operations: [
+    { type: 'set_shell', w: 24, d: 20 },
+    { type: 'add_room', name: 'Kitchen', x: 0, y: 0, w: 12, d: 10 },
+    { type: 'add_room', name: 'Living', x: 12, y: 0, w: 12, d: 10 },
+    { type: 'add_room', name: 'Bed', x: 0, y: 10, w: 12, d: 10 },
+    ...Array.from({ length: 8 }, () => ({ type: 'add_opening', wall: 'south', widthFt: 3 }))
+  ] };
+  ok(!traceLooksIncomplete(full, { rooms: [], shell: {} }).sparseRooms, 'well-tiled plan not flagged sparse');
+}
+
+// ---- Deterministic de-overlap: piled rooms slide apart --------------------
+{
+  const plan = { operations: [
+    { type: 'set_shell', w: 40.5, d: 23 },
+    { type: 'add_room', name: 'Hallway', x: 10, y: 10, w: 12, d: 4 },
+    { type: 'add_room', name: 'Bathroom', x: 11, y: 10, w: 6, d: 5 },
+    { type: 'add_room', name: 'Kitchen', x: 0, y: 0, w: 14, d: 10 }
+  ], warnings: [] };
+  separateOverlappingRooms(plan, { shell: { widthFt: 40.5, depthFt: 23 } });
+  const applied = applyBimOperations({ projectName: 'T', revision: 1, shell: { widthFt: 40.5, depthFt: 23, wallHeightFt: 10, storeys: 1, roofType: 'gable', roofPitch: 0.3 }, systems: {}, rooms: [], elements: [], openings: [], levels: [], walls: {} }, plan);
+  const rooms = applied.spec.rooms;
+  let piled = false;
+  for (let i = 0; i < rooms.length; i += 1) {
+    for (let j = i + 1; j < rooms.length; j += 1) {
+      const a = rooms[i];
+      const b = rooms[j];
+      const ov = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y));
+      if (ov > 0.35 * Math.min(a.w * a.d, b.w * b.d)) piled = true;
+    }
+  }
+  ok(!piled, 'overlapping rooms slid apart deterministically');
+  ok((plan.warnings || []).some((w) => /slid/.test(w)), 'the slide is announced honestly');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

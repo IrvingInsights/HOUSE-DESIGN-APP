@@ -62,6 +62,26 @@ function scoreTrace({ spec, plan }) {
     && (r.x < -0.5 || r.y < -0.5 || r.x + r.w > shellW + 0.5 || r.y + r.d > shellD + 0.5));
   add('every ground-floor room inside the shell', strays.length === 0, strays.map((r) => r.name).join(', '));
 
+  // Rooms tile the plan — they never sit on top of each other
+  const overlapNames = new Set();
+  for (let i = 0; i < rooms.length; i += 1) {
+    for (let j = i + 1; j < rooms.length; j += 1) {
+      const a = rooms[i];
+      const b = rooms[j];
+      if (Number(a.level || 1) !== Number(b.level || 1)) continue;
+      const ov = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x))
+        * Math.max(0, Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y));
+      if (ov > 0.35 * Math.min(a.w * a.d, b.w * b.d)) { overlapNames.add(a.name); overlapNames.add(b.name); }
+    }
+  }
+  add("rooms don't pile on each other", overlapNames.size === 0, [...overlapNames].join(', '));
+
+  // A dwelling's rooms tile most of its floor plate — sparse coverage means
+  // enclosed spaces were skipped (the unlabeled-plan failure mode).
+  const groundCover = rooms.filter((r) => Number(r.level || 1) === 1).reduce((sum, r) => sum + r.w * r.d, 0);
+  const coverPct = shellW > 0 && shellD > 0 ? groundCover / (shellW * shellD) : 1;
+  add('rooms cover the floor plan (no skipped spaces)', coverPct >= 0.45, `${Math.round(coverPct * 100)}% of the shell`);
+
   // Rooms named for the basement live below grade (when a basement exists)
   const basement = Number(spec.shell.basementHeightFt) > 0;
   const misleveled = rooms.filter((r) => /basement/i.test(r.name || '') && Number(r.level || 1) !== -1);
