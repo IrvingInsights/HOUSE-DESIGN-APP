@@ -361,7 +361,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const pad = padExtension(spec.shell);
       const padRect = sitePadRect(spec);
       const roofSpec = roofProfile(spec.shell);
-      const { extraFt: storeyLift, baseWallFt: baseStoreyFt, storeys } = storeyInfo(spec.shell);
+      const { extraFt: storeyLift, baseWallFt: baseStoreyFt, storeys, upperFt } = storeyInfo(spec.shell);
       const basementH = basementInfo(spec.shell).heightFt;
       const wallHeight = roofSpec.highWallHeightFt + storeyLift;
       const southWallHeight = (roofSpec.roofType === 'shed' ? roofSpec.southWallHeightFt : roofSpec.highWallHeightFt) + storeyLift;
