@@ -183,8 +183,10 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
   const W = Number(spec.shell.widthFt) || 36;
   const D = Number(spec.shell.depthFt) || 28;
   const snap = (v) => Math.round(v * 2) / 2;
-  const buildingContext = ['foundation', 'shell', 'frame', 'flooring', 'roof'].includes(context);
+  const buildingContext = ['foundation', 'shell', 'frame', 'floor', 'walls', 'roof', 'windows'].includes(context);
   const siteContext = context === 'site' || context === 'outdoors';
+
+
 
   // Two honest framings, no shrunken default: HOUSE (the working view — the
   // shell at full size, like the plan always drew) and SITE (everything —
@@ -389,6 +391,63 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
   }
   const shellW = shellGhost?.ghostW ?? W;
   const shellD = shellGhost?.ghostD ?? D;
+
+  let dragAnnotations = null;
+  if (drag && drag.ghost) {
+    const g = drag.ghost;
+    const tickH = 0.5;
+    const yLine = g.y + g.d + 1;
+    const xLine = g.x + g.w + 1;
+    dragAnnotations = (
+      <g stroke="#5c6258" strokeWidth={0.06} fill="none" opacity={0.8} style={{ fontFamily: 'var(--font-hand)' }}>
+        {/* Width */}
+        <line x1={g.x} y1={yLine} x2={g.x + g.w} y2={yLine} strokeDasharray="0.1 0.1" />
+        <line x1={g.x} y1={yLine - tickH} x2={g.x} y2={yLine + tickH} />
+        <line x1={g.x + g.w} y1={yLine - tickH} x2={g.x + g.w} y2={yLine + tickH} />
+        <text x={g.x + g.w / 2} y={yLine - 0.2} textAnchor="middle" fontSize={1.6} fill="#5c6258" stroke="none">{g.w}′</text>
+
+        {/* Depth */}
+        <line x1={xLine} y1={g.y} x2={xLine} y2={g.y + g.d} strokeDasharray="0.1 0.1" />
+        <line x1={xLine - tickH} y1={g.y} x2={xLine + tickH} y2={g.y} />
+        <line x1={xLine - tickH} y1={g.y + g.d} x2={xLine + tickH} y2={g.y + g.d} />
+        <text x={xLine + 0.3} y={g.y + g.d / 2 + 0.5} textAnchor="start" fontSize={1.6} fill="#5c6258" stroke="none">{g.d}′</text>
+      </g>
+    );
+  } else if (shellGhost) {
+    const tickH = 0.5;
+    const yLine = shellGhost.ghostD + 2;
+    const xLine = shellGhost.ghostW + 2;
+    dragAnnotations = (
+      <g stroke="#5c6258" strokeWidth={0.07} fill="none" opacity={0.8} style={{ fontFamily: 'var(--font-hand)' }}>
+        {/* Width */}
+        <line x1={0} y1={yLine} x2={shellGhost.ghostW} y2={yLine} strokeDasharray="0.15 0.15" />
+        <line x1={0} y1={yLine - tickH} x2={0} y2={yLine + tickH} />
+        <line x1={shellGhost.ghostW} y1={yLine - tickH} x2={shellGhost.ghostW} y2={yLine + tickH} />
+        <text x={shellGhost.ghostW / 2} y={yLine - 0.25} textAnchor="middle" fontSize={2.2} fill="#5c6258" stroke="none">{shellGhost.ghostW}′</text>
+
+        {/* Depth */}
+        <line x1={xLine} y1={0} x2={xLine} y2={shellGhost.ghostD} strokeDasharray="0.15 0.15" />
+        <line x1={xLine - tickH} y1={0} x2={xLine + tickH} y2={0} />
+        <line x1={xLine - tickH} y1={shellGhost.ghostD} x2={xLine + tickH} y2={shellGhost.ghostD} />
+        <text x={xLine + 0.4} y={shellGhost.ghostD / 2 + 0.6} textAnchor="start" fontSize={2.2} fill="#5c6258" stroke="none">{shellGhost.ghostD}′</text>
+      </g>
+    );
+  } else if (edgeDrag && edgeDrag.edge) {
+    const e = edgeDrag.edge;
+    const gx = e.nx * edgeDrag.offset;
+    const gy = e.ny * edgeDrag.offset;
+    const tickH = 0.5;
+    const midX = (e.x0 + e.x1) / 2 + gx;
+    const midY = (e.y0 + e.y1) / 2 + gy;
+    dragAnnotations = (
+      <g stroke="#5c6258" strokeWidth={0.07} fill="none" opacity={0.8} style={{ fontFamily: 'var(--font-hand)' }}>
+        <line x1={midX} y1={midY} x2={midX + e.nx * 2} y2={midY + e.ny * 2} strokeDasharray="0.1 0.1" />
+        <text x={midX + e.nx * 2.5} y={midY + e.ny * 2.5 + 0.5} textAnchor="middle" fontSize={1.8} fill="#5c6258" stroke="none">
+          {edgeDrag.offset > 0 ? '+' : ''}{edgeDrag.offset}′
+        </text>
+      </g>
+    );
+  }
 
   const roomAt = (room) => (drag && drag.id === room.id ? { ...room, ...drag.ghost } : room);
   const gridStep = W > 60 ? 10 : 5;
@@ -653,6 +712,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
             byEdge.top.length > 0 && chip('e-t', vb.x + vb.w / 2, vb.y + inset * 1.6, 'middle', `↑ ${listOf(byEdge.top)}`)
           ].filter(Boolean);
         })()}
+        {dragAnnotations}
       </svg>
       <div className="planNorth">▲ N</div>
       {siteBeyondHouse && (

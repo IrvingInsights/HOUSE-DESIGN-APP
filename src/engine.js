@@ -1439,9 +1439,7 @@ export function getWallSections(spec) {
     west: { name: 'West Wall', lengthFt: spec.shell.depthFt, x: 0, y: 0 },
     east: { name: 'East Wall', lengthFt: spec.shell.depthFt, x: spec.shell.widthFt, y: 0 }
   };
-  const { storeys, extraFt } = storeyInfo(spec.shell);
-  // Upper walls ring the storey's EXTENT plate, not necessarily the footprint.
-  const plate2 = upperPlateRect(spec, 2);
+  const { storeys, extraFt, upperFt } = storeyInfo(spec.shell);
 
   // Custom footprint: walls are the POLYGON EDGES (id wall-e0, wall-e1, …).
   // Construction is still keyed by facing (all north-facing edges share the
@@ -1451,16 +1449,16 @@ export function getWallSections(spec) {
       const r = resolveWallSide(spec, edge.facing, level);
       if (r.omitted) return null;
       const upper = level > 1;
-      const heightFt = upper ? extraFt : r.heightFt;
+      const heightFt = upper ? upperFt : r.heightFt;
       const name = `${WALL_SIDE_LABELS[edge.facing]} Wall${edge.facingSeq > 1 ? ` ${edge.facingSeq}` : ''}`;
       return {
-        id: upper ? `wall-${edge.key}-u` : `wall-${edge.key}`,
-        name: upper ? `${name} (upper)` : name,
+        id: upper ? `wall-${edge.key}-u${level === 2 ? '' : level}` : `wall-${edge.key}`,
+        name: upper ? `${name} (level ${level})` : name,
         side: edge.facing,
         edgeIndex: edge.index,
         edgeKey: edge.key,
         storey: upper ? 'upper' : 'ground',
-        level: upper ? 2 : 1,
+        level,
         lengthFt: edge.lengthFt,
         heightFt,
         x: Math.min(edge.x0, edge.x1),
@@ -1478,44 +1476,47 @@ export function getWallSections(spec) {
         rValue: r.assembly.rValue,
         interiorFinish: r.interiorFinish,
         exteriorFinish: r.exteriorFinish,
-        note: `${r.assembly.label} (R≈${r.assembly.rValue}, ${r.thicknessFt.toFixed(2)}' thick); ${edge.lengthFt}' long, ${heightFt}' ${upper ? 'of upper storey' : 'high'}. One segment of the ${edge.facing}-facing walls — construction is shared across that facing. Move it in the Plan view.`
+        note: `${r.assembly.label} (R≈${r.assembly.rValue}, ${r.thicknessFt.toFixed(2)}' thick); ${edge.lengthFt}' long, ${heightFt}' ${upper ? `on level ${level}` : 'high'}. One segment of the ${edge.facing}-facing walls — construction is shared across that facing. Move it in the Plan view.`
       };
     };
     const edges = footprintEdges(spec);
     const sections = edges.map((edge) => edgeSection(edge, 1)).filter(Boolean);
-    if (storeys > 1 && extraFt > 0) {
-      if (plate2) {
-        // Upper storey rings its extent plate — a plain rectangle, so the four
-        // cardinal upper sections stay exactly as on a legacy design.
-        for (const side of WALL_SIDES) {
-          const r = resolveWallSide(spec, side, 2);
-          if (r.omitted) continue;
-          sections.push({
-            id: `wall-${side}-u`,
-            name: `${layout[side].name} (upper)`,
-            side,
-            storey: 'upper',
-            level: 2,
-            lengthFt: side === 'north' || side === 'south' ? plate2.w : plate2.d,
-            heightFt: extraFt,
-            x: side === 'east' ? plate2.x + plate2.w : plate2.x,
-            y: side === 'south' ? plate2.y + plate2.d : plate2.y,
-            category: 'wall-section',
-            type: 'wall',
-            w: side === 'north' || side === 'south' ? plate2.w : r.thicknessFt,
-            d: side === 'east' || side === 'west' ? plate2.d : r.thicknessFt,
-            h: extraFt,
-            assembly: r.assembly.label,
-            assemblyKey: r.assemblyKey,
-            thicknessFt: r.thicknessFt,
-            rValue: r.assembly.rValue,
-            interiorFinish: r.interiorFinish,
-            exteriorFinish: r.exteriorFinish,
-            note: `${r.assembly.label} upper band around the storey extent plate.`
-          });
+    for (let level = 2; level <= Math.ceil(storeys); level++) {
+      if (upperFt > 0) {
+        const plate = upperPlateRect(spec, level);
+        if (plate) {
+          // Upper storey rings its extent plate — a plain rectangle, so the four
+          // cardinal upper sections stay exactly as on a legacy design.
+          for (const side of WALL_SIDES) {
+            const r = resolveWallSide(spec, side, level);
+            if (r.omitted) continue;
+            sections.push({
+              id: `wall-${side}-u${level === 2 ? '' : level}`,
+              name: `${layout[side].name} (level ${level})`,
+              side,
+              storey: 'upper',
+              level,
+              lengthFt: side === 'north' || side === 'south' ? plate.w : plate.d,
+              heightFt: upperFt,
+              x: side === 'east' ? plate.x + plate.w : plate.x,
+              y: side === 'south' ? plate.y + plate.d : plate.y,
+              category: 'wall-section',
+              type: 'wall',
+              w: side === 'north' || side === 'south' ? plate.w : r.thicknessFt,
+              d: side === 'east' || side === 'west' ? plate.d : r.thicknessFt,
+              h: upperFt,
+              assembly: r.assembly.label,
+              assemblyKey: r.assemblyKey,
+              thicknessFt: r.thicknessFt,
+              rValue: r.assembly.rValue,
+              interiorFinish: r.interiorFinish,
+              exteriorFinish: r.exteriorFinish,
+              note: `${r.assembly.label} upper band around the storey extent plate.`
+            });
+          }
+        } else {
+          sections.push(...edges.map((edge) => edgeSection(edge, level)).filter(Boolean));
         }
-      } else {
-        sections.push(...edges.map((edge) => edgeSection(edge, 2)).filter(Boolean));
       }
     }
     return sections;
@@ -1524,21 +1525,22 @@ export function getWallSections(spec) {
     const r = resolveWallSide(spec, side, level);
     if (r.omitted) return null;
     const upper = level > 1;
-    const heightFt = upper ? extraFt : r.heightFt;
-    const base = upper && plate2
+    const heightFt = upper ? upperFt : r.heightFt;
+    const plate = upper ? upperPlateRect(spec, level) : null;
+    const base = upper && plate
       ? {
         name: layout[side].name,
-        lengthFt: side === 'north' || side === 'south' ? plate2.w : plate2.d,
-        x: side === 'east' ? plate2.x + plate2.w : plate2.x,
-        y: side === 'south' ? plate2.y + plate2.d : plate2.y
+        lengthFt: side === 'north' || side === 'south' ? plate.w : plate.d,
+        x: side === 'east' ? plate.x + plate.w : plate.x,
+        y: side === 'south' ? plate.y + plate.d : plate.y
       }
       : layout[side];
     return {
-      id: upper ? `wall-${side}-u` : `wall-${side}`,
-      name: upper ? `${base.name} (upper)` : base.name,
+      id: upper ? `wall-${side}-u${level === 2 ? '' : level}` : `wall-${side}`,
+      name: upper ? `${base.name} (level ${level})` : base.name,
       side,
       storey: upper ? 'upper' : 'ground',
-      level: upper ? 2 : 1,
+      level,
       lengthFt: base.lengthFt,
       heightFt,
       x: base.x,
@@ -1554,12 +1556,14 @@ export function getWallSections(spec) {
       rValue: r.assembly.rValue,
       interiorFinish: r.interiorFinish,
       exteriorFinish: r.exteriorFinish,
-      note: `${r.assembly.label} (R≈${r.assembly.rValue}, ${r.thicknessFt.toFixed(2)}' thick); ${base.lengthFt}' long, ${heightFt}' ${upper ? 'of upper storey' : 'high'}. Interior: ${r.interiorFinish}. Openings on this side: ${spec.openings.filter((opening) => opening.wall === side).length}.`
+      note: `${r.assembly.label} (R≈${r.assembly.rValue}, ${r.thicknessFt.toFixed(2)}' thick); ${base.lengthFt}' long, ${heightFt}' ${upper ? `on level ${level}` : 'high'}. Interior: ${r.interiorFinish}. Openings on this side: ${spec.openings.filter((opening) => opening.wall === side && Number(opening.level || 1) === level).length}.`
     };
   };
   const sections = WALL_SIDES.map((side) => buildSection(side, 1)).filter(Boolean);
-  if (storeys > 1 && extraFt > 0) {
-    sections.push(...WALL_SIDES.map((side) => buildSection(side, 2)).filter(Boolean));
+  for (let level = 2; level <= Math.ceil(storeys); level++) {
+    if (upperFt > 0) {
+      sections.push(...WALL_SIDES.map((side) => buildSection(side, level)).filter(Boolean));
+    }
   }
   return sections;
 }
@@ -3082,8 +3086,9 @@ export function detectIssues(spec) {
   if (derivedForChecks.panels > 0 && derivedForChecks.panels > derivedForChecks.panelRoom) {
     issues.push({ severity: 'warning', title: `Solar needs ${derivedForChecks.panels} panels but the roof holds ~${derivedForChecks.panelRoom}`, owner: 'Engineer', system: 'power', fix: 'Grow the roof, cut electric loads (a wood heat source helps), or plan a ground-mount array.' });
   }
-  if (naturalApproach && derivedForChecks.total > 324700) {
-    issues.push({ severity: 'warning', title: 'Cost is over the owner-builder loan ceiling', owner: 'Project Manager', system: 'shell', fix: `Estimated ${'$' + Math.round(derivedForChecks.total).toLocaleString()} exceeds a typical USDA direct-loan limit ($324,700). Shrink the footprint, simplify systems, or take on more sweat equity.` });
+  const budgetCeiling = Number(spec.shell?.budgetCeiling ?? 324700);
+  if (naturalApproach && derivedForChecks.total > budgetCeiling) {
+    issues.push({ severity: 'warning', title: 'Cost is over the owner-builder loan ceiling', owner: 'Project Manager', system: 'shell', fix: `Estimated ${'$' + Math.round(derivedForChecks.total).toLocaleString()} exceeds the budget limit (${'$' + budgetCeiling.toLocaleString()}). Shrink the footprint, simplify systems, or take on more sweat equity.` });
   }
   // Overhang rules (aiCritic R325.5.4-style protection + passive-solar shading).
   const overhangCheck = resolveOverhangs(spec.shell);
@@ -3447,11 +3452,17 @@ export function deriveDesign(spec, wallSections) {
 
   // Sweat equity: labor fraction of each trade you take on yourself
   // (add-on laborFractionByCategory: walls .8, roof .55, utilities .45).
-  const sweat = (utilities.diyWalls ? cost.walls * 0.8 : 0)
-    + (utilities.diyRoof ? cost.roof * 0.55 : 0)
-    + (utilities.diyHeat ? cost.heat * 0.45 : 0)
-    + (utilities.diyFoundation ? cost.foundation * 0.5 : 0)
-    + (utilities.diyFrame ? cost.frame * 0.6 : 0);
+  const sweatWallsFrac = Number(spec.shell?.sweatWallsFrac ?? 0.8);
+  const sweatRoofFrac = Number(spec.shell?.sweatRoofFrac ?? 0.55);
+  const sweatHeatFrac = Number(spec.shell?.sweatHeatFrac ?? 0.45);
+  const sweatFoundationFrac = Number(spec.shell?.sweatFoundationFrac ?? 0.5);
+  const sweatFrameFrac = Number(spec.shell?.sweatFrameFrac ?? 0.6);
+
+  const sweat = (utilities.diyWalls ? cost.walls * sweatWallsFrac : 0)
+    + (utilities.diyRoof ? cost.roof * sweatRoofFrac : 0)
+    + (utilities.diyHeat ? cost.heat * sweatHeatFrac : 0)
+    + (utilities.diyFoundation ? cost.foundation * sweatFoundationFrac : 0)
+    + (utilities.diyFrame ? cost.frame * sweatFrameFrac : 0);
   const total = totalBeforeSweat - sweat;
 
   // Embodied carbon (kg CO2e, directional/comparative — add-on coefficients).

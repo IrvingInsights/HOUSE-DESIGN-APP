@@ -4,6 +4,7 @@ import { getCached, makeCacheKey, setCached } from './cache.mjs';
 import { slugify } from './utils.mjs';
 import { applyBimOperations, isDimensionShorthandShellOp, shellShorthandDims, parseWxD } from './bim-core.mjs';
 import fs from 'node:fs';
+import path from 'node:path';
 
 const operationSchema = {
   type: 'object',
@@ -1193,7 +1194,7 @@ export async function extractDrawingManifest({ attachmentParts }) {
 // same drawing, and ask ONLY for the rooms/openings it still owes. Merge the
 // missing pieces in (dedup rooms by name). Model-agnostic — makes a flaky
 // single pass reliable without a full multi-stage rework.
-async function repairTraceIfNeeded(plan, { attachmentParts, sourceSpec, manifest = null }) {
+async function repairTraceIfNeeded(plan, { attachmentParts, sourceSpec, manifest = null, escalate = false }) {
   const check = traceLooksIncomplete(plan, sourceSpec, manifest);
   if (!check.incomplete) return scrubDeferralSummary(plan);
 
@@ -1224,7 +1225,11 @@ ${check.gaps?.shellDeviation ? `- THE DRAWING'S DIMENSION STRINGS say the CONDIT
 Do NOT restate the shell or footprint unless the earlier value is wrong. NEVER defer, summarize, or write "future refinement" — emit the operations. Report final counts in summary.`
   };
 
-  const res = await callGemini({ parts: [repairText, ...attachmentParts], responseSchema: geminiSchema(operationSchema) });
+  const res = await callGemini({
+    parts: [repairText, ...attachmentParts],
+    responseSchema: geminiSchema(operationSchema),
+    model: escalate ? 'gemini-1.5-pro' : undefined
+  });
   if (!res.ok) return scrubDeferralSummary(plan);
   let extra;
   try { extra = JSON.parse(res.text); } catch { return scrubDeferralSummary(plan); }
@@ -1278,7 +1283,7 @@ const AUDIT_ROUNDS = 2;
 // the server keeps working, which reads as "the engine died". Budget the
 // loop: a round only STARTS while total planning time is under this.
 const AUDIT_TIME_BUDGET_MS = 200 * 1000;
-async function auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt = Date.now(), force = false, budgetMs = AUDIT_TIME_BUDGET_MS, note = null }) {
+async function auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt = Date.now(), force = false, budgetMs = AUDIT_TIME_BUDGET_MS, note = null, escalate = false }) {
   if (!attachmentParts?.length) return plan;
   if (!(plan.operations || []).length && !force) return plan;
   plan.operations ||= [];
@@ -1309,7 +1314,11 @@ Rules: correct EXISTING items by id — never re-add something already listed. I
     };
     let res;
     try {
-      res = await callGemini({ parts: [auditText, ...attachmentParts], responseSchema: geminiSchema(operationSchema) });
+      res = await callGemini({
+        parts: [auditText, ...attachmentParts],
+        responseSchema: geminiSchema(operationSchema),
+        model: escalate ? 'gemini-1.5-pro' : undefined
+      });
     } catch { break; }
     if (!res?.ok) break;
     let verdict;
@@ -1465,7 +1474,7 @@ export function filterOpsForPass(ops, types) {
   return (Array.isArray(ops) ? ops : []).filter((op) => op && allowed.has(op.type));
 }
 
-async function stagedTracePlan({ attachmentParts, geminiResponseSchema, note }) {
+async function stagedTracePlan({ attachmentParts, geminiResponseSchema, note, escalate = false }) {
   const collected = { structure: [], rooms: [], openings: [], elements: [] };
   for (const pass of TRACE_PASSES) {
     note?.(pass.note);
@@ -1474,7 +1483,8 @@ async function stagedTracePlan({ attachmentParts, geminiResponseSchema, note }) 
       // Pass-specific schema + tight cap: the full 24-field op schema invited
       // a digit-loop degeneration (33k chars of '0' logged) — fewer number
       // fields to loop in, and any future loop dies at 8k tokens in seconds.
-      res = await callGemini({ parts: [{ text: `${pass.text}\n${TRACE_CONVENTIONS}` }, ...attachmentParts], responseSchema: passResponseSchema(pass.key, pass.types), maxOutputTokens: 8192 });
+      const model = (escalate && (pass.key === 'rooms' || pass.key === 'openings')) ? 'gemini-1.5-pro' : undefined;
+      res = await callGemini({ parts: [{ text: `${pass.text}\n${TRACE_CONVENTIONS}` }, ...attachmentParts], responseSchema: passResponseSchema(pass.key, pass.types), maxOutputTokens: 8192, model });
     } catch {
       res = null;
     }
@@ -1491,9 +1501,10 @@ async function stagedTracePlan({ attachmentParts, geminiResponseSchema, note }) 
       // Unreadable usually means the reply outran the token cap — one retry
       // asking for a tighter list (the classic single call retries the same).
       try {
+        const model = (escalate && (pass.key === 'rooms' || pass.key === 'openings')) ? 'gemini-1.5-pro' : undefined;
         res = await callGemini({ parts: [{ text: `Your previous reply was truncated or unreadable. Same task again, but reply with FEWER, tighter operations — at most 30, the most important first.
 ${pass.text}
-${TRACE_CONVENTIONS}` }, ...attachmentParts], responseSchema: passResponseSchema(pass.key, pass.types), maxOutputTokens: 8192 });
+${TRACE_CONVENTIONS}` }, ...attachmentParts], responseSchema: passResponseSchema(pass.key, pass.types), maxOutputTokens: 8192, model });
       } catch { res = null; }
       if (res?.ok) {
         try {
@@ -1552,7 +1563,7 @@ export async function aiPlan(payload) {
     shell: payload?.bim?.shell || payload?.spec?.shell
   });
   const cached = getCached(cacheKey);
-  if (cached) return { ...cached, source: `${cached.source || 'ai-planner'}-cache` };
+  if (cached && payload.bypassCache !== true) return { ...cached, source: `${cached.source || 'ai-planner'}-cache` };
 
   const sourceSpec = payload.bim || payload.spec || {};
   const compactSpec = {
@@ -1677,91 +1688,129 @@ ${payload.prompt}`
     // Job-mode fresh traces read the set in FOCUSED PASSES first; anything
     // less than a structural success falls through to the classic one call.
     let plan = null;
-    if (freshTrace && payload.jobMode === true) {
-      const stagedParts = geminiParts(content.filter((c) => c.type === 'input_image'));
-      if (stagedParts.length) {
-        plan = await stagedTracePlan({ attachmentParts: stagedParts, geminiResponseSchema, note });
-        if (plan) plan.warnings.push('Read the set in four focused passes (structure, rooms, openings, elements).');
-        else note?.('Focused passes came up short — reading the whole set in one pass instead…');
+    if (freshTrace) {
+      const runTakeoff = async (escalate) => {
+        let takeoffPlan = null;
+        if (payload.jobMode === true) {
+          const stagedParts = geminiParts(content.filter((c) => c.type === 'input_image'));
+          if (stagedParts.length) {
+            takeoffPlan = await stagedTracePlan({ attachmentParts: stagedParts, geminiResponseSchema, note, escalate });
+            if (takeoffPlan) takeoffPlan.warnings.push('Read the set in four focused passes (structure, rooms, openings, elements).');
+            else note?.('Focused passes came up short — reading the whole set in one pass instead…');
+          }
+        }
+        if (!takeoffPlan) {
+          let res = await callGemini({ parts: geminiParts(content), responseSchema: geminiResponseSchema, model: escalate ? 'gemini-1.5-pro' : undefined });
+          if (!res.ok) {
+            const fallback = localPlan(payload);
+            fallback.warnings.unshift(`AI planner unavailable: ${res.status} ${res.errorText.slice(0, 160)}`);
+            return fallback;
+          }
+          try {
+            takeoffPlan = JSON.parse(res.text);
+          } catch {
+            // Truncated/garbled output: one retry asking for a tighter plan instead
+            // of dropping the user's turn on the floor.
+            res = await callGemini({
+              parts: [{ text: 'Your previous response was truncated mid-JSON. Reply again with FEWER, higher-level operations (at most 30, most important first) and shorter reason strings.' }, ...geminiParts(content)],
+              responseSchema: geminiResponseSchema,
+              model: escalate ? 'gemini-1.5-pro' : undefined
+            });
+            try {
+              takeoffPlan = res.ok ? JSON.parse(res.text) : null;
+            } catch { takeoffPlan = null; }
+            if (!takeoffPlan) {
+              const fallback = localPlan(payload);
+              fallback.warnings.unshift('AI planner returned unreadable JSON twice — try again, or break the request into smaller steps.');
+              return fallback;
+            }
+          }
+        }
+
+        const attachmentParts = geminiParts(content.filter((c) => c.type === 'input_image'));
+        note?.('Indexing the drawing set…');
+        let manifest = null;
+        try { manifest = sanitizeManifest(await extractDrawingManifest({ attachmentParts })); } catch { manifest = null; }
+        
+        takeoffPlan = scrubDeadOperations(takeoffPlan);
+        takeoffPlan = reclassifyOutdoorRooms(takeoffPlan);
+        takeoffPlan = repairBasementRooms(takeoffPlan, sourceSpec);
+        takeoffPlan = repairTraceGeometry(takeoffPlan, sourceSpec);
+        note?.('Completeness check…');
+        takeoffPlan = await repairTraceIfNeeded(takeoffPlan, { attachmentParts, sourceSpec, manifest, escalate });
+        takeoffPlan = applyDeterministicRescues(takeoffPlan, sourceSpec);
+        
+        // A hard set (an unlabeled as-built) can need a SECOND focused repair —
+        // one round fixed the room list but left sizes/openings under-read.
+        // repairTraceIfNeeded no-ops when the check is already clean.
+        if (traceLooksIncomplete(takeoffPlan, sourceSpec, manifest).incomplete) {
+          note?.('Second completeness pass…');
+          takeoffPlan = await repairTraceIfNeeded(takeoffPlan, { attachmentParts, sourceSpec, manifest, escalate });
+          takeoffPlan = applyDeterministicRescues(takeoffPlan, sourceSpec);
+        }
+        // CYCLE until faithful: simulate the applied model, show the AI its own
+        // result next to the drawing, take its corrections, check again.
+        takeoffPlan = await auditTraceLoop(takeoffPlan, { attachmentParts, sourceSpec, startedAt, budgetMs: auditBudgetMs, note, escalate });
+        // The audit merges NEW ops (it added a greenhouse "room" once) — every
+        // deterministic rescue must run again on them, not just a subset.
+        takeoffPlan = applyDeterministicRescues(takeoffPlan, sourceSpec);
+        // Surface the index honestly: what the sheets list vs what got traced.
+        if (manifest) {
+          const finalGaps = manifestGaps(takeoffPlan, sourceSpec, manifest);
+          if (finalGaps) {
+            takeoffPlan.warnings = [...(takeoffPlan.warnings || []),
+              `Drawing index: ${finalGaps.roomNames.length} rooms, ${finalGaps.windowCount} windows, ${finalGaps.doorCount} doors across ${finalGaps.sheetCount} sheet${finalGaps.sheetCount === 1 ? '' : 's'} — takeoff covers ${finalGaps.roomsCovered} of ${finalGaps.roomNames.length} rooms.`];
+          }
+        }
+        return takeoffPlan;
+      };
+
+      plan = await runTakeoff(false);
+      const isFallback = String(plan?.source || '').startsWith('local');
+      if (!isFallback) {
+        let report = applyBimOperations(sourceSpec, plan);
+        let checks = scoreTrace(report.spec, plan);
+        let passedCount = checks.filter((c) => c.pass).length;
+        const totalChecks = checks.length;
+        
+        autoCaptureTrace(payload.attachedImages, plan, report.spec, checks);
+
+        if (passedCount < 10) {
+          note?.(`Trace score below gate (${passedCount}/${totalChecks} checks passed) — auto-retrying once with escalated model tier…`);
+          plan = await runTakeoff(true);
+          report = applyBimOperations(sourceSpec, plan);
+          checks = scoreTrace(report.spec, plan);
+          passedCount = checks.filter((c) => c.pass).length;
+          autoCaptureTrace(payload.attachedImages, plan, report.spec, checks);
+        }
+
+        const scoreMessage = formatPlainLanguageScore(checks);
+        plan.summary = `${scoreMessage}\n\n${plan.summary || ''}`;
       }
-    }
-    if (!plan) {
-    let res = await callGemini({ parts: geminiParts(content), responseSchema: geminiResponseSchema });
-    if (!res.ok) {
-      const fallback = localPlan(payload);
-      fallback.warnings.unshift(`AI planner unavailable: ${res.status} ${res.errorText.slice(0, 160)}`);
-      return fallback;
-    }
-    try {
-      plan = JSON.parse(res.text);
-    } catch {
-      // Truncated/garbled output: one retry asking for a tighter plan instead
-      // of dropping the user's turn on the floor.
-      res = await callGemini({
-        parts: [{ text: 'Your previous response was truncated mid-JSON. Reply again with FEWER, higher-level operations (at most 30, most important first) and shorter reason strings.' }, ...geminiParts(content)],
-        responseSchema: geminiResponseSchema
-      });
-      try {
-        plan = res.ok ? JSON.parse(res.text) : null;
-      } catch { plan = null; }
-      if (!plan) {
+    } else {
+      let res = await callGemini({ parts: geminiParts(content), responseSchema: geminiResponseSchema });
+      if (!res.ok) {
         const fallback = localPlan(payload);
-        fallback.warnings.unshift('AI planner returned unreadable JSON twice — try again, or break the request into smaller steps.');
+        fallback.warnings.unshift(`AI planner unavailable: ${res.status} ${res.errorText.slice(0, 160)}`);
         return fallback;
       }
-    }
-    }
-    // A FRESH drawing takeoff must be complete — verify and repair a punted
-    // pass. Follow-up edits skip this (repairing an edit re-adds duplicates).
-    if (freshTrace) {
-      const attachmentParts = geminiParts(content.filter((c) => c.type === 'input_image'));
-      // The drawing's own INDEX first: a slim dedicated extraction the later
-      // completeness checks hold the takeoff against. Failure-tolerant — a
-      // null manifest means every later step behaves exactly as before.
-      note?.('Indexing the drawing set…');
-      let manifest = null;
-      try { manifest = sanitizeManifest(await extractDrawingManifest({ attachmentParts })); } catch { manifest = null; }
-      // Dead-op scrub first (fieldless updates, nameless rooms), then the
-      // deterministic geometry rescue (origin + shell), then the AI repair
-      // for anything missing or unmeasured, then rescue again in case the
-      // repair itself added rooms in a stray frame.
-      plan = scrubDeadOperations(plan);
-      plan = reclassifyOutdoorRooms(plan);
-      plan = repairBasementRooms(plan, sourceSpec);
-      plan = repairTraceGeometry(plan, sourceSpec);
-      note?.('Completeness check…');
-      plan = await repairTraceIfNeeded(plan, { attachmentParts, sourceSpec, manifest });
-      plan = applyDeterministicRescues(plan, sourceSpec);
-      // A hard set (an unlabeled as-built) can need a SECOND focused repair —
-      // one round fixed the room list but left sizes/openings under-read.
-      // repairTraceIfNeeded no-ops when the check is already clean.
-      if (traceLooksIncomplete(plan, sourceSpec, manifest).incomplete) {
-        note?.('Second completeness pass…');
-        plan = await repairTraceIfNeeded(plan, { attachmentParts, sourceSpec, manifest });
-        plan = applyDeterministicRescues(plan, sourceSpec);
-      }
-      // CYCLE until faithful: simulate the applied model, show the AI its own
-      // result next to the drawing, take its corrections, check again.
-      plan = await auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt, budgetMs: auditBudgetMs, note });
-      // The audit merges NEW ops (it added a greenhouse "room" once) — every
-      // deterministic rescue must run again on them, not just a subset.
-      plan = applyDeterministicRescues(plan, sourceSpec);
-      // Surface the index honestly: what the sheets list vs what got traced.
-      if (manifest) {
-        const finalGaps = manifestGaps(plan, sourceSpec, manifest);
-        if (finalGaps) {
-          plan.warnings = [...(plan.warnings || []),
-            `Drawing index: ${finalGaps.roomNames.length} rooms, ${finalGaps.windowCount} windows, ${finalGaps.doorCount} doors across ${finalGaps.sheetCount} sheet${finalGaps.sheetCount === 1 ? '' : 's'} — takeoff covers ${finalGaps.roomsCovered} of ${finalGaps.roomNames.length} rooms.`];
+      try {
+        plan = JSON.parse(res.text);
+      } catch {
+        // Truncated/garbled output: one retry asking for a tighter plan instead
+        // of dropping the user's turn on the floor.
+        res = await callGemini({
+          parts: [{ text: 'Your previous response was truncated mid-JSON. Reply again with FEWER, higher-level operations (at most 30, most important first) and shorter reason strings.' }, ...geminiParts(content)],
+          responseSchema: geminiResponseSchema
+        });
+        try {
+          plan = res.ok ? JSON.parse(res.text) : null;
+        } catch { plan = null; }
+        if (!plan) {
+          const fallback = localPlan(payload);
+          fallback.warnings.unshift('AI planner returned unreadable JSON twice — try again, or break the request into smaller steps.');
+          return fallback;
         }
-      }
-    } else if (asksAudit && sendAttachments) {
-      // Audit-only ask ("re-check the trace against the drawing"): compare
-      // the CURRENT model to the drawing and emit only the corrections.
-      const attachmentParts = geminiParts(content.filter((c) => c.type === 'input_image'));
-      plan = await auditTraceLoop(plan, { attachmentParts, sourceSpec, startedAt, force: true, budgetMs: auditBudgetMs, note });
-      plan = applyDeterministicRescues(plan, sourceSpec);
-      if (!(plan.operations || []).length && !String(plan.summary || '').trim()) {
-        plan.summary = 'Checked the model against the drawing — no discrepancies worth correcting.';
       }
     }
     return setCached(cacheKey, { source: 'ai-planner-gemini', ...plan }, 3 * 60 * 1000);
@@ -1798,4 +1847,153 @@ ${payload.prompt}`
   const text = data.output_text || data.output?.flatMap((item) => item.content || []).find((item) => item.type === 'output_text')?.text || '';
   const plan = JSON.parse(text);
   return setCached(cacheKey, { source: 'ai-planner', ...plan }, 3 * 60 * 1000);
+}
+
+export function scoreTrace(spec, plan) {
+  // Support both (spec, plan) and ({ spec, plan })
+  let targetSpec = spec;
+  let targetPlan = plan;
+  if (spec && !plan && spec.spec && spec.plan) {
+    targetSpec = spec.spec;
+    targetPlan = spec.plan;
+  }
+
+  const checks = [];
+  const rooms = targetSpec.rooms || [];
+  const openings = targetSpec.openings || [];
+  const shellW = Number(targetSpec.shell?.widthFt) || 0;
+  const shellD = Number(targetSpec.shell?.depthFt) || 0;
+  const add = (name, pass, detail = '') => checks.push({ name, pass, detail });
+
+  add('traced at least 2 rooms', rooms.length >= 2, `${rooms.length} rooms`);
+
+  // Placeholder signature: most rooms sharing one identical size
+  const sizes = new Map();
+  rooms.forEach((r) => { const k = `${r.w}x${r.d}`; sizes.set(k, (sizes.get(k) || 0) + 1); });
+  const biggestShare = rooms.length ? Math.max(...sizes.values()) / rooms.length : 0;
+  add('rooms individually measured (no placeholder run)', rooms.length < 4 || biggestShare < 0.6,
+    `${Math.round(biggestShare * 100)}% share one size`);
+
+  // Ground rooms inside the shell
+  const strays = rooms.filter((r) => Number(r.level || 1) === 1
+    && (r.x < -0.5 || r.y < -0.5 || r.x + r.w > shellW + 0.5 || r.y + r.d > shellD + 0.5));
+  add('every ground-floor room inside the shell', strays.length === 0, strays.map((r) => r.name).join(', '));
+
+  // Rooms tile the plan — they never sit on top of each other
+  const overlapNames = new Set();
+  for (let i = 0; i < rooms.length; i += 1) {
+    for (let j = i + 1; j < rooms.length; j += 1) {
+      const a = rooms[i];
+      const b = rooms[j];
+      if (Number(a.level || 1) !== Number(b.level || 1)) continue;
+      const ov = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x))
+        * Math.max(0, Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y));
+      if (ov > 0.35 * Math.min(a.w * a.d, b.w * b.d)) { overlapNames.add(a.name); overlapNames.add(b.name); }
+    }
+  }
+  add("rooms don't pile on each other", overlapNames.size === 0, [...overlapNames].join(', '));
+
+  // A dwelling's rooms tile most of its floor plate — sparse coverage means
+  // enclosed spaces were skipped (the unlabeled-plan failure mode).
+  const groundCover = rooms.filter((r) => Number(r.level || 1) === 1).reduce((sum, r) => sum + r.w * r.d, 0);
+  const coverPct = shellW > 0 && shellD > 0 ? groundCover / (shellW * shellD) : 1;
+  add('rooms cover the floor plan (no skipped spaces)', coverPct >= 0.45, `${Math.round(coverPct * 100)}% of the shell`);
+
+  // Rooms named for the basement live below grade (when a basement exists)
+  const basement = Number(spec.shell?.basementHeightFt) > 0;
+  const misleveled = rooms.filter((r) => /basement/i.test(r.name || '') && Number(r.level || 1) !== -1);
+  add('basement-named rooms on the basement level', !basement || misleveled.length === 0, misleveled.map((r) => r.name).join(', '));
+
+  // Openings sanity floor: any dwelling has a door and windows
+  add('a believable number of openings', openings.length >= Math.max(4, Math.min(rooms.length, 8)), `${openings.length} openings`);
+
+  // Openings positioned within their wall
+  const badPos = openings.filter((o) => {
+    const along = o.wall === 'north' || o.wall === 'south' ? Number(o.x) || 0 : Number(o.y) || 0;
+    const wallLen = o.wall === 'north' || o.wall === 'south' ? shellW : shellD;
+    return o.wall !== 'roof' && (along < -0.5 || along + (Number(o.widthFt) || 3) > wallLen + 1);
+  });
+  add('openings sit within their walls', badPos.length === 0, `${badPos.length} out of range`);
+
+  // Partitions inside the shell
+  const strayParts = (spec.elements || []).filter((e) => e.category === 'partition'
+    && (e.x < -0.5 || e.y < -0.5 || e.x + e.w > shellW + 1 || e.y + e.d > shellD + 1));
+  add('interior walls inside the shell', strayParts.length === 0, strayParts.map((e) => e.name).join(', '));
+
+  // Shell agrees with the drawing's own dimension strings (when indexed)
+  const idx = (targetPlan?.warnings || []).find((w) => /drawing index/i.test(w)) || '';
+  const devWarn = (targetPlan?.warnings || []).some((w) => /dimension strings say/i.test(w));
+  add('shell matches the drawing index (or no index)', !devWarn, idx.slice(0, 60));
+
+  // Self-check convergence: corrections must not grow round over round
+  const roundFixes = (targetPlan?.warnings || [])
+    .map((w) => /self-check round (\d+): corrected (\d+)/i.exec(w))
+    .filter(Boolean)
+    .sort((a, b) => Number(a[1]) - Number(b[1]))
+    .map((m) => Number(m[2]));
+  add('self-check converging (fixes not growing)', roundFixes.length < 2 || roundFixes[1] <= roundFixes[0], roundFixes.join(' -> '));
+
+  return checks;
+}
+
+export function formatPlainLanguageScore(checks) {
+  const passed = checks.filter(c => c.pass).length;
+  const total = checks.length;
+  if (passed === total) {
+    return `Read your drawing — ${passed} of ${total} checks passed.`;
+  }
+
+  const failedList = checks.filter(c => !c.pass);
+  const details = failedList.map(c => {
+    if (c.name === 'every ground-floor room inside the shell') return 'some rooms sit outside the building';
+    if (c.name === "rooms don't pile on each other") return 'some rooms overlap';
+    if (c.name === 'rooms cover the floor plan (no skipped spaces)') return 'some spaces were skipped';
+    if (c.name === 'a believable number of openings') return 'some windows or doors were missed';
+    if (c.name === 'openings sit within their walls') return 'some openings are out of range';
+    if (c.name === 'interior walls inside the shell') return 'some partition walls are misplaced';
+    if (c.name === 'rooms individually measured (no placeholder run)') return 'some rooms have default sizes';
+    if (c.name === 'traced at least 2 rooms') return 'too few rooms were detected';
+    return c.name;
+  }).join(' and ');
+
+  return `Read your drawing — ${passed} of ${total} checks passed. (${details || 'some items may sit wrong'}; tap Review to see them.)`;
+}
+
+export function autoCaptureTrace(attachedImages, plan, spec, checks) {
+  try {
+    const corpusDir = path.join(process.cwd(), '.data', 'trace-corpus');
+    if (!fs.existsSync(corpusDir)) {
+      fs.mkdirSync(corpusDir, { recursive: true });
+    }
+
+    for (const image of (attachedImages || [])) {
+      if (typeof image.src === 'string' && image.src.startsWith('data:application/pdf;base64,')) {
+        const match = image.src.match(/^data:application\/pdf;base64,(.*)$/);
+        if (!match) continue;
+        const buffer = Buffer.from(match[1], 'base64');
+
+        const cleanName = slugify(image.name.replace(/\.[^/.]+$/, ''));
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const pdfFilename = `${cleanName}-${timestamp}.pdf`;
+        const jsonFilename = `${cleanName}-${timestamp}.result.json`;
+
+        fs.writeFileSync(path.join(corpusDir, pdfFilename), buffer);
+
+        const meta = {
+          when: new Date().toISOString(),
+          originalName: image.name,
+          score: {
+            passed: checks.filter(c => c.pass).length,
+            total: checks.length,
+            checks
+          },
+          plan,
+          spec
+        };
+        fs.writeFileSync(path.join(corpusDir, jsonFilename), JSON.stringify(meta, null, 2));
+      }
+    }
+  } catch (error) {
+    console.error('Failed to auto-capture trace:', error);
+  }
 }

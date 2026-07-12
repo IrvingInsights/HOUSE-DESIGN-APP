@@ -4879,3 +4879,108 @@ body,
 .layersPanel { background: rgba(250, 246, 236, 0.97); }
 .selMenu { background: rgba(250, 246, 236, 0.98); }
 .planFrameToggle button.active { background: var(--slate); color: #fff; }
+
+/* Phase 2: Visual Delights and Notice styling */
+
+/* 1. Paper vellum repeating grid background texture */
+.modelShell, .planWrap {
+  background-color: var(--canvas) !important;
+  background-image: 
+    linear-gradient(rgba(138, 119, 104, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(138, 119, 104, 0.04) 1px, transparent 1px) !important;
+  background-size: 16px 16px !important;
+}
+
+/* 2. Selected object notice box */
+.selectedObjectNotice {
+  padding: 16px;
+  background: var(--raise, #FBF7EC);
+  border: 1px dashed var(--line, #e4ded4);
+  border-radius: 6px;
+  margin: 12px 0;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.selectedObjectNotice p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--plum, #26424C);
+}
+.selectedObjectNotice button {
+  font-size: 12px;
+  padding: 4px 12px;
+}
+
+/* 3. Glowing circular expert avatars */
+.expert {
+  grid-template-columns: 36px 1fr !important;
+  align-items: center !important;
+  padding: 10px 8px !important;
+}
+.expertAvatar {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--raise, #FBF7EC);
+  border: 1.5px solid #dcd7cd;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.expertAvatar svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.2s ease;
+}
+.expert:hover .expertAvatar svg {
+  transform: scale(1.1);
+}
+.expert.clear .expertAvatar {
+  border-color: var(--evergreen, #557A61);
+  background: rgba(85, 122, 97, 0.09);
+  box-shadow: 0 0 10px rgba(85, 122, 97, 0.3);
+}
+.expert.clear .expertAvatar svg {
+  color: var(--evergreen, #557A61);
+}
+.expert.revise .expertAvatar {
+  border-color: var(--terracotta, #E4935D);
+  background: rgba(228, 147, 93, 0.09);
+  box-shadow: 0 0 10px rgba(228, 147, 93, 0.3);
+}
+.expert.revise .expertAvatar svg {
+  color: var(--terracotta, #E4935D);
+}
+.expert.blocked .expertAvatar {
+  border-color: var(--clay, #C06E52);
+  background: rgba(192, 110, 82, 0.09);
+  box-shadow: 0 0 10px rgba(192, 110, 82, 0.3);
+}
+.expert.blocked .expertAvatar svg {
+  color: var(--clay, #C06E52);
+}
+.statusDot {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--canvas, #F4F3EC);
+  transition: all 0.2s ease;
+}
+.expert.clear .statusDot {
+  background: var(--evergreen, #557A61);
+}
+.expert.revise .statusDot {
+  background: var(--terracotta, #E4935D);
+}
+.expert.blocked .statusDot {
+  background: var(--clay, #C06E52);
+}

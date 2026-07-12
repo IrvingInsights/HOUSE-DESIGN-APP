@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { request } from 'node:http';
+import { scoreTrace } from '../backend/planner.mjs';
 
 const CORPUS = path.join(process.cwd(), '.data', 'trace-corpus');
 const only = process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : null;
@@ -39,86 +40,6 @@ const post = (url, body) => new Promise((resolve, reject) => {
 });
 const get = (url) => fetch(url).then((r) => r.json());
 
-// ---- Universal invariants: true of ANY correctly traced dwelling ----
-function scoreTrace({ spec, plan }) {
-  const checks = [];
-  const rooms = spec.rooms || [];
-  const openings = spec.openings || [];
-  const shellW = Number(spec.shell.widthFt) || 0;
-  const shellD = Number(spec.shell.depthFt) || 0;
-  const add = (name, pass, detail = '') => checks.push({ name, pass, detail });
-
-  add('traced at least 2 rooms', rooms.length >= 2, `${rooms.length} rooms`);
-
-  // Placeholder signature: most rooms sharing one identical size
-  const sizes = new Map();
-  rooms.forEach((r) => { const k = `${r.w}x${r.d}`; sizes.set(k, (sizes.get(k) || 0) + 1); });
-  const biggestShare = rooms.length ? Math.max(...sizes.values()) / rooms.length : 0;
-  add('rooms individually measured (no placeholder run)', rooms.length < 4 || biggestShare < 0.6,
-    `${Math.round(biggestShare * 100)}% share one size`);
-
-  // Ground rooms inside the shell
-  const strays = rooms.filter((r) => Number(r.level || 1) === 1
-    && (r.x < -0.5 || r.y < -0.5 || r.x + r.w > shellW + 0.5 || r.y + r.d > shellD + 0.5));
-  add('every ground-floor room inside the shell', strays.length === 0, strays.map((r) => r.name).join(', '));
-
-  // Rooms tile the plan — they never sit on top of each other
-  const overlapNames = new Set();
-  for (let i = 0; i < rooms.length; i += 1) {
-    for (let j = i + 1; j < rooms.length; j += 1) {
-      const a = rooms[i];
-      const b = rooms[j];
-      if (Number(a.level || 1) !== Number(b.level || 1)) continue;
-      const ov = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x))
-        * Math.max(0, Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y));
-      if (ov > 0.35 * Math.min(a.w * a.d, b.w * b.d)) { overlapNames.add(a.name); overlapNames.add(b.name); }
-    }
-  }
-  add("rooms don't pile on each other", overlapNames.size === 0, [...overlapNames].join(', '));
-
-  // A dwelling's rooms tile most of its floor plate — sparse coverage means
-  // enclosed spaces were skipped (the unlabeled-plan failure mode).
-  const groundCover = rooms.filter((r) => Number(r.level || 1) === 1).reduce((sum, r) => sum + r.w * r.d, 0);
-  const coverPct = shellW > 0 && shellD > 0 ? groundCover / (shellW * shellD) : 1;
-  add('rooms cover the floor plan (no skipped spaces)', coverPct >= 0.45, `${Math.round(coverPct * 100)}% of the shell`);
-
-  // Rooms named for the basement live below grade (when a basement exists)
-  const basement = Number(spec.shell.basementHeightFt) > 0;
-  const misleveled = rooms.filter((r) => /basement/i.test(r.name || '') && Number(r.level || 1) !== -1);
-  add('basement-named rooms on the basement level', !basement || misleveled.length === 0, misleveled.map((r) => r.name).join(', '));
-
-  // Openings sanity floor: any dwelling has a door and windows
-  add('a believable number of openings', openings.length >= Math.max(4, Math.min(rooms.length, 8)), `${openings.length} openings`);
-
-  // Openings positioned within their wall
-  const badPos = openings.filter((o) => {
-    const along = o.wall === 'north' || o.wall === 'south' ? Number(o.x) || 0 : Number(o.y) || 0;
-    const wallLen = o.wall === 'north' || o.wall === 'south' ? shellW : shellD;
-    return o.wall !== 'roof' && (along < -0.5 || along + (Number(o.widthFt) || 3) > wallLen + 1);
-  });
-  add('openings sit within their walls', badPos.length === 0, `${badPos.length} out of range`);
-
-  // Partitions inside the shell
-  const strayParts = (spec.elements || []).filter((e) => e.category === 'partition'
-    && (e.x < -0.5 || e.y < -0.5 || e.x + e.w > shellW + 1 || e.y + e.d > shellD + 1));
-  add('interior walls inside the shell', strayParts.length === 0, strayParts.map((e) => e.name).join(', '));
-
-  // Shell agrees with the drawing's own dimension strings (when indexed)
-  const idx = (plan.warnings || []).find((w) => /drawing index/i.test(w)) || '';
-  const devWarn = (plan.warnings || []).some((w) => /dimension strings say/i.test(w));
-  add('shell matches the drawing index (or no index)', !devWarn, idx.slice(0, 60));
-
-  // Self-check convergence: corrections must not grow round over round
-  const roundFixes = (plan.warnings || [])
-    .map((w) => /self-check round (\d+): corrected (\d+)/i.exec(w))
-    .filter(Boolean)
-    .sort((a, b) => Number(a[1]) - Number(b[1]))
-    .map((m) => Number(m[2]));
-  add('self-check converging (fixes not growing)', roundFixes.length < 2 || roundFixes[1] <= roundFixes[0], roundFixes.join(' -> '));
-
-  return checks;
-}
-
 const current = await get('http://127.0.0.1:5184/api/projects/current');
 let totalFail = 0;
 let skipped = 0;
@@ -136,7 +57,7 @@ for (const file of pdfs) {
   delete spec.shell.footprint; delete spec.shell.basementHeightFt; spec.shell.storeys = 1;
 
   const start = await post('http://127.0.0.1:5184/api/bim/apply', {
-    async: true, persist: false,
+    async: true, persist: false, bypassCache: true,
     prompt: 'trace this design accurately',
     bim: spec, spec,
     attachedImages: [{ id: 'corpus', name: file, src: `data:application/pdf;base64,${b64}`, size: b64.length, kind: 'pdf' }],

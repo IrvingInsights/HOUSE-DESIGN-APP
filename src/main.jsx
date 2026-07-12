@@ -1023,6 +1023,10 @@ function App() {
       operations.push({ type: 'set_shell', field, value: String(numeric > 0 ? clamp(numeric, 3, 14) : 0) });
     } else if (field === 'southWallHeightFt' || field === 'northWallHeightFt') {
       operations.push({ type: 'set_wall_height', wall: field === 'southWallHeightFt' ? 'south' : 'north', h: clamp(numeric, 2, 24) });
+    } else if (field === 'budgetCeiling') {
+      operations.push({ type: 'set_shell', field, value: String(clamp(numeric, 0, 10000000)) });
+    } else if (field.startsWith('sweat') && field.endsWith('Frac')) {
+      operations.push({ type: 'set_shell', field, value: String(clamp(numeric, 0, 1)) });
     } else {
       operations.push({ type: 'set_shell', field, value: String(field === 'roofPitch' ? clamp(numeric, 0.08, 0.75) : field === 'wallHeightFt' ? clamp(numeric, 7, 40) : field === 'storeys' ? clamp(numeric, 1, 3) : clamp(numeric, 18, field === 'depthFt' ? 80 : field === 'widthFt' ? 96 : field === 'padExtensionFt' ? 200 : 24)) });
     }
@@ -1060,7 +1064,7 @@ function App() {
       operations: [{ type: 'set_wall_side', wall: side, field, value, ...(level > 1 ? { level } : {}) }],
       promptText: `Set ${level > 1 ? 'upper ' : ''}${side} wall ${field}`,
       logPrefix: 'Wall edit',
-      nextSelectedId: level > 1 ? `wall-${side}-u` : `wall-${side}`
+      nextSelectedId: level > 1 ? `wall-${side}-u${level === 2 ? '' : level}` : `wall-${side}`
     });
   }
 
@@ -1855,7 +1859,7 @@ function App() {
     // An UPPER (tower/storey) wall rings the extent plate — moving it moves
     // that plate's edge, not the house footprint. One dispatch: resize +
     // re-anchor; walls, stepped roof, and frame all follow the plate.
-    if (/-u$/.test(String(wall.id))) {
+    if (/-u\d*$/.test(String(wall.id))) {
       const lvl = Number(wall.level || 2);
       const plateEl = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === lvl);
       if (!plateEl) return;
@@ -2191,9 +2195,9 @@ function App() {
 
         <section className="panelBlock compact consoleSummary">
           <div className="statGrid three">
-            <button type="button" title="See the full cost breakdown" onClick={() => { setAppMode('design'); setConsoleView('costs'); }}><strong>${estimatedCost.toLocaleString()}</strong><span>{derived.sweat > 0 ? `est. cost · sweat saves $${Math.round(derived.sweat / 1000)}k` : 'est. cost'}</span></button>
-            <button type="button" title="Open the Rooms plan" onClick={() => { setConsoleView('systems'); setSystemView('rooms'); }}><strong>{spec.rooms.length}</strong><span>room{spec.rooms.length === 1 ? '' : 's'} · {area} sf</span></button>
-            <button type="button" className={openFlagCount === 0 ? 'stateStat ok' : 'stateStat bad'} title="See the checks in Review" onClick={() => setConsoleView('review')}><strong>{openFlagCount === 0 ? 'All clear' : openFlagCount}</strong><span>{openFlagCount === 0 ? 'checks pass' : `check${openFlagCount === 1 ? '' : 's'} to fix`}</span></button>
+            <div title="Estimated project cost"><strong>${estimatedCost.toLocaleString()}</strong><span>{derived.sweat > 0 ? `est. cost · sweat saves $${Math.round(derived.sweat / 1000)}k` : 'est. cost'}</span></div>
+            <div title="Total interior rooms count"><strong>{spec.rooms.length}</strong><span>room{spec.rooms.length === 1 ? '' : 's'} · {area} sf</span></div>
+            <div className={openFlagCount === 0 ? 'stateStat ok' : 'stateStat bad'} title="Review checklist issues"><strong>{openFlagCount === 0 ? 'All clear' : openFlagCount}</strong><span>{openFlagCount === 0 ? 'checks pass' : `check${openFlagCount === 1 ? '' : 's'} to fix`}</span></div>
           </div>
         </section>
 
@@ -2353,29 +2357,29 @@ function App() {
                 const plates = (spec.elements || []).filter((el) => el.category === 'floor' && Number(el.level || 1) > 1);
                 if (!plates.length) return null;
                 return (
-                <FineTune label={plates.length > 1 ? 'Fine-tune — each upper storey' : 'Fine-tune — the upper storey'} hint="its exact size, position, and ceiling height">
-                {plates.map((plateEl) => {
-                const plateDispatch = (ops, label) => applyBackendOperations({ operations: ops, promptText: label, logPrefix: 'Storey', nextSelectedId: plateEl.id });
-                const num = (v) => Number(v) || 0;
-                return (
-                  <div key={plateEl.id}>
-                    <div className="sectionHead">{floorLabel(spec, Number(plateEl.level))} — its own size, position, and height</div>
-                    <div className="controlGrid">
-                      <label>Ceiling height (ft)<NumField step="0.5" min="3" max="14" value={storeyInfo(spec.shell).upperFt} onChange={(event) => updateShell('upperStoreyHeightFt', event.target.value)} /></label>
-                      <label>From west wall (ft)<NumField step="0.5" value={num(plateEl.x)} onChange={(event) => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: num(event.target.value), y: num(plateEl.y) }], 'Move the upper storey')} /></label>
-                      <label>From north wall (ft)<NumField step="0.5" value={num(plateEl.y)} onChange={(event) => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: num(plateEl.x), y: num(event.target.value) }], 'Move the upper storey')} /></label>
-                      <label>Width (ft)<NumField step="0.5" min="6" value={num(plateEl.w)} onChange={(event) => plateDispatch([{ type: 'resize_object', targetId: plateEl.id, w: Math.max(6, num(event.target.value)), d: num(plateEl.d) }], 'Resize the upper storey')} /></label>
-                      <label>Depth (ft)<NumField step="0.5" min="6" value={num(plateEl.d)} onChange={(event) => plateDispatch([{ type: 'resize_object', targetId: plateEl.id, w: num(plateEl.w), d: Math.max(6, num(event.target.value)) }], 'Resize the upper storey')} /></label>
-                    </div>
-                    <div className="storeyControl">
-                      <button type="button" className="secondary" title="Cover the whole ground floor" onClick={() => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: 0.01, y: 0.01 }, { type: 'resize_object', targetId: plateEl.id, w: Number(spec.shell.widthFt), d: Number(spec.shell.depthFt) }], 'Match the storey to the ground floor')}>Match ground floor</button>
-                      <button type="button" className="secondary" title="Center the storey over the plan" onClick={() => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: Math.max(0.01, (Number(spec.shell.widthFt) - num(plateEl.w)) / 2), y: Math.max(0.01, (Number(spec.shell.depthFt) - num(plateEl.d)) / 2) }], 'Center the upper storey')}>Center it</button>
-                    </div>
-                    <p className="systemNote">The upper storey covers only this rectangle — walls ring it and the roof steps down over the rest. Its wall construction has its own section on the <b>Walls</b> page; its frame on the <b>Frame</b> page. Also draggable on the <b>{floorLabel(spec, Number(plateEl.level))}</b> Plan tab.</p>
+                  <div className="storeyGroupSection" style={{ marginTop: '15px', borderTop: '1px solid var(--line)', paddingTop: '15px' }}>
+                    {plates.map((plateEl) => {
+                      const plateDispatch = (ops, label) => applyBackendOperations({ operations: ops, promptText: label, logPrefix: 'Storey', nextSelectedId: plateEl.id });
+                      const num = (v) => Number(v) || 0;
+                      return (
+                        <div key={plateEl.id}>
+                          <div className="sectionHead">{floorLabel(spec, Number(plateEl.level))} — size, position, and height</div>
+                          <div className="controlGrid">
+                            <label>Ceiling height (ft)<NumField step="0.5" min="3" max="14" value={storeyInfo(spec.shell).upperFt} onChange={(event) => updateShell('upperStoreyHeightFt', event.target.value)} /></label>
+                            <label>From west wall (ft)<NumField step="0.5" value={num(plateEl.x)} onChange={(event) => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: num(event.target.value), y: num(plateEl.y) }], 'Move the upper storey')} /></label>
+                            <label>From north wall (ft)<NumField step="0.5" value={num(plateEl.y)} onChange={(event) => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: num(plateEl.x), y: num(event.target.value) }], 'Move the upper storey')} /></label>
+                            <label>Width (ft)<NumField step="0.5" min="6" value={num(plateEl.w)} onChange={(event) => plateDispatch([{ type: 'resize_object', targetId: plateEl.id, w: Math.max(6, num(event.target.value)), d: num(plateEl.d) }], 'Resize the upper storey')} /></label>
+                            <label>Depth (ft)<NumField step="0.5" min="6" value={num(plateEl.d)} onChange={(event) => plateDispatch([{ type: 'resize_object', targetId: plateEl.id, w: num(plateEl.w), d: Math.max(6, num(event.target.value)) }], 'Resize the upper storey')} /></label>
+                          </div>
+                          <div className="storeyControl" style={{ marginTop: '10px', display: 'flex', gap: '8px' }}>
+                            <button type="button" className="secondary" title="Cover the whole ground floor" onClick={() => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: 0.01, y: 0.01 }, { type: 'resize_object', targetId: plateEl.id, w: Number(spec.shell.widthFt), d: Number(spec.shell.depthFt) }], 'Match the storey to the ground floor')}>Match ground floor</button>
+                            <button type="button" className="secondary" title="Center the storey over the plan" onClick={() => plateDispatch([{ type: 'move_object', targetId: plateEl.id, x: Math.max(0.01, (Number(spec.shell.widthFt) - num(plateEl.w)) / 2), y: Math.max(0.01, (Number(spec.shell.depthFt) - num(plateEl.d)) / 2) }], 'Center the upper storey')}>Center it</button>
+                          </div>
+                          <p className="systemNote">The upper storey covers only this rectangle — walls ring it and the roof steps down over the rest. Its wall construction has its own section on the <b>Walls</b> page; its frame on the <b>Frame</b> page. Also draggable on the <b>{floorLabel(spec, Number(plateEl.level))}</b> Plan tab.</p>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-                })}
-                </FineTune>
                 );
               })()}
               <FineTune label="Fine-tune — footprint shape" hint="L-shapes, notches, moving a wall">
@@ -2402,40 +2406,49 @@ function App() {
 
           {systemView === 'rooms' && (
             <div className="systemPage">
-              <div className="sectionHead">Add a room</div>
-              <div className="roomAddGrid">
-                {ROOM_PRESETS.map((preset) => (
-                  <button key={preset.name} className="roomAddChip" onClick={() => addRoomPreset(preset)}>
-                    <b>{preset.name}</b>
-                    <small>{preset.w} × {preset.d}′</small>
-                  </button>
-                ))}
-              </div>
-              {pendingRoomAdds.length > 0 && (
-                <div className="pendingAdds" aria-live="polite">
-                  {pendingRoomAdds.map((name, index) => (
-                    <span key={`${name}-${index}`} className="pendingAdd">{index === 0 ? `Adding ${name}…` : `Queued: ${name}`}</span>
-                  ))}
+              {selectedRoom && !selectedIsWall ? (
+                <div className="selectedObjectNotice">
+                  <p>Editing selected <b>{selectedIsElement ? 'Fixture' : selectedIsOpening ? 'Opening' : 'Room'} ({selected?.name || 'Object'})</b> in the BIM Inspector below.</p>
+                  <button type="button" className="secondary" onClick={() => selectObject(null)}>▾ Show Room Library</button>
                 </div>
-              )}
-              <p className="systemNote">Click to drop a room in — it slots into free space (nothing else moves). Rapid clicks queue up and land in order. Rename or resize any room in the Inspector below, or drag it in the 2D plan. You can also tell the assistant "add a pantry 8 × 10".</p>
-
-              <div className="sectionHead">Add a fixture</div>
-              <div className="roomAddGrid">
-                {interiorFixtures(spec).map((fixture) => (
-                  <button key={fixture.key} className="roomAddChip fixture" onClick={() => placeFixture(fixture)}>
-                    <b>{fixture.name}</b>
-                    <small>{fixture.w} × {fixture.d}′</small>
-                  </button>
-                ))}
-              </div>
-              <p className="systemNote">Heaters, tanks, stairs, counters — placed as objects you can drag in the 2D plan and see in 3D. The heater matches your Heat page choice.</p>
-
-              {spec.rooms.length > 1 && (
+              ) : (
                 <>
-                  <div className="sectionHead">Interior walls</div>
-                  <button className="secondary" onClick={drawPartitions}>⌗ Draw walls between rooms</button>
-                  <p className="systemNote">Where two rooms share an edge, this drops a real partition wall on the line — with a 3′ doorway so the plan stays walkable. Tap a wall to change its construction (framed / cob / adobe), door width, or door position; drag it in the Plan like anything else. Chat works too: “add a cob wall between the kitchen and the living room.”</p>
+                  <div className="sectionHead">Add a room</div>
+                  <div className="roomAddGrid">
+                    {ROOM_PRESETS.map((preset) => (
+                      <button key={preset.name} className="roomAddChip" onClick={() => addRoomPreset(preset)}>
+                        <b>{preset.name}</b>
+                        <small>{preset.w} × {preset.d}′</small>
+                      </button>
+                    ))}
+                  </div>
+                  {pendingRoomAdds.length > 0 && (
+                    <div className="pendingAdds" aria-live="polite">
+                      {pendingRoomAdds.map((name, index) => (
+                        <span key={`${name}-${index}`} className="pendingAdd">{index === 0 ? `Adding ${name}…` : `Queued: ${name}`}</span>
+                      ))}
+                    </div>
+                  )}
+                  <p className="systemNote">Click to drop a room in — it slots into free space (nothing else moves). Rapid clicks queue up and land in order. Rename or resize any room in the Inspector below, or drag it in the 2D plan. You can also tell the assistant "add a pantry 8 × 10".</p>
+
+                  <div className="sectionHead">Add a fixture</div>
+                  <div className="roomAddGrid">
+                    {interiorFixtures(spec).map((fixture) => (
+                      <button key={fixture.key} className="roomAddChip fixture" onClick={() => placeFixture(fixture)}>
+                        <b>{fixture.name}</b>
+                        <small>{fixture.w} × {fixture.d}′</small>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="systemNote">Heaters, tanks, stairs, counters — placed as objects you can drag in the 2D plan and see in 3D. The heater matches your Heat page choice.</p>
+
+                  {spec.rooms.length > 1 && (
+                    <>
+                      <div className="sectionHead">Interior walls</div>
+                      <button className="secondary" onClick={drawPartitions}>⌗ Draw walls between rooms</button>
+                      <p className="systemNote">Where two rooms share an edge, this drops a real partition wall on the line — with a 3′ doorway so the plan stays walkable. Tap a wall to change its construction (framed / cob / adobe), door width, or door position; drag it in the Plan like anything else. Chat works too: “add a cob wall between the kitchen and the living room.”</p>
+                    </>
+                  )}
                 </>
               )}
 
@@ -2477,51 +2490,60 @@ function App() {
             const sharedHeight = activeHeights[0] ?? spec.shell.wallHeightFt;
             return (
               <div className="systemPage">
-                <div className="sectionHead">The obvious numbers first</div>
-                <div className="controlGrid">
-                  {heightsMixed ? (
-                    <label>Height
-                      <div className="mixedField">
-                        <span>Mixed · {Math.min(...activeHeights)}–{Math.max(...activeHeights)}' — each side rules below</span>
-                        <button className="breakOpen" onClick={() => updateShell('wallHeightFt', Math.max(...activeHeights))}>unify at {Math.max(...activeHeights)}'</button>
-                      </div>
-                    </label>
-                  ) : (
-                    <label>Height (ft)<NumField min="7" max="40" value={sharedHeight} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
-                  )}
-                  <label>Width<span className="readOnlyDim">{spec.shell.widthFt}′ <small>north/south walls</small></span></label>
-                  <label>Length<span className="readOnlyDim">{spec.shell.depthFt}′ <small>east/west walls</small></span></label>
-                </div>
-                <p className="systemNote">Height lives here. Width and Length are the overall shape of the house — <button type="button" className="inlineLink" onClick={() => setSystemView('shell')}>edit the overall shape on the Shell page</button> so there's one place that changes it.</p>
+                {selectedRoom && selectedIsWall ? (
+                  <div className="selectedObjectNotice">
+                    <p>Editing selected <b>Wall ({selected?.name || 'Side'})</b> in the BIM Inspector below.</p>
+                    <button type="button" className="secondary" onClick={() => selectObject(null)}>▾ Show Global Wall Settings</button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="sectionHead">The obvious numbers first</div>
+                    <div className="controlGrid">
+                      {heightsMixed ? (
+                        <label>Height
+                          <div className="mixedField">
+                            <span>Mixed · {Math.min(...activeHeights)}–{Math.max(...activeHeights)}' — each side rules below</span>
+                            <button className="breakOpen" onClick={() => updateShell('wallHeightFt', Math.max(...activeHeights))}>unify at {Math.max(...activeHeights)}'</button>
+                          </div>
+                        </label>
+                      ) : (
+                        <label>Height (ft)<NumField min="7" max="40" value={sharedHeight} onChange={(event) => updateShell('wallHeightFt', event.target.value)} /></label>
+                      )}
+                      <label>Width<span className="readOnlyDim">{spec.shell.widthFt}′ <small>north/south walls</small></span></label>
+                      <label>Length<span className="readOnlyDim">{spec.shell.depthFt}′ <small>east/west walls</small></span></label>
+                    </div>
+                    <p className="systemNote">Height lives here. Width and Length are the overall shape of the house — <button type="button" className="inlineLink" onClick={() => setSystemView('shell')}>edit the overall shape on the Shell page</button> so there's one place that changes it.</p>
 
-                <div className="sectionHead">Wall system (all sides)</div>
-                <div className="controlGrid">
-                  <label>Assembly
-                    <select value={globalKey} onChange={(event) => setAllWallsAssembly(event.target.value)}>
-                      {mixed && <option value="" disabled>Mixed — see per-side</option>}
-                      {Object.values(WALL_ASSEMBLIES).map((assembly) => (
-                        <option key={assembly.key} value={assembly.key} style={greenOptStyle(assembly)}>{greenLeaf(assembly)}{assembly.label} (R≈{assembly.rValue})</option>
-                      ))}
-                    </select>
-                  </label>
-                  {(() => {
-                    const clads = WALL_SIDES.map((side) => resolveWallSide(spec, side).cladding);
-                    const cladsMixed = new Set(clads).size > 1;
-                    return (
-                      <label>Cladding (all sides)
-                        <select value={cladsMixed ? '' : clads[0]} onChange={(event) => setAllWallsCladding(event.target.value)}>
-                          {cladsMixed && <option value="" disabled>Mixed — tap a wall to set per side</option>}
-                          {Object.entries(CLADDING_TYPES).map(([key, c]) => <option key={key} value={key} style={greenOptStyle(c)}>{greenLeaf(c)}{c.label}{c.costPsf ? ` (+$${c.costPsf}/sf)` : ''}</option>)}
+                    <div className="sectionHead">Wall system (all sides)</div>
+                    <div className="controlGrid">
+                      <label>Assembly
+                        <select value={globalKey} onChange={(event) => setAllWallsAssembly(event.target.value)}>
+                          {mixed && <option value="" disabled>Mixed — see per-side</option>}
+                          {Object.values(WALL_ASSEMBLIES).map((assembly) => (
+                            <option key={assembly.key} value={assembly.key} style={greenOptStyle(assembly)}>{greenLeaf(assembly)}{assembly.label} (R≈{assembly.rValue})</option>
+                          ))}
                         </select>
                       </label>
-                    );
-                  })()}
-                </div>
-                <label className="diyToggle">
-                  <input type="checkbox" checked={utilitiesOf(spec).diyWalls} onChange={(event) => updateUtility('diyWalls', event.target.checked)} />
-                  <span>I'll raise the walls myself (sweat equity — walls are the most DIY-able system)</span>
-                </label>
-                <p className="systemNote">While all sides share one height you can set it here; once a side differs, set its height by tapping that wall under Fine-tune below.</p>
+                      {(() => {
+                        const clads = WALL_SIDES.map((side) => resolveWallSide(spec, side).cladding);
+                        const cladsMixed = new Set(clads).size > 1;
+                        return (
+                          <label>Cladding (all sides)
+                            <select value={cladsMixed ? '' : clads[0]} onChange={(event) => setAllWallsCladding(event.target.value)}>
+                              {cladsMixed && <option value="" disabled>Mixed — tap a wall to set per side</option>}
+                              {Object.entries(CLADDING_TYPES).map(([key, c]) => <option key={key} value={key} style={greenOptStyle(c)}>{greenLeaf(c)}{c.label}{c.costPsf ? ` (+$${c.costPsf}/sf)` : ''}</option>)}
+                            </select>
+                          </label>
+                        );
+                      })()}
+                    </div>
+                    <label className="diyToggle">
+                      <input type="checkbox" checked={utilitiesOf(spec).diyWalls} onChange={(event) => updateUtility('diyWalls', event.target.checked)} />
+                      <span>I'll raise the walls myself (sweat equity — walls are the most DIY-able system)</span>
+                    </label>
+                    <p className="systemNote">While all sides share one height you can set it here; once a side differs, set its height by tapping that wall under Fine-tune below.</p>
+                  </>
+                )}
 
                 <FineTune label={storeyInfo(spec.shell).storeys > 1 ? 'Fine-tune — wall by wall, ground & upper' : 'Fine-tune — wall by wall'} hint="each side's system, height, thickness, finishes">
                 <p className="systemNote">Tap a wall — here or in the model — to edit that side in the Inspector below. Tick “no wall” to leave a side open to an attached greenhouse or porch.</p>
@@ -2550,36 +2572,45 @@ function App() {
                   })}
                 </div>
 
-                {storeyInfo(spec.shell).storeys > 1 && (() => {
-                  const upperSides = WALL_SIDES.map((side) => ({ side, r: resolveWallSide(spec, side, 2) })).filter(({ r }) => !r.omitted);
-                  const upperKeys = new Set(upperSides.map(({ r }) => r.assemblyKey));
-                  const upperGlobal = upperKeys.size === 1 ? upperSides[0]?.r.assemblyKey : '';
-                  return (
-                    <>
-                      <div className="sectionHead">Upper storey — each side</div>
-                      <div className="controlGrid">
-                        <label>Assembly (all upper sides)
-                          <select value={upperGlobal} onChange={(event) => setAllWallsAssembly(event.target.value, 2)}>
-                            {upperKeys.size > 1 && <option value="" disabled>Mixed — see per-side</option>}
-                            {Object.values(WALL_ASSEMBLIES).map((assembly) => (
-                              <option key={assembly.key} value={assembly.key} style={greenOptStyle(assembly)}>{greenLeaf(assembly)}{assembly.label} (R≈{assembly.rValue})</option>
-                            ))}
-                          </select>
-                        </label>
+                {(() => {
+                  const maxLvl = Math.ceil(storeyInfo(spec.shell).storeys);
+                  if (maxLvl <= 1) return null;
+                  return Array.from({ length: maxLvl - 1 }, (_, index) => {
+                    const level = index + 2;
+                    const upperSides = WALL_SIDES.map((side) => ({ side, r: resolveWallSide(spec, side, level) })).filter(({ r }) => !r.omitted);
+                    if (upperSides.length === 0) return null;
+                    const upperKeys = new Set(upperSides.map(({ r }) => r.assemblyKey));
+                    const upperGlobal = upperKeys.size === 1 ? upperSides[0]?.r.assemblyKey : '';
+                    const label = level === 3 ? 'Tower (level 3)' : 'Upper storey (level 2)';
+                    return (
+                      <div key={level} style={{ marginTop: '15px', borderTop: '1px solid var(--line)', paddingTop: '15px' }}>
+                        <div className="sectionHead">{label} — each side</div>
+                        <div className="controlGrid">
+                          <label>Assembly (all {level === 3 ? 'tower' : 'upper'} sides)
+                            <select value={upperGlobal} onChange={(event) => setAllWallsAssembly(event.target.value, level)}>
+                              {upperKeys.size > 1 && <option value="" disabled>Mixed — see per-side</option>}
+                              {Object.values(WALL_ASSEMBLIES).map((assembly) => (
+                                <option key={assembly.key} value={assembly.key} style={greenOptStyle(assembly)}>{greenLeaf(assembly)}{assembly.label} (R≈{assembly.rValue})</option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                        <div className="pickList" style={{ marginTop: '10px' }}>
+                          {upperSides.map(({ side, r }) => {
+                            const targetId = level === 2 ? `wall-${side}-u` : `wall-${side}-u${level}`;
+                            return (
+                              <div key={`u-${level}-${side}`} className={`pickRow${selectedRoom === targetId ? ' active' : ''}`}>
+                                <button type="button" className="pickRowMain" onClick={() => selectObject(targetId)}>
+                                  <strong>{WALL_SIDE_LABELS[side]} (level {level})</strong>
+                                  <small>{r.assembly.label} · {r.thicknessFt.toFixed(2)}′ thick</small>
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                      <p className="systemNote">The upper storey can run a different construction — light straw-clay or framed infill over a cob or bale ground floor is a natural-building classic (lighter loads up high).</p>
-                      <div className="pickList">
-                        {upperSides.map(({ side, r }) => (
-                          <div key={`u-${side}`} className={`pickRow${selectedRoom === `wall-${side}-u` ? ' active' : ''}`}>
-                            <button type="button" className="pickRowMain" onClick={() => selectObject(`wall-${side}-u`)}>
-                              <strong>{WALL_SIDE_LABELS[side]} (upper)</strong>
-                              <small>{r.assembly.label} · {r.thicknessFt.toFixed(2)}′ thick</small>
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  );
+                    );
+                  });
                 })()}
                 </FineTune>
               </div>
@@ -3183,12 +3214,14 @@ function App() {
           const subtotal = derived.totalBeforeSweat;
           const maxAmount = rows.length ? rows[0].amount : 1;
           const perSf = derived.heatedFloor > 0 ? derived.total / derived.heatedFloor : 0;
-          const overBy = derived.total - 324700;
+          const budgetCeiling = Number(spec.shell.budgetCeiling ?? 324700);
+          const overBy = derived.total - budgetCeiling;
           const diyTrades = [
-            { field: 'diyWalls', label: 'Walls', costKey: 'walls', frac: 0.8 },
-            { field: 'diyRoof', label: 'Roof', costKey: 'roof', frac: 0.55 },
-            { field: 'diyHeat', label: 'Heat', costKey: 'heat', frac: 0.45 },
-            { field: 'diyFoundation', label: 'Foundation', costKey: 'foundation', frac: 0.5 }
+            { field: 'diyWalls', label: 'Walls', costKey: 'walls', frac: Number(spec.shell.sweatWallsFrac ?? 0.8) },
+            { field: 'diyRoof', label: 'Roof', costKey: 'roof', frac: Number(spec.shell.sweatRoofFrac ?? 0.55) },
+            { field: 'diyHeat', label: 'Heat', costKey: 'heat', frac: Number(spec.shell.sweatHeatFrac ?? 0.45) },
+            { field: 'diyFoundation', label: 'Foundation', costKey: 'foundation', frac: Number(spec.shell.sweatFoundationFrac ?? 0.5) },
+            { field: 'diyFrame', label: 'Frame', costKey: 'frame', frac: Number(spec.shell.sweatFrameFrac ?? 0.6) }
           ];
           const toggleDiy = (field) => void applyBackendOperations({
             operations: [{ type: 'set_utility', field, value: !derived.utilities[field] }],
@@ -3261,6 +3294,32 @@ function App() {
                   </>
                 );
               })()}
+              
+              <div className="sectionHead">Budget & Sweat settings</div>
+              <details className="fineTuneGroup" style={{ marginBottom: '15px' }}>
+                <summary>Configure Budget & Multipliers</summary>
+                <div className="controlGrid" style={{ marginTop: '10px' }}>
+                  <label>Loan ceiling ($)
+                    <NumField step="1000" min="0" value={spec.shell.budgetCeiling ?? 324700} onChange={(event) => updateShell('budgetCeiling', event.target.value)} />
+                  </label>
+                  <label>Walls sweat share (0-1)
+                    <NumField step="0.05" min="0" max="1" value={spec.shell.sweatWallsFrac ?? 0.8} onChange={(event) => updateShell('sweatWallsFrac', event.target.value)} />
+                  </label>
+                  <label>Roof sweat share (0-1)
+                    <NumField step="0.05" min="0" max="1" value={spec.shell.sweatRoofFrac ?? 0.55} onChange={(event) => updateShell('sweatRoofFrac', event.target.value)} />
+                  </label>
+                  <label>Heat sweat share (0-1)
+                    <NumField step="0.05" min="0" max="1" value={spec.shell.sweatHeatFrac ?? 0.45} onChange={(event) => updateShell('sweatHeatFrac', event.target.value)} />
+                  </label>
+                  <label>Foundation sweat share (0-1)
+                    <NumField step="0.05" min="0" max="1" value={spec.shell.sweatFoundationFrac ?? 0.5} onChange={(event) => updateShell('sweatFoundationFrac', event.target.value)} />
+                  </label>
+                  <label>Frame sweat share (0-1)
+                    <NumField step="0.05" min="0" max="1" value={spec.shell.sweatFrameFrac ?? 0.6} onChange={(event) => updateShell('sweatFrameFrac', event.target.value)} />
+                  </label>
+                </div>
+              </details>
+
               <div className="sectionHead">Do it yourself</div>
               <p className="systemNote">Each trade you take on drops the cash cost by its labor share. Toggle what you'll build.</p>
               <div className="diyGrid">
@@ -3281,8 +3340,8 @@ function App() {
               )}
               <div className={overBy > 0 ? 'costCeiling over' : 'costCeiling under'}>
                 {overBy > 0
-                  ? `${fmtMoney(overBy)} over the $324,700 owner-builder loan ceiling — trim the footprint, simplify systems, or take on more sweat equity.`
-                  : `${fmtMoney(-overBy)} under the $324,700 owner-builder loan ceiling.`}
+                  ? `${fmtMoney(overBy)} over the ${fmtMoney(budgetCeiling)} owner-builder loan ceiling — trim the footprint, simplify systems, or take on more sweat equity.`
+                  : `${fmtMoney(-overBy)} under the ${fmtMoney(budgetCeiling)} owner-builder loan ceiling.`}
               </div>
             </section>
           );
@@ -3326,7 +3385,10 @@ function App() {
                 const Icon = expert.icon;
                 return (
                   <button key={expert.id} className={`expert ${expert.status}`} onClick={() => chooseChatTarget(expert.id)} title="Aim the chat at this expert, then ask in Studio">
-                    <Icon size={17} />
+                    <div className="expertAvatar">
+                      <Icon size={17} />
+                      <span className="statusDot" />
+                    </div>
                     <div><b>{expert.name}</b><span>{expert.notes}</span></div>
                   </button>
                 );
@@ -3417,9 +3479,7 @@ function App() {
               ))}
               {floorCount(spec) < 3 && <button className="addFloor" onClick={addStorey} title="Add a storey">+ Floor</button>}
             </div>}
-            {/* keyed on the revision ONLY — re-pulsing on every selection made
-                the calmest corner of the bar twitch constantly */}
-            <div className="changeBadge" key={spec.revision} title={`Rev ${spec.revision}: ${lastModelChange}`}><Sparkles size={14} /> Rev {spec.revision}: {lastModelChange}</div>
+            <div className="changeBadge" key={spec.revision} title={`Rev ${spec.revision}: ${lastModelChange}`}><Sparkles size={14} /> Rev {spec.revision}</div>
             {viewMode === '3d' && webglOK && <button className={`layersToggle${layersOpen ? ' open' : ''}${hiddenLayerCount > 0 || modelLayers.xray ? ' filtered' : ''}`} onClick={() => setLayersOpen((open) => !open)} title="Show / hide model layers">
               <Layers size={14} /> Layers{hiddenLayerCount > 0 ? ` · ${hiddenLayerCount} off` : modelLayers.xray ? ' · x-ray' : ''}
             </button>}

@@ -50,7 +50,7 @@ function cutPlanes(spec, cut) {
   return [new THREE.Plane(new THREE.Vector3(0, 0, -1), cutZ)];
 }
 
-export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, viewRequest = null, sectionCut = 1, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview, onFallbackNav }) {
+export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, viewRequest = null, sectionCut = 1, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview, onFallbackNav, context = null }) {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraStateRef = useRef(null);
@@ -192,8 +192,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     outlinePass.edgeStrength = 2.6;
     outlinePass.edgeGlow = 0;
     outlinePass.edgeThickness = 1;
-    outlinePass.visibleEdgeColor.set(0xc88a5b);
-    outlinePass.hiddenEdgeColor.set(0x6b543c);
+    outlinePass.visibleEdgeColor.set(0x26424c);
+    outlinePass.hiddenEdgeColor.set(0x405a63);
     composer.addPass(outlinePass);
     composer.addPass(new OutputPass());
     composer.setSize(mount.clientWidth, mount.clientHeight);
@@ -560,32 +560,31 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const pushSideBoxes = (side, totalH, thickness, place) => {
         const groundH = Math.max(1, totalH - storeyLift);
         wallMeshSpecs.push({ side, storey: 'ground', meshes: place(thickness, groundH, 0) });
-        if (storeyLift > 0) {
-          const u = wallUpper[side];
-          const tU = u.thicknessFt;
-          const p = plate2;
-          // STEPPED SHED (rect path): a partial tower's N/S walls sit DOWN on
-          // the wing roof plane under them and rise to the lifted plane —
-          // the flat groundH band floated above the wing (the gap) and
-          // overshot the tower's own roof. (E/W on a shed come from the
-          // stepped raked sides, not here. Gable/flat keep the flat band.)
-          const realPlate = upperPlateRect(spec, 2);
-          const stepped = Boolean(realPlate && realPlate.w * realPlate.d < width * depth - 1);
-          let upperMesh;
-          if (stepped && roofSpec.roofType === 'shed' && (side === 'north' || side === 'south')) {
-            const wingTop = (zz) => roofSpec.northWallHeightFt
-              + (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) * clamp(depth > 0 ? zz / depth : 0, 0, 1);
-            const TUCK = 0.45;
-            const zz = side === 'north' ? p.y : p.y + p.d;
-            const yBot = wingTop(zz) - TUCK;
-            upperMesh = box(p.w, storeyLift + TUCK, tU, p.x + p.w / 2, yBot + (storeyLift + TUCK) / 2, side === 'north' ? p.y + tU / 2 : p.y + p.d - tU / 2, wallMatOf(u));
-          } else {
-            upperMesh = side === 'north' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + tU / 2, wallMatOf(u))
-              : side === 'south' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + p.d - tU / 2, wallMatOf(u))
-              : side === 'west' ? box(tU, storeyLift, p.d, p.x + tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u))
-              : box(tU, storeyLift, p.d, p.x + p.w - tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u));
+        for (let level = 2; level <= Math.ceil(storeys); level++) {
+          if (upperFt > 0) {
+            const u = resolveWallSide(spec, side, level);
+            if (u.omitted) continue;
+            const tU = u.thicknessFt;
+            const p = upperPlateRect(spec, level) || { x: 0, y: 0, w: width, d: depth };
+            const liftOffset = groundH + (level - 2) * upperFt;
+            const realPlate = upperPlateRect(spec, level);
+            const stepped = Boolean(realPlate && realPlate.w * realPlate.d < width * depth - 1);
+            let upperMesh;
+            if (stepped && roofSpec.roofType === 'shed' && (side === 'north' || side === 'south')) {
+              const wingTop = (zz) => roofSpec.northWallHeightFt
+                + (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) * clamp(depth > 0 ? zz / depth : 0, 0, 1);
+              const TUCK = 0.45;
+              const zz = side === 'north' ? p.y : p.y + p.d;
+              const yBot = wingTop(zz) - TUCK;
+              upperMesh = box(p.w, upperFt + TUCK, tU, p.x + p.w / 2, yBot + (upperFt + TUCK) / 2 + (level - 2) * upperFt, side === 'north' ? p.y + tU / 2 : p.y + p.d - tU / 2, wallMatOf(u));
+            } else {
+              upperMesh = side === 'north' ? box(p.w, upperFt, tU, p.x + p.w / 2, liftOffset + upperFt / 2, p.y + tU / 2, wallMatOf(u))
+                : side === 'south' ? box(p.w, upperFt, tU, p.x + p.w / 2, liftOffset + upperFt / 2, p.y + p.d - tU / 2, wallMatOf(u))
+                : side === 'west' ? box(tU, upperFt, p.d, p.x + tU / 2, liftOffset + upperFt / 2, p.y + p.d / 2, wallMatOf(u))
+                : box(tU, upperFt, p.d, p.x + p.w - tU / 2, liftOffset + upperFt / 2, p.y + p.d / 2, wallMatOf(u));
+            }
+            wallMeshSpecs.push({ side, storey: 'upper', level, meshes: [upperMesh] });
           }
-          wallMeshSpecs.push({ side, storey: 'upper', meshes: [upperMesh] });
         }
       };
       if (customFp) {
@@ -629,15 +628,18 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           }
           wallMeshSpecs.push({ side: edge.facing, storey: 'ground', edgeKey: edge.key, meshes });
           // No extent plate: the upper band rides this same edge.
-          if (storeyLift > 0 && !hasPlate) {
-            const u = wallUpper[edge.facing];
-            const tU = u.thicknessFt;
-            const ux = midX - edge.nx * (tU / 2);
-            const uy = midY - edge.ny * (tU / 2);
-            const upperMesh = edge.horizontal
-              ? box(len, storeyLift, tU, ux, groundH + storeyLift / 2, uy, wallMatOf(u))
-              : box(tU, storeyLift, len, ux, groundH + storeyLift / 2, uy, wallMatOf(u));
-            wallMeshSpecs.push({ side: edge.facing, storey: 'upper', edgeKey: edge.key, meshes: [upperMesh] });
+          for (let level = 2; level <= Math.ceil(storeys); level++) {
+            if (upperFt > 0) {
+              const u = resolveWallSide(spec, edge.facing, level);
+              const tU = u.thicknessFt;
+              const ux = midX - edge.nx * (tU / 2);
+              const uy = midY - edge.ny * (tU / 2);
+              const liftOffset = groundH + (level - 2) * upperFt;
+              const upperMesh = edge.horizontal
+                ? box(len, upperFt, tU, ux, liftOffset + upperFt / 2, uy, wallMatOf(u))
+                : box(tU, upperFt, len, ux, liftOffset + upperFt / 2, uy, wallMatOf(u));
+              wallMeshSpecs.push({ side: edge.facing, storey: 'upper', level, edgeKey: edge.key, meshes: [upperMesh] });
+            }
           }
         });
         // With a plate, upper bands ring IT — same cardinal ids as a rectangle.
@@ -646,44 +648,48 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // lifted upper plane. A flat band at max wall height used to float
         // above the roof on the south (the gap) and stab through the upper
         // roof on the north.
-        if (storeyLift > 0 && hasPlate) {
-          const p = plate2;
-          // Ground wing plane (no lift), slightly sunk so the band always
-          // reads as MEETING the roof rather than hovering a sliver above it.
+        if (storeyLift > 0) {
           const wingTopAt = (zz) => (shed
             ? roofSpec.northWallHeightFt + (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) * clamp(depth > 0 ? zz / depth : 0, 0, 1)
             : Math.max(1, (wallResolved.north.heightFt || 10)));
           const TUCK = 0.45;
-          WALL_SIDES.forEach((side) => {
-            if (omittedWalls.has(side) || wallResolved[side].omitted) return;
-            const u = wallUpper[side];
-            const tU = u.thicknessFt;
-            let upperMesh;
-            if (shed) {
-              if (side === 'north' || side === 'south') {
-                const zz = side === 'north' ? p.y : p.y + p.d;
-                const yBot = wingTopAt(zz) - TUCK;
-                upperMesh = box(p.w, storeyLift + TUCK, tU, p.x + p.w / 2, yBot + (storeyLift + TUCK) / 2, side === 'north' ? p.y + tU / 2 : p.y + p.d - tU / 2, wallMatOf(u));
-              } else {
-                // E/W: the band follows the slope — a parallelogram, i.e. a
-                // box laid along the plane's angle (both planes share it).
-                const z0 = p.y; const z1 = p.y + p.d;
-                const y0 = wingTopAt(z0) - TUCK + (storeyLift + TUCK) / 2;
-                const y1 = wingTopAt(z1) - TUCK + (storeyLift + TUCK) / 2;
-                const len = Math.hypot(z1 - z0, y1 - y0);
-                const xAt = side === 'west' ? p.x + tU / 2 : p.x + p.w - tU / 2;
-                upperMesh = box(tU, storeyLift + TUCK, len, xAt, (y0 + y1) / 2, (z0 + z1) / 2, wallMatOf(u));
-                upperMesh.rotation.x = -Math.atan2(y1 - y0, z1 - z0);
+          for (let level = 2; level <= Math.ceil(storeys); level++) {
+            if (upperFt > 0) {
+              const p = upperPlateRect(spec, level);
+              if (p) {
+                WALL_SIDES.forEach((side) => {
+                  if (omittedWalls.has(side) || wallResolved[side].omitted) return;
+                  const u = resolveWallSide(spec, side, level);
+                  const tU = u.thicknessFt;
+                  let upperMesh;
+                  if (shed) {
+                    if (side === 'north' || side === 'south') {
+                      const zz = side === 'north' ? p.y : p.y + p.d;
+                      const yBot = wingTopAt(zz) - TUCK;
+                      upperMesh = box(p.w, upperFt + TUCK, tU, p.x + p.w / 2, yBot + (upperFt + TUCK) / 2 + (level - 2) * upperFt, side === 'north' ? p.y + tU / 2 : p.y + p.d - tU / 2, wallMatOf(u));
+                    } else {
+                      // E/W: the band follows the slope — a parallelogram, i.e. a
+                      // box laid along the plane's angle (both planes share it).
+                      const z0 = p.y; const z1 = p.y + p.d;
+                      const y0 = wingTopAt(z0) - TUCK + (upperFt + TUCK) / 2 + (level - 2) * upperFt;
+                      const y1 = wingTopAt(z1) - TUCK + (upperFt + TUCK) / 2 + (level - 2) * upperFt;
+                      const len = Math.hypot(z1 - z0, y1 - y0);
+                      const xAt = side === 'west' ? p.x + tU / 2 : p.x + p.w - tU / 2;
+                      upperMesh = box(tU, upperFt + TUCK, len, xAt, (y0 + y1) / 2, (z0 + z1) / 2, wallMatOf(u));
+                      upperMesh.rotation.x = -Math.atan2(y1 - y0, z1 - z0);
+                    }
+                  } else {
+                    const liftOffset = groundH + (level - 2) * upperFt;
+                    upperMesh = side === 'north' ? box(p.w, upperFt, tU, p.x + p.w / 2, liftOffset + upperFt / 2, p.y + tU / 2, wallMatOf(u))
+                      : side === 'south' ? box(p.w, upperFt, tU, p.x + p.w / 2, liftOffset + upperFt / 2, p.y + p.d - tU / 2, wallMatOf(u))
+                      : side === 'west' ? box(tU, upperFt, p.d, p.x + tU / 2, liftOffset + upperFt / 2, p.y + p.d / 2, wallMatOf(u))
+                      : box(tU, upperFt, p.d, p.x + p.w - tU / 2, liftOffset + upperFt / 2, p.y + p.d / 2, wallMatOf(u));
+                  }
+                  wallMeshSpecs.push({ side, storey: 'upper', level, meshes: [upperMesh] });
+                });
               }
-            } else {
-              const groundH = Math.max(1, (wallResolved[side].heightFt + storeyLift) - storeyLift);
-              upperMesh = side === 'north' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + tU / 2, wallMatOf(u))
-                : side === 'south' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + p.d - tU / 2, wallMatOf(u))
-                : side === 'west' ? box(tU, storeyLift, p.d, p.x + tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u))
-                : box(tU, storeyLift, p.d, p.x + p.w - tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u));
             }
-            wallMeshSpecs.push({ side, storey: 'upper', meshes: [upperMesh] });
-          });
+          }
         }
       } else if (roofSpec.roofType === 'shed') {
         const eaveAtZ = (zz) => northWallHeight + (southWallHeight - northWallHeight) * clamp(depth > 0 ? zz / depth : 0, 0, 1);
@@ -722,15 +728,16 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         pushSideBoxes('west', hW, tW, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('west'), gaps: gapsFor('west') }));
         pushSideBoxes('east', hE, tE, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: width - t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('east'), gaps: gapsFor('east') }));
       }
-      wallMeshSpecs.forEach(({ side, storey, meshes, edgeKey }) => {
+      wallMeshSpecs.forEach(({ side, storey, level, meshes, edgeKey }) => {
         if (omittedWalls.has(side) || wallResolved[side].omitted) return;
         if (!layers[`wall${titleCase(side)}`]) return;
-        const resolved = storey === 'upper' ? wallUpper[side] : wallResolved[side];
+        const resolved = storey === 'upper' ? resolveWallSide(spec, side, level || 2) : wallResolved[side];
         (meshes || []).forEach((mesh) => {
-          mesh.name = `${titleCase(side)} Wall${storey === 'upper' ? ' (upper)' : ''} - ${resolved.assembly.label}`;
+          mesh.name = `${titleCase(side)} Wall${storey === 'upper' ? ` (level ${level || 2})` : ''} - ${resolved.assembly.label}`;
+          const lvlSuffix = (level === 2 || !level) ? '' : level;
           mesh.userData.roomId = edgeKey
-            ? (storey === 'upper' ? `wall-${edgeKey}-u` : `wall-${edgeKey}`)
-            : (storey === 'upper' ? `wall-${side}-u` : `wall-${side}`);
+            ? (storey === 'upper' ? `wall-${edgeKey}-u${lvlSuffix}` : `wall-${edgeKey}`)
+            : (storey === 'upper' ? `wall-${side}-u${lvlSuffix}` : `wall-${side}`);
           mesh.userData.wallSide = side;
           roomMeshes.push(mesh);
           group.add(addEdges(mesh));
@@ -1914,7 +1921,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const side = node.userData.wallSide || id.split('-')[1];
             const off = sideOut[side];
             if (off) { node.position.x += off[0]; node.position.z += off[2]; }
-            if (id.endsWith('-u')) node.position.y += 3;
+            const uMatch = id.match(/-u(\d*)$/);
+            if (uMatch) {
+              const level = uMatch[1] ? Number(uMatch[1]) : 2;
+              node.position.y += (level - 1) * 3;
+            }
             return;
           }
           if (id.startsWith('opening-')) {
@@ -2252,7 +2263,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       ctx.lineWidth = 3;
       ctx.strokeRect(2, 2, 508, 124);
       ctx.fillStyle = '#26424C';
-      ctx.font = '600 44px "Source Sans 3", Aptos, Arial';
+      ctx.font = '48px "Architects Daughter", "Segoe Print", "Comic Sans MS", cursive';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(text, 256, 64, 470);
@@ -2320,7 +2331,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         };
         return;
       }
-      const hit = raycaster.intersectObjects(roomMeshes, false)[0];
+      const buildingContext = ['foundation', 'shell', 'frame', 'floor', 'walls', 'roof', 'windows'].includes(context);
+      const targets = buildingContext
+        ? roomMeshes.filter(m => !m.userData.roomId || !spec.rooms.some(r => r.id === m.userData.roomId))
+        : roomMeshes;
+      const hit = raycaster.intersectObjects(targets, false)[0];
       if (!hit?.object?.userData?.roomId) return;
       const objectId = hit.object.userData.roomId;
       // Openings slide ALONG their wall — grab a window in 3D and move it.
@@ -2344,7 +2359,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // Ground walls (and edge segments) drag IN and OUT — grab the wall and
       // push it; the footprint follows on release. Upper bands move via the
       // storey controls; the roof/pad follow the shell.
-      if (objectId.startsWith('wall-') && !objectId.endsWith('-u')) {
+      if (objectId.startsWith('wall-') && !/-u\d*$/.test(objectId)) {
         const side = hit.object.userData.wallSide;
         if (!side) {
           callbacksRef.current.onSelectRoom(objectId);
