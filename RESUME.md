@@ -27,7 +27,7 @@ Run: `node server.mjs` with cwd = this folder (or start.bat — it self-restarts
 - Zero-filled ops: 0 means "unset" (the basement is level -1 precisely because 0 is swallowed). update_object writes strings — use move_object/resize_object for numbers.
 - Multi-step UI actions = ONE batched dispatch or chained baseSpec — never N calls on stale state.
 - updateShell has an 18-ft minimum clamp branch trap: new shell fields need their own branch.
-- After bim-core edits run `node tools/op_smoke_test.mjs` (106); planner edits `node tools/trace_repair_test.mjs` (82); geometry work `node tools/geom_test.mjs` (41).
+- After bim-core edits run `node tools/op_smoke_test.mjs` (106); planner edits `node tools/trace_repair_test.mjs` (96); geometry work `node tools/geom_core_test.mjs` (41).
 
 **LLM calls**
 - Log the raw tail of every unparseable reply (see the parsePass evidence pattern) — one log line replaced three guessing rounds (the digit-loop: 33k chars of '0').
