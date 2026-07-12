@@ -3,3 +3,5 @@ dist/
 .data/
 *.log
 .env.local
+PROOF-REPORT.md
+proof-run.log

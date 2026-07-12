@@ -63,13 +63,19 @@ complex instructions won't.
 ## Known limitations (honest list)
 
 - **Tracing a drawing gives a strong starting point, not an exact replica.**
-  Rooms come out named and measured, but placement can land a little
-  differently run to run, and a big drawing set takes a minute or two. If a
-  result looks off, say "re-check the trace against the drawing" in chat —
-  and if a traced design gets muddled after many edits, a fresh re-trace
-  beats repairing it one message at a time.
+  Rooms come out named, measured, and laid out the same way every time (the
+  app places them itself — they can't overlap or land outside the walls),
+  but what the reader SEES can vary: a room count or size may differ between
+  runs, and a big set takes a minute or two. The app grades every read —
+  the chat reply opens with "Read your drawing — X of 11 checks passed" and
+  any doubts appear as flags in **Review**, which clear themselves as you
+  fix things. If a read scores low, trace it again; if a traced design gets
+  muddled after many edits, a fresh re-trace beats repairing it one message
+  at a time.
 - Footprints can be L / T / U shapes (drag a wall edge in the Plan view, or
-  tap a wall → "Split into 3" → drag the middle), and a partial upper storey
+  tap a wall → "Split into 3" → drag the middle), a split wall's sections can
+  each run their own construction (a timber-frame bay beside straw-clay
+  infill — tap a section, change its System), and a partial upper storey
   gets a real **stepped roof**. Still honest gaps: roof VALLEYS aren't
   modeled (segments just meet), skylights on stepped/L roofs sit
   approximately, and the 3D frame isn't drawn for custom outlines.

@@ -107,12 +107,23 @@ No compare view, no new surface. What it was for is covered without new UI:
   **Review flags** — the panel that already exists, already jumps to the
   object when tapped. Build this as part of Phase 1's reporting, not later.
 
-### Phase 3 — Prove it, then ship it
-- Add 4–6 diverse floor plans to the corpus (public/permit-set samples:
-  labeled, unlabeled, hand-drawn, multi-storey).
-- **Stability gate: three consecutive full-corpus sweeps, all sets ≥10/11.**
-  (Scriptable overnight; costs under a dollar.)
-- Then: TESTING.md check, zip/link to the 2–3 testers, friend pulls.
+### Phase 3 — Prove it, then ship it — **harness built 2026-07-12, gate open**
+- **The whole battery is one click: `PROVE-IT.bat`** (or
+  `node tools/prove_it.mjs [--sweeps N] [--stability K] [--set X]`). It runs
+  the unit suites, N full corpus sweeps, and K stability runs, auto-starts
+  the server, and writes **PROOF-REPORT.md** in plain language with a
+  READY / ALMOST (rate-limited) / NOT YET verdict. Default (3 sweeps + 20
+  stability runs) is the overnight run.
+- Corpus curated to 4 distinct sets (columbia-st byte-dupe deleted;
+  fl0-house-v5-complete promoted from captured/ — the capture flow works).
+  Diversity is still thin (one architect family + FL0): adding public sample
+  plans means downloading files, which needs Daniel's go-ahead — or he can
+  drop ANY floor-plan PDF into `.data/trace-corpus/` himself; it's in the
+  tests forever from then on.
+- **Stability gate: three consecutive full-corpus sweeps, all sets ≥10/11,
+  no placement divergence** — the READY verdict in PROOF-REPORT.md.
+- Then: TESTING.md check (refreshed 2026-07-12), zip/link to the 2–3
+  testers, friend pulls.
 - MVP is declared when testers' first hour produces no "wait, why can't I—".
 
 ## What this app will never promise (say it, don't hide it)
