@@ -862,17 +862,76 @@ export function cleanTraceElements(plan, sourceSpec) {
   if (dropped.length) {
     plan.warnings = [...(plan.warnings || []), `${dropped.join(', ')}: traced as both a room and a site element — kept the measured room.`];
   }
-  // 2) Overlapping outdoor elements are a pile, not a site plan: when they
-  //    collide, re-lay ALL of them in a readable rank beside the house.
+  // 2) ATTACHED structures (a greenhouse, sunspace, or porch) belong flush
+  //    against a wall, not floating in the yard — schematics draw them beside
+  //    the outline and the rank below would drag them further out. A solar
+  //    greenhouse attaches to the SOUTH face by convention; a porch to its
+  //    nearest face. Already-flush elements are left alone.
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
   let shellW = num(sourceSpec?.shell?.widthFt) || 36;
+  let shellD = num(sourceSpec?.shell?.depthFt) || 28;
   for (const op of plan.operations) {
     if (op.type !== 'set_shell') continue;
     if (num(op.w)) shellW = num(op.w);
+    if (num(op.d)) shellD = num(op.d);
     if (op.field === 'widthFt' && num(op.value)) shellW = num(op.value);
+    if (op.field === 'depthFt' && num(op.value)) shellD = num(op.value);
   }
-  const outdoor = plan.operations.filter((o) => o.type === 'add_element' && OUTDOOR_ELEMENT_CATS.has(o.category) && !num(o.z));
   const rectOf = (o) => ({ x: num(o.x), y: num(o.y), w: num(o.w) || 10, d: num(o.d) || 10 });
+  const isAttachedKind = (o) => o.category === 'greenhouse' || o.category === 'porch'
+    || /\b(greenhouse|sunspace|sunroom)\b/i.test(String(o.name || ''));
+  const touchesFace = (r) => {
+    const xOverlap = Math.min(r.x + r.w, shellW) - Math.max(r.x, 0);
+    const yOverlap = Math.min(r.y + r.d, shellD) - Math.max(r.y, 0);
+    return (Math.abs(r.y - shellD) < 0.6 && xOverlap >= 3) // south
+      || (Math.abs(r.y + r.d) < 0.6 && xOverlap >= 3)      // north
+      || (Math.abs(r.x - shellW) < 0.6 && yOverlap >= 3)   // east
+      || (Math.abs(r.x + r.w) < 0.6 && yOverlap >= 3);     // west
+  };
+  const snapped = [];
+  for (const op of plan.operations) {
+    if (op.type !== 'add_element' || !isAttachedKind(op) || num(op.z)) continue;
+    const r = rectOf(op);
+    if (touchesFace(r)) continue;
+    let face;
+    if (op.category === 'greenhouse' || /\b(greenhouse|sunspace|sunroom)\b/i.test(String(op.name || ''))) face = 'south';
+    else {
+      const cx = r.x + r.w / 2;
+      const cy = r.y + r.d / 2;
+      const dists = { south: Math.abs(cy - shellD), north: Math.abs(cy), east: Math.abs(cx - shellW), west: Math.abs(cx) };
+      face = Object.keys(dists).reduce((a, b) => (dists[b] < dists[a] ? b : a));
+    }
+    // Slide along the face to a spot clear of anything already sitting there.
+    const axis = (face === 'south' || face === 'north') ? 'x' : 'y';
+    const runLen = axis === 'x' ? r.w : r.d;
+    const faceLen = axis === 'x' ? shellW : shellD;
+    const others = plan.operations.filter((o) => o !== op && o.type === 'add_element' && OUTDOOR_ELEMENT_CATS.has(o.category))
+      .map(rectOf)
+      .filter((o) => (face === 'south' ? Math.abs(o.y - shellD) < 0.6 : face === 'north' ? Math.abs(o.y + o.d) < 0.6
+        : face === 'east' ? Math.abs(o.x - shellW) < 0.6 : Math.abs(o.x + o.w) < 0.6))
+      .map((o) => (axis === 'x' ? [o.x, o.x + o.w] : [o.y, o.y + o.d]));
+    let along = Math.max(0, Math.min(axis === 'x' ? r.x : r.y, faceLen - runLen));
+    const collides = (a) => others.some(([s, e]) => a < e && a + runLen > s);
+    if (collides(along)) {
+      let best = null;
+      for (let a = 0; a + runLen <= faceLen + 0.01; a += 0.5) {
+        if (!collides(a)) { best = a; break; }
+      }
+      if (best !== null) along = best;
+    }
+    if (face === 'south') { op.y = shellD; op.x = along; }
+    else if (face === 'north') { op.y = -r.d; op.x = along; }
+    else if (face === 'east') { op.x = shellW; op.y = along; }
+    else { op.x = -r.w; op.y = along; }
+    snapped.push(op.name || op.category);
+  }
+  if (snapped.length) {
+    plan.warnings = [...(plan.warnings || []), `${snapped.join(', ')}: attached to the house wall (traces often float these in the yard).`];
+  }
+  // 3) Overlapping outdoor elements are a pile, not a site plan: when they
+  //    collide, re-lay ALL of them in a readable rank beside the house.
+  //    Attached structures stay put — the rank would tear them off the wall.
+  const outdoor = plan.operations.filter((o) => o.type === 'add_element' && OUTDOOR_ELEMENT_CATS.has(o.category) && !num(o.z) && !isAttachedKind(o));
   const overlapArea = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y));
   const piled = outdoor.some((a, i) => outdoor.some((b, j) => {
     if (j <= i) return false;

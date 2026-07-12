@@ -1688,7 +1688,9 @@ export function applyBimOperations(currentSpec, plan) {
         d: Math.max(1, Number(operation.d || sizeDefaults.d)),
         h: Math.max(0.2, Number(operation.h || sizeDefaults.h)),
         level: Number(operation.level || 1),
-        roofType: operation.roofType || '',
+        // A carport or porch IS a canopy on posts — without a roofType it
+        // rendered as a giant translucent ghost box.
+        roofType: operation.roofType || (operation.category === 'carport' || operation.category === 'porch' ? 'shed' : ''),
         construction: operation.construction || '',
         // Partitions reuse the opening fields for their door: widthFt = door
         // width (0 = solid wall), positionFt = distance along the wall run.

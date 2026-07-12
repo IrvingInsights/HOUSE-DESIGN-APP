@@ -489,5 +489,23 @@ const miniSpec = () => ({
   ok(plan.operations.some((o) => o.type === 'add_element' && /greenhouse/i.test(o.name || '')), 'greenhouse reclassified to an outdoor element');
 }
 
+// ---- Attached structures snap flush to a wall (greenhouse in the yard) -----
+{
+  const plan = { operations: [
+    { type: 'set_shell', w: 24, d: 28 },
+    { type: 'add_element', category: 'porch', name: 'Daily Entry', x: 18, y: 28, w: 6, d: 8 },
+    { type: 'add_element', category: 'greenhouse', name: 'Solar Greenhouse', x: 27, y: 28, w: 18, d: 8 },
+    { type: 'add_element', category: 'carport', name: 'Carport', x: 30, y: 3, w: 18, d: 20 }
+  ], warnings: [] };
+  cleanTraceElements(plan, { shell: { widthFt: 24, depthFt: 28 }, rooms: [] });
+  const gh = plan.operations.find((o) => o.category === 'greenhouse');
+  ok(gh.y === 28 && gh.x >= 0 && gh.x + gh.w <= 24.01, `greenhouse snapped flush to the south wall (${gh.x},${gh.y})`);
+  const porch = plan.operations.find((o) => o.category === 'porch');
+  ok(porch.x === 18 && porch.y === 28, 'already-flush porch left alone');
+  ok(!(gh.x < porch.x + porch.w && gh.x + gh.w > porch.x), 'greenhouse slid clear of the porch on the same face');
+  const carport = plan.operations.find((o) => o.category === 'carport');
+  ok(carport.x === 30 && carport.y === 3, 'freestanding carport not dragged to a wall');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

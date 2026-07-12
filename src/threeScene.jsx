@@ -1156,7 +1156,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           opacity: room.id === selectedRoom ? 0.88 : 0.58,
           roughness: 0.7
         });
-        const mesh = box(room.w, 0.22, room.d, room.x + room.w / 2, 0.05 + roomLift, room.y + room.d / 2, material);
+        // Upper-storey zone slabs inset so their colored edge doesn't peek
+        // through the seam where the wall bands seat (ground slabs sit well
+        // inside the thicker ground walls already).
+        const slabInset = roomLevel > 1 ? Math.min(0.4, room.w / 4, room.d / 4) : 0;
+        const mesh = box(room.w - slabInset * 2, 0.22, room.d - slabInset * 2, room.x + room.w / 2, 0.05 + roomLift, room.y + room.d / 2, material);
         mesh.name = room.name;
         mesh.userData.roomId = room.id;
         mesh.userData.footprint = { w: room.w, d: room.d };
@@ -1283,10 +1287,20 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             opacity: element.id === selectedRoom ? 0.9 : 0.72,
             roughness: 0.85
           });
+          // The visible plate is inset so the storey's wall bands cover its
+          // edge (a green sliver used to peek through the seat seam); the
+          // full-extent invisible handle keeps drag/resize working.
+          const plateInset = Math.min(0.35, element.w / 4, element.d / 4);
           if (!cuts.length) {
-            mesh = box(element.w, elementHeight, element.d, element.x + element.w / 2, elevation + elementHeight / 2, element.y + element.d / 2, plateMat2);
+            const visiblePlate = box(element.w - plateInset * 2, elementHeight, element.d - plateInset * 2,
+              element.x + element.w / 2, elevation + elementHeight / 2, element.y + element.d / 2, plateMat2);
+            visiblePlate.userData.roomId = element.id;
+            visiblePlate.userData.generated = true;
+            group.add(visiblePlate);
+            const plateHandle0 = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
+            mesh = box(element.w, elementHeight, element.d, element.x + element.w / 2, elevation + elementHeight / 2, element.y + element.d / 2, plateHandle0);
           } else {
-            let rects = [{ x: element.x, y: element.y, w: element.w, d: element.d }];
+            let rects = [{ x: element.x + plateInset, y: element.y + plateInset, w: element.w - plateInset * 2, d: element.d - plateInset * 2 }];
             cuts.forEach((cut) => {
               const cutRect = { x: cut.x - 0.2, y: cut.y - 0.2, w: cut.w + 0.4, d: cut.d + 0.4 };
               rects = rects.flatMap((r) => subtractRect(r, cutRect));
@@ -1386,6 +1400,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const stepH = rise / steps;
           for (let s = 0; s < steps; s += 1) {
             const topY = elevation + (s + 1) * stepH;
+            // Stairs stop at the roof's underside like partitions do — a run
+            // whose top lands under a low stepped wing used to poke its last
+            // treads out through the metal.
+            const treadCx = alongX ? element.x + s * treadD + treadD / 2 : element.x + stairWide / 2;
+            const treadCz = alongX ? element.y + stairWide / 2 : element.y + s * treadD + treadD / 2;
+            if (lvlS !== BASEMENT_LEVEL && topY > roofUnderAt(treadCx, treadCz) - 0.12) continue;
             const tread = alongX
               ? box(treadD, 0.22, stairWide, element.x + s * treadD + treadD / 2, topY - 0.11, element.y + stairWide / 2, treadMat)
               : box(stairWide, 0.22, treadD, element.x + stairWide / 2, topY - 0.11, element.y + s * treadD + treadD / 2, treadMat);
@@ -1401,6 +1421,17 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           }
           const stairHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.05, depthWrite: false });
           mesh = box(element.w, rise, element.d, element.x + element.w / 2, elevation + rise / 2, element.y + element.d / 2, stairHandle);
+        } else if (element.roofType || element.category === 'carport' || element.category === 'porch') {
+          // An open-air structure (carport, porch, covered deck) is a canopy
+          // on posts over a low deck — NOT a building-sized translucent ghost
+          // box. The full-volume handle stays for select/drag.
+          const deckMat = new THREE.MeshStandardMaterial({ color: 0x9c8265, roughness: 0.9, map: grainTexture('wood') });
+          const deck = box(element.w, 0.28, element.d, element.x + element.w / 2, elevation + 0.14, element.y + element.d / 2, deckMat);
+          deck.userData.roomId = element.id;
+          deck.userData.generated = true;
+          group.add(deck);
+          const openHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
+          mesh = box(element.w, Math.max(7.4, elementHeight), element.d, element.x + element.w / 2, elevation + Math.max(7.4, elementHeight) / 2, element.y + element.d / 2, openHandle);
         } else {
         const material = new THREE.MeshStandardMaterial({
           color: elementPalette[element.category] || 0x8a7768,
@@ -1430,8 +1461,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // gable gets a small ridge, anything else a shed panel tilted down
         // away from the house. All parts carry the element's roomId so
         // selection glow and explode move the assembly as one.
-        if (element.roofType && element.category !== 'foundation' && element.category !== 'floor') {
-          const deckTop = elevation + elementHeight;
+        const canopyKind = element.roofType || (element.category === 'carport' || element.category === 'porch' ? 'shed' : '');
+        if (canopyKind && element.category !== 'foundation' && element.category !== 'floor') {
+          // Posts stand on the deck (or a low volume) — never on top of a
+          // tall handle volume, which floated the canopy 10ft up.
+          const deckTop = elevation + Math.min(elementHeight, 1);
           const eave = deckTop + 6.8;
           const canopyPart = (m) => { m.userData.roomId = element.id; m.userData.generated = true; group.add(m); };
           [[element.x + 0.4, element.y + 0.4], [element.x + element.w - 0.4, element.y + 0.4],
@@ -1440,7 +1474,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const cxm = element.x + element.w / 2;
           const czm = element.y + element.d / 2;
           const ow = 0.9;
-          if (element.roofType === 'gable') {
+          if (canopyKind === 'gable') {
             const alongX = element.w >= element.d;
             const span = (alongX ? element.d : element.w) / 2 + ow;
             const rise = Math.max(0.9, span * 0.3);
