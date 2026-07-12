@@ -622,6 +622,30 @@ function upsertRoom(spec, room) {
 }
 
 function normalizeRooms(spec) {
+  // ONE extent plate per level (dedupe): keep the plate that best overlaps
+  // that level's rooms; drop the rest. Duplicated plates (trace/audit/tower
+  // paths) made walls, roof steps, and controls disagree about the storey.
+  const floorPlates = (spec.elements || []).filter((el) => el.category === 'floor');
+  if (floorPlates.length > 1) {
+    const levels = [...new Set(floorPlates.map((el) => Number(el.level || 1)))];
+    for (const lvl of levels) {
+      const group = floorPlates.filter((el) => Number(el.level || 1) === lvl);
+      if (group.length < 2) continue;
+      const overlapArea = (plate) => (spec.rooms || [])
+        .filter((room) => Number(room.level || 1) === lvl)
+        .reduce((sum, room) => sum
+          + Math.max(0, Math.min(Number(room.x) + Number(room.w), Number(plate.x) + Number(plate.w)) - Math.max(Number(room.x), Number(plate.x)))
+          * Math.max(0, Math.min(Number(room.y) + Number(room.d), Number(plate.y) + Number(plate.d)) - Math.max(Number(room.y), Number(plate.y))), 0);
+      const area = (plate) => Math.max(1, Number(plate.w) * Number(plate.d));
+      const keep = group.reduce((a, b) => {
+        const oa = overlapArea(a); const ob = overlapArea(b);
+        if (ob !== oa) return ob > oa ? b : a;
+        return area(b) < area(a) ? b : a; // tie: the tighter fit wins
+      });
+      spec.elements = spec.elements.filter((el) => el.category !== 'floor' || Number(el.level || 1) !== lvl || el === keep);
+    }
+  }
+
   const roomMargin = Math.max(16, padExtension(spec.shell));
   spec.rooms = spec.rooms.map((room) => ({
     ...room,
@@ -1609,6 +1633,22 @@ export function applyBimOperations(currentSpec, plan) {
         if (!Number(operation.h)) element.h = Math.max(7, Number(next.shell.wallHeightFt || 10) - 0.5);
       }
       const placed = { ...element, ...clampObjectPosition(next, element, element.x, element.y) };
+      // ONE extent plate per level, enforced at the op layer: a second
+      // 'floor' plate for a level that has one is a RESHAPE of the existing
+      // plate, never a sibling — duplicates made the walls ring one plate
+      // while the roof stepped around another.
+      if (placed.category === 'floor') {
+        const lvl = Number(placed.level || 1);
+        const existingPlate = next.elements.find((el) => el.category === 'floor' && Number(el.level || 1) === lvl);
+        if (existingPlate) {
+          existingPlate.x = placed.x; existingPlate.y = placed.y;
+          existingPlate.w = placed.w; existingPlate.d = placed.d;
+          if (Number(placed.z)) existingPlate.z = Number(placed.z);
+          changedIds.push(existingPlate.id);
+          actions.push(`Reshaped the ${existingPlate.name} — one extent plate per storey.`);
+          continue;
+        }
+      }
       next.elements.push(placed);
       changedIds.push(id);
       actions.push(operationDescription(operation, next));

@@ -564,10 +564,27 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const u = wallUpper[side];
           const tU = u.thicknessFt;
           const p = plate2;
-          const upperMesh = side === 'north' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + tU / 2, wallMatOf(u))
-            : side === 'south' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + p.d - tU / 2, wallMatOf(u))
-            : side === 'west' ? box(tU, storeyLift, p.d, p.x + tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u))
-            : box(tU, storeyLift, p.d, p.x + p.w - tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u));
+          // STEPPED SHED (rect path): a partial tower's N/S walls sit DOWN on
+          // the wing roof plane under them and rise to the lifted plane —
+          // the flat groundH band floated above the wing (the gap) and
+          // overshot the tower's own roof. (E/W on a shed come from the
+          // stepped raked sides, not here. Gable/flat keep the flat band.)
+          const realPlate = upperPlateRect(spec, 2);
+          const stepped = Boolean(realPlate && realPlate.w * realPlate.d < width * depth - 1);
+          let upperMesh;
+          if (stepped && roofSpec.roofType === 'shed' && (side === 'north' || side === 'south')) {
+            const wingTop = (zz) => roofSpec.northWallHeightFt
+              + (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) * clamp(depth > 0 ? zz / depth : 0, 0, 1);
+            const TUCK = 0.45;
+            const zz = side === 'north' ? p.y : p.y + p.d;
+            const yBot = wingTop(zz) - TUCK;
+            upperMesh = box(p.w, storeyLift + TUCK, tU, p.x + p.w / 2, yBot + (storeyLift + TUCK) / 2, side === 'north' ? p.y + tU / 2 : p.y + p.d - tU / 2, wallMatOf(u));
+          } else {
+            upperMesh = side === 'north' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + tU / 2, wallMatOf(u))
+              : side === 'south' ? box(p.w, storeyLift, tU, p.x + p.w / 2, groundH + storeyLift / 2, p.y + p.d - tU / 2, wallMatOf(u))
+              : side === 'west' ? box(tU, storeyLift, p.d, p.x + tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u))
+              : box(tU, storeyLift, p.d, p.x + p.w - tU / 2, groundH + storeyLift / 2, p.y + p.d / 2, wallMatOf(u));
+          }
           wallMeshSpecs.push({ side, storey: 'upper', meshes: [upperMesh] });
         }
       };
@@ -732,9 +749,17 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           if (!rSg.sunGlazing || rSg.omitted || omittedWalls.has(side)) return;
           if (!layers[`wall${titleCase(side)}`]) return;
           const kneeH = rSg.heightFt;
+          // STEPPED RULE (same as walls/frame/roof): with a PARTIAL upper
+          // storey the perimeter eave is GROUND height — the lift happens
+          // only over the plate. The band used the fully-lifted eave and
+          // rose 10 ft past the main roof, reading as a tower wall floating
+          // above the roof with a gap below.
+          const plateSg = upperPlateRect(spec, 2);
+          const steppedSg = storeyLift > 0 && plateSg && plateSg.w * plateSg.d < width * depth - 1;
+          const liftSg = steppedSg ? 0 : storeyLift;
           const eaveH = roofSpec.roofType === 'shed'
-            ? (side === 'south' ? southWallHeight : side === 'north' ? northWallHeight : Math.max(northWallHeight, southWallHeight))
-            : wallHeight;
+            ? (side === 'south' ? roofSpec.southWallHeightFt + liftSg : side === 'north' ? roofSpec.northWallHeightFt + liftSg : Math.max(roofSpec.northWallHeightFt, roofSpec.southWallHeightFt) + liftSg)
+            : roofSpec.highWallHeightFt + liftSg;
           const gapH = eaveH - kneeH;
           if (gapH < 1.5) return;
           const tiltRad = clamp(Number(rSg.sunGlazingTiltDeg ?? 30), 0, 45) * Math.PI / 180;
@@ -1160,7 +1185,17 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         let elementHeight = element.h || 1.2;
         let elevation = Number(element.z || 0);
         let mesh;
-        if (element.category === 'foundation') {
+        if ((element.category === 'tower' || element.category === 'loft') && upperPlateRect(spec, Math.max(2, Number(element.level || 2)))) {
+          // A tower/loft whose level HAS an extent plate is already fully
+          // represented by the plate + upper wall bands + stepped roof — the
+          // generic volume box double-rendered on top and stuck through the
+          // roof planes. Keep an invisible full-volume handle so the element
+          // stays selectable and draggable.
+          const hVol = Math.max(2, Number(element.h) || 8);
+          const ghostMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
+          mesh = box(element.w, hVol, element.d, element.x + element.w / 2, elevation + hVol / 2, element.y + element.d / 2, ghostMat);
+          elementHeight = hVol;
+        } else if (element.category === 'foundation') {
           // A foundation RUN under a specific wall line: gravel trench below
           // grade, and (per its construction) a concrete stem standing proud —
           // the greenhouse-divider detail. The stem (or the ground-level cap)

@@ -1852,6 +1852,30 @@ function App() {
     const wall = wallSections.find((item) => item.id === selectedRoom);
     const amount = clamp(Number(offsetFt) || 0, -48, 48);
     if (!wall || !amount) return;
+    // An UPPER (tower/storey) wall rings the extent plate — moving it moves
+    // that plate's edge, not the house footprint. One dispatch: resize +
+    // re-anchor; walls, stepped roof, and frame all follow the plate.
+    if (/-u$/.test(String(wall.id))) {
+      const lvl = Number(wall.level || 2);
+      const plateEl = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === lvl);
+      if (!plateEl) return;
+      const p = { x: Number(plateEl.x) || 0, y: Number(plateEl.y) || 0, w: Number(plateEl.w) || 10, d: Number(plateEl.d) || 10 };
+      if (wall.side === 'south') p.d = Math.max(4, p.d + amount);
+      else if (wall.side === 'north') { p.y -= amount; p.d = Math.max(4, p.d + amount); }
+      else if (wall.side === 'east') p.w = Math.max(4, p.w + amount);
+      else { p.x -= amount; p.w = Math.max(4, p.w + amount); }
+      void applyBackendOperations({
+        operations: [
+          { type: 'resize_object', targetId: plateEl.id, w: p.w, d: p.d },
+          { type: 'move_object', targetId: plateEl.id, x: Math.max(0, p.x), y: Math.max(0, p.y) }
+        ],
+        promptText: `Move the upper ${wall.side} wall ${amount > 0 ? 'out' : 'in'} ${Math.abs(amount)}′`,
+        logPrefix: 'Storey',
+        nextSelectedId: wall.id,
+        chatText: `Moved the upper ${wall.side} wall ${amount > 0 ? 'outward' : 'inward'} ${Math.abs(amount)} ft — the storey extent, its walls, and the stepped roof follow together.`
+      });
+      return;
+    }
     void applyBackendOperations({
       operations: [wall.edgeKey
         ? { type: 'move_wall_edge', field: wall.edgeKey, value: String(amount) }

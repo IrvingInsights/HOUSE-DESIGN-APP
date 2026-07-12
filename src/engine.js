@@ -2816,6 +2816,30 @@ export function upsertRoom(spec, room) {
 }
 
 export function normalizeRooms(spec) {
+  // ONE extent plate per level (dedupe): keep the plate that best overlaps
+  // that level's rooms; drop the rest. Duplicated plates (trace/audit/tower
+  // paths) made walls, roof steps, and controls disagree about the storey.
+  const floorPlates = (spec.elements || []).filter((el) => el.category === 'floor');
+  if (floorPlates.length > 1) {
+    const levels = [...new Set(floorPlates.map((el) => Number(el.level || 1)))];
+    for (const lvl of levels) {
+      const group = floorPlates.filter((el) => Number(el.level || 1) === lvl);
+      if (group.length < 2) continue;
+      const overlapArea = (plate) => (spec.rooms || [])
+        .filter((room) => Number(room.level || 1) === lvl)
+        .reduce((sum, room) => sum
+          + Math.max(0, Math.min(Number(room.x) + Number(room.w), Number(plate.x) + Number(plate.w)) - Math.max(Number(room.x), Number(plate.x)))
+          * Math.max(0, Math.min(Number(room.y) + Number(room.d), Number(plate.y) + Number(plate.d)) - Math.max(Number(room.y), Number(plate.y))), 0);
+      const area = (plate) => Math.max(1, Number(plate.w) * Number(plate.d));
+      const keep = group.reduce((a, b) => {
+        const oa = overlapArea(a); const ob = overlapArea(b);
+        if (ob !== oa) return ob > oa ? b : a;
+        return area(b) < area(a) ? b : a; // tie: the tighter fit wins
+      });
+      spec.elements = spec.elements.filter((el) => el.category !== 'floor' || Number(el.level || 1) !== lvl || el === keep);
+    }
+  }
+
   const roomMargin = Math.max(16, padExtension(spec.shell));
   spec.rooms = spec.rooms.map((room) => ({
     ...room,
