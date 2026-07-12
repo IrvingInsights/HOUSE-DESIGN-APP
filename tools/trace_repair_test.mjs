@@ -620,7 +620,19 @@ const miniSpec = () => ({
   ok(noOverlap, 'tiled rooms never overlap');
   const kitchen = rooms1.find((r) => r.name === 'Kitchen');
   const bath = rooms1.find((r) => r.name === 'Bathroom');
-  ok(kitchen.y === 0 && bath.y === 10, 'row structure preserved (kitchen north, bath south)');
+  ok(kitchen.y === 0.01 && bath.y === 10.01, 'row structure preserved (kitchen north, bath south)');
+  // Flush-at-origin must survive the zero-filled op pipeline: 0 means "unset"
+  // to add_room (it injects a 2 ft margin that shifted whole layouts into
+  // overlaps — the first corpus sweep caught exactly this), so the tiler
+  // spells the origin 0.01 and apply must keep it.
+  const applied = applyBimOperations({
+    projectName: 'Tiler', revision: 1,
+    shell: { widthFt: 30, depthFt: 24, wallHeightFt: 10, southWallHeightFt: 10, northWallHeightFt: 10, roofType: 'gable', roofPitch: 0.32, storeys: 1 },
+    systems: { envelope: 'straw bale walls', structure: 'timber', water: 'well', energy: 'solar' },
+    rooms: [], elements: [], openings: [], levels: [], walls: {}, notes: ''
+  }, out1);
+  const appliedKitchen = applied.spec.rooms.find((r) => r.name === 'Kitchen');
+  ok(appliedKitchen.x === 0.01 && appliedKitchen.y === 0.01, 'tiled origin room survives apply flush (no +2 margin shift)');
 
   // Same reads, JITTERED hints (±1.5 ft, different op order) → identical layout.
   const read2 = [read1[3], read1[1], read1[4], read1[0], read1[2]].map((r, i) => ({
@@ -639,7 +651,7 @@ const miniSpec = () => ({
   ];
   const outWide = placeTraceRooms(mkPlan(wide), empty);
   const c = outWide.operations.find((o) => o.type === 'add_room' && o.name === 'C');
-  ok(c.x === 0 && c.y === 8, 'overflowing row wraps to the next row');
+  ok(c.x === 0.01 && c.y === 8.01, 'overflowing row wraps to the next row');
 
   // Audit move ops on tiled rooms fold in as hints and are consumed.
   const moved = placeTraceRooms(mkPlan(read1, [{ type: 'move_object', name: 'Kitchen', x: 40, y: 40 }]), empty);

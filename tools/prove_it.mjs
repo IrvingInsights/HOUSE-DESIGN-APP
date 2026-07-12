@@ -74,11 +74,13 @@ for (let s = 1; s <= SWEEPS; s += 1) {
   if (s > 1) { console.log('\n(pausing 3 minutes between sweeps for API rate limits)'); await new Promise((r) => setTimeout(r, 180000)); }
   const { out } = run(['tools/trace_corpus_test.mjs'], `corpus sweep ${s}/${SWEEPS}`);
   const summary = (out.trim().split('\n').pop() || '').trim();
-  const skipped = /skipped/i.test(out) && !/0 skipped/.test(out);
+  // Judge by the summary line alone: real failures beat rate-limit skips.
+  const failures = Number((/(\d+) invariant failure/.exec(summary) || [])[1] || 0) > 0 || /NOTHING TESTED/.test(summary);
+  const skipped = Number((/\((\d+) skipped/.exec(summary) || [])[1] || 0) > 0 || /NOTHING TESTED/.test(summary);
   const clean = /CORPUS CLEAN/.test(summary) && !skipped;
   if (clean) cleanSweeps += 1;
-  if (skipped) sweepsWithSkips += 1;
-  say(`- Sweep ${s}: ${clean ? 'CLEAN' : skipped ? `INCOMPLETE — the AI service refused some sets (rate limits); re-run later` : 'FAILURES'} — ${summary}`);
+  if (!failures && skipped) sweepsWithSkips += 1;
+  say(`- Sweep ${s}: ${clean ? 'CLEAN' : failures ? 'FAILURES — the evidence is in .data/trace-corpus/*.lastfail.json' : 'INCOMPLETE — the AI service refused some sets (rate limits); re-run later'} — ${summary}`);
 }
 say('');
 

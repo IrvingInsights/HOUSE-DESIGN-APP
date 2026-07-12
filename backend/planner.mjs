@@ -1249,8 +1249,12 @@ export function placeTraceRooms(plan, sourceSpec) {
       if (!shelf.rooms.length) continue;
       let xCursor = 0;
       for (const r of shelf.rooms) {
-        r.px = Math.round(Math.min(xCursor, Math.max(0, shellW - r.w)) * 2) / 2;
-        r.py = Math.round(yCursor * 2) / 2;
+        // The whole grid rides a +0.01 translation: 0 means "unset" to the
+        // zero-filled op pipeline (add_room turns it into a 2 ft margin that
+        // shifted whole layouts into overlaps — the first corpus sweep caught
+        // it), and a uniform shim keeps abutting rooms exactly abutting.
+        r.px = Math.round(Math.min(xCursor, Math.max(0, shellW - r.w)) * 2) / 2 + 0.01;
+        r.py = Math.round(yCursor * 2) / 2 + 0.01;
         xCursor += r.w;
       }
       yCursor += Math.max(...shelf.rooms.map((r) => r.d));
