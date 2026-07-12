@@ -40,7 +40,7 @@ prompt tweak is the losing game we've been playing. The winning game is
 | Cost control (thinking off, minimal schemas, ~pennies/trace) | Done | Headroom exists for escalation |
 | **The app referees itself in production** | **Missing** | **Phase 1 — the biggest single win** |
 | **Placement by AI coordinates** | **Fragile by design** | **Phase 2 — remove it** |
-| **User can see what the read got wrong** | **Missing** | **Phase 3** |
+| **User can see what the read got wrong** | **Missing** | **Folded into Review — no new surface (Daniel: no compare view, no bloat)** |
 | Corpus breadth (4 sets, all one architect + FL0) | Narrow | Phase 4 — add diverse public plans |
 | Stochastic stability (each set passes repeatedly) | Unproven | Phase 4 — 3 consecutive clean sweeps |
 | Server resilience (crash guard, atomic saves, auto-restart) | Done | — |
@@ -49,7 +49,7 @@ prompt tweak is the losing game we've been playing. The winning game is
 | Custom-footprint frame/IFC/permit gaps | Documented honestly | Post-MVP |
 | Sharing (GitHub + Codespace + TESTING.md) | Done | Ship at Phase 4 exit |
 
-## The four moves
+## The three moves
 
 ### Phase 1 — The app referees itself (next session, ~1 session)
 Move the corpus scorer INTO the trace pipeline. After every in-app trace:
@@ -79,17 +79,14 @@ touches which) and bad at emitting *coordinates*. Split the job:
 **Exit test:** 20 consecutive traces of one drawing produce the same room
 layout (names may vary on unlabeled plans; geometry may not).
 
-### Phase 3 — Trust UI (1 session)
-- **Compare view**: the drawing page rendered beside the 2D plan, so anyone
-  can see at a glance what matched and what didn't.
-- **Doubt list**: the trace's inferred names and estimated positions listed
-  as "check these" chips, each tap selecting the object.
-- Score chip on the model bar after a trace; "Re-check against the drawing"
-  as a visible button, not a chat incantation.
+### ~~Phase 3 — Trust UI~~ CUT (Daniel, 2026-07-12: "don't want to bloat the thing")
+No compare view, no new surface. What it was for is covered without new UI:
+- Phase 1 already reports the read-score in chat in plain language.
+- Trace doubts (inferred names, estimated positions) become ordinary
+  **Review flags** — the panel that already exists, already jumps to the
+  object when tapped. Build this as part of Phase 1's reporting, not later.
 
-**Exit test:** a non-coder can verify a trace in under a minute without chat.
-
-### Phase 4 — Prove it, then ship it
+### Phase 3 — Prove it, then ship it
 - Add 4–6 diverse floor plans to the corpus (public/permit-set samples:
   labeled, unlabeled, hand-drawn, multi-storey).
 - **Stability gate: three consecutive full-corpus sweeps, all sets ≥10/11.**
