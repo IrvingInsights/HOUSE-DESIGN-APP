@@ -378,6 +378,18 @@ async function httpSanity() {
   ok(plate2 && plate2.w >= 10 && plate2.d >= 17, 'extent plate grows to cover its storey rooms', `${plate2?.w}x${plate2?.d}`);
 }
 
+// --- interior elements never default to the yard ------------------------------
+{
+  // A partition with no x (zero-filled op) used to park at shellW+3 — an
+  // interior wall floating in the yard. Unset interior positions = origin.
+  const out = apply(freshSpec(), [{ type: 'add_element', category: 'partition', name: 'Hall Wall', y: 8, w: 10 }]);
+  const part = out.spec.elements.find((el) => el.category === 'partition');
+  ok(part && part.x + part.w <= 36.01 && part.x >= 0, 'unplaced partition lands inside the shell', `x=${part?.x}`);
+  const out2 = apply(freshSpec(), [{ type: 'add_element', category: 'shed', name: 'Garden Shed', w: 8, d: 6 }]);
+  const shed = out2.spec.elements.find((el) => el.name === 'Garden Shed');
+  ok(shed && shed.x >= 36, 'unplaced OUTDOOR element still parks beside the house', `x=${shed?.x}`);
+}
+
 const wantHttp = process.argv.includes('--http');
 (async () => {
   if (wantHttp) await httpSanity();

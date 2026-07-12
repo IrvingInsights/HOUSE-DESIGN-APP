@@ -1030,6 +1030,10 @@ export function shellShorthandDims(operation) {
   };
 }
 
+// Element kinds that live ON/IN the house — an unset position means "at the
+// origin", never "park it in the yard beside the shell".
+const INTERIOR_ELEMENT_CATS = new Set(['floor', 'partition', 'foundation']);
+
 export function applyBimOperations(currentSpec, plan) {
   const next = structuredClone(currentSpec);
   next.rooms ||= [];
@@ -1678,11 +1682,12 @@ export function applyBimOperations(currentSpec, plan) {
         category: operation.category || (operation.type === 'add_site_element' ? 'site' : operation.type.replace('add_', '') || 'custom'),
         sourceCategory: 'AI Planner',
         note: operation.reason || 'Custom BIM element generated from natural-language design request.',
-        // "0 is unset" here because emptyBimOperation zero-fills — but a floor
-        // (storey extent) plate belongs ON the house, not beside it, so its
-        // unset default is the origin. Fixes storey plates landing at x=16,y=3.
-        x: Number(operation.x || (operation.category === 'floor' ? 0 : next.shell.widthFt + 3)),
-        y: Number(operation.y || (operation.category === 'floor' ? 0 : 3)),
+        // "0 is unset" here because emptyBimOperation zero-fills — but INTERIOR
+        // kinds (storey plates, partitions, foundation runs) belong ON the
+        // house, not parked beside it: their unset default is the origin.
+        // A partition with no x used to land in the yard at shellW+3.
+        x: Number(operation.x || (INTERIOR_ELEMENT_CATS.has(operation.category) ? 0 : next.shell.widthFt + 3)),
+        y: Number(operation.y || (INTERIOR_ELEMENT_CATS.has(operation.category) ? 0 : 3)),
         z: Number(operation.z || 0),
         w: Math.max(1, Number(operation.w || sizeDefaults.w)),
         d: Math.max(1, Number(operation.d || sizeDefaults.d)),
