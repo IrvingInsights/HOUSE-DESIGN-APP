@@ -15,9 +15,10 @@ Run: `node server.mjs` with cwd = this folder (or start.bat — it self-restarts
 - **UX**: pinned Inspector (bottom of left bar, collapsible), Fine-tune ▸ disclosure on system pages, journey rail (← prev / Next → through build order → Review), visited-system dots, House|Site plan framing + edge arrows + wheel-zoom/pan, model toolbar above the view, chat starts closed w/ unread badge, engine-offline banner + auto-recovery.
 
 ## START HERE
-1. **Read `.data/trace-corpus/fl0-v6.lastfail.json`** (full failing spec+plan). Diagnose how the staged path put KITCHEN outside the shell (suspects: structure-pass set_shell/set_footprint interplay, or an audit-move id the effective-rect grow didn't match). Fix the CLASS, add a unit test, re-run `node tools/trace_corpus_test.mjs` until clean.
-2. Refresh TESTING.md's known-limitations list (setup steps are current; limitations predate ~45 commits).
-3. Tell Daniel to send the repo link to his testers. Resist building more first — tester surprises are the last mile.
+1. ~~Staged-path fl0-v6 failure~~ **DONE (commits 4235d36 + cce73fe):** two classes — junk-field set_shell ops the engine swallowed while the repair "grew" them (shared `isDimensionShorthandShellOp` predicate now), and rescues that skipped audit-added ops (`applyDeterministicRescues` runs after EVERY AI stage). Floor stacks are structural now too (level updates raise storeys + land at `storeyElevationFt`; plates cover their level's rooms in normalizeRooms BOTH copies). fl0-v6 9/9 staged.
+2. ~~TESTING.md refresh~~ **DONE.**
+3. **Re-run the full corpus when Daniel is idle** (`node tools/trace_corpus_test.mjs` — the confirmation run was stopped because it shares his Gemini quota while he live-tests).
+4. Tell Daniel to send the repo link to his testers. Resist building more first — tester surprises are the last mile.
 - Queued/optional: richer staged-read notes in the planning bubble; ifc_writer.py → JS port (drop Blender entirely); light/dark toggle from the retired dark layers; rotate the Gemini key (old ask); Cloudflare tunnel is installed but NOT started (start only on Daniel's explicit word).
 
 ## The disciplines (hard-won — keep them)
