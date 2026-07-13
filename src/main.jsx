@@ -196,6 +196,30 @@ function App() {
   // find-it — the old smooth-scroll bridge was cancelled by the 3D rebuild
   // that fires on the same selection, so tapping a wall looked like a no-op).
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  // The system page (the design quiz) can pop OUT of the left bar into a wide
+  // drafting sheet over the model — the bar keeps nav + a roomier Inspector.
+  // (Daniel: "the left bar including the bim Inspector is crowded".)
+  const [pageOut, setPageOut] = useState(() => {
+    try { return window.localStorage.getItem('nbPageOut') === '1'; } catch { return false; }
+  });
+  function togglePageOut() {
+    setPageOut((current) => {
+      const next = !current;
+      try { window.localStorage.setItem('nbPageOut', next ? '1' : '0'); } catch { /* private mode */ }
+      return next;
+    });
+  }
+  // The drawer anchors just right of the left bar, whose width is fluid —
+  // measure it into a CSS var the drawer rules can use.
+  useEffect(() => {
+    const measure = () => {
+      const bar = document.querySelector('.leftPanel');
+      if (bar) document.documentElement.style.setProperty('--leftbar-w', `${Math.round(bar.getBoundingClientRect().width)}px`);
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [pageOut]);
   // The design journey: systems the user has opened get a quiet sage dot in
   // the nav — a sense of ground covered on the way to a complete design.
   const [visitedSystems, setVisitedSystems] = useState(() => initialSaved?.visitedSystems || ['shell']);
@@ -2230,7 +2254,7 @@ function App() {
   const systemFocus = consoleView === 'systems' ? systemView : null;
 
   return (
-    <main className={chatOpen ? 'app' : 'app chatClosed'}>
+    <main className={`${chatOpen ? 'app' : 'app chatClosed'}${pageOut && appMode === 'design' && consoleView === 'systems' ? ' pageOut' : ''}`}>
       <aside className="leftPanel">
         <div className="leftScroll">
         <div className="brand">
@@ -2331,6 +2355,10 @@ function App() {
 
 
         {appMode === 'design' && consoleView === 'systems' && <section className="panelBlock consolePanel systemsPanel">
+          <button type="button" className="pagePopToggle" onClick={togglePageOut}
+            title={pageOut ? 'Tuck this page back into the left bar' : 'Pop this page out over the model — more room to work, and the Inspector gets the bar to itself'}>
+            {pageOut ? '⤡ Tuck back in' : '⤢ More room'}
+          </button>
           <nav className="systemNav" aria-label="Building systems">
             {SYSTEM_GROUPS.map((group) => (
               <div className="systemNavGroup" key={group.label}>
