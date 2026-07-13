@@ -3993,41 +3993,40 @@ button.danger:hover,
   .welcomeCard.threeCol .welcomeSide { grid-column: auto; }
 }
 
-/* Start-choice cards carry their own material colors: earth-green for empty
-   land, straw-gold for the sample house, drafting-slate for file/drawing.
-   (Explicit hexes — the overlay is outside the dark token scope.) */
+/* Start-choice cards carry their own material colors — earth-green for empty
+   land, straw-gold for the sample house, drafting-slate for file/drawing —
+   in the SAME paper palette as the rest of the app. */
 .welcomeChoices .welcomeChoice:nth-child(1) {
-  background: linear-gradient(155deg, #2A342A, #23291F);
-  border: 1px solid #5C6B4F;
+  background: linear-gradient(155deg, #EAF1E7, #E3EEE5);
+  border: 1px solid #BDD1BE;
 }
-.welcomeChoices .welcomeChoice:nth-child(1) b { color: #A9BE8F; }
-.welcomeChoices .welcomeChoice:nth-child(1):hover { border-color: #8FA377; background: #2F3B2D; }
+.welcomeChoices .welcomeChoice:nth-child(1) b { color: #3E7B53; }
+.welcomeChoices .welcomeChoice:nth-child(1):hover { border-color: #3E7B53; background: #DDEADF; }
 .welcomeChoices .welcomeChoice:nth-child(2) {
-  background: linear-gradient(155deg, #37301F, #2B2519);
-  border: 1px solid #77623A;
+  background: linear-gradient(155deg, #F6EFDD, #F3EAD3);
+  border: 1px solid #E2D1A5;
 }
-.welcomeChoices .welcomeChoice:nth-child(2) b { color: #E0BE6E; }
-.welcomeChoices .welcomeChoice:nth-child(2):hover { border-color: #C9A24B; background: #3D351F; }
+.welcomeChoices .welcomeChoice:nth-child(2) b { color: #A9781F; }
+.welcomeChoices .welcomeChoice:nth-child(2):hover { border-color: #C9A24B; background: #F0E4C5; }
 .welcomeChoices .welcomeChoice.welcomeFile {
-  background: linear-gradient(155deg, #24333A, #1E2A2F);
-  border: 1px solid #45626E;
+  background: linear-gradient(155deg, #E8EFF1, #E2ECEE);
+  border: 1px solid #BFD4D9;
 }
-.welcomeChoices .welcomeChoice.welcomeFile b { color: #93C0CE; }
-.welcomeChoices .welcomeChoice.welcomeFile:hover { border-color: #7FA8B5; background: #283B44; }
-.welcomeChoices .welcomeChoice small { color: #BCB4A4; }
+.welcomeChoices .welcomeChoice.welcomeFile b { color: #26424C; }
+.welcomeChoices .welcomeChoice.welcomeFile:hover { border-color: #3C6472; background: #D9E7EA; }
+.welcomeChoices .welcomeChoice small { color: var(--ink2, #565A4F); }
 
 /* previous-design rows on the opening card */
 .welcomePrevious { margin-top: 4px; }
 .welcomePrevRow {
   display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
   width: 100%; margin-top: 6px; padding: 9px 12px; text-align: left;
-  /* the overlay sits outside the dark-scoped columns — pin the dark surface */
-  background: #281F1A; border: 1px solid #564A3F;
-  border-radius: 9px; color: #ECE4D6; cursor: pointer;
+  background: var(--panel-2, #F6F5EF); border: 1px solid var(--line2, #CAC8BB);
+  border-radius: 9px; color: var(--ink, #22251F); cursor: pointer;
 }
-.welcomePrevRow:hover { border-color: #C88A5B; background: #3A2C22; }
+.welcomePrevRow:hover { border-color: var(--active-line, #3C6472); background: var(--sage, #E2ECEE); }
 .welcomePrevRow b { font-size: 13.5px; }
-.welcomePrevRow small { font-size: 12px; color: #978C79; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.welcomePrevRow small { font-size: 12px; color: var(--ink3, #868A7C); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* the AI-planning indicator in the chat window: sweep bar + wheel + dots */
 .planningBar {
@@ -4984,3 +4983,36 @@ body,
 .expert.blocked .statusDot {
   background: var(--clay, #C06E52);
 }
+
+/* The opening card joins the paper theme — it was the last dark slab left
+   from the charcoal era. Same tokens as every panel; the one slate accent
+   carries the primary Continue action. */
+.welcomeOverlay { background: rgba(34, 37, 31, 0.4); }
+.welcomeCard {
+  background: var(--panel);
+  border-color: var(--line2);
+  color: var(--ink);
+  box-shadow: 0 30px 80px rgba(62, 55, 45, 0.35);
+}
+.welcomeCard h2 { color: var(--ink); }
+.welcomeIntro { color: var(--ink2); }
+.welcomeName span { color: var(--ink3); }
+.welcomeName input {
+  background: var(--field);
+  border-color: var(--field-border);
+  color: var(--ink);
+}
+.welcomeChoice {
+  background: var(--panel-2);
+  border-color: var(--line2);
+  color: var(--ink);
+}
+.welcomeChoice:hover { background: var(--sage); border-color: var(--active-line); }
+.welcomeChoice small { color: var(--ink2); }
+.welcomeHow span { color: var(--ink2); }
+.welcomeFoot { color: var(--ink3); }
+.welcomeCancel { border-color: var(--line2); color: var(--ink2); }
+.welcomeCancel:hover { border-color: var(--active-line); color: var(--evergreen); background: transparent; }
+.welcomeDivider { color: var(--ink3); }
+.welcomeDivider::before, .welcomeDivider::after { background: var(--line); }
+.welcomeContinue { background: var(--evergreen); border-color: var(--evergreen); color: #fff; }
