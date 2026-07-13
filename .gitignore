@@ -5,3 +5,4 @@ dist/
 .env.local
 PROOF-REPORT.md
 proof-run.log
+sweep2.log
