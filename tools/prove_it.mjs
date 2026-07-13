@@ -74,8 +74,9 @@ for (let s = 1; s <= SWEEPS; s += 1) {
   if (s > 1) { console.log('\n(pausing 3 minutes between sweeps for API rate limits)'); await new Promise((r) => setTimeout(r, 180000)); }
   const { out } = run(['tools/trace_corpus_test.mjs'], `corpus sweep ${s}/${SWEEPS}`);
   const summary = (out.trim().split('\n').pop() || '').trim();
-  // Judge by the summary line alone: real failures beat rate-limit skips.
-  const failures = Number((/(\d+) invariant failure/.exec(summary) || [])[1] || 0) > 0 || /NOTHING TESTED/.test(summary);
+  // Judge by the summary line alone: real failures beat rate-limit skips,
+  // and a fully-refused sweep (NOTHING TESTED) is quota, not failure.
+  const failures = Number((/(\d+) invariant failure/.exec(summary) || [])[1] || 0) > 0;
   const skipped = Number((/\((\d+) skipped/.exec(summary) || [])[1] || 0) > 0 || /NOTHING TESTED/.test(summary);
   const clean = /CORPUS CLEAN/.test(summary) && !skipped;
   if (clean) cleanSweeps += 1;
