@@ -5,7 +5,29 @@ proven on one drawing, failing on the next. This document is the whole board
 and the plan. **Every session on this app executes this plan in order and
 does not freelance.** RESUME.md says where we are; this says where we're going.
 
-## The one sentence that defines success
+## REFOCUS (Daniel, 2026-07-13): design-from-scratch IS the product
+
+> "Primary focus of the app is design from scratch. Focus on that first.
+> Once we nail that, we can move on to the interpretation of drawings."
+
+This outranks everything below. The trace pipeline stays in the app as an
+**experimental** entry point (labeled as such in the opening card and
+TESTING.md), its referee and corpus keep guarding it, but NO session works
+on trace quality until design-from-scratch is nailed. The rest of this file
+is the trace-era strategy, kept for when that work resumes.
+
+## The one sentence that defines success (v2)
+
+> A first-time user starts on empty land and designs a house they believe
+> in — rooms, walls, roof, costs, checks — for an hour, without the chat,
+> without the manual, and without once asking "wait, why can't I—".
+
+The gate: Daniel does that hour first, then his 2–3 testers. Every "why
+can't I" they hit becomes the work list, in their words. The 287-check unit
+suite is the regression floor (free to run); the trace corpus/battery only
+guards the experimental corner.
+
+## The one sentence that defined success (v1, trace era — parked)
 
 > Attach a drawing, press Apply, and get a decent model in the preview —
 > every time, with the app itself saying how good the read was — without

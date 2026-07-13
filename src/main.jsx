@@ -4106,8 +4106,8 @@ function App() {
                 <small>A small working house — rooms, systems, and checks already alive. Change everything.</small>
               </button>
               <label className="welcomeChoice welcomeFile">
-                <b>Start from a file or drawing</b>
-                <small>A sketch, photo, floor plan, or PDF — the assistant reads it and builds the model from it.</small>
+                <b>Start from a file or drawing <span className="expTag">experimental</span></b>
+                <small>A sketch, floor plan, or PDF — the assistant reads it into a starting point, grades its own read, and flags doubts in Review. Expect to adjust; designing from scratch is the polished path.</small>
                 <input type="file" accept="image/*,application/pdf,.pdf,.txt,.md,.csv" onChange={(event) => { startFromFile(event.target.files?.[0]); event.target.value = ''; }} />
               </label>
             </div>

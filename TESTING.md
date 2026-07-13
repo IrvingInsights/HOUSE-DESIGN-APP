@@ -43,9 +43,17 @@ complex instructions won't.
 
 ## What to try
 
-- The opening card → start from the **sample homestead** — or **start from a
-  drawing**: pick a floor-plan PDF or photo and the app traces it into a
-  working model (takes a minute or two; needs the AI key).
+**The heart of the app is designing from scratch — start there.**
+
+- The opening card → **Start on empty land** (or the **sample homestead** if
+  you'd rather remodel than begin blank). Add rooms from the Rooms page,
+  drag them around the 2D plan, drag the green corners to resize, and watch
+  the cost and checks react to everything you do.
+- **Start from a drawing** is the experimental corner: the app reads a
+  floor-plan PDF into a starting point, grades its own read ("X of 11
+  checks"), and flags doubts in Review. Useful, imperfect, improving —
+  judge the app on designing, not on this. (Takes a minute or two; needs
+  the AI key.)
 - Pick systems on the left (Foundation → Frame → Floor → Walls → Roof…),
   set the plain numbers, watch cost/checks react. The **Next →** button at
   the foot of each page walks you through in build order.

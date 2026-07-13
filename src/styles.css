@@ -5016,3 +5016,9 @@ body,
 .welcomeDivider { color: var(--ink3); }
 .welcomeDivider::before, .welcomeDivider::after { background: var(--line); }
 .welcomeContinue { background: var(--evergreen); border-color: var(--evergreen); color: #fff; }
+.expTag {
+  display: inline-block; vertical-align: 2px; margin-left: 6px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--warn, #A9781F); background: var(--warn-bg, #F3EAD3);
+  border-radius: 3px; padding: 1px 6px;
+}
