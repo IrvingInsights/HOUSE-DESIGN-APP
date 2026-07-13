@@ -74,7 +74,22 @@ Move the corpus scorer INTO the trace pipeline. After every in-app trace:
 **Exit test:** Daniel attaches any drawing; the app itself tells him how good
 the read was; a bad read retries without him asking. No assistant involved.
 
-### Phase 2 — Take placement away from the AI — **built 2026-07-12**
+### Phase 2 — Take placement away from the AI — **built 2026-07-12, REVERTED 2026-07-13**
+**The tiler is gone, on purpose. Do not rebuild it.** It re-placed traced
+rooms into rows; every invariant passed and every real plan was flattened
+into a row structure the drawing never had (a deep living room beside two
+stacked bedrooms cannot be expressed in rows). Daniel, on a real trace:
+"the model looks nothing like the drawings." The lesson for this whole
+strategy: **the 11 invariants measure tidiness, not resemblance — never
+optimize them at the expense of looking like the drawing.** Placement now
+works as the clean baseline did: the reader's positions carry the drawing's
+massing, and the deterministic rescues LEGALIZE them (overlaps slide apart,
+strays come inside, garbage geometry re-anchors) without redesigning the
+plan. Same read → same layout still holds (the rescues are deterministic);
+what was given up is layout-identity under read jitter, which was never
+worth a wrong-looking model. The stability harness stays — it separates
+read variance from placement variance either way. Original notes follow
+for the record:
 LLMs are good at reading *what exists* (room names, dimensions, arrangement)
 and bad at emitting *coordinates*. The job is split — with two deliberate
 deviations from the original sketch, decided during the build:
