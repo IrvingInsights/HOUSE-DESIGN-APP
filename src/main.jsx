@@ -46,6 +46,19 @@ function isConnectionError(error) {
 
 const ENGINE_OFFLINE_NOTICE = 'I can’t reach the design engine, so changes aren’t saving right now — your last edit didn’t stick. The engine window (the one that says "running at http://127.0.0.1:5184") has stopped. Start it again by double-clicking start.bat in the app folder (Start Mac.command on a Mac), then reload this page. Your design is safe on disk. I’ll say the moment I can reach it again.';
 
+// When the AI reading service itself failed, the reply must SAY SO instead of
+// covering with a canned answer. The backend threads the reason through plan
+// warnings ("AI planner unavailable: 429 …" / "Studio vision unavailable: …");
+// an empty prepaid balance gets the specific way out.
+function aiUnavailableNotice(warnings) {
+  const hit = (warnings || []).find((w) => /(planner|studio vision) unavailable/i.test(String(w)));
+  if (!hit) return null;
+  if (/depleted|RESOURCE_EXHAUSTED|quota|billing|prepay|429/i.test(hit)) {
+    return 'The AI reading service couldn’t answer — its credit is used up or it’s over its limit, so I couldn’t read your message or drawing. Nothing is broken and your design is safe. The fix: top up the app’s Google AI key at ai.studio/projects (a few dollars covers months), or wait for the daily limit to reset — then send the same message again, with the drawing re-attached if you had one. Simple edits still work without the AI: try "add a bedroom 12 x 10".';
+  }
+  return `The AI reading service couldn’t answer just now (${String(hit).replace(/^.*unavailable:\s*/i, '').slice(0, 120)}). It’s usually just busy — wait a minute and send the same message again. Simple edits still work without it.`;
+}
+
 if (import.meta.hot) {
   import.meta.hot.on('vite:beforeFullReload', () => {
     try { window.sessionStorage.setItem('nbHmrReload', '1'); } catch { /* storage blocked — card just reopens */ }
@@ -394,8 +407,9 @@ function App() {
         projectBrain,
         contextPacket: buildContextPacket(spec, projectBrain, selected, submittedPrompt)
       });
-      const reply = result.reply || buildStudioConversationResponse(submittedPrompt, spec, selected, issues, attachedImages);
-      const warningText = result.warnings?.length ? `\n\nNotes:\n- ${result.warnings.join('\n- ')}` : '';
+      const consultAiDown = aiUnavailableNotice(result.warnings);
+      const reply = consultAiDown || result.reply || buildStudioConversationResponse(submittedPrompt, spec, selected, issues, attachedImages);
+      const warningText = !consultAiDown && result.warnings?.length ? `\n\nNotes:\n- ${result.warnings.join('\n- ')}` : '';
       setChatMessages((items) => [
         ...items,
         { role: 'user', speaker: 'You', text: submittedPrompt },
@@ -812,11 +826,15 @@ function App() {
         return;
       }
 
+      // If the AI service itself failed, SAY SO — never cover for it with the
+      // canned conversation reply. (A build-from-drawing ask once got answered
+      // with boilerplate while the real story was an empty prepaid balance.)
+      const aiDown = aiUnavailableNotice(plan?.warnings);
       setChatMessages((items) => [
         ...items,
-        { role: 'studio', speaker: 'Studio', text: isConsultativePrompt(submittedPrompt, attachedImages) ? buildStudioConversationResponse(submittedPrompt, spec, selected, issues, attachedImages) : `No BIM change made.\n\n${structuredPlanSummary(structuredReport)}` }
+        { role: 'studio', speaker: 'Studio', text: aiDown || (isConsultativePrompt(submittedPrompt, attachedImages) ? buildStudioConversationResponse(submittedPrompt, spec, selected, issues, attachedImages) : `No BIM change made.\n\n${structuredPlanSummary(structuredReport)}`) }
       ]);
-      setRevisionLog((items) => [`No change: Planner could not turn "${submittedPrompt}" into a safe BIM operation.`, ...items]);
+      setRevisionLog((items) => [aiDown ? `No change: the AI service was unavailable for "${submittedPrompt}".` : `No change: Planner could not turn "${submittedPrompt}" into a safe BIM operation.`, ...items]);
     } catch (error) {
       if (isConnectionError(error)) {
         // The engine itself is unreachable — nothing about the request or the
