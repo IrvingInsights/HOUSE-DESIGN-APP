@@ -1,9 +1,9 @@
 // The proof battery (STRATEGY Phase 3): everything that must be true before
 // the app goes to testers, in one command, with a plain-language report.
 //
-//   node tools/prove_it.mjs                      # 3 sweeps + 20 stability runs (overnight)
-//   node tools/prove_it.mjs --sweeps 1 --stability 4   # quick confidence pass
-//   node tools/prove_it.mjs --set fl0-v6         # stability set to hammer
+//   node tools/prove_it.mjs                      # the ship gate: 3 sweeps (~12 reads, cents)
+//   node tools/prove_it.mjs --stability 20       # + the ONE-TIME placement marathon
+//   node tools/prove_it.mjs --sweeps 1           # quick confidence pass
 //
 // Or just double-click PROVE-IT.bat. Runs the unit suites (seconds, free),
 // then N full trace-corpus sweeps and K stability runs of one drawing
@@ -18,8 +18,12 @@ const arg = (name, fallback) => {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : fallback;
 };
+// Cost dial: the default battery is the CHEAP one (~12 drawing-reads, well
+// under half a dollar). The 20-trace stability marathon is a ONE-TIME formal
+// record — run `PROVE-IT.bat --stability 20` once, keep the report, done.
 const SWEEPS = Math.max(1, Math.min(5, Number(arg('sweeps', 3)) || 3));
-const STABILITY_RUNS = Math.max(0, Math.min(20, Number(arg('stability', 20)) || 20));
+const stabilityArg = Number(arg('stability', 0));
+const STABILITY_RUNS = Math.max(0, Math.min(20, Number.isFinite(stabilityArg) ? stabilityArg : 0));
 const STABILITY_SET = arg('set', 'columbia-rev1');
 
 const lines = [];
