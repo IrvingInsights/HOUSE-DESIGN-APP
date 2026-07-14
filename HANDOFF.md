@@ -55,9 +55,12 @@ revision snapshots. Public repo: github.com/IrvingInsights/HOUSE-DESIGN-APP.
 - Every new op = THREE registrations: bim-core handler + client mirror
   (engine.js) + planner schema enum. Grep the enum when an op "doesn't work
   via chat."
-- Dual copies must stay identical: WALL_ASSEMBLIES / resolveWallSide /
-  detectIssues / normalizeRooms live in BOTH backend/bim-core.mjs and
-  src/engine.js.
+- WALL_ASSEMBLIES / WALL_SIDES / wallAssemblyKeyFromText / resolveWallSide now
+  live ONCE in backend/bim-core.mjs; src/engine.js imports and re-exports them
+  (the dual copy was collapsed). detectIssues / normalizeRooms are STILL in both
+  files and deliberately DIVERGED by layer (server-lite vs full) — see the
+  LAYERING NOTE in each. Run tools/golden_numbers_test.mjs after any change to
+  the house-math; it fails loudly if a derived number moves.
 - Zero-filled ops: 0 means "unset" (basement is level -1 because 0 is
   swallowed; move_object to origin uses 0.01). update_object writes strings —
   use move_object/resize_object for numbers; `field:'level'` is structural
