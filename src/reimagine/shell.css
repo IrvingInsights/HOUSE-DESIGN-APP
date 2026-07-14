@@ -92,8 +92,18 @@
 .rz-chapter-label { font-size: 14px; font-weight: 500; }
 .rz-stamp { margin: 12px 4px 0; font-size: 11px; color: var(--moss, #868a7c); text-align: right; }
 
-/* Shape chapter controls — the outline in numbers */
-.rz-shape { display: flex; align-items: end; gap: 8px; margin: 0 4px 14px; }
+/* Shape chapter controls — pick an outline, then the size in numbers */
+.rz-shape { display: flex; flex-direction: column; gap: 8px; margin: 0 4px 14px; }
+.rz-shape-presets { display: flex; gap: 4px; }
+.rz-shape-presets button {
+  flex: 1; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  color: var(--earth, #565a4f); background: var(--raise, #fff);
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 6px 0;
+}
+.rz-shape-presets button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 60%, transparent); }
+.rz-shape-presets button.on { background: var(--evergreen, #3c6472); border-color: var(--evergreen, #3c6472); color: #fff; }
+.rz-shape-note { font-size: 11px; color: var(--moss, #868a7c); }
+.rz-shape-size { display: flex; align-items: end; gap: 8px; }
 .rz-shape-field { display: flex; flex-direction: column; gap: 3px; flex: 1; }
 .rz-shape-field span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); }
 .rz-shape-field { position: relative; }

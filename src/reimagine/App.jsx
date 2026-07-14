@@ -15,7 +15,7 @@ import './shell.css';
 // edges for Shape, room dragging for Rooms, door/window gaps for Openings) —
 // so each chapter looks and acts like what it's for.
 const CHAPTERS = [
-  { id: 'shape', label: 'Shape', view: 'plan', planContext: 'shell', greet: (d) => `Start with the outline. Set the width and depth below, or drag a wall edge right on the plan. Right now it's ${fmtNum(d.floor)} sq ft.` },
+  { id: 'shape', label: 'Shape', view: 'plan', planContext: 'shell', greet: (d) => `Start with the outline — a plain rectangle or an L, T, or U. Set the size below, or drag any wall edge right on the plan. Right now it's ${fmtNum(d.floor)} sq ft.` },
   { id: 'rooms', label: 'Rooms', view: 'plan', planContext: 'rooms', greet: () => 'Lay the rooms out flat, from above. Drag a room to move it, grab a corner to resize. No roof in the way up here.' },
   { id: 'shell', label: 'Shell', view: '3d', greet: (d) => `The shell stands ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'}. Set how tall the walls run.` },
   { id: 'roof', label: 'Roof', view: '3d', greet: () => 'Choose how the roof sheds weather and sun — and how much daylight it lets in.' },
@@ -26,7 +26,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 5 · Jul 14';
+const UPDATE_STAMP = 'update 6 · Jul 14';
 
 const TYPE_LABEL = {
   living: 'Living', service: 'Service', sleeping: 'Sleeping', wet: 'Wet core',
@@ -70,6 +70,20 @@ export default function App() {
     { type: 'set_shell', field: 'depthFt', value: String(clamp(Number(d), 12, 80)) }
   ]);
   const moveEdge = (edgeIndex, offsetFt) => applyOps([{ type: 'move_wall_edge', field: `e${edgeIndex}`, value: String(offsetFt) }]);
+  // Shape presets: rectilinear outlines built from the current size. 'rect'
+  // clears back to a plain rectangle; corners land on half-foot marks.
+  const setShape = (kind) => {
+    if (kind === 'rect') { applyOps([{ type: 'set_footprint', value: 'rect' }]); return; }
+    const W = Number(spec.shell.widthFt) || 36;
+    const D = Number(spec.shell.depthFt) || 28;
+    const s = (v) => Math.round(v * 2) / 2;
+    const SHAPES = {
+      l: [[0, 0], [W, 0], [W, s(D * 0.55)], [s(W * 0.6), s(D * 0.55)], [s(W * 0.6), D], [0, D]],
+      t: [[0, 0], [W, 0], [W, s(D * 0.5)], [s(W * 0.75), s(D * 0.5)], [s(W * 0.75), D], [s(W * 0.25), D], [s(W * 0.25), s(D * 0.5)], [0, s(D * 0.5)]],
+      u: [[0, 0], [W, 0], [W, D], [s(W * 0.7), D], [s(W * 0.7), s(D * 0.45)], [s(W * 0.3), s(D * 0.45)], [s(W * 0.3), D], [0, D]]
+    };
+    if (SHAPES[kind]) applyOps([{ type: 'set_footprint', value: JSON.stringify(SHAPES[kind]) }]);
+  };
   const moveOpening = (index, along) => {
     const op = spec.openings?.[index]; if (!op || op.wall === 'roof') return;
     const field = op.wall === 'north' || op.wall === 'south' ? 'x' : 'y';
@@ -149,7 +163,10 @@ export default function App() {
                 key={`${spec.shell.widthFt}x${spec.shell.depthFt}`}
                 widthFt={spec.shell.widthFt}
                 depthFt={spec.shell.depthFt}
+                isRect={!spec.shell.footprint}
+                corners={Array.isArray(spec.shell.footprint) ? spec.shell.footprint.length : 4}
                 onCommit={resizeShell}
+                onShape={setShape}
               />
             )}
             <nav className="rz-chapters">
@@ -243,9 +260,9 @@ function RoomCard({ room, derived, onClose }) {
   );
 }
 
-// Shape chapter's plain controls: the outline in numbers. Type a size, press
-// Enter (or click away) and the footprint re-derives.
-function ShapeControls({ widthFt, depthFt, onCommit }) {
+// Shape chapter's plain controls: pick an outline, then the size in numbers.
+// Presets are starting points — every edge stays draggable on the plan after.
+function ShapeControls({ widthFt, depthFt, isRect, corners, onCommit, onShape }) {
   const [w, setW] = useState(String(Math.round(widthFt * 10) / 10));
   const [d, setD] = useState(String(Math.round(depthFt * 10) / 10));
   const commit = () => {
@@ -255,17 +272,31 @@ function ShapeControls({ widthFt, depthFt, onCommit }) {
   const onKey = (e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } };
   return (
     <div className="rz-shape">
-      <label className="rz-shape-field">
-        <span>Width</span>
-        <input type="number" min="12" max="96" step="1" value={w} onChange={(e) => setW(e.target.value)} onBlur={commit} onKeyDown={onKey} />
-        <em>ft</em>
-      </label>
-      <span className="rz-shape-x">×</span>
-      <label className="rz-shape-field">
-        <span>Depth</span>
-        <input type="number" min="12" max="80" step="1" value={d} onChange={(e) => setD(e.target.value)} onBlur={commit} onKeyDown={onKey} />
-        <em>ft</em>
-      </label>
+      <div className="rz-shape-presets">
+        {[['rect', 'Rectangle'], ['l', 'L'], ['t', 'T'], ['u', 'U']].map(([kind, label]) => (
+          <button
+            key={kind}
+            type="button"
+            className={kind === 'rect' && isRect ? 'on' : ''}
+            onClick={() => onShape(kind)}
+            title={kind === 'rect' ? 'Plain rectangle' : `${label}-shaped outline — a starting point you can drag`}
+          >{label}</button>
+        ))}
+      </div>
+      {!isRect && <div className="rz-shape-note">custom outline · {corners} corners — drag any edge on the plan</div>}
+      <div className="rz-shape-size">
+        <label className="rz-shape-field">
+          <span>Width</span>
+          <input type="number" min="12" max="96" step="1" value={w} onChange={(e) => setW(e.target.value)} onBlur={commit} onKeyDown={onKey} />
+          <em>ft</em>
+        </label>
+        <span className="rz-shape-x">×</span>
+        <label className="rz-shape-field">
+          <span>Depth</span>
+          <input type="number" min="12" max="80" step="1" value={d} onChange={(e) => setD(e.target.value)} onBlur={commit} onKeyDown={onKey} />
+          <em>ft</em>
+        </label>
+      </div>
     </div>
   );
 }
