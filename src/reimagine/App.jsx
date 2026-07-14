@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ThreeScene, webglAvailable } from '../threeScene.jsx';
 import { PlanView } from '../planView.jsx';
 import {
-  applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType
+  applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES
 } from '../../backend/bim-core.mjs';
 import {
   seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS,
@@ -33,7 +33,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 17 · Jul 14';
+const UPDATE_STAMP = 'update 18 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1186,18 +1186,27 @@ function StructureControls({ spec, onAllWalls, onFrame, onShell, onWallSide, onS
       {/* not all walls are the same height: a 2-ft greenhouse kneewall on the
           south, a tall north wall a shed falls from — each side has its own */}
       <details className="rz-perwall">
-        <summary>Each wall its own height ▸</summary>
+        <summary>Wall by wall — height &amp; construction ▸</summary>
         {WALL_SIDES.map((side, i) => (
-          <div key={side} className="rz-field rz-field-num rz-perwall-row">
+          <div key={side} className="rz-perwall-row">
             <button type="button" className="rz-perwall-name" title="See this wall in 3D" onClick={() => onSelectWall(side)}>
               {side[0].toUpperCase() + side.slice(1)}
-              <small> · {resolved[i].assembly.label}</small>
             </button>
+            <select
+              className="rz-perwall-sys"
+              title={`What the ${side} wall is built of`}
+              value={resolved[i].assemblyKey}
+              onChange={(e) => onWallSide(side, 'assembly', e.target.value)}
+            >
+              {Object.values(WALL_ASSEMBLIES).map((a) => (
+                <option key={a.key} value={a.key}>{a.green ? '🌿 ' : ''}{a.label}</option>
+              ))}
+            </select>
             <NumInput value={Math.round(resolved[i].heightFt * 10) / 10} min={2} max={40} step={0.5} onCommit={(v) => onWallSide(side, 'heightFt', v)} />
           </div>
         ))}
         <div className="rz-shape-note">
-          {shed ? 'On a shed roof the south and north heights set which way it falls.' : 'Down to a 2 ft kneewall.'} Setting the all-walls height above puts every side back in step.
+          {shed ? 'On a shed roof the south and north heights set which way it falls.' : 'Down to a 2 ft kneewall.'} Setting the all-walls choices above puts every side back in step. Tap a wall in 3D for its full card.
         </div>
       </details>
       <div className="rz-shape-note">Whole-house choices — with load-bearing walls the timeline walls first, then roofs; with a frame it roofs before straw walls go in. Or tap any wall in 3D to set just that one.</div>
@@ -1231,7 +1240,19 @@ function WallCard({ side, spec, onWallSide, onClose }) {
           ))}
         </select>
       </label>
-      <p className="rz-muted" style={{ marginTop: 8 }}>Just this wall — the other three keep their own height and system.</p>
+      <label className="rz-field">
+        <span>Weather face (this wall)</span>
+        <select value={r.cladding || 'render'} onChange={(e) => onWallSide(side, 'cladding', e.target.value)}>
+          {Object.values(CLADDING_TYPES).map((c) => (
+            <option key={c.key} value={c.key}>{c.green ? '🌿 ' : ''}{c.label}</option>
+          ))}
+        </select>
+      </label>
+      <label className="rz-nowall">
+        <input type="checkbox" checked={Boolean(r.omitted)} onChange={(e) => onWallSide(side, 'omitted', e.target.checked)} />
+        <span>No wall on this side (opens to an attached space)</span>
+      </label>
+      <p className="rz-muted" style={{ marginTop: 8 }}>Just this wall — the other three keep their own height, system, and face.</p>
     </div>
   );
 }

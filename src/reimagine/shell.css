@@ -188,6 +188,16 @@
 }
 .rz-perwall-name small { font-weight: 400; color: var(--moss, #868a7c); }
 .rz-perwall-name:hover { color: var(--evergreen, #3c6472); }
+.rz-perwall-row { display: flex; align-items: center; gap: 6px; }
+.rz-perwall-row .rz-perwall-name { flex: 0 0 44px; }
+.rz-perwall-sys {
+  flex: 1; min-width: 0; font: inherit; font-size: 12px; color: var(--ink, #22251f);
+  background: var(--raise, #fff); border: 1px solid var(--line, #dbd9ce);
+  border-radius: 8px; padding: 4px 5px;
+}
+.rz-perwall-row .rz-num { width: 74px; flex: 0 0 auto; }
+.rz-nowall { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--earth, #565a4f); cursor: pointer; }
+.rz-nowall input { accent-color: var(--evergreen, #3c6472); }
 
 /* right-click menu on the plan */
 .rz-ctx {
