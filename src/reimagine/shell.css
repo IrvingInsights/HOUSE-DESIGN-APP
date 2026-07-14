@@ -213,6 +213,65 @@
   box-shadow: 0 8px 30px rgba(30, 40, 30, 0.12);
 }
 
+/* floor pills — top left, the plan's level selector */
+.rz-floors {
+  position: absolute; z-index: 5; top: 16px; left: 16px;
+  display: flex; gap: 3px; padding: 4px; border-radius: 12px;
+  background: color-mix(in srgb, var(--ivory, #fbfaf6) 88%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 70%, transparent);
+  box-shadow: 0 8px 30px rgba(30, 40, 30, 0.12);
+}
+.rz-floors button {
+  border: none; background: transparent; color: var(--earth, #565a4f);
+  font: inherit; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 9px; cursor: pointer;
+}
+.rz-floors button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 70%, transparent); color: var(--ink); }
+.rz-floors button.on { background: var(--evergreen, #3c6472); color: #fff; }
+.rz-floors .rz-floors-add { color: var(--evergreen, #3c6472); }
+.rz-floors .rz-floors-del { color: var(--bad, #ae452f); font-weight: 500; font-size: 12px; }
+
+/* shared Trail-block field styles (Foundation + Shell chapters) */
+.rz-found { display: flex; flex-direction: column; gap: 9px; margin: 0 4px 14px; }
+.rz-field { display: flex; flex-direction: column; gap: 3px; }
+.rz-field > span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); }
+.rz-field select {
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 13px;
+  color: var(--ink, #22251f); background: var(--raise, #fff);
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 6px 8px;
+}
+.rz-field select:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; }
+.rz-field-num { flex-direction: row; align-items: center; justify-content: space-between; }
+.rz-num { position: relative; width: 96px; }
+.rz-num input {
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; font-weight: 600;
+  color: var(--ink, #22251f); background: var(--raise, #fff);
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 5px 24px 5px 9px;
+}
+.rz-num input:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; }
+.rz-num em { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-style: normal; font-size: 11px; color: var(--moss, #868a7c); }
+.rz-found-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); margin-top: 4px; }
+.rz-found-palette { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.rz-found-palette button {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  font: inherit; font-size: 12px; cursor: pointer; text-align: left;
+  color: var(--ink, #22251f); background: var(--raise, #fff);
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 6px 8px;
+}
+.rz-found-palette button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 60%, transparent); }
+.rz-found-palette small { color: var(--moss, #868a7c); }
+.rz-found-list { display: flex; flex-direction: column; gap: 2px; }
+.rz-found-row { display: flex; align-items: center; gap: 4px; border-radius: 9px; }
+.rz-found-row.sel { background: color-mix(in srgb, var(--sage, #e2ecee) 70%, transparent); }
+.rz-found-pick {
+  flex: 1; display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  border: none; background: transparent; cursor: pointer; font: inherit; font-size: 12.5px;
+  color: var(--ink, #22251f); padding: 5px 8px; border-radius: 9px; text-align: left;
+}
+.rz-found-pick:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 55%, transparent); }
+.rz-found-pick small { color: var(--moss, #868a7c); white-space: nowrap; }
+
 /* the Trail's door into the Time Machine */
 .rz-build-btn {
   margin: 12px 4px 0; width: calc(100% - 8px);

@@ -602,16 +602,21 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
           const isSel = raw.id === selectedRoom;
           const w = Number(el.w) || 4;
           const d = Number(el.d) || 4;
+          // In a building context most elements are backdrop — EXCEPT the ones
+          // the context is FOR: foundation runs are the subject of the
+          // Foundation view (drag them under whatever they carry), like extent
+          // plates always are. The foundation's layout is its own thing.
+          const isContextSubject = raw.category === 'floor' || (context === 'foundation' && raw.category === 'foundation');
           return (
             <g key={raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
               <rect
                 x={el.x} y={el.y} width={w} height={d}
                 fill={PLAN_ELEMENT_HEX[raw.category] || '#8a7768'}
-                fillOpacity={raw.category === 'partition' ? (isSel ? 1 : 0.95) : (isSel ? 0.92 : 0.7) * (buildingContext && raw.category !== 'floor' ? 0.25 : 1)}
+                fillOpacity={raw.category === 'partition' ? (isSel ? 1 : 0.95) : (isSel ? 0.92 : 0.7) * (buildingContext && !isContextSubject ? 0.25 : 1)}
                 stroke={isSel ? 'var(--active-line)' : '#5a5348'}
                 strokeWidth={isSel ? 0.4 : 0.22}
                 strokeDasharray={raw.category === 'partition' ? undefined : '0.8 0.5'}
-                pointerEvents={buildingContext && raw.category !== 'floor' ? 'none' : undefined}
+                pointerEvents={buildingContext && !isContextSubject ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
               />
               {(() => {

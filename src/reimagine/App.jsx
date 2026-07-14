@@ -1,10 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ThreeScene, webglAvailable } from '../threeScene.jsx';
 import { PlanView } from '../planView.jsx';
-import { applyBimOperations, clamp } from '../../backend/bim-core.mjs';
+import {
+  applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType
+} from '../../backend/bim-core.mjs';
 import {
   seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS,
-  buildTimeline, phaseDependencies, orderPhasesByDeps, validatePhaseOrder, DEFAULT_MODEL_LAYERS
+  buildTimeline, phaseDependencies, orderPhasesByDeps, validatePhaseOrder, DEFAULT_MODEL_LAYERS,
+  floorCount, floorLabel, storeyInfo, upperPlateRect, utilitiesOf,
+  WALL_SIDES, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS
 } from '../engine.js';
 import '../styles.css';
 import './shell.css';
@@ -17,8 +21,9 @@ import './shell.css';
 // so each chapter looks and acts like what it's for.
 const CHAPTERS = [
   { id: 'shape', label: 'Shape', view: 'plan', planContext: 'shell', greet: (d) => `Start with the outline — a plain rectangle or an L, T, or U. Set the size below, or drag any wall edge right on the plan. Right now it's ${fmtNum(d.floor)} sq ft.` },
-  { id: 'rooms', label: 'Rooms', view: 'plan', planContext: 'rooms', greet: () => 'Lay the rooms out flat, from above. Drag a room to move it, grab a corner to resize. No roof in the way up here.' },
-  { id: 'shell', label: 'Shell', view: '3d', greet: (d) => `The shell stands ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'}. Set how tall the walls run.` },
+  { id: 'rooms', label: 'Rooms', view: 'plan', planContext: 'rooms', greet: () => 'Lay the rooms out flat, from above. Drag a room to move it, grab a corner to resize — and use the floor pills (top left) to work each level, add one, or take one away.' },
+  { id: 'foundation', label: 'Foundation', view: 'plan', planContext: 'foundation', greet: () => 'What the house sits on. Pick the main type below — and the foundation doesn’t have to match the rooms: drop extra footings and drag them under whatever they carry, even outside the walls.' },
+  { id: 'shell', label: 'Shell', view: '3d', greet: (d) => `The shell stands ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'}. Pick the wall system and the frame that carries the roof — the timeline and every receipt follow along.` },
   { id: 'roof', label: 'Roof', view: '3d', greet: () => 'Choose how the roof sheds weather and sun — and how much daylight it lets in.' },
   { id: 'openings', label: 'Openings', view: 'plan', planContext: 'windows', greet: () => 'Place doors and windows where light and paths want them. Slide them along their wall.' },
   { id: 'systems', label: 'Systems', view: '3d', greet: () => 'Heat, water, power, waste — the working parts. Each shows its own receipts.' },
@@ -27,7 +32,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 8 · Jul 14';
+const UPDATE_STAMP = 'update 9 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -110,6 +115,7 @@ export default function App() {
   const [askText, setAskText] = useState('');
   const [askEcho, setAskEcho] = useState(null);
   const [budgetOpen, setBudgetOpen] = useState(false);
+  const [activeFloor, setActiveFloor] = useState(1); // 1=ground, 2/3=upper, BASEMENT_LEVEL=basement
   // The Time Machine: open/closed, playhead in weeks, playing, Daniel's custom
   // phase order (null = the builder's order), the tapped phase, and the last
   // accept/refuse message.
@@ -220,6 +226,73 @@ export default function App() {
     applyOps([{ type: 'update_object', targetId: `opening-${index}`, field, value: along }]);
   };
 
+  // --- floors: add/remove a storey, walk levels in the plan -----------------
+  const floors = floorCount(spec);
+  const hasBasement = basementInfo(spec.shell).present;
+  const addFloor = () => {
+    const next = Math.min(3, floors + 1);
+    const ops = [{ type: 'set_shell', field: 'storeys', value: String(next) }];
+    // The new storey gets an extent plate — resize it on its floor to put the
+    // storey over only part of the building.
+    if (!upperPlateRect(spec, next)) {
+      ops.push({
+        type: 'add_element', name: `Storey ${next} extent`, category: 'floor',
+        x: 0, y: 0, z: storeyInfo(spec.shell).baseWallFt * (next - 1),
+        w: Number(spec.shell.widthFt), d: Number(spec.shell.depthFt), h: 0.4, level: next
+      });
+    }
+    applyOps(ops);
+    setActiveFloor(next);
+  };
+  const removeFloor = () => {
+    if (floors <= 1) return;
+    // One dispatch: storeys down, that level's extent plates gone, its rooms
+    // brought to the ground floor — removing a floor never deletes rooms.
+    const ops = [{ type: 'set_shell', field: 'storeys', value: String(floors - 1) }];
+    (spec.elements || []).filter((el) => el.category === 'floor' && Number(el.level || 1) === floors)
+      .forEach((plate) => ops.push({ type: 'remove_object', targetId: plate.id, name: plate.name }));
+    (spec.rooms || []).filter((room) => Number(room.level || 1) === floors)
+      .forEach((room) => ops.push({ type: 'update_object', targetId: room.id, name: room.name, field: 'level', value: '1' }));
+    applyOps(ops);
+    setActiveFloor((f) => (f === BASEMENT_LEVEL ? f : Math.min(f, floors - 1)));
+  };
+
+  // --- foundation: the main type + free-roaming footing runs ----------------
+  const chooseFoundation = (value) => {
+    // 'basement' is a foundation choice that IS a storey — one source of truth
+    // (shell.basementHeightFt drives both), same as the classic app.
+    if (value === 'basement') {
+      if (!hasBasement) applyOps([{ type: 'set_shell', field: 'basementHeightFt', value: '8' }]);
+      return;
+    }
+    const ops = [{ type: 'set_utility', field: 'foundationType', value }];
+    if (hasBasement) ops.unshift({ type: 'set_shell', field: 'basementHeightFt', value: '0' });
+    applyOps(ops);
+    if (hasBasement && activeFloor === BASEMENT_LEVEL) setActiveFloor(1);
+  };
+  const setUtilityField = (field, value) => applyOps([{ type: 'set_utility', field, value: String(value) }]);
+  const setShellField = (field, value) => applyOps([{ type: 'set_shell', field, value: String(value) }]);
+  const placeFoundationRun = (preset) => {
+    // Land beside the house (never at 0,0 — that's "unset" to the op layer),
+    // staggered so repeated drops don't pile up; then drag it into place.
+    const existing = (spec.elements || []).filter((el) => el.category === 'foundation').length;
+    applyOps([{
+      type: 'add_element', name: preset.name, category: 'foundation', construction: preset.construction,
+      x: 2 + (existing % 2) * (preset.w + 2), y: Number(spec.shell.depthFt) + 3 + Math.floor(existing / 2) * 3.5,
+      w: preset.w, d: preset.d, h: preset.h, level: 1
+    }]);
+  };
+  const removeElement = (el) => {
+    applyOps([{ type: 'remove_object', targetId: el.id, name: el.name }]);
+    if (selectedId === el.id) setSelectedId(null);
+  };
+
+  // --- structure: whole-house wall system + frame ----------------------------
+  // ONE dispatch for all four sides — four separate calls would race on the
+  // same base spec and only the last would land (a bug this app has had).
+  const setAllWalls = (value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, field: 'assembly', value })));
+  const setFrame = (value) => applyOps([{ type: 'set_frame', value }]);
+
   // switching chapters nudges you to the view that chapter is best done in
   const goChapter = (c) => { setActiveChapter(c.id); if (c.view) setViewMode(c.view === 'plan' ? 'plan' : '3d'); };
 
@@ -238,7 +311,7 @@ export default function App() {
             onMoveEdge={moveEdge}
             onMoveOpening={moveOpening}
             context={chapter.planContext || null}
-            activeFloor={1}
+            activeFloor={activeChapter === 'rooms' ? activeFloor : 1}
           />
         ) : (
           <ThreeScene
@@ -276,6 +349,24 @@ export default function App() {
           : <span className="rz-status-item rz-flag">{flags.length} to look at</span>}
       </div>
 
+      {/* floor pills — the layout controller works one level at a time */}
+      {!timelineOpen && viewMode === 'plan' && activeChapter === 'rooms' && (
+        <div className="rz-floors">
+          {hasBasement && (
+            <button className={activeFloor === BASEMENT_LEVEL ? 'on' : ''} onClick={() => setActiveFloor(BASEMENT_LEVEL)}>Basement</button>
+          )}
+          {Array.from({ length: floors }, (_, i) => i + 1).map((f) => (
+            <button key={f} className={activeFloor === f ? 'on' : ''} onClick={() => setActiveFloor(f)}>{floorLabel(spec, f)}</button>
+          ))}
+          {floors < 3 && (
+            <button className="rz-floors-add" title="Add a storey — it gets an extent plate you can resize on its floor" onClick={addFloor}>+ floor</button>
+          )}
+          {floors > 1 && activeFloor === floors && (
+            <button className="rz-floors-del" title="Remove this floor — its rooms move to the ground floor, nothing is deleted" onClick={removeFloor}>remove</button>
+          )}
+        </div>
+      )}
+
       {/* Plan / 3D toggle + (3D only) view angles — the Time Machine owns the
           view while it's open */}
       {!timelineOpen && <div className="rz-views">
@@ -304,6 +395,26 @@ export default function App() {
                 corners={Array.isArray(spec.shell.footprint) ? spec.shell.footprint.length : 4}
                 onCommit={resizeShell}
                 onShape={setShape}
+              />
+            )}
+            {activeChapter === 'foundation' && (
+              <FoundationControls
+                spec={spec}
+                selectedId={selectedId}
+                onChoose={chooseFoundation}
+                onUtility={setUtilityField}
+                onShell={setShellField}
+                onPlaceRun={placeFoundationRun}
+                onRemoveRun={removeElement}
+                onSelectRun={setSelectedId}
+              />
+            )}
+            {activeChapter === 'shell' && (
+              <StructureControls
+                spec={spec}
+                onAllWalls={setAllWalls}
+                onFrame={setFrame}
+                onShell={setShellField}
               />
             )}
             <nav className="rz-chapters">
@@ -663,6 +774,130 @@ function ShapeControls({ widthFt, depthFt, isRect, corners, onCommit, onShape })
           <em>ft</em>
         </label>
       </div>
+    </div>
+  );
+}
+
+// A number field that commits ONCE on blur/Enter — typing digits must never
+// dispatch per keystroke (clamps would fight the digits).
+function NumInput({ value, min, max, step = 1, unit = 'ft', onCommit }) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => { setDraft(String(value)); }, [value]);
+  const commit = () => {
+    const n = Number(draft);
+    if (Number.isFinite(n) && n !== Number(value)) onCommit(clamp(n, min, max));
+  };
+  return (
+    <span className="rz-num">
+      <input
+        type="number" min={min} max={max} step={step} value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } }}
+      />
+      <em>{unit}</em>
+    </span>
+  );
+}
+
+// Foundation chapter: the main type the house sits on, plus footing runs that
+// live on their own layout — under a heavy interior wall, a porch, a future
+// addition, inside or outside the rooms.
+function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, onPlaceRun, onRemoveRun, onSelectRun }) {
+  const u = utilitiesOf(spec);
+  const basement = basementInfo(spec.shell);
+  const typeVal = basement.present ? 'basement' : u.foundationType;
+  const runs = (spec.elements || []).filter((el) => el.category === 'foundation');
+  const runCost = (el) => {
+    const t = FOUNDATION_RUN_TYPES[el.construction] || FOUNDATION_RUN_TYPES.rubble;
+    const lf = Math.max(Number(el.w) || 0, Number(el.d) || 0);
+    return Math.round(lf * (t.costLf + t.stemCostLfFt * (Number(el.h) || 0)));
+  };
+  return (
+    <div className="rz-found">
+      <label className="rz-field">
+        <span>Main foundation</span>
+        <select value={typeVal} onChange={(e) => onChoose(e.target.value)}>
+          <option value="rubble">🌿 Rubble trench — drained gravel, the least concrete</option>
+          <option value="stemwall">Stem wall — concrete wall on a footing</option>
+          <option value="slab">Insulated slab — simple, the most concrete</option>
+          <option value="basement">Basement — a full storey below grade</option>
+        </select>
+      </label>
+      {typeVal === 'stemwall' && (
+        <label className="rz-field rz-field-num">
+          <span>Stem wall height</span>
+          <NumInput value={u.stemwallHeightFt ?? 1.5} min={0.5} max={6} step={0.25} onCommit={(v) => onUtility('stemwallHeightFt', v)} />
+        </label>
+      )}
+      {typeVal === 'basement' && (
+        <label className="rz-field rz-field-num">
+          <span>Basement depth</span>
+          <NumInput value={basement.heightFt} min={6} max={12} step={0.5} onCommit={(v) => onShell('basementHeightFt', v)} />
+        </label>
+      )}
+      <div className="rz-found-head">Extra footings — their own layout</div>
+      <div className="rz-found-palette">
+        {FOUNDATION_RUN_PRESETS.map((preset) => {
+          const t = FOUNDATION_RUN_TYPES[preset.construction];
+          return (
+            <button key={preset.construction} type="button" title={t.note} onClick={() => onPlaceRun(preset)}>
+              <b>{t.label}</b>
+              <small>${Math.round(t.costLf + t.stemCostLfFt * preset.h)}/ft</small>
+            </button>
+          );
+        })}
+      </div>
+      {runs.length > 0 && (
+        <div className="rz-found-list">
+          {runs.map((el) => (
+            <div key={el.id} className={`rz-found-row ${selectedId === el.id ? 'sel' : ''}`}>
+              <button type="button" className="rz-found-pick" onClick={() => onSelectRun(el.id)}>
+                {(FOUNDATION_RUN_TYPES[el.construction] || FOUNDATION_RUN_TYPES.rubble).label}
+                <small>{Math.round(Math.max(Number(el.w) || 0, Number(el.d) || 0))} ft · {fmtMoney(runCost(el))}</small>
+              </button>
+              <button type="button" className="rz-x" title="Remove this footing" onClick={() => onRemoveRun(el)}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="rz-shape-note">Drop one, then drag it on the plan — under a heavy wall, a porch, anywhere. It prices by the foot in the budget.</div>
+    </div>
+  );
+}
+
+// Shell chapter: the structure in three plain choices — what the walls are,
+// what carries the roof, how tall the walls run. The timeline's build order
+// and every receipt follow these.
+function StructureControls({ spec, onAllWalls, onFrame, onShell }) {
+  const resolved = WALL_SIDES.map((side) => resolveWallSide(spec, side));
+  const wallKeys = new Set(resolved.map((r) => r.assemblyKey));
+  const wallVal = wallKeys.size === 1 ? [...wallKeys][0] : '__mixed';
+  const frameVal = resolveFrameType(spec, 1);
+  return (
+    <div className="rz-found">
+      <label className="rz-field">
+        <span>Walls (all sides)</span>
+        <select value={wallVal} onChange={(e) => { if (e.target.value !== '__mixed') onAllWalls(e.target.value); }}>
+          {wallVal === '__mixed' && <option value="__mixed">Mixed — sides differ</option>}
+          {Object.values(WALL_ASSEMBLIES).map((a) => (
+            <option key={a.key} value={a.key}>{a.green ? '🌿 ' : ''}{a.label} — R{a.rValue}</option>
+          ))}
+        </select>
+      </label>
+      <label className="rz-field">
+        <span>Frame — what carries the roof</span>
+        <select value={frameVal} onChange={(e) => onFrame(e.target.value)}>
+          {Object.entries(FRAME_TYPES).map(([key, f]) => (
+            <option key={key} value={key}>{f.green ? '🌿 ' : ''}{f.label}</option>
+          ))}
+        </select>
+      </label>
+      <label className="rz-field rz-field-num">
+        <span>Wall height</span>
+        <NumInput value={Number(spec.shell.wallHeightFt) || 10} min={7} max={40} step={0.5} onCommit={(v) => onShell('wallHeightFt', v)} />
+      </label>
+      <div className="rz-shape-note">Whole-house choices — with load-bearing walls the timeline walls first, then roofs; with a frame it roofs before straw walls go in. Wall-by-wall control comes with the tap-a-wall card.</div>
     </div>
   );
 }
