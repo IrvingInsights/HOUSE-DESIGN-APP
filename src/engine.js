@@ -852,8 +852,8 @@ export function parseLocalRoomAdds(text) {
     const dimMatch = clause.match(/(\d+(?:\.\d+)?)\s*(?:x|by|×)\s*(\d+(?:\.\d+)?)/);
     if (numMatch && !(dimMatch && dimMatch[0].includes(numMatch[1]))) count = clamp(Number(numMatch[1]), 1, 8);
     else if (wordMatch) count = WORD_COUNTS[wordMatch[1]] || 1;
-    const w = dimMatch ? clamp(Number(dimMatch[1]), 4, 60) : match.w;
-    const d = dimMatch ? clamp(Number(dimMatch[2]), 4, 60) : match.d;
+    const w = dimMatch ? clamp(Number(dimMatch[1]), 2, 60) : match.w;
+    const d = dimMatch ? clamp(Number(dimMatch[2]), 2, 60) : match.d;
     for (let i = 0; i < count; i += 1) {
       nameCount[match.name] = (nameCount[match.name] || 0) + 1;
       rooms.push({ name: match.name, type: match.type, w, d });
@@ -2133,8 +2133,8 @@ export function applyNaturalLanguageDesign(prompt, currentSpec, attachedImages =
     if (resize) {
       const room = findRoom(next, resize[1]);
       if (room) {
-        room.w = clamp(Number(resize[2]), 4, next.shell.widthFt);
-        room.d = clamp(Number(resize[3]), 4, next.shell.depthFt);
+        room.w = clamp(Number(resize[2]), 2, next.shell.widthFt);
+        room.d = clamp(Number(resize[3]), 2, next.shell.depthFt);
         changedIds.push(room.id);
         actions.push(`Resized ${room.name} to ${room.w}' x ${room.d}'.`);
       } else {
@@ -2154,8 +2154,8 @@ export function applyNaturalLanguageDesign(prompt, currentSpec, attachedImages =
     if (!rawName || rawName.length < 3) continue;
     const profile = roomProfile(rawName);
     const dims = dimensionsFromText(chunk, profile);
-    const width = clamp(dims.w, 4, Math.max(4, next.shell.widthFt));
-    const depth = clamp(dims.d, 4, Math.max(4, next.shell.depthFt));
+    const width = clamp(dims.w, 2, Math.max(2, next.shell.widthFt));
+    const depth = clamp(dims.d, 2, Math.max(2, next.shell.depthFt));
     const location = nextRoomLocation(next, width, depth, rawName);
     const existing = findRoom(next, rawName);
     const room = {
@@ -2977,8 +2977,9 @@ export function normalizeRooms(spec) {
         x: clamp(room.x, -roomMargin * 0.25, spec.shell.widthFt + 8),
         y: clamp(room.y, -roomMargin * 0.25, spec.shell.depthFt + 8)
       }),
-    w: clamp(room.w, 4, spec.shell.widthFt),
-    d: clamp(room.d, 4, spec.shell.depthFt)
+    // 2-ft floor, not 4: a reach-in closet is a legitimate 2-ft-deep room.
+    w: clamp(room.w, 2, spec.shell.widthFt),
+    d: clamp(room.d, 2, spec.shell.depthFt)
   }));
   if (Array.isArray(spec.elements)) {
     spec.elements = spec.elements.map((element) => {

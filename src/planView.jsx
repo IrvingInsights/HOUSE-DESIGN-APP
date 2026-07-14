@@ -306,8 +306,9 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
       let { x, y, w, d } = o;
       const right = o.x + o.w;
       const bottom = o.y + o.d;
-      if (drag.mode.includes('w')) { x = clamp(snap(o.x + dx), right - 60, right - 3); w = right - x; } else if (drag.mode.includes('e')) { w = clamp(snap(o.w + dx), 3, 60); }
-      if (drag.mode.includes('n')) { y = clamp(snap(o.y + dy), bottom - 60, bottom - 3); d = bottom - y; } else if (drag.mode.includes('s')) { d = clamp(snap(o.d + dy), 3, 60); }
+      // 2-ft floor: a reach-in closet is a real 2-ft-deep room.
+      if (drag.mode.includes('w')) { x = clamp(snap(o.x + dx), right - 60, right - 2); w = right - x; } else if (drag.mode.includes('e')) { w = clamp(snap(o.w + dx), 2, 60); }
+      if (drag.mode.includes('n')) { y = clamp(snap(o.y + dy), bottom - 60, bottom - 2); d = bottom - y; } else if (drag.mode.includes('s')) { d = clamp(snap(o.d + dy), 2, 60); }
       ghost = { x, y, w, d };
     }
     setDrag((current) => current && { ...current, ghost });
@@ -803,8 +804,9 @@ export function PlanMoveBoard({ spec, selectedRoom, selectedObject, onSelectRoom
     if (!room) return;
     const point = pointToFeet(event);
     if (drag.mode === 'resize') {
-      const nextW = clamp(Math.round((point.x - room.x) * 2) / 2, 4, Math.max(4, shellW - room.x));
-      const nextD = clamp(Math.round((point.y - room.y) * 2) / 2, 4, Math.max(4, shellD - room.y));
+      // Rooms go down to 2 ft — a real reach-in closet is a 2-ft-deep room.
+      const nextW = clamp(Math.round((point.x - room.x) * 2) / 2, 2, Math.max(2, shellW - room.x));
+      const nextD = clamp(Math.round((point.y - room.y) * 2) / 2, 2, Math.max(2, shellD - room.y));
       dragRef.current = { ...drag, w: nextW, d: nextD };
       onResize(room.id, nextW, nextD, false);
       return;
