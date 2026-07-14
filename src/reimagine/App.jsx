@@ -21,6 +21,10 @@ const CHAPTERS = [
   { id: 'finishes', label: 'Finishes', view: '3d', greet: () => 'Materials and surfaces, inside and out — natural or conventional, wall by wall.' }
 ];
 
+// Bumped on every shell change so Daniel can see at a glance which version
+// his browser is showing (bottom of the Trail).
+const UPDATE_STAMP = 'update 4 · Jul 14';
+
 const TYPE_LABEL = {
   living: 'Living', service: 'Service', sleeping: 'Sleeping', wet: 'Wet core',
   work: 'Work', plant: 'Growing', outdoor: 'Outdoor', site: 'Site'
@@ -148,6 +152,7 @@ export default function App() {
                 </button>
               ))}
             </nav>
+            <div className="rz-stamp">{UPDATE_STAMP}</div>
           </>
         )}
       </aside>

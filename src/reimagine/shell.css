@@ -90,6 +90,7 @@
   background: color-mix(in srgb, var(--sage, #e2ecee) 80%, transparent); color: var(--evergreen, #3c6472);
 }
 .rz-chapter-label { font-size: 14px; font-weight: 500; }
+.rz-stamp { margin: 12px 4px 0; font-size: 11px; color: var(--moss, #868a7c); text-align: right; }
 
 /* SURFACE 3 — the Card, bottom-right, appears on tap */
 .rz-card {
