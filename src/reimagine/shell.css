@@ -90,7 +90,29 @@
   background: color-mix(in srgb, var(--sage, #e2ecee) 80%, transparent); color: var(--evergreen, #3c6472);
 }
 .rz-chapter-label { font-size: 14px; font-weight: 500; }
-.rz-stamp { margin: 12px 4px 0; font-size: 11px; color: var(--moss, #868a7c); text-align: right; }
+.rz-stamp { margin: 12px 4px 0; font-size: 11px; color: var(--moss, #868a7c); text-align: right; display: flex; justify-content: space-between; align-items: baseline; }
+.rz-fresh {
+  border: none; background: transparent; cursor: pointer; padding: 0;
+  font: inherit; font-size: 11px; color: var(--moss, #868a7c); text-decoration: underline dotted;
+}
+.rz-fresh:hover { color: var(--bad, #ae452f); }
+
+/* self-update chip — top center, under the status strip */
+.rz-update {
+  position: absolute; z-index: 15; top: 60px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; max-width: min(640px, calc(100vw - 40px));
+  padding: 8px 14px; border-radius: 999px; font-size: 13px; color: var(--ink, #22251f);
+  background: color-mix(in srgb, var(--sage, #e2ecee) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--evergreen, #3c6472) 40%, transparent);
+  box-shadow: 0 8px 30px rgba(30, 40, 30, 0.14);
+}
+.rz-update button {
+  border: none; border-radius: 999px; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 700;
+  background: var(--evergreen, #3c6472); color: #fff; padding: 5px 14px;
+}
+.rz-update .rz-update-later { background: transparent; color: var(--earth, #565a4f); font-weight: 500; }
+.rz-update-busy { color: var(--earth, #565a4f); }
+.rz-update-err { color: var(--bad, #ae452f); }
 
 /* Shape chapter controls — pick an outline, then the size in numbers */
 .rz-shape { display: flex; flex-direction: column; gap: 8px; margin: 0 4px 14px; }

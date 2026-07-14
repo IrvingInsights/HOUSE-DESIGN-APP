@@ -33,7 +33,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 12 · Jul 14';
+const UPDATE_STAMP = 'update 13 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -89,6 +89,20 @@ function scrubLayers(schedule, scrubWeek, spec) {
   return layers;
 }
 
+// The design survives reloads and self-updates: every change lands in the
+// browser's local storage (this machine only), and the app picks it back up
+// on the next open. Losing an hour of design to a refresh is not a thing.
+const STORE_KEY = 'rz.design.v1';
+function loadStoredSpec() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed?.spec?.shell && Array.isArray(parsed.spec.rooms)) return parsed.spec;
+  } catch { /* corrupt or blocked storage — start from the sample */ }
+  return null;
+}
+
 // Keep a custom order valid as the phase list itself changes (the heater
 // phase comes and goes with the heat source): drop ids that no longer exist,
 // slot new phases in at their default position.
@@ -107,7 +121,7 @@ const TYPE_LABEL = {
 };
 
 export default function App() {
-  const [spec, setSpec] = useState(() => structuredClone(seedSpec));
+  const [spec, setSpec] = useState(() => loadStoredSpec() || structuredClone(seedSpec));
   const [selectedId, setSelectedId] = useState(null);
   const [activeChapter, setActiveChapter] = useState('shape');
   const [viewMode, setViewMode] = useState('plan'); // 'plan' (top-down) | '3d'
@@ -321,6 +335,62 @@ export default function App() {
     if (activeChapter === 'rooms') setActiveFloor(level);
   };
 
+  // autosave the design to this browser (debounced — never per keystroke)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try { localStorage.setItem(STORE_KEY, JSON.stringify({ spec, savedAt: Date.now() })); } catch { /* storage full/blocked — in-memory still works */ }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [spec]);
+  const startFresh = () => {
+    if (!window.confirm('Start over with the sample design? Your current design will be cleared.')) return;
+    try { localStorage.removeItem(STORE_KEY); } catch { /* fine */ }
+    setSpec(structuredClone(seedSpec));
+    setSelectedId(null);
+    setPhaseOrder(null);
+  };
+
+  // --- self-update: the app notices new versions and applies them itself -----
+  const [update, setUpdate] = useState(null); // {behind, latest} | 'applying' | {error}
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      try {
+        const r = await fetch('/api/update/check', { cache: 'no-store' });
+        const j = await r.json();
+        if (alive && j.behind > 0) setUpdate((cur) => (cur === 'applying' ? cur : j));
+      } catch { /* engine busy/offline — try again next round */ }
+    };
+    check();
+    const timer = setInterval(check, 5 * 60 * 1000);
+    const onFocus = () => check();
+    window.addEventListener('focus', onFocus);
+    return () => { alive = false; clearInterval(timer); window.removeEventListener('focus', onFocus); };
+  }, []);
+  const applyUpdateNow = async () => {
+    setUpdate('applying');
+    try {
+      const r = await fetch('/api/update/apply', { method: 'POST' });
+      const j = await r.json();
+      if (!j.ok) { setUpdate({ error: j.error || 'update failed' }); return; }
+      if (j.restarting) {
+        // the engine restarts itself on new code — wait for it, then reload
+        for (let i = 0; i < 40; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          try { const ping = await fetch('/api/update/check', { cache: 'no-store' }); if (ping.ok) break; } catch { /* still restarting */ }
+        }
+      }
+      window.location.reload();
+    } catch {
+      // apply killed the engine before answering — same story: wait, reload
+      for (let i = 0; i < 40; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        try { const ping = await fetch('/api/update/check', { cache: 'no-store' }); if (ping.ok) break; } catch { /* still restarting */ }
+      }
+      window.location.reload();
+    }
+  };
+
   // --- right-click menu on the plan ------------------------------------------
   const [ctxMenu, setCtxMenu] = useState(null); // { id, x, y }
   const openContext = (id, x, y) => { setSelectedId(id); setCtxMenu({ id, x, y }); };
@@ -517,7 +587,10 @@ export default function App() {
             <button className="rz-build-btn" onClick={timelineOpen ? closeTimeline : openTimeline}>
               {timelineOpen ? '× Back to designing' : '▶ Watch it build'}
             </button>
-            <div className="rz-stamp">{UPDATE_STAMP}</div>
+            <div className="rz-stamp">
+              <button className="rz-fresh" title="Clear this design and start from the sample" onClick={startFresh}>start fresh</button>
+              {UPDATE_STAMP}
+            </div>
           </>
         )}
       </aside>
@@ -555,6 +628,23 @@ export default function App() {
           </div>
         );
       })()}
+
+      {/* self-update chip — the app fetches its own newer versions */}
+      {update && (
+        <div className="rz-update">
+          {update === 'applying' ? (
+            <span className="rz-update-busy">Updating… the app will refresh itself in a moment.</span>
+          ) : update.error ? (
+            <span className="rz-update-err">Couldn’t update by itself ({update.error}) — the start.bat window can do it: close it and open it again.</span>
+          ) : (
+            <>
+              <span>A newer version is ready{update.latest ? ` — “${update.latest}”` : ''}.</span>
+              <button onClick={applyUpdateNow}>Update now</button>
+              <button className="rz-update-later" onClick={() => setUpdate(null)}>Later</button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* right-click menu — quick actions on whatever was tapped */}
       {ctxMenu && (() => {
