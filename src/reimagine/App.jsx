@@ -3,7 +3,7 @@ import { ThreeScene, webglAvailable } from '../threeScene.jsx';
 import { PlanView } from '../planView.jsx';
 import { applyBimOperations, clamp } from '../../backend/bim-core.mjs';
 import {
-  seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum
+  seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS
 } from '../engine.js';
 import '../styles.css';
 import './shell.css';
@@ -26,7 +26,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 6 · Jul 14';
+const UPDATE_STAMP = 'update 7 · Jul 14';
 
 const TYPE_LABEL = {
   living: 'Living', service: 'Service', sleeping: 'Sleeping', wet: 'Wet core',
@@ -42,6 +42,7 @@ export default function App() {
   const [viewRequest, setViewRequest] = useState({ mode: 'iso', n: 1 });
   const [askText, setAskText] = useState('');
   const [askEcho, setAskEcho] = useState(null);
+  const [budgetOpen, setBudgetOpen] = useState(false);
 
   const webglOK = useMemo(() => webglAvailable(), []);
   const wallSections = useMemo(() => getWallSections(spec), [spec]);
@@ -131,7 +132,12 @@ export default function App() {
       <div className="rz-status">
         <span className="rz-status-item"><b>{fmtNum(derived.floor)}</b> sq ft</span>
         <span className="rz-dot" />
-        <span className="rz-status-item"><b>{fmtMoney(derived.total)}</b> rough</span>
+        <button
+          type="button"
+          className="rz-status-item rz-status-btn"
+          title="Tap to see where every dollar comes from"
+          onClick={() => setBudgetOpen((v) => !v)}
+        ><b>{fmtMoney(derived.total)}</b> rough ▾</button>
         <span className="rz-dot" />
         <span className="rz-status-item"><b>{Math.round(derived.carbonKg / 1000)}</b> t CO₂e</span>
         <span className="rz-dot" />
@@ -185,6 +191,12 @@ export default function App() {
           </>
         )}
       </aside>
+
+      {/* SURFACE 4a — the Budget sheet: the first live Sheet. Every line opens
+          to its math; the math is emitted by the engine itself. */}
+      {budgetOpen && (
+        <BudgetSheet derived={derived} onClose={() => setBudgetOpen(false)} />
+      )}
 
       {/* SURFACE 3 — the Card (tap any part → vitals, receipts) */}
       {selectedRoom && (
@@ -256,6 +268,77 @@ function RoomCard({ room, derived, onClose }) {
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+// One receipt line, math written out: "1,280 sf of wall face × $16/sf = $20,480".
+function ReceiptLine({ line }) {
+  const rateUnit = line.unit ? line.unit.split(' ')[0] : '';
+  const math = line.qty != null && line.rate != null
+    ? `${fmtNum(line.qty)} ${line.unit} × ${line.each ? `$${line.rate} each` : `$${line.rate}/${rateUnit}`} = `
+    : '';
+  const negative = line.amount < 0;
+  return (
+    <div className="rz-rline">
+      <div className="rz-rline-main">
+        <span className="rz-rline-label">{line.label}</span>
+        <span className={`rz-rline-amount ${negative ? 'neg' : ''}`}>
+          {negative ? `−${fmtMoney(Math.abs(line.amount))}` : fmtMoney(line.amount)}
+        </span>
+      </div>
+      {(math || line.note) && (
+        <div className="rz-rline-math">{math && <span>{math}{fmtMoney(Math.abs(line.amount))}</span>}{math && line.note ? ' — ' : ''}{line.note}</div>
+      )}
+    </div>
+  );
+}
+
+// The Budget sheet — where every dollar shows its work. Rows come from the
+// engine's own receipts (built inside deriveDesign), so what you read here IS
+// the math that produced the total, not a retelling of it.
+function BudgetSheet({ derived, onClose }) {
+  const [openKey, setOpenKey] = useState(null);
+  const rows = COST_ROWS
+    .map((row) => ({ ...row, amount: derived.cost[row.key] || 0, lines: derived.receipts.systems[row.key] || [] }))
+    .filter((row) => row.amount > 0 || row.lines.length > 0)
+    .sort((a, b) => b.amount - a.amount);
+  const maxAmount = Math.max(1, ...rows.map((row) => row.amount));
+  return (
+    <div className="rz-budget">
+      <div className="rz-budget-head">
+        <h2>Where the money goes</h2>
+        <button className="rz-x" onClick={onClose}>×</button>
+      </div>
+      <div className="rz-budget-rows">
+        {rows.map((row) => (
+          <div key={row.key} className={`rz-brow ${openKey === row.key ? 'open' : ''}`}>
+            <button type="button" className="rz-brow-head" onClick={() => setOpenKey(openKey === row.key ? null : row.key)}>
+              <span className="rz-brow-label">{row.label}</span>
+              <span className="rz-brow-bar"><span style={{ width: `${Math.round((row.amount / maxAmount) * 100)}%` }} /></span>
+              <span className="rz-brow-amount">{fmtMoney(row.amount)}</span>
+            </button>
+            {openKey === row.key && (
+              <div className="rz-brow-body">
+                {row.lines.length === 0
+                  ? <div className="rz-rline-math">Nothing on this line yet.</div>
+                  : row.lines.map((line, i) => <ReceiptLine key={i} line={line} />)}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="rz-budget-foot">
+        <div className="rz-bfoot-row"><span>Everything, bought new</span><b>{fmtMoney(derived.totalBeforeSweat)}</b></div>
+        {derived.receipts.sweat.map((line, i) => (
+          <div key={i} className="rz-bfoot-row rz-bfoot-sweat"><span>{line.label}</span><b>−{fmtMoney(Math.abs(line.amount))}</b></div>
+        ))}
+        <div className="rz-bfoot-row rz-bfoot-total"><span>Rough total</span><b>{fmtMoney(derived.total)}</b></div>
+        <div className="rz-budget-note">
+          Planning figures with placeholder rates — for comparing choices, not for quoting.
+          Every line above shows the exact math the total is made of.
+        </div>
+      </div>
     </div>
   );
 }

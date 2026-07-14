@@ -3478,7 +3478,128 @@ export function deriveDesign(spec, wallSections) {
     count: Object.values(reclaimed).filter(Boolean).length
   };
 
+  // ---- Receipts: the itemized math behind every cost line -------------------
+  // Built HERE, from the SAME variables the costs were just computed from, in
+  // the same pass — so a receipt can never drift from its number. Each line:
+  // {label, amount, qty, unit, rate, each, note}; flat items omit qty/rate.
+  // tools/receipts_test.mjs asserts every system's lines sum to cost.<system>.
+  const rline = (label, amount, qty = null, unit = '', rate = null, note = '', each = false) => ({ label, amount, qty, unit, rate, note, each });
+  const costReceipts = {};
+  { // foundation
+    const lines = [];
+    if (basement.present) {
+      lines.push(rline('Basement walls (concrete)', perimeterFt * basement.heightFt * 24, perimeterFt * basement.heightFt, 'sf of wall face', 24));
+      lines.push(rline('Basement slab', floor * 7, floor, 'sf of floor', 7));
+      if (basementRoomArea > 0) lines.push(rline('Finished basement rooms', basementRoomArea * 9, basementRoomArea, 'sf of room', 9));
+    } else if (utilities.foundationType === 'stemwall') {
+      lines.push(rline('Footing & site prep', floor * 8, floor, 'sf of floor', 8));
+      lines.push(rline(`Stem wall, ${stemwallHeightFt}' tall`, perimeterFt * stemwallHeightFt * 18, perimeterFt * stemwallHeightFt, 'sf of stem face', 18));
+    } else {
+      const rate = foundationCostPsf[utilities.foundationType] ?? 10;
+      const label = utilities.foundationType === 'rubble' ? 'Rubble trench foundation' : utilities.foundationType === 'slab' ? 'Slab on grade' : 'Foundation';
+      lines.push(rline(label, floor * rate, floor, 'sf of floor', rate));
+    }
+    if (foundationInsulationCost > 0) {
+      lines.push(foundationInsulation === 'full'
+        ? rline('Under-slab insulation (full)', floor * 3, floor, 'sf of floor', 3)
+        : rline('Perimeter insulation', perimeterFt * 6, perimeterFt, 'ft of perimeter', 6));
+    }
+    if (foundationRunCost > 0) lines.push(rline('Interior foundation strips', foundationRunCost, null, '', null, `${foundationRuns.length} placed run${foundationRuns.length === 1 ? '' : 's'} under interior walls, priced by the foot`));
+    costReceipts.foundation = lines;
+  }
+  { // frame
+    const lines = [];
+    const gRate = FRAME_TYPES[groundFrameKey]?.costPsf ?? 0;
+    const uRate = FRAME_TYPES[upperFrameKey]?.costPsf ?? 0;
+    if (groundFrameArea > 0) lines.push(rline(`Ground frame — ${FRAME_TYPES[groundFrameKey]?.label || groundFrameKey}`, groundFrameArea * gRate, groundFrameArea, 'sf of frame plane', gRate, gRate === 0 ? 'load-bearing walls carry the roof themselves — no separate frame to buy' : 'perimeter × wall height' + (bandFrameArea > 0 ? ' + sun-glazing bands' : '')));
+    if (upperFrameArea > 0) lines.push(rline(`Upper frame — ${FRAME_TYPES[upperFrameKey]?.label || upperFrameKey}`, upperFrameArea * uRate, upperFrameArea, 'sf of frame plane', uRate));
+    if (reclaimed.frame && frameCostRaw > 0) lines.push(rline('Reclaimed timber', -(frameCostRaw - frameCost), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.frame.cost * 100)}% of the new-material price`));
+    costReceipts.frame = lines;
+  }
+  { // flooring
+    const lines = [];
+    const fRate = FLOORING_TYPES[flooringKey]?.costPsf ?? 4;
+    const finishFinal = flooringCostRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.cost : 1);
+    lines.push(rline(`Finish floor — ${FLOORING_TYPES[flooringKey]?.label || flooringKey}`, flooringCostRaw, heatedFloor, 'sf of heated floor', fRate));
+    if (reclaimed.flooring) lines.push(rline('Reclaimed boards', -(flooringCostRaw - finishFinal), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.flooring.cost * 100)}% of new`));
+    if (subfloorCost > 0) lines.push(rline(`Subfloor — ${SUBFLOOR_TYPES[subfloorKey]?.label || subfloorKey}`, subfloorCost, floor, 'sf of deck', SUBFLOOR_TYPES[subfloorKey]?.costPsf ?? 0));
+    if (floorInsulCost > 0) lines.push(rline(`Floor insulation — ${INSULATION_TYPES[floorInsulKey]?.label || floorInsulKey}`, floorInsulCost, floor, 'sf of floor', INSULATION_TYPES[floorInsulKey].costPsf));
+    costReceipts.flooring = lines;
+  }
+  { // upper floors
+    const area = upperFloorArea + loftTowerArea;
+    costReceipts.upperFloors = area > 0 ? [rline('Upper floor decks', area * 12, area, 'sf of deck', 12, 'joists + deck between storeys')] : [];
+  }
+  { // outdoors
+    const lines = [];
+    for (const item of OUTDOOR_ITEMS) {
+      if (!outdoorItemPresent(spec, item)) continue;
+      if (item.key === 'greenhouse') {
+        const gCost = (spec.elements || []).filter((element) => element.name === item.name)
+          .reduce((s, element) => s + Math.max(24, (Number(element.w) || item.w) * (Number(element.d) || item.d)) * greenhouseCostSf, 0);
+        lines.push(rline('Greenhouse', gCost, gCost / greenhouseCostSf, 'sf of footprint', greenhouseCostSf));
+      } else {
+        lines.push(rline(item.name, item.cost));
+      }
+    }
+    if (outbuildingCost > 0) lines.push(rline('Outbuildings', outbuildingCost, null, '', null, 'each footprint × its construction rate'));
+    if (canopyCost > 0) lines.push(rline('Porch / deck canopies', canopyCost, canopyCost / 14, 'sf covered', 14, 'light roof on posts'));
+    costReceipts.outdoors = lines;
+  }
+  { // walls
+    const lines = [];
+    const areaByAssembly = new Map();
+    for (const wall of wallSections) areaByAssembly.set(wall.assemblyKey, (areaByAssembly.get(wall.assemblyKey) || 0) + wallFaceArea(wall));
+    for (const [key, area] of areaByAssembly) {
+      if (area <= 0) continue;
+      const rate = wallCostPsf[key] ?? 16;
+      lines.push(rline(`${WALL_ASSEMBLIES[key]?.label || key} walls`, area * rate, area, 'sf of wall face', rate));
+    }
+    if (partitionCost > 0) lines.push(rline('Interior partitions', partitionCost, null, '', null, 'length × height × the partition rate'));
+    if (claddingCost > 0) lines.push(rline('Exterior cladding', claddingCost, null, '', null, 'face area × the cladding rate (render is already in the wall price)'));
+    if (reclaimed.walls) lines.push(rline('Reclaimed wall materials', -(wallsCostRaw - cost.walls), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.walls.cost * 100)}% of new`));
+    costReceipts.walls = lines;
+  }
+  { // windows
+    const rate = utilities.windowQuality === 'triple' ? 70 : 45;
+    const lines = [rline(`Glazing — ${utilities.windowQuality === 'triple' ? 'triple' : 'double'} pane`, windowsCostRaw, totalGlass, 'sf of glass', rate, 'every window, glazed door, skylight, and sun band')];
+    if (reclaimed.windows) lines.push(rline('Reclaimed windows', -(windowsCostRaw - cost.windows), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.windows.cost * 100)}% of new`));
+    costReceipts.windows = lines;
+  }
+  { // roof
+    const lines = [
+      rline('Roof structure & cladding', roofArea * 10, roofArea, 'sf of roof surface', 10),
+      rline(`Roof insulation — ${INSULATION_TYPES[roofInsulKey]?.label || roofInsulKey}`, roofInsulCost, roofArea, 'sf of roof', INSULATION_TYPES[roofInsulKey].costPsf)
+    ];
+    if (reclaimed.roof) lines.push(rline('Reclaimed roofing', -(roofCostRaw - cost.roof), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.roof.cost * 100)}% of new`));
+    costReceipts.roof = lines;
+  }
+  { // heat / water / waste / power
+    const heatNames = { rocket_mass: 'Rocket mass heater', masonry: 'Masonry heater', wood_stove: 'Wood stove', minisplit: 'Mini-split heat pump' };
+    costReceipts.heat = [rline(heatNames[utilities.heatSource] || 'Heat source', heatCostBySource[utilities.heatSource] ?? 3000, null, '', null, 'installed, flat planning figure')];
+    const waterNames = { well: 'Drilled well', spring: 'Spring development', catchment: 'Roof catchment system', town: 'Town water hookup' };
+    const waterLines = [rline(waterNames[utilities.waterSource] || 'Water source', waterCostBySource[utilities.waterSource] ?? 5000)];
+    if ((Number(utilities.tankGal) || 0) > 0) waterLines.push(rline('Storage tank', Number(utilities.tankGal) * 1.5, Number(utilities.tankGal), 'gal of storage', 1.5));
+    costReceipts.water = waterLines;
+    const wasteNames = { septic: 'Septic system', composting: 'Composting toilet setup', reedbed: 'Reed bed greywater' };
+    costReceipts.waste = [rline(wasteNames[utilities.wasteMethod] || 'Waste system', wasteCostByMethod[utilities.wasteMethod] ?? 5000)];
+    costReceipts.power = utilities.powerMode === 'gridtie'
+      ? [rline('Grid connection', 4200, null, '', null, 'hookup + panel, flat planning figure')]
+      : [
+        rline('Solar panels', panels * 900, panels, 'panels', 900, '', true),
+        rline('Battery bank', batteryKwh * 500, batteryKwh, 'kWh of storage', 500),
+        rline('Inverter, wiring & mounts', 3000)
+      ];
+  }
+  const sweatLines = [];
+  if (utilities.diyFoundation && cost.foundation) sweatLines.push(rline('Foundation — your own labor', -cost.foundation * sweatFoundationFrac, null, '', null, `${Math.round(sweatFoundationFrac * 100)}% of that line is labor`));
+  if (utilities.diyFrame && cost.frame) sweatLines.push(rline('Frame — your own labor', -cost.frame * sweatFrameFrac, null, '', null, `${Math.round(sweatFrameFrac * 100)}% of that line is labor`));
+  if (utilities.diyWalls && cost.walls) sweatLines.push(rline('Walls — your own labor', -cost.walls * sweatWallsFrac, null, '', null, `${Math.round(sweatWallsFrac * 100)}% of that line is labor`));
+  if (utilities.diyRoof && cost.roof) sweatLines.push(rline('Roof — your own labor', -cost.roof * sweatRoofFrac, null, '', null, `${Math.round(sweatRoofFrac * 100)}% of that line is labor`));
+  if (utilities.diyHeat && cost.heat) sweatLines.push(rline('Heat — your own labor', -cost.heat * sweatHeatFrac, null, '', null, `${Math.round(sweatHeatFrac * 100)}% of that line is labor`));
+
   return {
+    receipts: { systems: costReceipts, sweat: sweatLines },
     site, utilities, reclaimed, reclaimedSavings, floor, heatedFloor, storeys, basement, basementRoomArea, basementHeated, roofArea, roofFootprint, overhangs, wallArea, glazedWallArea, wallR, southGlass, glassPct,
     skylightArea, totalGlass, glazingU, stemwallHeightFt, azimuthDeg, solarFactor,
     sunWinterDeg, sunSummerDeg, winterShadeFrac, summerShadeFrac,
