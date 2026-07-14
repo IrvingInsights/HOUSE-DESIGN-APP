@@ -174,6 +174,21 @@
 }
 .rz-room-custom button:disabled { opacity: 0.45; cursor: default; }
 
+/* per-wall heights disclosure (Shell chapter) */
+.rz-perwall summary {
+  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--evergreen, #3c6472);
+  list-style: none; padding: 2px 0;
+}
+.rz-perwall summary::-webkit-details-marker { display: none; }
+.rz-perwall[open] summary { margin-bottom: 6px; }
+.rz-perwall-row { margin-bottom: 5px; }
+.rz-perwall-name {
+  border: none; background: transparent; cursor: pointer; text-align: left; padding: 0;
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--ink, #22251f);
+}
+.rz-perwall-name small { font-weight: 400; color: var(--moss, #868a7c); }
+.rz-perwall-name:hover { color: var(--evergreen, #3c6472); }
+
 /* right-click menu on the plan */
 .rz-ctx {
   position: fixed; z-index: 20; min-width: 190px;

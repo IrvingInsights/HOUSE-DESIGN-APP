@@ -33,7 +33,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 16 · Jul 14';
+const UPDATE_STAMP = 'update 17 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -430,6 +430,7 @@ export default function App() {
   // same base spec and only the last would land (a bug this app has had).
   const setAllWalls = (value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, field: 'assembly', value })));
   const setFrame = (value) => applyOps([{ type: 'set_frame', value }]);
+  const setWallSide = (side, field, value) => applyOps([{ type: 'set_wall_side', wall: side, field, value }]);
 
   // switching chapters nudges you to the view that chapter is best done in
   const goChapter = (c) => { setActiveChapter(c.id); if (c.view) setViewMode(c.view === 'plan' ? 'plan' : '3d'); };
@@ -571,6 +572,8 @@ export default function App() {
                 onAllWalls={setAllWalls}
                 onFrame={setFrame}
                 onShell={setShellField}
+                onWallSide={setWallSide}
+                onSelectWall={(side) => { setSelectedId(`wall-${side}`); setViewMode('3d'); }}
               />
             )}
             <nav className="rz-chapters">
@@ -613,6 +616,10 @@ export default function App() {
         />
       )}
       {selectedId && !selectedRoom && (() => {
+        const wallSide = WALL_SIDES.find((side) => selectedId === `wall-${side}`);
+        if (wallSide) {
+          return <WallCard side={wallSide} spec={spec} onWallSide={setWallSide} onClose={() => setSelectedId(null)} />;
+        }
         const el = (spec.elements || []).find((e) => e.id === selectedId);
         return (
           <div className="rz-card">
@@ -1146,11 +1153,13 @@ function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, on
 // Shell chapter: the structure in three plain choices — what the walls are,
 // what carries the roof, how tall the walls run. The timeline's build order
 // and every receipt follow these.
-function StructureControls({ spec, onAllWalls, onFrame, onShell }) {
+function StructureControls({ spec, onAllWalls, onFrame, onShell, onWallSide, onSelectWall }) {
   const resolved = WALL_SIDES.map((side) => resolveWallSide(spec, side));
   const wallKeys = new Set(resolved.map((r) => r.assemblyKey));
   const wallVal = wallKeys.size === 1 ? [...wallKeys][0] : '__mixed';
   const frameVal = resolveFrameType(spec, 1);
+  const heights = new Set(resolved.map((r) => Math.round(r.heightFt * 10)));
+  const shed = (spec.shell.roofType || 'gable') === 'shed';
   return (
     <div className="rz-found">
       <label className="rz-field">
@@ -1171,10 +1180,58 @@ function StructureControls({ spec, onAllWalls, onFrame, onShell }) {
         </select>
       </label>
       <label className="rz-field rz-field-num">
-        <span>Wall height</span>
+        <span>Wall height (all){heights.size > 1 ? ' · sides differ' : ''}</span>
         <NumInput value={Number(spec.shell.wallHeightFt) || 10} min={7} max={40} step={0.5} onCommit={(v) => onShell('wallHeightFt', v)} />
       </label>
-      <div className="rz-shape-note">Whole-house choices — with load-bearing walls the timeline walls first, then roofs; with a frame it roofs before straw walls go in. Wall-by-wall control comes with the tap-a-wall card.</div>
+      {/* not all walls are the same height: a 2-ft greenhouse kneewall on the
+          south, a tall north wall a shed falls from — each side has its own */}
+      <details className="rz-perwall">
+        <summary>Each wall its own height ▸</summary>
+        {WALL_SIDES.map((side, i) => (
+          <div key={side} className="rz-field rz-field-num rz-perwall-row">
+            <button type="button" className="rz-perwall-name" title="See this wall in 3D" onClick={() => onSelectWall(side)}>
+              {side[0].toUpperCase() + side.slice(1)}
+              <small> · {resolved[i].assembly.label}</small>
+            </button>
+            <NumInput value={Math.round(resolved[i].heightFt * 10) / 10} min={2} max={40} step={0.5} onCommit={(v) => onWallSide(side, 'heightFt', v)} />
+          </div>
+        ))}
+        <div className="rz-shape-note">
+          {shed ? 'On a shed roof the south and north heights set which way it falls.' : 'Down to a 2 ft kneewall.'} Setting the all-walls height above puts every side back in step.
+        </div>
+      </details>
+      <div className="rz-shape-note">Whole-house choices — with load-bearing walls the timeline walls first, then roofs; with a frame it roofs before straw walls go in. Or tap any wall in 3D to set just that one.</div>
+    </div>
+  );
+}
+
+// Tap a wall in 3D → its own card: THIS wall's height and system.
+function WallCard({ side, spec, onWallSide, onClose }) {
+  const r = resolveWallSide(spec, side);
+  const label = side[0].toUpperCase() + side.slice(1);
+  return (
+    <div className="rz-card">
+      <div className="rz-card-head">
+        <h2>{label} wall</h2>
+        <button className="rz-x" onClick={onClose}>×</button>
+      </div>
+      <div className="rz-vitals">
+        <Vital label="System" value={r.assembly.label} />
+        <Vital label="Thickness" value={`${round1(r.thicknessFt)} ft`} />
+      </div>
+      <label className="rz-field rz-field-num">
+        <span>Height (this wall)</span>
+        <NumInput value={Math.round(r.heightFt * 10) / 10} min={2} max={40} step={0.5} onCommit={(v) => onWallSide(side, 'heightFt', v)} />
+      </label>
+      <label className="rz-field">
+        <span>Wall system (this wall)</span>
+        <select value={r.assemblyKey} onChange={(e) => onWallSide(side, 'assembly', e.target.value)}>
+          {Object.values(WALL_ASSEMBLIES).map((a) => (
+            <option key={a.key} value={a.key}>{a.green ? '🌿 ' : ''}{a.label} — R{a.rValue}</option>
+          ))}
+        </select>
+      </label>
+      <p className="rz-muted" style={{ marginTop: 8 }}>Just this wall — the other three keep their own height and system.</p>
     </div>
   );
 }
