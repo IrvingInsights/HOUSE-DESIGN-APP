@@ -54,6 +54,8 @@
   font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 9px; cursor: pointer;
 }
 .rz-views button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 70%, transparent); color: var(--ink); }
+.rz-views button.on { background: var(--evergreen, #3c6472); color: #fff; }
+.rz-views-sep { width: 1px; align-self: stretch; background: var(--line2, #cac8bb); margin: 2px 4px; }
 
 /* SURFACE 2 — the Trail spine, left edge */
 .rz-trail {

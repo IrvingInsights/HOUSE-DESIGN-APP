@@ -1,22 +1,24 @@
 import React, { useMemo, useState } from 'react';
 import { ThreeScene, webglAvailable } from '../threeScene.jsx';
+import { PlanView } from '../planView.jsx';
+import { applyBimOperations, clamp } from '../../backend/bim-core.mjs';
 import {
   seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum
 } from '../engine.js';
 import '../styles.css';
 import './shell.css';
 
-// The Trail — the spine of the app. One chapter open at a time. Each opens with
-// a plain-sentence greeting (the "foreman" voice). Ordered as the house is
-// actually decided; the model stays the same object underneath.
+// The Trail — the spine of the app. Shape comes FIRST (settle the footprint),
+// then Rooms fill it, then everything the shell implies. One chapter open at a
+// time; each opens with a plain-sentence greeting (the "foreman" voice).
 const CHAPTERS = [
-  { id: 'rooms', label: 'Rooms', greet: (d) => `Your rooms are roughed in — ${fmtNum(d.floor)} sq ft across ${d.bedrooms >= 0 ? '' : ''}the ground floor. Tap any room to shape it, or tell me what to add.` },
-  { id: 'shape', label: 'Shape', greet: () => 'Push and pull the walls until the footprint feels right. The house re-derives as you go.' },
-  { id: 'shell', label: 'Shell', greet: (d) => `The shell stands ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'}. Set the height and how tall the walls run.` },
-  { id: 'roof', label: 'Roof', greet: () => 'Choose how the roof sheds weather and sun — and how much daylight it lets in.' },
-  { id: 'openings', label: 'Openings', greet: () => 'Place doors and windows where light and paths want them. South glass earns its keep in winter.' },
-  { id: 'systems', label: 'Systems', greet: () => 'Heat, water, power, waste — the working parts. Each shows its own receipts.' },
-  { id: 'finishes', label: 'Finishes', greet: () => 'Materials and surfaces, inside and out — natural or conventional, wall by wall.' }
+  { id: 'shape', label: 'Shape', view: 'plan', greet: (d) => `Start with the outline — drag the footprint edges until it's the size you want. Right now it's ${fmtNum(d.floor)} sq ft.` },
+  { id: 'rooms', label: 'Rooms', view: 'plan', greet: () => 'Lay the rooms out flat, from above. Drag a room to move it, grab a corner to resize. No roof in the way up here.' },
+  { id: 'shell', label: 'Shell', view: '3d', greet: (d) => `The shell stands ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'}. Set how tall the walls run.` },
+  { id: 'roof', label: 'Roof', view: '3d', greet: () => 'Choose how the roof sheds weather and sun — and how much daylight it lets in.' },
+  { id: 'openings', label: 'Openings', view: 'plan', greet: () => 'Place doors and windows where light and paths want them. Slide them along their wall.' },
+  { id: 'systems', label: 'Systems', view: '3d', greet: () => 'Heat, water, power, waste — the working parts. Each shows its own receipts.' },
+  { id: 'finishes', label: 'Finishes', view: '3d', greet: () => 'Materials and surfaces, inside and out — natural or conventional, wall by wall.' }
 ];
 
 const TYPE_LABEL = {
@@ -25,11 +27,11 @@ const TYPE_LABEL = {
 };
 
 export default function App() {
-  const [spec] = useState(() => structuredClone(seedSpec));
+  const [spec, setSpec] = useState(() => structuredClone(seedSpec));
   const [selectedId, setSelectedId] = useState(null);
-  const [activeChapter, setActiveChapter] = useState('rooms');
+  const [activeChapter, setActiveChapter] = useState('shape');
+  const [viewMode, setViewMode] = useState('plan'); // 'plan' (top-down) | '3d'
   const [trailOpen, setTrailOpen] = useState(true);
-  // Open framed from the corner so the whole house reads at a glance, not the roof.
   const [viewRequest, setViewRequest] = useState({ mode: 'iso', n: 1 });
   const [askText, setAskText] = useState('');
   const [askEcho, setAskEcho] = useState(null);
@@ -42,17 +44,65 @@ export default function App() {
   const selectedRoom = spec.rooms.find((r) => r.id === selectedId) || null;
   const chapter = CHAPTERS.find((c) => c.id === activeChapter) || CHAPTERS[0];
 
+  // --- direct editing: apply ops CLIENT-SIDE, no server round-trip ----------
+  const findObj = (id) => spec.rooms.find((r) => r.id === id) || (spec.elements || []).find((e) => e.id === id);
+  const applyOps = (operations) => {
+    const report = applyBimOperations(spec, { operations });
+    if (report?.spec) setSpec(report.spec);
+  };
+  const moveObject = (id, x, y) => { const o = findObj(id); if (o) applyOps([{ type: 'move_object', targetId: id, name: o.name, x, y }]); };
+  const resizeObject = (id, x, y, w, d) => {
+    const o = findObj(id); if (!o) return;
+    applyOps([
+      { type: 'resize_object', targetId: id, name: o.name, w, d, h: Number(o.h) || 0.22 },
+      { type: 'move_object', targetId: id, name: o.name, x, y }
+    ]);
+  };
+  const resizeShell = (w, d) => applyOps([
+    { type: 'set_shell', field: 'widthFt', value: String(clamp(Number(w), 12, 96)) },
+    { type: 'set_shell', field: 'depthFt', value: String(clamp(Number(d), 12, 80)) }
+  ]);
+  const moveEdge = (edgeIndex, offsetFt) => applyOps([{ type: 'move_wall_edge', field: `e${edgeIndex}`, value: String(offsetFt) }]);
+  const moveOpening = (index, along) => {
+    const op = spec.openings?.[index]; if (!op || op.wall === 'roof') return;
+    const field = op.wall === 'north' || op.wall === 'south' ? 'x' : 'y';
+    applyOps([{ type: 'update_object', targetId: `opening-${index}`, field, value: along }]);
+  };
+
+  // switching chapters nudges you to the view that chapter is best done in
+  const goChapter = (c) => { setActiveChapter(c.id); if (c.view) setViewMode(c.view === 'plan' ? 'plan' : '3d'); };
+
   return (
     <div className="rz-root">
-      {/* SURFACE 1 — the Model, center stage and full-bleed */}
+      {/* SURFACE 1 — the Model / Plan, center stage and full-bleed */}
       <div className="rz-model">
-        <ThreeScene
-          spec={spec}
-          selectedRoom={selectedId}
-          viewRequest={viewRequest}
-          onSelectRoom={(id) => setSelectedId(id)}
-          onFallbackNav={() => {}}
-        />
+        {viewMode === 'plan' ? (
+          <PlanView
+            spec={spec}
+            selectedRoom={selectedId}
+            onSelect={setSelectedId}
+            onMove={moveObject}
+            onResize={resizeObject}
+            onResizeShell={resizeShell}
+            onMoveEdge={moveEdge}
+            onMoveOpening={moveOpening}
+            activeFloor={1}
+          />
+        ) : (
+          <ThreeScene
+            spec={spec}
+            selectedRoom={selectedId}
+            viewRequest={viewRequest}
+            onSelectRoom={setSelectedId}
+            onMoveEnd={(id, x, y) => {
+              if (typeof id !== 'string') return;
+              if (id.startsWith('opening-')) moveOpening(Number(id.replace('opening-', '')), x);
+              else moveObject(id, x, y);
+            }}
+            onResizeEnd={(id, w, d) => { const o = findObj(id); if (o) applyOps([{ type: 'resize_object', targetId: id, name: o.name, w, d, h: Number(o.h) || 0.22 }]); }}
+            onFallbackNav={() => {}}
+          />
+        )}
       </div>
 
       {/* SURFACE 5b — one-line status strip (whole-house facts) */}
@@ -68,14 +118,15 @@ export default function App() {
           : <span className="rz-status-item rz-flag">{flags.length} to look at</span>}
       </div>
 
-      {/* view angles — cheap orientation, the model is the subject */}
-      {webglOK && (
-        <div className="rz-views">
-          {[['iso', 'Corner'], ['top', 'Top'], ['front', 'Front'], ['side', 'Side']].map(([mode, label]) => (
-            <button key={mode} onClick={() => setViewRequest({ mode, n: Date.now() })}>{label}</button>
-          ))}
-        </div>
-      )}
+      {/* Plan / 3D toggle + (3D only) view angles */}
+      <div className="rz-views">
+        <button className={viewMode === 'plan' ? 'on' : ''} onClick={() => setViewMode('plan')}>Plan</button>
+        <button className={viewMode === '3d' ? 'on' : ''} onClick={() => setViewMode('3d')}>3D</button>
+        {viewMode === '3d' && webglOK && <span className="rz-views-sep" />}
+        {viewMode === '3d' && webglOK && [['iso', 'Corner'], ['top', 'Top'], ['front', 'Front'], ['side', 'Side']].map(([mode, label]) => (
+          <button key={mode} onClick={() => setViewRequest({ mode, n: Date.now() })}>{label}</button>
+        ))}
+      </div>
 
       {/* SURFACE 2 — the Trail (chapters + foreman greeting) */}
       <aside className={`rz-trail ${trailOpen ? 'open' : 'closed'}`}>
@@ -90,7 +141,7 @@ export default function App() {
                 <button
                   key={c.id}
                   className={`rz-chapter ${c.id === activeChapter ? 'active' : ''}`}
-                  onClick={() => setActiveChapter(c.id)}
+                  onClick={() => goChapter(c)}
                 >
                   <span className="rz-chapter-num">{i + 1}</span>
                   <span className="rz-chapter-label">{c.label}</span>
@@ -101,7 +152,7 @@ export default function App() {
         )}
       </aside>
 
-      {/* SURFACE 3 — the Card (tap any part → vitals, controls, receipts) */}
+      {/* SURFACE 3 — the Card (tap any part → vitals, receipts) */}
       {selectedRoom && (
         <RoomCard room={selectedRoom} derived={derived} onClose={() => setSelectedId(null)} />
       )}
@@ -111,24 +162,24 @@ export default function App() {
             <h2>{prettyId(selectedId)}</h2>
             <button className="rz-x" onClick={() => setSelectedId(null)}>×</button>
           </div>
-          <p className="rz-muted">A part of the building. Fine controls for this arrive as the surfaces fill in.</p>
+          <p className="rz-muted">Selected. Drag it in the plan to move or resize; deeper controls arrive as the surfaces fill in.</p>
         </div>
       )}
 
-      {/* SURFACE 4b — the Ask bar (talk instead of tap) */}
+      {/* SURFACE 4b — the Ask bar (a shortcut, never the only way) */}
       <form
         className="rz-ask"
         onSubmit={(e) => { e.preventDefault(); if (askText.trim()) { setAskEcho(askText.trim()); setAskText(''); } }}
       >
         {askEcho && (
           <div className="rz-ask-echo">
-            Heard: “{askEcho}”. Talking-to-change lands in a later pass — for now, tap the model.
+            Heard: “{askEcho}”. Talking-to-change is coming — for now, drag rooms in Plan and grab their corners to resize.
           </div>
         )}
         <input
           value={askText}
           onChange={(e) => setAskText(e.target.value)}
-          placeholder="Tell me what to change…  (e.g. add a big pantry off the kitchen)"
+          placeholder="Tell me what to change…  (or just drag it in the plan)"
         />
         <button type="submit" aria-label="Send">→</button>
       </form>
@@ -166,8 +217,8 @@ function RoomCard({ room, derived, onClose }) {
       {expanded && (
         <div className="rz-more-body">
           <p className="rz-muted">
-            Fine controls — move, resize, change use and finish — attach here as the sculpting
-            surface lands. Every number in this card will open to its full plain-English math.
+            Drag this room in the Plan view to move it; grab a corner to resize. Every number
+            here will open to its full plain-English math as the receipts surface lands.
           </p>
         </div>
       )}
