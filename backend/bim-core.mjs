@@ -147,7 +147,8 @@ export function resolveWallSide(spec, side, level = 1, edgeKey = null) {
   // Per-segment construction: a split wall's pieces can differ (a timber-frame
   // section beside straw-clay infill). spec.wallSegments is keyed by the plan
   // edge (e0, e1, …) and overrides construction only — height and omit stay
-  // side-level concepts. MUST mirror the engine.js copy exactly.
+  // side-level concepts. THIS is the single source of truth — engine.js imports
+  // and re-exports resolveWallSide from here (no more hand-synced dual copy).
   const overlaySegment = (base) => {
     const seg = edgeKey ? (spec.wallSegments || {})[edgeKey] : null;
     if (!seg) return base;
@@ -761,6 +762,18 @@ function upsertRoom(spec, room) {
   else spec.rooms.push(room);
 }
 
+// LAYERING NOTE — normalizeRooms and detectIssues below exist in BOTH this file
+// and src/engine.js, and the two copies have deliberately DIVERGED (they are not
+// hand-synced mirrors like the wall model above). The split is by layer:
+//   • bim-core (here): the server/ops layer. Runs while APPLYING operations, so it
+//     stays free of deriveDesign (cost/water/power) — it can't depend on the
+//     higher engine layer without a circular import.
+//   • engine.js: the user-facing layer. Its detectIssues is the fuller check suite
+//     (budget, water-supply, panel, shading checks that NEED derived numbers); its
+//     normalizeRooms is the client render-path copy.
+// Whoever edits a shared check should decide, per change, whether it belongs to
+// both layers. FOLLOW-UP (reimagining spec §6/§10): fully unify these by relocating
+// deriveDesign into a shared lower module so one detectIssues can serve both.
 function normalizeRooms(spec) {
   // ONE extent plate per level (dedupe): keep the plate that best overlaps
   // that level's rooms; drop the rest. Duplicated plates (trace/audit/tower

@@ -24,7 +24,7 @@ Run: `node server.mjs` with cwd = this folder (or start.bat — it self-restarts
 ## The disciplines (hard-won — keep them)
 **Ops & data**
 - Every new op = THREE registrations: bim-core handler + client mirror (main.jsx/engine.js) + planner schema enum. Grep the enum when an op "doesn't work via chat."
-- Dual copies must stay identical: WALL_ASSEMBLIES / resolveWallSide / detectIssues exist in BOTH bim-core.mjs and engine.js.
+- WALL_ASSEMBLIES / WALL_SIDES / wallAssemblyKeyFromText / resolveWallSide now live ONCE in bim-core.mjs; engine.js imports + re-exports them (dual copy collapsed). STILL dual-copied and deliberately DIVERGED: detectIssues / normalizeRooms (server-lite in bim-core, full in engine — see the LAYERING NOTE in both files). The house-math is pinned by tools/golden_numbers_test.mjs — run it after any engine/bim-core change.
 - Zero-filled ops: 0 means "unset" (the basement is level -1 precisely because 0 is swallowed). update_object writes strings — use move_object/resize_object for numbers.
 - Multi-step UI actions = ONE batched dispatch or chained baseSpec — never N calls on stale state.
 - updateShell has an 18-ft minimum clamp branch trap: new shell fields need their own branch.

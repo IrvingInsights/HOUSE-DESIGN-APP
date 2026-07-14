@@ -3,7 +3,9 @@ import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES,
   resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint,
   basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt,
-  scoreTraceSpecChecks
+  scoreTraceSpecChecks,
+  // Single source of truth for the per-wall assembly model — no longer duplicated here.
+  WALL_SIDES, WALL_ASSEMBLIES, wallAssemblyKeyFromText, resolveWallSide
 } from '../backend/bim-core.mjs';
 import { Box, Building2, ClipboardCheck, Leaf, PenTool, Sparkles, Tractor, TreePine, Wrench } from 'lucide-react';
 
@@ -1834,105 +1836,13 @@ export function wallAssemblyProfile(envelopeText = '') {
   };
 }
 
-// --- Per-wall assembly model (kept in sync with backend/bim-core.mjs) --------
-export const WALL_SIDES = ['north', 'south', 'east', 'west'];
+// --- Per-wall assembly model ------------------------------------------------
+// WALL_SIDES, WALL_ASSEMBLIES, wallAssemblyKeyFromText, and resolveWallSide now
+// live ONCE in backend/bim-core.mjs (imported above) — no more hand-synced dual
+// copies. Re-exported here so existing importers of './engine.js' are unaffected.
+export { WALL_SIDES, WALL_ASSEMBLIES, wallAssemblyKeyFromText, resolveWallSide };
 export const WALL_SIDE_LABELS = { north: 'North', south: 'South', east: 'East', west: 'West' };
 
-export const WALL_ASSEMBLIES = {
-  // green: true marks natural / low-carbon methods — the UI shows them with a
-  // leaf. Standard options sit alongside: every system offers both.
-  'straw-bale':       { key: 'straw-bale',       label: 'Straw Bale',          thicknessFt: 1.6,  color: 0xd8bf79, rValue: 33, finish: 'lime / clay plaster', green: true },
-  'hemp-lime':        { key: 'hemp-lime',        label: 'Hemp-Lime',           thicknessFt: 1.25, color: 0xb9c49b, rValue: 22, finish: 'vapor-open plaster', green: true },
-  'cob':              { key: 'cob',              label: 'Cob',                 thicknessFt: 1.8,  color: 0xb9835e, rValue: 14, finish: 'earthen plaster', green: true },
-  'rammed-earth':     { key: 'rammed-earth',     label: 'Rammed Earth',        thicknessFt: 1.35, color: 0x9d7456, rValue: 12, finish: 'sealed / waxed earth', green: true },
-  'cordwood':         { key: 'cordwood',         label: 'Cordwood',            thicknessFt: 1.25, color: 0x9b7652, rValue: 18, finish: 'lime mortar joints', green: true },
-  'light-straw-clay': { key: 'light-straw-clay', label: 'Light Straw-Clay',    thicknessFt: 1.0,  color: 0xc6b077, rValue: 20, finish: 'clay plaster', green: true },
-  'framed':           { key: 'framed',           label: 'Framed (vapor-open)', thicknessFt: 0.55, color: 0xd9d5c8, rValue: 23, finish: 'plaster / cladding' },
-  // Standard/panelized options — light, predictable, fast at height (upper
-  // storeys over a natural ground floor are a legitimate hybrid).
-  'sips':             { key: 'sips',             label: 'SIPs panel (fast, standard)',            thicknessFt: 0.6, color: 0xd8d5cf, rValue: 24, finish: 'drywall / cladding' },
-  'ply-insulated':    { key: 'ply-insulated',    label: 'Marine ply + rigid insulation (panelized)', thicknessFt: 0.5, color: 0xc9b58f, rValue: 18, finish: 'sealed ply / cladding' },
-  'icf':              { key: 'icf',              label: 'ICF concrete (standard)',                thicknessFt: 1.0, color: 0xb5b2a8, rValue: 23, finish: 'drywall / parge' },
-  // A GLASS WALL — the whole face is glazing in a timber frame (an attached
-  // greenhouse's south face), not windows punched into an opaque wall. The
-  // engine treats its face area as glass: solar gain, glazing heat loss,
-  // glazing-rate cost.
-  'glazed':           { key: 'glazed',           label: 'Glazed (glass wall)', thicknessFt: 0.35, color: 0xaecfd8, rValue: 2,  finish: 'timber-framed glazing' }
-};
-
-export function wallAssemblyKeyFromText(text) {
-  const t = String(text || '').toLowerCase();
-  if (/glazed|glass wall|curtain wall|glasshouse/.test(t)) return 'glazed';
-  if (/light straw|straw.?clay/.test(t)) return 'light-straw-clay';
-  if (/straw bale|strawbale|straw/.test(t)) return 'straw-bale';
-  if (/hemp/.test(t)) return 'hemp-lime';
-  if (/cob/.test(t)) return 'cob';
-  if (/rammed/.test(t)) return 'rammed-earth';
-  if (/cordwood/.test(t)) return 'cordwood';
-  return 'framed';
-}
-
-export function resolveWallSide(spec, side, level = 1, edgeKey = null) {
-  // Per-segment construction: a split wall's pieces can differ (a timber-frame
-  // section beside straw-clay infill). spec.wallSegments is keyed by the plan
-  // edge (e0, e1, …) and overrides construction only — height and omit stay
-  // side-level concepts. MUST mirror the bim-core copy exactly.
-  const overlaySegment = (base) => {
-    const seg = edgeKey ? (spec.wallSegments || {})[edgeKey] : null;
-    if (!seg) return base;
-    const segAssemblyKey = seg.assembly && WALL_ASSEMBLIES[seg.assembly] ? seg.assembly : base.assemblyKey;
-    const segAssembly = WALL_ASSEMBLIES[segAssemblyKey] || base.assembly;
-    return {
-      ...base,
-      assemblyKey: segAssemblyKey,
-      assembly: segAssembly,
-      thicknessFt: Number(seg.thicknessFt ?? (seg.assembly ? segAssembly.thicknessFt : base.thicknessFt)),
-      interiorFinish: seg.interiorFinish || base.interiorFinish,
-      exteriorFinish: seg.exteriorFinish || base.exteriorFinish,
-      cladding: CLADDING_TYPES[seg.cladding] ? seg.cladding : base.cladding,
-      segmentKey: edgeKey
-    };
-  };
-  const shell = spec.shell || {};
-  const w = (spec.walls || {})[side] || {};
-  const assemblyKey = w.assembly && WALL_ASSEMBLIES[w.assembly] ? w.assembly : wallAssemblyKeyFromText(spec.systems?.envelope);
-  const assembly = WALL_ASSEMBLIES[assemblyKey] || WALL_ASSEMBLIES.framed;
-  const defaultHeight = side === 'south' ? Number(shell.southWallHeightFt || shell.wallHeightFt || 10)
-    : side === 'north' ? Number(shell.northWallHeightFt || shell.wallHeightFt || 10)
-      : Number(shell.wallHeightFt || 10);
-  const omittedSet = new Set(shell.omittedWalls || []);
-  const ground = {
-    side,
-    heightFt: Number(w.heightFt ?? defaultHeight),
-    assemblyKey,
-    assembly,
-    thicknessFt: Number(w.thicknessFt ?? assembly.thicknessFt),
-    interiorFinish: w.interiorFinish || assembly.finish,
-    exteriorFinish: w.exteriorFinish || 'rainscreen / lime render',
-    // Angled greenhouse glazing above the wall (kneewall below, glass to the
-    // eave at sunGlazingTiltDeg from vertical, carried by the frame).
-    sunGlazing: Boolean(w.sunGlazing),
-    sunGlazingTiltDeg: Number(w.sunGlazingTiltDeg ?? 30),
-    cladding: CLADDING_TYPES[w.cladding] ? w.cladding : 'render',
-    omitted: Boolean(w.omitted) || omittedSet.has(side)
-  };
-  if (level <= 1) return overlaySegment(ground);
-  // Upper storeys: spec.wallsUpper per-side overrides fall back to the ground
-  // wall — MUST mirror the bim-core copy exactly.
-  const u = (spec.wallsUpper || {})[side] || {};
-  const upperKey = u.assembly && WALL_ASSEMBLIES[u.assembly] ? u.assembly : ground.assemblyKey;
-  const upperAssembly = WALL_ASSEMBLIES[upperKey] || ground.assembly;
-  return overlaySegment({
-    ...ground,
-    level,
-    assemblyKey: upperKey,
-    assembly: upperAssembly,
-    thicknessFt: Number(u.thicknessFt ?? (u.assembly ? upperAssembly.thicknessFt : ground.thicknessFt)),
-    interiorFinish: u.interiorFinish || ground.interiorFinish,
-    exteriorFinish: u.exteriorFinish || ground.exteriorFinish,
-    cladding: CLADDING_TYPES[u.cladding] ? u.cladding : ground.cladding
-  });
-}
 
 // True when any side carries a per-wall override (drives the "mixed" hint).
 export function wallsAreMixed(spec) {
@@ -2860,6 +2770,12 @@ export function upsertRoom(spec, room) {
   else spec.rooms.push(room);
 }
 
+// LAYERING NOTE — normalizeRooms and detectIssues also exist in backend/bim-core.mjs
+// as a leaner server/ops-layer copy that stays free of deriveDesign. The two have
+// deliberately DIVERGED; this file holds the user-facing versions (detectIssues here
+// is the fuller suite whose checks need derived cost/water/power numbers). When you
+// change a shared check, decide whether the bim-core copy needs it too. FOLLOW-UP
+// (reimagining spec §6/§10): unify by moving deriveDesign into a shared lower module.
 export function normalizeRooms(spec) {
   // ONE extent plate per level (dedupe): keep the plate that best overlaps
   // that level's rooms; drop the rest. Duplicated plates (trace/audit/tower
