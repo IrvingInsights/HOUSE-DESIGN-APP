@@ -123,6 +123,21 @@
 }
 .rz-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .rz-card-head h2 { margin: 0; font-size: 18px; font-weight: 700; color: var(--ink, #22251f); }
+/* the card title doubles as the rename field — looks like a heading until tapped */
+.rz-card-name {
+  flex: 1; min-width: 0; margin: 0; padding: 1px 4px 1px 0; border: none; border-radius: 6px;
+  background: transparent; font: inherit; font-size: 18px; font-weight: 700; color: var(--ink, #22251f);
+}
+.rz-card-name:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 50%, transparent); }
+.rz-card-name:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; background: var(--raise, #fff); }
+.rz-remove {
+  margin-top: 12px; width: 100%; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--bad, #ae452f);
+  background: transparent; border: 1px solid color-mix(in srgb, var(--bad, #ae452f) 40%, transparent);
+  border-radius: 9px; padding: 7px 0;
+}
+.rz-remove:hover { background: color-mix(in srgb, #ae452f 8%, transparent); }
+.rz-rooms-palette button b { font-weight: 600; }
 .rz-x {
   border: none; background: transparent; cursor: pointer;
   font-size: 20px; line-height: 1; color: var(--moss, #868a7c); padding: 0 2px;

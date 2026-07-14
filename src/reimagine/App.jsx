@@ -8,7 +8,8 @@ import {
   seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS,
   buildTimeline, phaseDependencies, orderPhasesByDeps, validatePhaseOrder, DEFAULT_MODEL_LAYERS,
   floorCount, floorLabel, storeyInfo, upperPlateRect, utilitiesOf,
-  WALL_SIDES, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS
+  WALL_SIDES, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS,
+  ROOM_PRESETS, planNewRoomPlacements
 } from '../engine.js';
 import '../styles.css';
 import './shell.css';
@@ -32,7 +33,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 10 · Jul 14';
+const UPDATE_STAMP = 'update 11 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -295,6 +296,44 @@ export default function App() {
     if (selectedId === el.id) setSelectedId(null);
   };
 
+  // --- rooms: add from a preset, rename, remove ------------------------------
+  const [roomNote, setRoomNote] = useState(null);
+  const addRoomPreset = (preset) => {
+    const level = activeFloor === BASEMENT_LEVEL ? BASEMENT_LEVEL : activeFloor;
+    const plan = planNewRoomPlacements(spec, [preset], level);
+    if (!plan.ops.length) return;
+    applyOps(plan.ops);
+    setRoomNote(plan.grew
+      ? `Added the ${plan.names[0]} and grew the house to ${plan.newW} × ${plan.newD} ft to fit it — your other rooms stayed put.`
+      : `Added the ${plan.names[0]}${level !== 1 ? ` on the ${floorLabel(spec, level).toLowerCase()}` : ''}.`);
+  };
+  const removeObject = (obj) => {
+    applyOps([{ type: 'remove_object', targetId: obj.id, name: obj.name }]);
+    if (selectedId === obj.id) setSelectedId(null);
+  };
+  const renameObject = (obj, name) => {
+    if (name.trim() && name.trim() !== obj.name) applyOps([{ type: 'update_object', targetId: obj.id, name: obj.name, field: 'name', value: name.trim() }]);
+  };
+
+  // Delete/Backspace removes the selected room or element in plan mode — but
+  // NEVER while typing in a field or with text highlighted (the classic app
+  // once ate highlighted text this way).
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (timelineOpen || !selectedId) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (String(window.getSelection?.() || '').length > 0) return;
+      const obj = spec.rooms.find((r) => r.id === selectedId) || (spec.elements || []).find((el) => el.id === selectedId);
+      if (!obj) return;
+      e.preventDefault();
+      removeObject(obj);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   // --- structure: whole-house wall system + frame ----------------------------
   // ONE dispatch for all four sides — four separate calls would race on the
   // same base spec and only the last would land (a bug this app has had).
@@ -405,6 +444,21 @@ export default function App() {
                 onShape={setShape}
               />
             )}
+            {activeChapter === 'rooms' && (
+              <div className="rz-found">
+                <div className="rz-found-head">Add a room{activeFloor !== 1 ? ` — ${floorLabel(spec, activeFloor).toLowerCase()}` : ''}</div>
+                <div className="rz-found-palette rz-rooms-palette">
+                  {ROOM_PRESETS.map((preset) => (
+                    <button key={preset.name} type="button" title={`${preset.w} × ${preset.d} ft to start — drag and resize it after`} onClick={() => addRoomPreset(preset)}>
+                      <b>{preset.name}</b>
+                      <small>{preset.w} × {preset.d} ft</small>
+                    </button>
+                  ))}
+                </div>
+                {roomNote && <div className="rz-shape-note">{roomNote}</div>}
+                <div className="rz-shape-note">Tap a room on the plan to rename or remove it (or press Delete).</div>
+              </div>
+            )}
             {activeChapter === 'foundation' && (
               <FoundationControls
                 spec={spec}
@@ -454,17 +508,31 @@ export default function App() {
 
       {/* SURFACE 3 — the Card (tap any part → vitals, receipts) */}
       {selectedRoom && (
-        <RoomCard room={selectedRoom} derived={derived} onClose={() => setSelectedId(null)} />
+        <RoomCard
+          room={selectedRoom}
+          derived={derived}
+          onRename={(name) => renameObject(selectedRoom, name)}
+          onRemove={() => removeObject(selectedRoom)}
+          onClose={() => setSelectedId(null)}
+        />
       )}
-      {selectedId && !selectedRoom && (
-        <div className="rz-card">
-          <div className="rz-card-head">
-            <h2>{prettyId(selectedId)}</h2>
-            <button className="rz-x" onClick={() => setSelectedId(null)}>×</button>
+      {selectedId && !selectedRoom && (() => {
+        const el = (spec.elements || []).find((e) => e.id === selectedId);
+        return (
+          <div className="rz-card">
+            <div className="rz-card-head">
+              {el
+                ? <NameField value={el.name} onCommit={(name) => renameObject(el, name)} />
+                : <h2>{prettyId(selectedId)}</h2>}
+              <button className="rz-x" onClick={() => setSelectedId(null)}>×</button>
+            </div>
+            <p className="rz-muted">Drag it in the plan to move it; grab a corner to resize.</p>
+            {el && (
+              <button className="rz-remove" onClick={() => removeObject(el)}>Remove {el.name}</button>
+            )}
           </div>
-          <p className="rz-muted">Selected. Drag it in the plan to move or resize; deeper controls arrive as the surfaces fill in.</p>
-        </div>
-      )}
+        );
+      })()}
 
       {/* SURFACE 4 — the Time Machine: scrub to watch the house assemble,
           drag phases to re-plan, every rule explained in plain English */}
@@ -636,14 +704,14 @@ function PhaseCard({ row, derived, onClose }) {
   );
 }
 
-function RoomCard({ room, derived, onClose }) {
+function RoomCard({ room, derived, onRename, onRemove, onClose }) {
   const [expanded, setExpanded] = useState(false);
   const area = Math.round((Number(room.w) || 0) * (Number(room.d) || 0));
   const sharePct = derived.floor > 0 ? Math.round((area / derived.floor) * 100) : 0;
   return (
     <div className="rz-card">
       <div className="rz-card-head">
-        <h2>{room.name}</h2>
+        <NameField value={room.name} onCommit={onRename} />
         <button className="rz-x" onClick={onClose}>×</button>
       </div>
 
@@ -666,12 +734,29 @@ function RoomCard({ room, derived, onClose }) {
       {expanded && (
         <div className="rz-more-body">
           <p className="rz-muted">
-            Drag this room in the Plan view to move it; grab a corner to resize. Every number
-            here will open to its full plain-English math as the receipts surface lands.
+            Drag this room in the Plan view to move it; grab a corner to resize. Tap the name
+            above to rename it.
           </p>
         </div>
       )}
+      <button className="rz-remove" onClick={onRemove}>Remove this room</button>
     </div>
+  );
+}
+
+// The card title IS the rename control: tap, type, Enter or click away.
+function NameField({ value, onCommit }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  return (
+    <input
+      className="rz-card-name"
+      value={draft}
+      title="Tap to rename"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => onCommit(draft)}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } }}
+    />
   );
 }
 
