@@ -11,19 +11,22 @@ import './shell.css';
 // The Trail — the spine of the app. Shape comes FIRST (settle the footprint),
 // then Rooms fill it, then everything the shell implies. One chapter open at a
 // time; each opens with a plain-sentence greeting (the "foreman" voice).
+// planContext puts the plan view in that chapter's editing mode (footprint
+// edges for Shape, room dragging for Rooms, door/window gaps for Openings) —
+// so each chapter looks and acts like what it's for.
 const CHAPTERS = [
-  { id: 'shape', label: 'Shape', view: 'plan', greet: (d) => `Start with the outline — drag the footprint edges until it's the size you want. Right now it's ${fmtNum(d.floor)} sq ft.` },
-  { id: 'rooms', label: 'Rooms', view: 'plan', greet: () => 'Lay the rooms out flat, from above. Drag a room to move it, grab a corner to resize. No roof in the way up here.' },
+  { id: 'shape', label: 'Shape', view: 'plan', planContext: 'shell', greet: (d) => `Start with the outline. Set the width and depth below, or drag a wall edge right on the plan. Right now it's ${fmtNum(d.floor)} sq ft.` },
+  { id: 'rooms', label: 'Rooms', view: 'plan', planContext: 'rooms', greet: () => 'Lay the rooms out flat, from above. Drag a room to move it, grab a corner to resize. No roof in the way up here.' },
   { id: 'shell', label: 'Shell', view: '3d', greet: (d) => `The shell stands ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'}. Set how tall the walls run.` },
   { id: 'roof', label: 'Roof', view: '3d', greet: () => 'Choose how the roof sheds weather and sun — and how much daylight it lets in.' },
-  { id: 'openings', label: 'Openings', view: 'plan', greet: () => 'Place doors and windows where light and paths want them. Slide them along their wall.' },
+  { id: 'openings', label: 'Openings', view: 'plan', planContext: 'windows', greet: () => 'Place doors and windows where light and paths want them. Slide them along their wall.' },
   { id: 'systems', label: 'Systems', view: '3d', greet: () => 'Heat, water, power, waste — the working parts. Each shows its own receipts.' },
   { id: 'finishes', label: 'Finishes', view: '3d', greet: () => 'Materials and surfaces, inside and out — natural or conventional, wall by wall.' }
 ];
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 4 · Jul 14';
+const UPDATE_STAMP = 'update 5 · Jul 14';
 
 const TYPE_LABEL = {
   living: 'Living', service: 'Service', sleeping: 'Sleeping', wet: 'Wet core',
@@ -90,6 +93,7 @@ export default function App() {
             onResizeShell={resizeShell}
             onMoveEdge={moveEdge}
             onMoveOpening={moveOpening}
+            context={chapter.planContext || null}
             activeFloor={1}
           />
         ) : (
@@ -140,6 +144,14 @@ export default function App() {
         {trailOpen && (
           <>
             <div className="rz-greeting">{chapter.greet(derived)}</div>
+            {activeChapter === 'shape' && (
+              <ShapeControls
+                key={`${spec.shell.widthFt}x${spec.shell.depthFt}`}
+                widthFt={spec.shell.widthFt}
+                depthFt={spec.shell.depthFt}
+                onCommit={resizeShell}
+              />
+            )}
             <nav className="rz-chapters">
               {CHAPTERS.map((c, i) => (
                 <button
@@ -227,6 +239,33 @@ function RoomCard({ room, derived, onClose }) {
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+// Shape chapter's plain controls: the outline in numbers. Type a size, press
+// Enter (or click away) and the footprint re-derives.
+function ShapeControls({ widthFt, depthFt, onCommit }) {
+  const [w, setW] = useState(String(Math.round(widthFt * 10) / 10));
+  const [d, setD] = useState(String(Math.round(depthFt * 10) / 10));
+  const commit = () => {
+    const nw = Number(w); const nd = Number(d);
+    if (Number.isFinite(nw) && Number.isFinite(nd) && (nw !== widthFt || nd !== depthFt)) onCommit(nw, nd);
+  };
+  const onKey = (e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } };
+  return (
+    <div className="rz-shape">
+      <label className="rz-shape-field">
+        <span>Width</span>
+        <input type="number" min="12" max="96" step="1" value={w} onChange={(e) => setW(e.target.value)} onBlur={commit} onKeyDown={onKey} />
+        <em>ft</em>
+      </label>
+      <span className="rz-shape-x">×</span>
+      <label className="rz-shape-field">
+        <span>Depth</span>
+        <input type="number" min="12" max="80" step="1" value={d} onChange={(e) => setD(e.target.value)} onBlur={commit} onKeyDown={onKey} />
+        <em>ft</em>
+      </label>
     </div>
   );
 }
