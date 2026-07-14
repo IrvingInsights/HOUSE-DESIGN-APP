@@ -22,7 +22,13 @@ export async function checkForUpdate() {
 
 export async function applyUpdate() {
   const before = (await git(['rev-parse', 'HEAD'])).stdout;
-  const pulled = await git(['pull', '--ff-only']);
+  let pulled = await git(['pull', '--ff-only']);
+  if (pulled.err && /would be overwritten|commit your changes|move or remove them/i.test(`${pulled.stderr}\n${pulled.stdout}`)) {
+    // A stray local file edit must never brick the one-tap update. Stash it
+    // (kept, never deleted — recoverable with `git stash pop`) and retry.
+    const stashed = await git(['stash', 'push', '--include-untracked', '-m', 'auto-stash before self-update']);
+    if (!stashed.err) pulled = await git(['pull', '--ff-only']);
+  }
   if (pulled.err) return { ok: false, error: pulled.stderr || pulled.stdout || 'update failed' };
   const after = (await git(['rev-parse', 'HEAD'])).stdout;
   if (!before || before === after) return { ok: true, changed: false, restarting: false };
