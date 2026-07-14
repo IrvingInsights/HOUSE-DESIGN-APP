@@ -452,6 +452,23 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
   }
 
   const roomAt = (room) => (drag && drag.id === room.id ? { ...room, ...drag.ghost } : room);
+  // Live size readout DURING a corner drag: big digits inside the box that
+  // track every half-foot as it changes — nobody should have to read tiny
+  // numbers somewhere else while their hand is mid-resize.
+  const isResizing = (id) => drag && drag.id === id && drag.mode !== 'move';
+  const fmtFt = (v) => String(Math.round(Number(v) * 2) / 2);
+  const liveDimsText = (rect) => `${fmtFt(rect.w)} × ${fmtFt(rect.d)}′`;
+  const liveDimsLabel = (rect) => {
+    const text = liveDimsText(rect);
+    const size = Math.max(0.9, Math.min(2.4, (rect.w - 0.6) / (text.length * LABEL_CHAR_W), rect.d * 0.5));
+    return (
+      <text
+        x={rect.x + rect.w / 2} y={rect.y + rect.d / 2 + size * 0.35}
+        textAnchor="middle" fontSize={size} fontWeight="700" fill="#1f2a26" pointerEvents="none"
+        paintOrder="stroke" stroke="rgba(246,244,236,0.92)" strokeWidth={size * 0.2}
+      >{text}</text>
+    );
+  };
   const gridStep = W > 60 ? 10 : 5;
   const gridLines = [];
   for (let gx = 0; gx <= W + 0.01; gx += gridStep) gridLines.push(<line key={`gx${gx}`} x1={gx} y1={0} x2={gx} y2={D} stroke="var(--line)" strokeWidth={0.06} opacity={0.5} />);
@@ -561,13 +578,15 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                 onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}
               />
               {(() => {
+                // mid-resize the room speaks in one voice: its live size
+                if (isResizing(raw.id)) return liveDimsLabel(room);
                 const lab = planLabelFit(raw.name, room.w, room.d, isSel);
                 if (!lab) return null;
                 const cx = room.x + room.w / 2;
                 const cy = room.y + room.d / 2;
                 const ink = planLabelInk(PLAN_ZONE_HEX[raw.type] || '#79a7a8');
                 const lineH = lab.size * 1.2;
-                const dimText = `${raw.w}×${raw.d}′`;
+                const dimText = liveDimsText(room);
                 const dimSize = Math.min(1.4, room.w / 6);
                 // dims only when they fit under the name without touching it
                 const showDims = lab.lines.length === 1
@@ -622,6 +641,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                 onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}
               />
               {(() => {
+                if (isResizing(raw.id)) return liveDimsLabel({ x: el.x, y: el.y, w, d });
                 const lab = planLabelFit(raw.name, w, d, isSel, 1.5);
                 if (!lab) return null;
                 const ink = planLabelInk(PLAN_ELEMENT_HEX[raw.category] || '#8a7768');
