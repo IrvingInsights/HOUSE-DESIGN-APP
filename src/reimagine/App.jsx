@@ -32,7 +32,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 9 · Jul 14';
+const UPDATE_STAMP = 'update 10 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -272,6 +272,14 @@ export default function App() {
   };
   const setUtilityField = (field, value) => applyOps([{ type: 'set_utility', field, value: String(value) }]);
   const setShellField = (field, value) => applyOps([{ type: 'set_shell', field, value: String(value) }]);
+  const placeSlabPad = () => {
+    // One shape, bigger than the house by default: 2 ft of apron all around.
+    // Drag and stretch it from there — under a porch, a carport, anywhere.
+    applyOps([{
+      type: 'add_element', name: 'Slab shape', category: 'foundation', construction: 'slabpad',
+      x: -2, y: -2, w: Number(spec.shell.widthFt) + 4, d: Number(spec.shell.depthFt) + 4, h: 0.35, level: 1
+    }]);
+  };
   const placeFoundationRun = (preset) => {
     // Land beside the house (never at 0,0 — that's "unset" to the op layer),
     // staggered so repeated drops don't pile up; then drag it into place.
@@ -405,6 +413,7 @@ export default function App() {
                 onUtility={setUtilityField}
                 onShell={setShellField}
                 onPlaceRun={placeFoundationRun}
+                onPlacePad={placeSlabPad}
                 onRemoveRun={removeElement}
                 onSelectRun={setSelectedId}
               />
@@ -803,16 +812,20 @@ function NumInput({ value, min, max, step = 1, unit = 'ft', onCommit }) {
 // Foundation chapter: the main type the house sits on, plus footing runs that
 // live on their own layout — under a heavy interior wall, a porch, a future
 // addition, inside or outside the rooms.
-function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, onPlaceRun, onRemoveRun, onSelectRun }) {
+function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, onPlaceRun, onPlacePad, onRemoveRun, onSelectRun }) {
   const u = utilitiesOf(spec);
   const basement = basementInfo(spec.shell);
   const typeVal = basement.present ? 'basement' : u.foundationType;
   const runs = (spec.elements || []).filter((el) => el.category === 'foundation');
   const runCost = (el) => {
     const t = FOUNDATION_RUN_TYPES[el.construction] || FOUNDATION_RUN_TYPES.rubble;
+    if (t.perSf) return Math.round((Number(el.w) * Number(el.d) || 0) * t.costSf);
     const lf = Math.max(Number(el.w) || 0, Number(el.d) || 0);
     return Math.round(lf * (t.costLf + t.stemCostLfFt * (Number(el.h) || 0)));
   };
+  const runMeasure = (el) => (FOUNDATION_RUN_TYPES[el.construction]?.perSf
+    ? `${Math.round(Number(el.w) * Number(el.d) || 0)} sf`
+    : `${Math.round(Math.max(Number(el.w) || 0, Number(el.d) || 0))} ft`);
   return (
     <div className="rz-found">
       <label className="rz-field">
@@ -836,7 +849,11 @@ function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, on
           <NumInput value={basement.heightFt} min={6} max={12} step={0.5} onCommit={(v) => onShell('basementHeightFt', v)} />
         </label>
       )}
-      <div className="rz-found-head">Extra footings — their own layout</div>
+      <div className="rz-found-head">The foundation's own layout</div>
+      <button type="button" className="rz-pad-btn" title={FOUNDATION_RUN_TYPES.slabpad.note} onClick={onPlacePad}>
+        <b>Slab — one shape, any size</b>
+        <small>drops 2 ft bigger than the house · ${FOUNDATION_RUN_TYPES.slabpad.costSf}/sf{typeVal === 'slab' ? ' · becomes THE slab' : ''}</small>
+      </button>
       <div className="rz-found-palette">
         {FOUNDATION_RUN_PRESETS.map((preset) => {
           const t = FOUNDATION_RUN_TYPES[preset.construction];
@@ -854,14 +871,14 @@ function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, on
             <div key={el.id} className={`rz-found-row ${selectedId === el.id ? 'sel' : ''}`}>
               <button type="button" className="rz-found-pick" onClick={() => onSelectRun(el.id)}>
                 {(FOUNDATION_RUN_TYPES[el.construction] || FOUNDATION_RUN_TYPES.rubble).label}
-                <small>{Math.round(Math.max(Number(el.w) || 0, Number(el.d) || 0))} ft · {fmtMoney(runCost(el))}</small>
+                <small>{runMeasure(el)} · {fmtMoney(runCost(el))}{FOUNDATION_RUN_TYPES[el.construction]?.perSf && typeVal === 'slab' ? ' — this IS the slab line' : ''}</small>
               </button>
               <button type="button" className="rz-x" title="Remove this footing" onClick={() => onRemoveRun(el)}>×</button>
             </div>
           ))}
         </div>
       )}
-      <div className="rz-shape-note">Drop one, then drag it on the plan — under a heavy wall, a porch, anywhere. It prices by the foot in the budget.</div>
+      <div className="rz-shape-note">Drop one, then drag and stretch it on the plan — bigger than the house, under a porch, anywhere. Strips price by the foot, slab shapes by the square foot; with a slab foundation your drawn shape IS the slab, priced once.</div>
     </div>
   );
 }

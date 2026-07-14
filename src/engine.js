@@ -653,7 +653,11 @@ export const FOUNDATION_RUN_TYPES = {
   rubble: { label: 'Rubble trench', costLf: 22, stemCostLfFt: 0, carbonLf: 6, note: 'Drained gravel trench — carries a wall with almost no concrete.' },
   'rubble-stem': { label: 'Rubble trench + stem wall', costLf: 26, stemCostLfFt: 18, carbonLf: 10, note: 'The full natural detail: drained trench below, masonry stem above splash height. What a bale or cob wall wants.' },
   stemwall: { label: 'Stem wall on footing', costLf: 20, stemCostLfFt: 18, carbonLf: 18, note: 'Concrete footing and stem — conventional and strong.' },
-  thickened: { label: 'Thickened slab edge / grade beam', costLf: 24, stemCostLfFt: 0, carbonLf: 22, note: 'For slab foundations: a deepened, reinforced strip under the load.' }
+  thickened: { label: 'Thickened slab edge / grade beam', costLf: 24, stemCostLfFt: 0, carbonLf: 22, note: 'For slab foundations: a deepened, reinforced strip under the load.' },
+  // perSf: an AREA of slab drawn as one shape, not a strip priced by the foot.
+  // Rates match the main slab foundation ($15/sf, 25 kg/sf) so the same
+  // concrete never prices differently depending on which control drew it.
+  slabpad: { label: 'Slab — one shape, any size', costSf: 15, carbonSf: 25, perSf: true, note: 'A whole slab drawn as one shape — bigger than the house, out under a porch or carport, wherever it needs to reach. With a slab foundation this shape IS the slab.' }
 };
 export const FOUNDATION_RUN_PRESETS = [
   { name: 'Rubble trench run', construction: 'rubble', w: 12, d: 1.5, h: 0.3 },
@@ -1223,10 +1227,15 @@ export function materialsTakeoff(spec, derived) {
   } else if (u.foundationType === 'slab') {
     add('foundation', 'Concrete (slab)', `${Math.round(derived.floor * 0.33 / 27)} yd³`, '4" slab over insulation');
   }
-  const runs = (spec.elements || []).filter((el) => el.category === 'foundation');
+  const runs = (spec.elements || []).filter((el) => el.category === 'foundation' && !FOUNDATION_RUN_TYPES[el.construction]?.perSf);
   if (runs.length) {
     const runLf = runs.reduce((sum, el) => sum + Math.max(Number(el.w) || 0, Number(el.d) || 0), 0);
     add('foundation', 'Foundation runs', `${Math.round(runLf)} lf`, 'strips under specific walls');
+  }
+  const pads = (spec.elements || []).filter((el) => el.category === 'foundation' && FOUNDATION_RUN_TYPES[el.construction]?.perSf);
+  if (pads.length) {
+    const padSf = pads.reduce((sum, el) => sum + (Number(el.w) * Number(el.d) || 0), 0);
+    add('foundation', 'Concrete (drawn slab shapes)', `${Math.round(padSf * 0.33 / 27)} yd³`, `${Math.round(padSf)} sf of slab drawn as its own shape`);
   }
 
   // Frame
@@ -3461,27 +3470,42 @@ export function deriveDesign(spec, wallSections) {
   // 18" stem matches the old flat $12/sf).
   const foundationInsulation = utilities.foundationInsulation || 'perimeter';
   const foundationInsulationCost = foundationInsulation === 'full' ? floor * 3 : foundationInsulation === 'perimeter' ? perimeterFt * 6 : 0;
+  // Slab PADS are areas of slab drawn as one shape (foundation elements with a
+  // perSf run type). When the main foundation is itself a slab, the drawn
+  // shape IS the slab — priced ONCE, by whichever is bigger (the shape must at
+  // least cover the house). Never both; a receipt must never double-count the
+  // same concrete. With any other main foundation the pads price as extra
+  // slab area (a carport apron beside a rubble-trench house).
+  const foundationElements = (spec.elements || []).filter((element) => element.category === 'foundation');
+  const slabPads = foundationElements.filter((element) => FOUNDATION_RUN_TYPES[element.construction]?.perSf);
+  const slabPadArea = slabPads.reduce((sum, element) => sum + (Number(element.w) * Number(element.d) || 0), 0);
+  const padIsTheSlab = !basement.present && utilities.foundationType === 'slab' && slabPadArea > 0;
+  const mainSlabArea = padIsTheSlab ? Math.max(slabPadArea, floor) : floor;
   // A basement IS the foundation: concrete perimeter walls by face area plus
   // a slab — it supersedes the rubble/stemwall/slab choice while present.
   const foundationCostBase = (basement.present
     ? perimeterFt * basement.heightFt * 24 + floor * 7 + basementRoomArea * 9
     : (utilities.foundationType === 'stemwall'
       ? floor * 8 + perimeterFt * stemwallHeightFt * 18
-      : floor * (foundationCostPsf[utilities.foundationType] ?? 10))) + foundationInsulationCost;
+      : (utilities.foundationType === 'slab' ? mainSlabArea : floor) * (foundationCostPsf[utilities.foundationType] ?? 10))) + foundationInsulationCost;
   const outbuildingCost = (spec.elements || []).filter((element) => element.category === 'outbuilding')
     .reduce((sum, element) => sum + (Number(element.w) * Number(element.d) || 0) * (OUTBUILDING_CONSTRUCTION[element.construction]?.costPsf ?? 60), 0);
-  // Placed foundation RUNS (strips under specific interior walls) price by the
-  // foot; a stem type adds its height component. Folded into the foundation line.
-  const foundationRuns = (spec.elements || []).filter((element) => element.category === 'foundation');
-  const foundationRunCost = foundationRuns.reduce((sum, element) => {
+  // Placed foundation RUNS (strips under specific walls) price by the foot; a
+  // stem type adds its height component. Slab pads price by AREA — unless the
+  // pad already became the main slab above. All fold into the foundation line.
+  const foundationRuns = foundationElements.filter((element) => !FOUNDATION_RUN_TYPES[element.construction]?.perSf);
+  const slabPadCost = padIsTheSlab ? 0 : slabPadArea * (FOUNDATION_RUN_TYPES.slabpad.costSf);
+  const slabPadCarbon = padIsTheSlab ? 0 : slabPadArea * (FOUNDATION_RUN_TYPES.slabpad.carbonSf);
+  const stripRunCost = foundationRuns.reduce((sum, element) => {
     const runType = FOUNDATION_RUN_TYPES[element.construction] || FOUNDATION_RUN_TYPES.rubble;
     const lengthFt = Math.max(Number(element.w) || 0, Number(element.d) || 0);
     return sum + lengthFt * (runType.costLf + runType.stemCostLfFt * (Number(element.h) || 0));
   }, 0);
+  const foundationRunCost = stripRunCost + slabPadCost;
   const foundationRunCarbon = foundationRuns.reduce((sum, element) => {
     const runType = FOUNDATION_RUN_TYPES[element.construction] || FOUNDATION_RUN_TYPES.rubble;
     return sum + Math.max(Number(element.w) || 0, Number(element.d) || 0) * runType.carbonLf;
-  }, 0);
+  }, 0) + slabPadCarbon;
   // A porch/deck canopy (element.roofType) is a light roof on posts: framing,
   // decking, and metal over the covered footprint, ~$14/sf.
   const canopyCost = (spec.elements || []).filter((element) => element.roofType && element.category !== 'foundation' && element.category !== 'floor')
@@ -3575,7 +3599,7 @@ export function deriveDesign(spec, wallSections) {
   // regular foundation's coefficient while present.
   const foundationCarbon = basement.present
     ? perimeterFt * basement.heightFt * 16 + floor * 12
-    : floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra;
+    : (utilities.foundationType === 'slab' ? mainSlabArea : floor) * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra;
   const carbonKg = foundationCarbon + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
   // What the reclaimed choices saved vs. buying everything new.
@@ -3608,6 +3632,11 @@ export function deriveDesign(spec, wallSections) {
     } else if (utilities.foundationType === 'stemwall') {
       lines.push(rline('Footing & site prep', floor * 8, floor, 'sf of floor', 8));
       lines.push(rline(`Stem wall, ${stemwallHeightFt}' tall`, perimeterFt * stemwallHeightFt * 18, perimeterFt * stemwallHeightFt, 'sf of stem face', 18));
+    } else if (padIsTheSlab) {
+      lines.push(rline('Slab — your drawn shape', mainSlabArea * 15, mainSlabArea, 'sf of slab', 15,
+        slabPadArea >= floor
+          ? 'the shape you drew IS the slab — bigger than the house, priced once'
+          : 'the drawn shape is smaller than the house, so the house area sets the price'));
     } else {
       const rate = foundationCostPsf[utilities.foundationType] ?? 10;
       const label = utilities.foundationType === 'rubble' ? 'Rubble trench foundation' : utilities.foundationType === 'slab' ? 'Slab on grade' : 'Foundation';
@@ -3618,7 +3647,8 @@ export function deriveDesign(spec, wallSections) {
         ? rline('Under-slab insulation (full)', floor * 3, floor, 'sf of floor', 3)
         : rline('Perimeter insulation', perimeterFt * 6, perimeterFt, 'ft of perimeter', 6));
     }
-    if (foundationRunCost > 0) lines.push(rline('Interior foundation strips', foundationRunCost, null, '', null, `${foundationRuns.length} placed run${foundationRuns.length === 1 ? '' : 's'} under interior walls, priced by the foot`));
+    if (stripRunCost > 0) lines.push(rline('Foundation strips', stripRunCost, null, '', null, `${foundationRuns.length} placed run${foundationRuns.length === 1 ? '' : 's'} under specific walls, priced by the foot`));
+    if (slabPadCost > 0) lines.push(rline('Extra slab (drawn shapes)', slabPadCost, slabPadArea, 'sf of slab', FOUNDATION_RUN_TYPES.slabpad.costSf, 'slab beyond the main foundation — a carport apron, a patio pad'));
     costReceipts.foundation = lines;
   }
   { // frame

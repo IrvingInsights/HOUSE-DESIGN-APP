@@ -1235,6 +1235,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           if (construction === 'rubble-stem' || construction === 'stemwall') {
             mesh = box(element.w, stemH + 0.1, element.d, cx, (stemH + 0.1) / 2 - 0.05, cz, stemMatRun);
             elementHeight = stemH;
+          } else if (construction === 'slabpad') {
+            // A slab drawn as one SHAPE (area, not a strip): a flat concrete
+            // pad mostly buried, its surface just proud of grade so it reads —
+            // and walks — like a real slab.
+            mesh = box(element.w, 0.5, element.d, cx, -0.17, cz, stemMatRun);
+            elementHeight = 0.16;
           } else if (construction === 'thickened') {
             mesh = box(element.w, 1.1, element.d, cx, -0.45, cz, stemMatRun);
             elementHeight = 0.2;

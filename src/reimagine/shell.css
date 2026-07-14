@@ -252,6 +252,15 @@
 .rz-num input:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; }
 .rz-num em { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-style: normal; font-size: 11px; color: var(--moss, #868a7c); }
 .rz-found-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); margin-top: 4px; }
+.rz-pad-btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  font: inherit; font-size: 12.5px; cursor: pointer; text-align: left;
+  color: var(--ink, #22251f); background: color-mix(in srgb, var(--sage, #e2ecee) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--evergreen, #3c6472) 35%, transparent);
+  border-radius: 9px; padding: 7px 9px;
+}
+.rz-pad-btn:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 85%, transparent); }
+.rz-pad-btn small { color: var(--moss, #868a7c); }
 .rz-found-palette { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .rz-found-palette button {
   display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
