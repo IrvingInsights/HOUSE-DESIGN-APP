@@ -1,0 +1,149 @@
+/* Reimagined shell — calm by default, depth on demand. Reuses the app's brand
+   tokens (--evergreen, --ivory, --ink…) defined on :root in styles.css, so the
+   shell tracks the same Sage/slate look automatically. Everything here is
+   scoped under .rz-* so it never touches the old app. */
+
+.rz-root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  font-family: var(--font-ui, system-ui, sans-serif);
+  color: var(--ink, #22251f);
+  background: var(--vellum, #ecebe4);
+}
+
+/* SURFACE 1 — the model is the ground everything floats on */
+.rz-model {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+.rz-model .scene { width: 100%; height: 100%; }
+
+/* floating chrome shares one soft, papery language */
+.rz-status, .rz-trail, .rz-card, .rz-ask, .rz-views {
+  position: absolute;
+  z-index: 5;
+  background: color-mix(in srgb, var(--ivory, #fbfaf6) 88%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 70%, transparent);
+  box-shadow: 0 8px 30px rgba(30, 40, 30, 0.12);
+}
+
+/* SURFACE 5b — status strip, top center, whole-house facts */
+.rz-status {
+  top: 16px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 18px; border-radius: 999px;
+  font-size: 14px; white-space: nowrap;
+}
+.rz-status-item b { font-weight: 700; color: var(--ink, #22251f); }
+.rz-status-item { color: var(--earth, #565a4f); }
+.rz-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--line2, #cac8bb); }
+.rz-clear { color: var(--good, #3e7b53); font-weight: 600; }
+.rz-flag { color: var(--warn, #a9781f); font-weight: 600; }
+
+/* view angle chips, bottom-left of the model (clear of the Ask bar) */
+.rz-views {
+  bottom: 20px; left: 20px;
+  display: flex; gap: 2px; padding: 4px; border-radius: 12px;
+}
+.rz-views button {
+  border: none; background: transparent; color: var(--earth, #565a4f);
+  font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 9px; cursor: pointer;
+}
+.rz-views button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 70%, transparent); color: var(--ink); }
+
+/* SURFACE 2 — the Trail spine, left edge */
+.rz-trail {
+  top: 50%; left: 16px; transform: translateY(-50%);
+  border-radius: 18px; padding: 14px; width: 236px;
+  transition: width 0.18s ease;
+}
+.rz-trail.closed { width: 44px; padding: 8px; }
+.rz-trail-toggle {
+  position: absolute; top: 10px; right: 10px;
+  width: 24px; height: 24px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--line, #dbd9ce); background: var(--raise, #fff);
+  color: var(--earth); font-size: 15px; line-height: 1;
+}
+.rz-greeting {
+  font-size: 14px; line-height: 1.5; color: var(--ink, #22251f);
+  margin: 6px 30px 16px 4px;
+}
+.rz-chapters { display: flex; flex-direction: column; gap: 2px; }
+.rz-chapter {
+  display: flex; align-items: center; gap: 12px;
+  border: none; background: transparent; cursor: pointer;
+  padding: 9px 10px; border-radius: 11px; text-align: left; font: inherit;
+  color: var(--earth, #565a4f); width: 100%;
+}
+.rz-chapter:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 60%, transparent); }
+.rz-chapter.active { background: var(--evergreen, #3c6472); color: #fff; }
+.rz-chapter.active .rz-chapter-num { background: rgba(255,255,255,0.22); color: #fff; }
+.rz-chapter-num {
+  flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  background: color-mix(in srgb, var(--sage, #e2ecee) 80%, transparent); color: var(--evergreen, #3c6472);
+}
+.rz-chapter-label { font-size: 14px; font-weight: 500; }
+
+/* SURFACE 3 — the Card, bottom-right, appears on tap */
+.rz-card {
+  bottom: 20px; right: 20px; width: 300px;
+  border-radius: 16px; padding: 16px 18px 18px;
+}
+.rz-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.rz-card-head h2 { margin: 0; font-size: 18px; font-weight: 700; color: var(--ink, #22251f); }
+.rz-x {
+  border: none; background: transparent; cursor: pointer;
+  font-size: 20px; line-height: 1; color: var(--moss, #868a7c); padding: 0 2px;
+}
+.rz-x:hover { color: var(--ink); }
+.rz-vitals { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0; }
+.rz-vital-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); }
+.rz-vital-value { font-size: 15px; font-weight: 600; color: var(--ink, #22251f); margin-top: 2px; }
+.rz-receipt {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  padding: 10px 12px; border-radius: 10px; font-size: 13px;
+  background: color-mix(in srgb, var(--sage, #e2ecee) 45%, transparent);
+}
+.rz-receipt-key { color: var(--earth, #565a4f); }
+.rz-receipt-val { color: var(--ink, #22251f); }
+.rz-receipt-val b { font-weight: 700; }
+.rz-more {
+  margin-top: 12px; border: none; background: transparent; cursor: pointer;
+  color: var(--evergreen, #3c6472); font: inherit; font-size: 13px; font-weight: 600; padding: 0;
+}
+.rz-more-body { margin-top: 8px; }
+.rz-muted { color: var(--earth, #565a4f); font-size: 13px; line-height: 1.5; margin: 0; }
+
+/* SURFACE 4b — the Ask bar, bottom center */
+.rz-ask {
+  bottom: 20px; left: 50%; transform: translateX(-50%);
+  width: min(520px, calc(100vw - 320px));
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 8px 8px 16px; border-radius: 999px;
+}
+.rz-ask input {
+  flex: 1; border: none; background: transparent; outline: none;
+  font: inherit; font-size: 14px; color: var(--ink, #22251f);
+}
+.rz-ask input::placeholder { color: var(--moss, #868a7c); }
+.rz-ask button {
+  flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%; cursor: pointer;
+  border: none; background: var(--evergreen, #3c6472); color: #fff; font-size: 16px;
+}
+.rz-ask-echo {
+  position: absolute; bottom: 56px; left: 0; right: 0;
+  background: var(--ivory, #fbfaf6); border: 1px solid var(--line, #dbd9ce);
+  border-radius: 12px; padding: 10px 14px; font-size: 13px; color: var(--earth, #565a4f);
+  box-shadow: 0 8px 30px rgba(30, 40, 30, 0.12);
+}
+
+/* when the view gets tight, the Ask bar yields to the model */
+@media (max-width: 720px) {
+  .rz-ask { width: calc(100vw - 32px); }
+  .rz-card { width: calc(100vw - 40px); }
+}
