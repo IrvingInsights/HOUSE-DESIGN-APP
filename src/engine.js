@@ -717,7 +717,8 @@ export const ROOM_PRESETS = [
   { name: 'Bathroom', type: 'wet', w: 8, d: 8 },
   { name: 'Office', type: 'work', w: 10, d: 10 },
   { name: 'Mudroom', type: 'service', w: 8, d: 8 },
-  { name: 'Pantry', type: 'storage', w: 8, d: 6 }
+  { name: 'Pantry', type: 'storage', w: 8, d: 6 },
+  { name: 'Hallway', type: 'service', w: 12, d: 4 }
 ];
 
 // Button label for each one-click flag fix (keyed by issue.fixId). Absence of a
@@ -801,8 +802,27 @@ export const ROOM_SYNONYMS = [
   { re: /\b(greenhouses?|sunrooms?|sun rooms?|solariums?|conservatories|conservatory)\b/, name: 'Sunroom', type: 'plant', w: 12, d: 10 },
   { re: /\b(porches|porch|verandas?|decks?)\b/, name: 'Porch', type: 'living', w: 16, d: 8 },
   { re: /\b(nurseries|nursery|kids rooms?|childrens rooms?)\b/, name: 'Nursery', type: 'sleeping', w: 10, d: 10 },
+  { re: /\b(hallways?|halls?|corridors?|passageways?|passages?)\b/, name: 'Hallway', type: 'service', w: 12, d: 4 },
+  { re: /\b(foyers?|entryways?|entry halls?|entries|entrances?|vestibules?)\b/, name: 'Entry', type: 'service', w: 8, d: 6 },
+  { re: /\b(workshops?|craft rooms?|makerspaces?)\b/, name: 'Workshop', type: 'work', w: 14, d: 12 },
   { re: /\b(rooms?|spaces?)\b/, name: 'Room', type: 'living', w: 12, d: 12 }
 ];
+
+// Turn ANY typed room name into an addable preset: recognized names get their
+// sensible type and starting size (a hallway starts long and narrow), unknown
+// names get a friendly default — the room keeps the name YOU typed either way.
+export function roomPresetFromName(rawName) {
+  const name = String(rawName || '').trim().replace(/\s+/g, ' ');
+  if (!name) return null;
+  const titled = name.replace(/\b\w/g, (c) => c.toUpperCase());
+  const syn = ROOM_SYNONYMS.find((s) => s.re.test(name.toLowerCase()));
+  return {
+    name: titled,
+    type: syn?.type || 'living',
+    w: syn?.w || 10,
+    d: syn?.d || 10
+  };
+}
 
 export const WORD_COUNTS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, another: 1 };
 

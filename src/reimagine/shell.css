@@ -160,6 +160,19 @@
 }
 .rz-remove:hover { background: color-mix(in srgb, #ae452f 8%, transparent); }
 .rz-rooms-palette button b { font-weight: 600; }
+.rz-room-custom { display: flex; gap: 4px; }
+.rz-room-custom input {
+  flex: 1; min-width: 0; font: inherit; font-size: 12.5px; color: var(--ink, #22251f);
+  background: var(--raise, #fff); border: 1px solid var(--line, #dbd9ce);
+  border-radius: 9px; padding: 6px 9px;
+}
+.rz-room-custom input:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; }
+.rz-room-custom input::placeholder { color: var(--moss, #868a7c); }
+.rz-room-custom button {
+  flex: 0 0 auto; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer;
+  color: #fff; background: var(--evergreen, #3c6472); border: none; border-radius: 9px; padding: 6px 14px;
+}
+.rz-room-custom button:disabled { opacity: 0.45; cursor: default; }
 
 /* right-click menu on the plan */
 .rz-ctx {

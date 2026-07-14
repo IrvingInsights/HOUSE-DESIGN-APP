@@ -9,7 +9,7 @@ import {
   buildTimeline, phaseDependencies, orderPhasesByDeps, validatePhaseOrder, DEFAULT_MODEL_LAYERS,
   floorCount, floorLabel, storeyInfo, upperPlateRect, utilitiesOf,
   WALL_SIDES, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS,
-  ROOM_PRESETS, planNewRoomPlacements
+  ROOM_PRESETS, planNewRoomPlacements, roomPresetFromName
 } from '../engine.js';
 import '../styles.css';
 import './shell.css';
@@ -33,7 +33,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 13 · Jul 14';
+const UPDATE_STAMP = 'update 14 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -547,8 +547,9 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+                <CustomRoomAdd onAdd={(preset) => addRoomPreset(preset)} />
                 {roomNote && <div className="rz-shape-note">{roomNote}</div>}
-                <div className="rz-shape-note">Tap a room on the plan to rename or remove it (or press Delete).</div>
+                <div className="rz-shape-note">Tap a room on the plan to rename or remove it (or press Delete). Right-click for more.</div>
               </div>
             )}
             {activeChapter === 'foundation' && (
@@ -890,6 +891,30 @@ function RoomCard({ room, derived, onRename, onRemove, onClose }) {
         </div>
       )}
       <button className="rz-remove" onClick={onRemove}>Remove this room</button>
+    </div>
+  );
+}
+
+// Any room, by name: type "hallway" (or anything else) and add it. Known
+// names come in at a sensible shape — a hallway starts long and narrow; an
+// unrecognized name starts 10 × 10. The name you type is the name it gets.
+function CustomRoomAdd({ onAdd }) {
+  const [name, setName] = useState('');
+  const add = () => {
+    const preset = roomPresetFromName(name);
+    if (!preset) return;
+    onAdd(preset);
+    setName('');
+  };
+  return (
+    <div className="rz-room-custom">
+      <input
+        value={name}
+        placeholder="Or name your own… (hallway, foyer, music room)"
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+      />
+      <button type="button" disabled={!name.trim()} onClick={add}>Add</button>
     </div>
   );
 }
