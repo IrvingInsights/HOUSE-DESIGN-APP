@@ -213,6 +213,74 @@
   box-shadow: 0 8px 30px rgba(30, 40, 30, 0.12);
 }
 
+/* the Trail's door into the Time Machine */
+.rz-build-btn {
+  margin: 12px 4px 0; width: calc(100% - 8px);
+  font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+  color: #fff; background: var(--evergreen, #3c6472);
+  border: none; border-radius: 11px; padding: 9px 0;
+}
+.rz-build-btn:hover { filter: brightness(1.08); }
+
+/* SURFACE 4 — the Time Machine strip, bottom center */
+.rz-timeline {
+  position: absolute; z-index: 6;
+  bottom: 16px; left: 50%; transform: translateX(-50%);
+  width: min(860px, calc(100vw - 320px));
+  border-radius: 16px; padding: 10px 14px 10px;
+  background: color-mix(in srgb, var(--ivory, #fbfaf6) 92%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 70%, transparent);
+  box-shadow: 0 8px 30px rgba(30, 40, 30, 0.14);
+}
+.rz-tl-top { display: flex; align-items: center; gap: 10px; }
+.rz-tl-play {
+  flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%; cursor: pointer;
+  border: none; background: var(--evergreen, #3c6472); color: #fff; font-size: 13px;
+}
+.rz-tl-headline { font-size: 13.5px; font-weight: 600; color: var(--ink, #22251f); }
+.rz-tl-spacer { flex: 1; }
+.rz-tl-reset {
+  border: 1px solid var(--line, #dbd9ce); background: var(--raise, #fff);
+  font: inherit; font-size: 12px; color: var(--earth, #565a4f);
+  border-radius: 9px; padding: 4px 10px; cursor: pointer;
+}
+.rz-tl-scrub { width: 100%; margin: 8px 0 6px; accent-color: var(--evergreen, #3c6472); cursor: pointer; }
+.rz-tl-chips { display: flex; gap: 3px; }
+.rz-chip {
+  position: relative; flex-basis: 0; min-width: 34px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px;
+  background: var(--raise, #fff); color: var(--moss, #868a7c);
+  font: inherit; font-size: 12px; font-weight: 600; padding: 6px 4px;
+  cursor: grab; white-space: nowrap;
+}
+.rz-chip.done { background: color-mix(in srgb, var(--sage, #e2ecee) 75%, transparent); color: var(--evergreen, #3c6472); border-color: color-mix(in srgb, var(--evergreen, #3c6472) 35%, transparent); }
+.rz-chip.now { background: var(--evergreen, #3c6472); color: #fff; border-color: var(--evergreen, #3c6472); }
+.rz-chip.focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: 1px; }
+.rz-chip.dropmark { box-shadow: inset 3px 0 0 var(--evergreen, #3c6472); }
+.rz-chip-badge { font-size: 10px; opacity: 0.75; }
+.rz-chip-warn {
+  width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto;
+  display: grid; place-items: center; font-size: 10px; font-weight: 800;
+  background: var(--warn, #a9781f); color: #fff;
+}
+.rz-tl-msg { margin-top: 7px; font-size: 12.5px; line-height: 1.45; }
+.rz-tl-msg.hint { color: var(--moss, #868a7c); }
+.rz-tl-msg.ok { color: var(--good, #3e7b53); }
+.rz-tl-msg.no { color: var(--bad, #ae452f); font-weight: 600; }
+
+/* the phase card floats above the strip */
+.rz-phase-card { bottom: 158px; }
+.rz-phase-checks { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
+.rz-check {
+  font-size: 12.5px; line-height: 1.45; padding: 8px 10px; border-radius: 10px;
+}
+.rz-check.ok { background: color-mix(in srgb, var(--sage, #e2ecee) 45%, transparent); color: var(--earth, #565a4f); }
+.rz-check.bad { background: color-mix(in srgb, #ae452f 12%, transparent); color: var(--bad, #ae452f); font-weight: 600; }
+.rz-phase-more p { margin: 0 0 6px; }
+
 /* when the view gets tight, the Ask bar yields to the model */
 @media (max-width: 720px) {
   .rz-ask { width: calc(100vw - 32px); }

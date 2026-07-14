@@ -979,6 +979,8 @@ export function arrangeRoomsPlan(spec) {
 // combination for inspection (walls per side, roof, floors, rooms, openings,
 // site, element categories), plus x-ray walls. Persisted with the design.
 export const DEFAULT_MODEL_LAYERS = {
+  frame: true,
+  foundation: true,
   wallNorth: true,
   wallSouth: true,
   wallEast: true,
@@ -1085,6 +1087,118 @@ export function buildTimeline(spec, derived) {
     });
   }
   return phases;
+}
+
+// ---- The Time Machine: build-order dependencies + the week-by-week schedule.
+// Hard dependencies come from the CONSTRUCTION ITSELF (what carries what, what
+// must stay dry, what must cure) — never from taste. Everything not listed
+// here is the builder's call to re-order. Each rule carries its reason in
+// plain English so the app can EXPLAIN a refusal instead of just refusing.
+// A rule may also carry a waiting gap (gapWeeks) that must pass after the
+// needed phase ends — concrete curing is the canonical case.
+export function phaseDependencies(spec, phases) {
+  const ids = new Set(phases.map((phase) => phase.id));
+  const deps = [];
+  const need = (id, needs, why, gapWeeks = 0, gapWhy = '') => {
+    if (ids.has(id) && ids.has(needs)) deps.push({ id, needs, why, gapWeeks, gapWhy });
+  };
+  const loadBearing = resolveFrameType(spec, 1) === 'load-bearing';
+  // Straw-based infill must never take rain — the classic natural-building rule.
+  const strawWalls = WALL_SIDES
+    .map((side) => resolveWallSide(spec, side))
+    .some((r) => !r.omitted && ['straw-bale', 'light-straw-clay'].includes(r.assemblyKey));
+
+  need('foundation', 'site-prep', 'You can’t pour a foundation into unexcavated ground.');
+  if (loadBearing) {
+    // The walls ARE the structure: they stand on the foundation, and the roof
+    // structure goes up on top of them.
+    need('walls', 'foundation', 'These walls carry the roof — they stand straight on the foundation.');
+    need('framing', 'walls', 'With load-bearing walls, the roof structure is built on top of the finished walls.');
+    need('roofing', 'framing', 'The roof cladding needs its structure underneath first.');
+  } else {
+    need('framing', 'foundation', 'The frame anchors to the foundation.');
+    need('roofing', 'framing', 'The rafters land on the frame.');
+    need('walls', 'framing', 'The infill walls fill the frame’s bays.');
+    if (strawWalls) need('walls', 'roofing', 'Straw must stay bone dry — the roof goes on before the bales go in.');
+  }
+  need('utilities', 'roofing', 'Rough plumbing and wiring is sheltered work — the building needs its roof first.');
+  need('heater', 'foundation', 'Tons of masonry will stand on that concrete — it has to cure hard first.', 4, 'about 4 weeks of curing');
+  need('heater', 'roofing', 'The heater is indoor work — roof on first.');
+  need('plaster', 'walls', 'Plaster goes onto finished walls.');
+  need('plaster', 'utilities', 'Plaster closes over the wiring and pipe chases.');
+  phases.forEach((phase) => {
+    if (phase.id !== 'occupancy') need('occupancy', phase.id, 'The inspector signs off on a FINISHED house — everything comes before this.');
+  });
+  return deps;
+}
+
+// Repair an order so it satisfies the dependencies, staying as close to the
+// given order as possible: walk the list, always taking the earliest phase
+// whose needs are already placed. Also how the DEFAULT order adapts to the
+// construction (a timber frame with straw-bale infill roofs before it walls).
+export function orderPhasesByDeps(phases, deps) {
+  const remaining = [...phases];
+  const placed = [];
+  const done = new Set();
+  while (remaining.length) {
+    const idx = remaining.findIndex((phase) => deps
+      .filter((dep) => dep.id === phase.id)
+      .every((dep) => done.has(dep.needs) || !remaining.some((r) => r.id === dep.needs)));
+    const pick = remaining.splice(Math.max(0, idx), 1)[0]; // idx -1 would be a rule cycle; take the head rather than hang
+    placed.push(pick);
+    done.add(pick.id);
+  }
+  return placed;
+}
+
+const wk = (n) => Math.round(n * 10) / 10;
+
+// Lay the ordered phases on the calendar (one crew, one phase at a time) and
+// receipt-check every dependency in plain English: "Foundation done week 3.5
+// + 4 weeks curing = ready week 7.5 — this starts week 13. OK." The same
+// sentences explain a refused drag.
+export function scheduleTimeline(orderedPhases, deps) {
+  let clock = 0;
+  const byId = {};
+  const rows = orderedPhases.map((phase) => {
+    const row = { ...phase, startWeek: wk(clock), endWeek: wk(clock + (Number(phase.weeks) || 0)), checks: [] };
+    clock = row.endWeek;
+    byId[row.id] = row;
+    return row;
+  });
+  rows.forEach((row) => {
+    deps.filter((dep) => dep.id === row.id).forEach((dep) => {
+      const needRow = byId[dep.needs];
+      if (!needRow) return;
+      const readyWeek = wk(needRow.endWeek + (dep.gapWeeks || 0));
+      const ok = readyWeek <= row.startWeek && needRow.endWeek <= row.startWeek;
+      const gapTxt = dep.gapWeeks ? ` + ${dep.gapWeeks} weeks (${dep.gapWhy}) = ready week ${readyWeek}` : '';
+      row.checks.push({
+        needs: dep.needs,
+        needsTitle: needRow.title,
+        ok,
+        why: dep.why,
+        text: ok
+          ? `${needRow.title} done week ${needRow.endWeek}${gapTxt} — this starts week ${row.startWeek}. OK.`
+          : `${needRow.title} isn’t ${dep.gapWeeks ? 'ready' : 'done'} until week ${readyWeek}, and this starts week ${row.startWeek}. ${dep.why}`
+      });
+    });
+  });
+  return rows;
+}
+
+// Judge a proposed order (a drag) BEFORE accepting it. Returns the schedule
+// either way, plus every broken rule as a plain sentence. Unknown ids are
+// ignored; missing phases are appended in their current position.
+export function validatePhaseOrder(phases, orderIds, deps) {
+  const byId = new Map(phases.map((phase) => [phase.id, phase]));
+  const ordered = orderIds.map((id) => byId.get(id)).filter(Boolean);
+  phases.forEach((phase) => { if (!ordered.includes(phase)) ordered.push(phase); });
+  const schedule = scheduleTimeline(ordered, deps);
+  const problems = schedule.flatMap((row) => row.checks
+    .filter((check) => !check.ok)
+    .map((check) => ({ phaseId: row.id, phaseTitle: row.title, text: check.text })));
+  return { ok: problems.length === 0, problems, schedule };
 }
 
 // The Build page's materials list. LAW: every system the design PRICES (each
