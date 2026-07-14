@@ -174,7 +174,7 @@ function planLabelFit(name, w, d, isSel, maxSize = 2) {
   return null;
 }
 
-export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShell, onMoveEdge, onMoveOpening, context = null, activeFloor = 1 }) {
+export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShell, onMoveEdge, onMoveOpening, onContext = null, context = null, activeFloor = 1 }) {
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
   const [shellGhost, setShellGhost] = useState(null);
@@ -558,6 +558,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                 strokeWidth={isSel ? 0.4 : 0.18}
                 pointerEvents={buildingContext || siteContext ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
+                onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}
               />
               {(() => {
                 const lab = planLabelFit(raw.name, room.w, room.d, isSel);
@@ -618,6 +619,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                 strokeDasharray={raw.category === 'partition' ? undefined : '0.8 0.5'}
                 pointerEvents={buildingContext && !isContextSubject ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
+                onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}
               />
               {(() => {
                 const lab = planLabelFit(raw.name, w, d, isSel, 1.5);

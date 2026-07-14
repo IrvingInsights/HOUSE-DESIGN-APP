@@ -33,7 +33,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 11 · Jul 14';
+const UPDATE_STAMP = 'update 12 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -311,6 +311,27 @@ export default function App() {
     applyOps([{ type: 'remove_object', targetId: obj.id, name: obj.name }]);
     if (selectedId === obj.id) setSelectedId(null);
   };
+  const duplicateRoom = (room) => {
+    const level = Number(room.level || 1);
+    const plan = planNewRoomPlacements(spec, [{ name: room.name, type: room.type, w: Number(room.w), d: Number(room.d) }], level);
+    if (plan.ops.length) applyOps(plan.ops);
+  };
+  const moveRoomToFloor = (room, level) => {
+    applyOps([{ type: 'update_object', targetId: room.id, name: room.name, field: 'level', value: String(level) }]);
+    if (activeChapter === 'rooms') setActiveFloor(level);
+  };
+
+  // --- right-click menu on the plan ------------------------------------------
+  const [ctxMenu, setCtxMenu] = useState(null); // { id, x, y }
+  const openContext = (id, x, y) => { setSelectedId(id); setCtxMenu({ id, x, y }); };
+  useEffect(() => {
+    if (!ctxMenu) return undefined;
+    const close = () => setCtxMenu(null);
+    const onEsc = (e) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('pointerdown', close);
+    window.addEventListener('keydown', onEsc);
+    return () => { window.removeEventListener('pointerdown', close); window.removeEventListener('keydown', onEsc); };
+  }, [ctxMenu]);
   const renameObject = (obj, name) => {
     if (name.trim() && name.trim() !== obj.name) applyOps([{ type: 'update_object', targetId: obj.id, name: obj.name, field: 'name', value: name.trim() }]);
   };
@@ -358,6 +379,7 @@ export default function App() {
             onMoveEdge={moveEdge}
             onMoveOpening={moveOpening}
             context={chapter.planContext || null}
+            onContext={timelineOpen ? null : openContext}
             activeFloor={activeChapter === 'rooms' ? activeFloor : 1}
           />
         ) : (
@@ -530,6 +552,44 @@ export default function App() {
             {el && (
               <button className="rz-remove" onClick={() => removeObject(el)}>Remove {el.name}</button>
             )}
+          </div>
+        );
+      })()}
+
+      {/* right-click menu — quick actions on whatever was tapped */}
+      {ctxMenu && (() => {
+        const room = spec.rooms.find((r) => r.id === ctxMenu.id);
+        const el = room ? null : (spec.elements || []).find((e) => e.id === ctxMenu.id);
+        const obj = room || el;
+        if (!obj) return null;
+        const level = Number(obj.level || 1);
+        // Floors on offer: existing ones, one new floor above (up to 3), and
+        // the basement when there is one — never the floor it's already on.
+        const floorChoices = room ? [
+          ...(hasBasement ? [BASEMENT_LEVEL] : []),
+          ...Array.from({ length: Math.min(3, floors + 1) }, (_, i) => i + 1)
+        ].filter((f) => f !== level) : [];
+        const style = {
+          left: Math.min(ctxMenu.x, window.innerWidth - 230),
+          top: Math.min(ctxMenu.y, window.innerHeight - (150 + floorChoices.length * 30))
+        };
+        const startRename = () => {
+          setCtxMenu(null);
+          setTimeout(() => { const f = document.querySelector('.rz-card-name'); f?.focus(); f?.select(); }, 60);
+        };
+        return (
+          <div className="rz-ctx" style={style} onPointerDown={(e) => e.stopPropagation()}>
+            <div className="rz-ctx-title">{obj.name}</div>
+            <button onClick={startRename}>Rename…</button>
+            {room && <button onClick={() => { duplicateRoom(room); setCtxMenu(null); }}>Duplicate</button>}
+            {floorChoices.map((f) => (
+              <button key={f} onClick={() => { moveRoomToFloor(room, f); setCtxMenu(null); }}>
+                Move to {floorLabel(spec, f).toLowerCase().replace(' floor', '')}{f > floors ? ' (new floor)' : ''}
+              </button>
+            ))}
+            <button className="rz-ctx-danger" onClick={() => { removeObject(obj); setCtxMenu(null); }}>
+              Remove {room ? 'room' : 'it'}
+            </button>
           </div>
         );
       })()}

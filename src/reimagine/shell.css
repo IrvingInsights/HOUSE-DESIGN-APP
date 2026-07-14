@@ -138,6 +138,29 @@
 }
 .rz-remove:hover { background: color-mix(in srgb, #ae452f 8%, transparent); }
 .rz-rooms-palette button b { font-weight: 600; }
+
+/* right-click menu on the plan */
+.rz-ctx {
+  position: fixed; z-index: 20; min-width: 190px;
+  display: flex; flex-direction: column; padding: 5px;
+  background: color-mix(in srgb, var(--ivory, #fbfaf6) 97%, transparent);
+  border: 1px solid var(--line, #dbd9ce); border-radius: 12px;
+  box-shadow: 0 10px 34px rgba(30, 40, 30, 0.2);
+}
+.rz-ctx-title {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--moss, #868a7c); padding: 5px 10px 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 60%, transparent);
+  margin-bottom: 3px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rz-ctx button {
+  border: none; background: transparent; cursor: pointer; text-align: left;
+  font: inherit; font-size: 13px; color: var(--ink, #22251f);
+  padding: 7px 10px; border-radius: 8px;
+}
+.rz-ctx button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 70%, transparent); }
+.rz-ctx .rz-ctx-danger { color: var(--bad, #ae452f); }
+.rz-ctx .rz-ctx-danger:hover { background: color-mix(in srgb, #ae452f 9%, transparent); }
 .rz-x {
   border: none; background: transparent; cursor: pointer;
   font-size: 20px; line-height: 1; color: var(--moss, #868a7c); padding: 0 2px;
