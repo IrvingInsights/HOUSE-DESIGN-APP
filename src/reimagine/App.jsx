@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ThreeScene, webglAvailable } from '../threeScene.jsx';
 import { PlanView } from '../planView.jsx';
 import {
-  applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES
+  applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
+  INSULATION_TYPES, resolveInsulation
 } from '../../backend/bim-core.mjs';
 import {
   seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS,
   buildTimeline, phaseDependencies, orderPhasesByDeps, validatePhaseOrder, DEFAULT_MODEL_LAYERS,
-  floorCount, floorLabel, storeyInfo, upperPlateRect, utilitiesOf,
-  WALL_SIDES, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS,
+  floorCount, floorLabel, storeyInfo, upperPlateRect, utilitiesOf, resolveOverhangs,
+  WALL_SIDES, WALL_SIDE_LABELS, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS,
   ROOM_PRESETS, planNewRoomPlacements, roomPresetFromName
 } from '../engine.js';
 import '../styles.css';
@@ -25,7 +26,7 @@ const CHAPTERS = [
   { id: 'rooms', label: 'Rooms', view: 'plan', planContext: 'rooms', greet: () => 'Lay the rooms out flat, from above. Drag a room to move it, grab a corner to resize — and use the floor pills (top left) to work each level, add one, or take one away.' },
   { id: 'foundation', label: 'Foundation', view: 'plan', planContext: 'foundation', greet: () => 'What the house sits on. Pick the main type below — and the foundation doesn’t have to match the rooms: drop extra footings and drag them under whatever they carry, even outside the walls.' },
   { id: 'shell', label: 'Shell', view: '3d', greet: (d) => `The shell stands ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'}. Pick the wall system and the frame that carries the roof — the timeline and every receipt follow along.` },
-  { id: 'roof', label: 'Roof', view: '3d', greet: () => 'Choose how the roof sheds weather and sun — and how much daylight it lets in.' },
+  { id: 'roof', label: 'Roof', view: '3d', greet: () => 'Choose how the roof sheds weather and sun. Pick the shape, how steep it runs, what insulates it, and how far it reaches past the walls.' },
   { id: 'openings', label: 'Openings', view: 'plan', planContext: 'windows', greet: () => 'Place doors and windows where light and paths want them. Slide them along their wall.' },
   { id: 'systems', label: 'Systems', view: '3d', greet: () => 'Heat, water, power, waste — the working parts. Each shows its own receipts.' },
   { id: 'finishes', label: 'Finishes', view: '3d', greet: () => 'Materials and surfaces, inside and out — natural or conventional, wall by wall.' }
@@ -33,7 +34,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 18 · Jul 14';
+const UPDATE_STAMP = 'update 19 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -432,6 +433,31 @@ export default function App() {
   const setFrame = (value) => applyOps([{ type: 'set_frame', value }]);
   const setWallSide = (side, field, value) => applyOps([{ type: 'set_wall_side', wall: side, field, value }]);
 
+  // --- roof: shape, pitch, insulation, overhang, shed direction --------------
+  const setRoofType = (value) => {
+    // Switching TO a shed with level eaves needs a fall or it won't drain — so
+    // set up a high-south / low-north profile (the solar classic) in one go.
+    if (value === 'shed') {
+      const wh = Number(spec.shell.wallHeightFt) || 10;
+      const sH = Number(spec.shell.southWallHeightFt) || wh;
+      const nH = Number(spec.shell.northWallHeightFt) || wh;
+      if (Math.abs(sH - nH) < 0.5) {
+        applyOps([{ type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: Math.max(7, wh + 2), northWallHeightFt: Math.max(2, wh) }]);
+        return;
+      }
+    }
+    applyOps([{ type: 'set_shell', field: 'roofType', value }]);
+  };
+  const setRoofPitch = (value) => applyOps([{ type: 'set_shell', field: 'roofPitch', value: String(value) }]);
+  const setRoofInsulation = (value) => applyOps([{ type: 'set_utility', field: 'roofInsulation', value }]);
+  const setOverhang = (wall, value) => applyOps([{ type: 'set_overhang', wall, value: String(clamp(Number(value) || 0, 0, 12)) }]);
+  const setShedFall = (drainTo, fallFt) => {
+    const wh = Number(spec.shell.wallHeightFt) || 10;
+    const hi = Math.max(7, Number(spec.shell.southWallHeightFt) || wh, Number(spec.shell.northWallHeightFt) || wh);
+    const lo = Math.max(2, hi - Math.max(0.5, Number(fallFt) || 2));
+    applyOps([{ type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: drainTo === 'north' ? hi : lo, northWallHeightFt: drainTo === 'north' ? lo : hi }]);
+  };
+
   // switching chapters nudges you to the view that chapter is best done in
   const goChapter = (c) => { setActiveChapter(c.id); if (c.view) setViewMode(c.view === 'plan' ? 'plan' : '3d'); };
 
@@ -574,6 +600,17 @@ export default function App() {
                 onShell={setShellField}
                 onWallSide={setWallSide}
                 onSelectWall={(side) => { setSelectedId(`wall-${side}`); setViewMode('3d'); }}
+              />
+            )}
+            {activeChapter === 'roof' && (
+              <RoofControls
+                spec={spec}
+                derived={derived}
+                onRoofType={setRoofType}
+                onPitch={setRoofPitch}
+                onInsulation={setRoofInsulation}
+                onOverhang={setOverhang}
+                onShedFall={setShedFall}
               />
             )}
             <nav className="rz-chapters">
@@ -1253,6 +1290,87 @@ function WallCard({ side, spec, onWallSide, onClose }) {
         <span>No wall on this side (opens to an attached space)</span>
       </label>
       <p className="rz-muted" style={{ marginTop: 8 }}>Just this wall — the other three keep their own height, system, and face.</p>
+    </div>
+  );
+}
+
+// Roof chapter: shape, steepness, what insulates it, how far it overhangs —
+// and, for a shed, which way it falls. Everything the engine already models.
+const ROOF_SHAPES = [
+  { key: 'gable', label: 'Gable', note: 'A ridge down the middle, two slopes.' },
+  { key: 'shed', label: 'Shed', note: 'One slope — high wall falling to a low one.' },
+  { key: 'hip', label: 'Hip', note: 'Slopes on all four sides to a ridge.' },
+  { key: 'flat', label: 'Flat', note: 'Near-level with a slight drainage fall.' }
+];
+function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOverhang, onShedFall }) {
+  const roofType = spec.shell.roofType || 'gable';
+  const pitch = Number(spec.shell.roofPitch || 0.32);
+  const insulKey = resolveInsulation(utilitiesOf(spec).roofInsulation, 'cellulose');
+  const overhangs = resolveOverhangs(spec.shell);
+  const [perSide, setPerSide] = useState(overhangs.split);
+  const sH = Number(spec.shell.southWallHeightFt || spec.shell.wallHeightFt || 10);
+  const nH = Number(spec.shell.northWallHeightFt || spec.shell.wallHeightFt || 10);
+  const fallNow = Math.round(Math.abs(sH - nH) * 2) / 2;
+  const drainsNow = fallNow < 0.25 ? '' : (sH >= nH ? 'north' : 'south');
+  return (
+    <div className="rz-found">
+      <label className="rz-field">
+        <span>Shape</span>
+        <select value={roofType} onChange={(e) => onRoofType(e.target.value)}>
+          {ROOF_SHAPES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+      </label>
+      <div className="rz-shape-note">{ROOF_SHAPES.find((s) => s.key === roofType)?.note}</div>
+
+      {roofType === 'shed' ? (
+        <>
+          <label className="rz-field">
+            <span>Which way it falls</span>
+            <select value={drainsNow} onChange={(e) => onShedFall(e.target.value, Math.max(2, fallNow))}>
+              {drainsNow === '' && <option value="">Level — pick a direction</option>}
+              <option value="north">Falls north — high south wall (solar classic)</option>
+              <option value="south">Falls south — high north wall</option>
+            </select>
+          </label>
+          <label className="rz-field rz-field-num">
+            <span>Fall, high eave to low</span>
+            <NumInput value={fallNow} min={0.5} max={12} step={0.5} onCommit={(v) => onShedFall(drainsNow || 'north', v)} />
+          </label>
+        </>
+      ) : roofType !== 'flat' && (
+        <label className="rz-field rz-field-num">
+          <span>Steepness · {Math.round(pitch * 12)}:12</span>
+          <NumInput value={Math.round(pitch * 12)} min={1} max={18} step={1} unit=":12" onCommit={(v) => onPitch(clamp(v / 12, 0.02, 1.5))} />
+        </label>
+      )}
+
+      <label className="rz-field">
+        <span>Insulation · R-{derived.roofR}</span>
+        <select value={insulKey} onChange={(e) => onInsulation(e.target.value)}>
+          {Object.entries(INSULATION_TYPES).map(([key, ins]) => (
+            <option key={key} value={key}>{ins.green ? '🌿 ' : ''}{ins.label} (R≈{ins.r})</option>
+          ))}
+        </select>
+      </label>
+
+      <div className="rz-field-num">
+        <span className="rz-field-lead">Overhang past the walls{perSide ? '' : ` · ${overhangs.all} ft`}</span>
+        {!perSide && <NumInput value={overhangs.all} min={0} max={12} step={0.5} onCommit={(v) => onOverhang('all', v)} />}
+      </div>
+      {perSide && (
+        <div className="rz-overhang-grid">
+          {WALL_SIDES.map((side) => (
+            <label key={side} className="rz-field rz-field-num rz-overhang-cell">
+              <span>{WALL_SIDE_LABELS[side]}</span>
+              <NumInput value={overhangs[side]} min={0} max={12} step={0.5} onCommit={(v) => onOverhang(side, v)} />
+            </label>
+          ))}
+        </div>
+      )}
+      <button type="button" className="rz-perwall-toggle" onClick={() => setPerSide((v) => !v)}>
+        {perSide ? '▾ one overhang all around' : '▸ a different overhang per side'}
+      </button>
+      <div className="rz-shape-note">A 2-ft overhang is the minimum that keeps rain off plastered natural walls; 2–3 ft on the south shades summer sun without blocking winter light.</div>
     </div>
   );
 }

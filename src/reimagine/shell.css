@@ -199,6 +199,18 @@
 .rz-nowall { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--earth, #565a4f); cursor: pointer; }
 .rz-nowall input { accent-color: var(--evergreen, #3c6472); }
 
+/* roof chapter — overhang controls */
+.rz-field-lead { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); }
+.rz-field-num .rz-field-lead { flex: 1; }
+.rz-overhang-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.rz-overhang-cell { flex-direction: column; align-items: stretch; }
+.rz-overhang-cell span { font-size: 11px; color: var(--moss, #868a7c); }
+.rz-overhang-cell .rz-num { width: 100%; }
+.rz-perwall-toggle {
+  border: none; background: transparent; cursor: pointer; padding: 2px 0; text-align: left;
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--evergreen, #3c6472);
+}
+
 /* right-click menu on the plan */
 .rz-ctx {
   position: fixed; z-index: 20; min-width: 190px;
