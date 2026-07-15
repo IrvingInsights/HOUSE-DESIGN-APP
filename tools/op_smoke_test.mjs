@@ -452,6 +452,20 @@ async function httpSanity() {
   ok(again.spec.traceReview?.passed === 9, 'traceReview survives ordinary edits (until the next trace)');
 }
 
+// --- id wins over name: same-named foundation runs never snap together --------
+{
+  let s = apply(freshSpec(), [
+    { type: 'add_element', name: 'Rubble trench run', category: 'foundation', construction: 'rubble', x: 2, y: 31, w: 12, d: 1.5, h: 0.3, level: 1 },
+    { type: 'add_element', name: 'Rubble trench run 2', category: 'foundation', construction: 'rubble', x: 16, y: 31, w: 12, d: 1.5, h: 0.3, level: 1 }
+  ]).spec;
+  const a = s.elements[0], b = s.elements[1];
+  // Drag B, but pass the SHARED name prefix — the worst case for the old
+  // id-OR-name lookup that let A's name match beat B's id.
+  const r = apply(s, [{ type: 'move_object', targetId: b.id, name: 'Rubble trench run', x: 20, y: 31 }]).spec;
+  const a2 = r.elements.find((e) => e.id === a.id), b2 = r.elements.find((e) => e.id === b.id);
+  ok(a2.x === 2 && b2.x === 20, 'move by id hits the right run — same-named runs never snap together', `A@${a2.x} B@${b2.x}`);
+}
+
 const wantHttp = process.argv.includes('--http');
 (async () => {
   if (wantHttp) await httpSanity();

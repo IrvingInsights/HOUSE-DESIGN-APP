@@ -35,7 +35,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 25 · Jul 14';
+const UPDATE_STAMP = 'update 26 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -300,11 +300,15 @@ export default function App() {
   };
   const placeFoundationRun = (preset) => {
     // Land beside the house (never at 0,0 — that's "unset" to the op layer),
-    // staggered so repeated drops don't pile up; then drag it into place.
-    const existing = (spec.elements || []).filter((el) => el.category === 'foundation').length;
+    // staggered so repeated drops don't pile up; then drag it into place. Each
+    // run gets a UNIQUE name (…2, …3) so they're distinct in the list and can't
+    // be confused for one another.
+    const runs = (spec.elements || []).filter((el) => el.category === 'foundation');
+    const sameKind = runs.filter((el) => el.construction === preset.construction).length;
+    const name = sameKind === 0 ? preset.name : `${preset.name} ${sameKind + 1}`;
     applyOps([{
-      type: 'add_element', name: preset.name, category: 'foundation', construction: preset.construction,
-      x: 2 + (existing % 2) * (preset.w + 2), y: Number(spec.shell.depthFt) + 3 + Math.floor(existing / 2) * 3.5,
+      type: 'add_element', name, category: 'foundation', construction: preset.construction,
+      x: 2 + (runs.length % 2) * (preset.w + 2), y: Number(spec.shell.depthFt) + 3 + Math.floor(runs.length / 2) * 3.5,
       w: preset.w, d: preset.d, h: preset.h, level: 1
     }]);
   };

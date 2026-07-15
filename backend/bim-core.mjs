@@ -948,12 +948,22 @@ function findDesignObject(spec, targetId, name = '') {
     const opening = (spec.openings || [])[openingIndex];
     if (opening) return { ...opening, id: targetId, __kind: 'opening', __openingIndex: openingIndex, name: opening.label || `${titleCase(opening.wall)} ${titleCase(opening.type)}` };
   }
-  // An empty name must NOT name-match ("x".includes('') is always true —
-  // an op carrying only a targetId would silently hit the first room).
+  // ID wins. Matching id-OR-name in ONE pass let a NAME match on an earlier
+  // object beat the real id match on a later one: dragging the 2nd "Rubble
+  // trench run" moved the 1st (they share a name), so the runs snapped onto
+  // each other. Resolve the exact id first; fall back to name only when no id
+  // hits. (An empty name must NOT name-match — "x".includes('') is always
+  // true, so an op with only a targetId would otherwise hit the first room.)
+  if (targetId) {
+    const byId = (spec.rooms || []).find((room) => room.id === targetId)
+      || (spec.elements || []).find((element) => element.id === targetId);
+    if (byId) return byId;
+  }
   const normalizedName = normalizeDesignLabel(name);
-  const nameMatches = (label) => Boolean(normalizedName) && (normalizeDesignLabel(label) === normalizedName || normalizeDesignLabel(label).includes(normalizedName));
-  return (spec.rooms || []).find((room) => room.id === targetId || nameMatches(room.name))
-    || (spec.elements || []).find((element) => element.id === targetId || nameMatches(element.name))
+  if (!normalizedName) return null;
+  const nameMatches = (label) => normalizeDesignLabel(label) === normalizedName || normalizeDesignLabel(label).includes(normalizedName);
+  return (spec.rooms || []).find((room) => nameMatches(room.name))
+    || (spec.elements || []).find((element) => nameMatches(element.name))
     || null;
 }
 
