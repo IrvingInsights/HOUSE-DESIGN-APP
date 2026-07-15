@@ -23,7 +23,7 @@ import './shell.css';
 // edges for Shape, room dragging for Rooms, door/window gaps for Openings) —
 // so each chapter looks and acts like what it's for.
 const CHAPTERS = [
-  { id: 'shape', label: 'Shape', view: 'plan', planContext: 'shell', greet: (d) => `Start with the outline — a plain rectangle or an L, T, or U. Set the size below, or drag any wall edge right on the plan. Right now it's ${fmtNum(d.floor)} sq ft.` },
+  { id: 'shape', label: 'Shape', view: 'plan', planContext: 'shell', greet: (d) => `Shape the whole building — a plain rectangle or an L, T, or U — or pick any room or element from the dropdown to size just that one. Right now the house is ${fmtNum(d.floor)} sq ft.` },
   { id: 'rooms', label: 'Rooms', view: 'plan', planContext: 'rooms', greet: () => 'Lay the rooms out flat, from above. Use the Floor selector (top left) to add a floor or switch between them — each floor keeps its own rooms and its own outline. Drag a room to move it, a corner to resize.' },
   { id: 'foundation', label: 'Foundation', view: 'plan', planContext: 'foundation', greet: () => 'What the house sits on. Pick the main type below — and the foundation doesn’t have to match the rooms: drop extra footings and drag them under whatever they carry, even outside the walls.' },
   { id: 'shell', label: 'Shell', view: '3d', greet: (d) => `The shell stands ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'}. Pick the wall system and the frame that carries the roof — the timeline and every receipt follow along.` },
@@ -35,7 +35,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 28 · Jul 14';
+const UPDATE_STAMP = 'update 29 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -270,6 +270,8 @@ export default function App() {
     const field = op.wall === 'north' || op.wall === 'south' ? 'x' : 'y';
     applyOps([{ type: 'update_object', targetId: `opening-${index}`, field, value: along }]);
   };
+  // Size any single object (room or element) — width × depth, position kept.
+  const sizeObject = (obj, w, d) => applyOps([{ type: 'resize_object', targetId: obj.id, name: obj.name, w, d, h: Number(obj.h) || 0.22 }]);
 
   // --- floors: add/remove a storey, walk levels in the plan -----------------
   const floors = floorCount(spec);
@@ -565,6 +567,12 @@ export default function App() {
   // switching chapters nudges you to the view that chapter is best done in
   const goChapter = (c) => { setActiveChapter(c.id); if (c.view) setViewMode(c.view === 'plan' ? 'plan' : '3d'); };
 
+  // In the Shape chapter, if a room/element is the shape target, the plan lets
+  // you see and drag it (rooms context); otherwise it edits the building
+  // footprint (shell context).
+  const targetIsObject = selectedId && (spec.rooms.some((r) => r.id === selectedId) || (spec.elements || []).some((e) => e.id === selectedId));
+  const planContext = activeChapter === 'shape' && targetIsObject ? 'rooms' : (chapter.planContext || null);
+
   return (
     <div className="rz-root">
       {/* SURFACE 1 — the Model / Plan, center stage and full-bleed */}
@@ -579,7 +587,7 @@ export default function App() {
             onResizeShell={resizeShell}
             onMoveEdge={moveEdge}
             onMoveOpening={moveOpening}
-            context={chapter.planContext || null}
+            context={planContext}
             onContext={timelineOpen ? null : openContext}
             activeFloor={activeChapter === 'rooms' ? activeFloor : 1}
           />
@@ -671,13 +679,12 @@ export default function App() {
             <div className="rz-greeting">{chapter.greet(derived)}</div>
             {activeChapter === 'shape' && (
               <ShapeControls
-                key={`${spec.shell.widthFt}x${spec.shell.depthFt}`}
-                widthFt={spec.shell.widthFt}
-                depthFt={spec.shell.depthFt}
-                isRect={!spec.shell.footprint}
-                corners={Array.isArray(spec.shell.footprint) ? spec.shell.footprint.length : 4}
-                onCommit={resizeShell}
-                onShape={setShape}
+                spec={spec}
+                selectedId={selectedId}
+                onSelectTarget={setSelectedId}
+                onShapeBuilding={setShape}
+                onSizeBuilding={resizeShell}
+                onSizeObject={sizeObject}
               />
             )}
             {activeChapter === 'rooms' && (
@@ -1177,41 +1184,71 @@ function BudgetSheet({ derived, onClose }) {
 
 // Shape chapter's plain controls: pick an outline, then the size in numbers.
 // Presets are starting points — every edge stays draggable on the plan after.
-function ShapeControls({ widthFt, depthFt, isRect, corners, onCommit, onShape }) {
-  const [w, setW] = useState(String(Math.round(widthFt * 10) / 10));
-  const [d, setD] = useState(String(Math.round(depthFt * 10) / 10));
-  const commit = () => {
-    const nw = Number(w); const nd = Number(d);
-    if (Number.isFinite(nw) && Number.isFinite(nd) && (nw !== widthFt || nd !== depthFt)) onCommit(nw, nd);
-  };
-  const onKey = (e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } };
+// The Shape controls, target-selectable. Pick WHAT you're shaping — the whole
+// building or any single room/element — from the dropdown. The building gets
+// the outline presets (Rectangle / L / T / U) and its size; a room or element
+// gets its own width × depth. One general control instead of building-only.
+function ShapeControls({ spec, selectedId, onSelectTarget, onShapeBuilding, onSizeBuilding, onSizeObject }) {
+  const rooms = spec.rooms || [];
+  const elements = (spec.elements || []).filter((e) => e.category !== 'floor');
+  const target = selectedId
+    ? (rooms.find((r) => r.id === selectedId) || elements.find((e) => e.id === selectedId) || null)
+    : null;
+  const isBuilding = !target;
+  const isRect = !spec.shell.footprint;
+  const corners = Array.isArray(spec.shell.footprint) ? spec.shell.footprint.length : 4;
+  const bW = Math.round((Number(spec.shell.widthFt) || 36) * 10) / 10;
+  const bD = Math.round((Number(spec.shell.depthFt) || 28) * 10) / 10;
   return (
     <div className="rz-shape">
-      <div className="rz-shape-presets">
-        {[['rect', 'Rectangle'], ['l', 'L'], ['t', 'T'], ['u', 'U']].map(([kind, label]) => (
-          <button
-            key={kind}
-            type="button"
-            className={kind === 'rect' && isRect ? 'on' : ''}
-            onClick={() => onShape(kind)}
-            title={kind === 'rect' ? 'Plain rectangle' : `${label}-shaped outline — a starting point you can drag`}
-          >{label}</button>
-        ))}
-      </div>
-      {!isRect && <div className="rz-shape-note">custom outline · {corners} corners — drag any edge on the plan</div>}
-      <div className="rz-shape-size">
-        <label className="rz-shape-field">
-          <span>Width</span>
-          <input type="number" min="12" max="96" step="1" value={w} onChange={(e) => setW(e.target.value)} onBlur={commit} onKeyDown={onKey} />
-          <em>ft</em>
-        </label>
-        <span className="rz-shape-x">×</span>
-        <label className="rz-shape-field">
-          <span>Depth</span>
-          <input type="number" min="12" max="80" step="1" value={d} onChange={(e) => setD(e.target.value)} onBlur={commit} onKeyDown={onKey} />
-          <em>ft</em>
-        </label>
-      </div>
+      <label className="rz-field">
+        <span>Shape what?</span>
+        <select value={isBuilding ? 'building' : target.id} onChange={(e) => onSelectTarget(e.target.value === 'building' ? null : e.target.value)}>
+          <option value="building">Whole building</option>
+          {rooms.length > 0 && (
+            <optgroup label="Rooms">
+              {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </optgroup>
+          )}
+          {elements.length > 0 && (
+            <optgroup label="Other elements">
+              {elements.map((el) => <option key={el.id} value={el.id}>{el.name}</option>)}
+            </optgroup>
+          )}
+        </select>
+      </label>
+
+      {isBuilding ? (
+        <>
+          <div className="rz-shape-presets">
+            {[['rect', 'Rectangle'], ['l', 'L'], ['t', 'T'], ['u', 'U']].map(([kind, label]) => (
+              <button
+                key={kind}
+                type="button"
+                className={kind === 'rect' && isRect ? 'on' : ''}
+                onClick={() => onShapeBuilding(kind)}
+                title={kind === 'rect' ? 'Plain rectangle' : `${label}-shaped outline — a starting point you can drag`}
+              >{label}</button>
+            ))}
+          </div>
+          {!isRect && <div className="rz-shape-note">custom outline · {corners} corners — drag any edge on the plan</div>}
+          <div className="rz-run-size">
+            <label>Width<NumInput value={bW} min={12} max={96} step={1} unit="ft" onCommit={(v) => onSizeBuilding(v, bD)} /></label>
+            <span className="rz-run-x">×</span>
+            <label>Depth<NumInput value={bD} min={12} max={80} step={1} unit="ft" onCommit={(v) => onSizeBuilding(bW, v)} /></label>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="rz-run-size">
+            <label>Width<NumInput value={Math.round(Number(target.w) * 10) / 10} min={2} max={96} step={0.5} unit="ft" onCommit={(v) => onSizeObject(target, v, Number(target.d))} /></label>
+            <span className="rz-run-x">×</span>
+            <label>Depth<NumInput value={Math.round(Number(target.d) * 10) / 10} min={2} max={80} step={0.5} unit="ft" onCommit={(v) => onSizeObject(target, Number(target.w), v)} /></label>
+            <span className="rz-run-area">{Math.round(Number(target.w) * Number(target.d))} sf</span>
+          </div>
+          <div className="rz-shape-note">Sizing “{target.name}”. Drag it on the plan (Rooms chapter) to move it. The L / T / U outlines shape the whole building — pick “Whole building” above for those.</div>
+        </>
+      )}
     </div>
   );
 }
