@@ -729,10 +729,26 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         buildRakedSide('west', tW / 2, tW);
         buildRakedSide('east', width - tE / 2, tE);
       } else {
-        pushSideBoxes('north', hN, tN, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north') }));
-        pushSideBoxes('south', hS, tS, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south') }));
-        pushSideBoxes('west', hW, tW, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('west'), gaps: gapsFor('west') }));
-        pushSideBoxes('east', hE, tE, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: width - t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('east'), gaps: gapsFor('east') }));
+        // Cap each wall at the roof underside so a wall taller than the eave
+        // can't stab up through the roof. This happens when a per-wall height
+        // (east/west never feed the roof profile; a legacy design can hold a
+        // south/north override its stored roof height predates) exceeds the
+        // eave. The cap is the LOWEST roof height along the wall's run — sampled
+        // at both ends and the middle — so no part of the wall pokes, and it
+        // only bites when the wall exceeds the roof (a normal wall sits AT the
+        // eave, so min(h, cap) leaves it unchanged). Shed rakes its own walls.
+        const roofCapForSide = (side) => {
+          const pts = side === 'north' ? [[0, 0], [width / 2, 0], [width, 0]]
+            : side === 'south' ? [[0, depth], [width / 2, depth], [width, depth]]
+            : side === 'west' ? [[0, 0], [0, depth / 2], [0, depth]]
+            : [[width, 0], [width, depth / 2], [width, depth]];
+          return Math.min(...pts.map(([px, pz]) => roofUnderAt(px, pz)));
+        };
+        const capped = (side, h) => Math.max(1, Math.min(h, roofCapForSide(side)));
+        pushSideBoxes('north', capped('north', hN), tN, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north') }));
+        pushSideBoxes('south', capped('south', hS), tS, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south') }));
+        pushSideBoxes('west', capped('west', hW), tW, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('west'), gaps: gapsFor('west') }));
+        pushSideBoxes('east', capped('east', hE), tE, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: width - t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('east'), gaps: gapsFor('east') }));
       }
       wallMeshSpecs.forEach(({ side, storey, level, meshes, edgeKey }) => {
         if (omittedWalls.has(side) || wallResolved[side].omitted) return;

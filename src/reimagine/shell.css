@@ -244,7 +244,8 @@
 .rz-field-lead { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); }
 .rz-field-num .rz-field-lead { flex: 1; }
 .rz-overhang-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.rz-overhang-cell { flex-direction: column; align-items: stretch; }
+/* stack label over a full-width input; higher specificity so it wins over .rz-field-num's row */
+.rz-overhang-grid .rz-overhang-cell { flex-direction: column; align-items: stretch; gap: 3px; }
 .rz-overhang-cell span { font-size: 11px; color: var(--moss, #868a7c); }
 .rz-overhang-cell .rz-num { width: 100%; }
 .rz-perwall-toggle {
@@ -448,7 +449,9 @@
   border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 6px 8px;
 }
 .rz-field select:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; }
-.rz-field-num { flex-direction: row; align-items: center; justify-content: space-between; }
+/* display:flex is what makes flex-direction take effect — needed for bare
+   .rz-field-num divs (the single "all" overhang) that lack the .rz-field class */
+.rz-field-num { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
 .rz-num { position: relative; width: 96px; }
 .rz-num input {
   width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; font-weight: 600;
@@ -456,6 +459,11 @@
   border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 5px 24px 5px 9px;
 }
 .rz-num input:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; }
+/* hide the native number spinners — they crowd the digit in narrow fields and
+   clash with the absolutely-positioned unit label */
+.rz-num input::-webkit-outer-spin-button,
+.rz-num input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.rz-num input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 .rz-num em { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-style: normal; font-size: 11px; color: var(--moss, #868a7c); }
 .rz-found-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); margin-top: 4px; }
 .rz-pad-btn {
