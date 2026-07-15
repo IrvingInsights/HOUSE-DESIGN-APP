@@ -35,7 +35,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 22 · Jul 14';
+const UPDATE_STAMP = 'update 23 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -338,6 +338,21 @@ export default function App() {
     if (activeChapter === 'rooms') setActiveFloor(level);
   };
 
+  // Compass heading: poll the live camera on a timer (NOT the render loop —
+  // a timer keeps ticking even when requestAnimationFrame is throttled, so the
+  // compass never freezes). Heading = azimuth around Y; north is world −z.
+  useEffect(() => {
+    if (viewMode !== '3d' || timelineOpen) return undefined;
+    const id = setInterval(() => {
+      const v = typeof window !== 'undefined' ? window.__nbView : null;
+      if (!v?.camera || !v?.controls) return;
+      const c = v.camera.position, t = v.controls.target;
+      const h = Math.atan2(c.x - t.x, c.z - t.z);
+      setHeading((prev) => (Math.abs(prev - h) > 0.008 ? h : prev));
+    }, 90);
+    return () => clearInterval(id);
+  }, [viewMode, timelineOpen]);
+
   // autosave the design to this browser (debounced — never per keystroke)
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -496,7 +511,6 @@ export default function App() {
               else moveObject(id, x, y);
             }}
             onResizeEnd={(id, w, d) => { const o = findObj(id); if (o) applyOps([{ type: 'resize_object', targetId: id, name: o.name, w, d, h: Number(o.h) || 0.22 }]); }}
-            onHeading={setHeading}
             onFallbackNav={() => {}}
           />
         )}
@@ -1470,24 +1484,29 @@ function Vital({ label, value }) {
   );
 }
 
-// A compass that tracks the camera. The rose rotates so N always points to
-// true north in the model; each letter counter-rotates to stay upright.
-// N is world −z, S +z (the solar face), E +x, W −x — the same axes the plan,
-// the walls, and the sun all use.
+// A compass that tracks the camera. Each letter is placed directly at its
+// screen position for the current heading (no nested CSS rotation — that
+// corrupts the position), so letters stay upright and land where the
+// direction actually is in the view. N is world −z, S +z (the solar face),
+// E +x, W −x — the same axes the plan, the walls, and the sun all use.
 function Compass({ heading }) {
   const deg = (heading * 180) / Math.PI;
+  const R = 20;
   const marks = [['N', 0], ['E', 90], ['S', 180], ['W', 270]];
   return (
     <div className="rz-compass" title="Which way the model faces — N tracks true north">
-      <div className="rz-compass-rose" style={{ transform: `rotate(${deg}deg)` }}>
-        {marks.map(([label, a]) => (
+      {marks.map(([label, a]) => {
+        const ang = ((a + deg) * Math.PI) / 180; // clockwise from top
+        const dx = R * Math.sin(ang);
+        const dy = -R * Math.cos(ang); // screen y is down; top = negative
+        return (
           <span
             key={label}
             className={`rz-compass-mark ${label === 'N' ? 'n' : ''} ${label === 'S' ? 's' : ''}`}
-            style={{ transform: `rotate(${a}deg) translateY(-21px) rotate(${-a - deg}deg)` }}
+            style={{ transform: `translate(-50%, -50%) translate(${dx}px, ${dy}px)` }}
           >{label}</span>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
