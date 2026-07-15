@@ -10,7 +10,8 @@ import {
   buildTimeline, phaseDependencies, orderPhasesByDeps, validatePhaseOrder, DEFAULT_MODEL_LAYERS,
   floorCount, floorLabel, storeyInfo, upperPlateRect, utilitiesOf, resolveOverhangs,
   WALL_SIDES, WALL_SIDE_LABELS, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS,
-  ROOM_PRESETS, planNewRoomPlacements, roomPresetFromName
+  ROOM_PRESETS, planNewRoomPlacements, roomPresetFromName,
+  resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons
 } from '../engine.js';
 import '../styles.css';
 import './shell.css';
@@ -34,7 +35,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 20 · Jul 14';
+const UPDATE_STAMP = 'update 21 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -457,6 +458,8 @@ export default function App() {
     const lo = Math.max(2, hi - Math.max(0.5, Number(fallFt) || 2));
     applyOps([{ type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: drainTo === 'north' ? hi : lo, northWallHeightFt: drainTo === 'north' ? lo : hi }]);
   };
+  const setGutters = (value) => applyOps([{ type: 'set_shell', field: 'gutters', value }]);
+  const setDischarge = (value) => applyOps([{ type: 'set_shell', field: 'discharge', value }]);
 
   // switching chapters nudges you to the view that chapter is best done in
   const goChapter = (c) => { setActiveChapter(c.id); if (c.view) setViewMode(c.view === 'plan' ? 'plan' : '3d'); };
@@ -616,6 +619,8 @@ export default function App() {
                 onInsulation={setRoofInsulation}
                 onOverhang={setOverhang}
                 onShedFall={setShedFall}
+                onGutters={setGutters}
+                onDischarge={setDischarge}
               />
             )}
             <nav className="rz-chapters">
@@ -1321,7 +1326,7 @@ const ROOF_SHAPES = [
   { key: 'hip', label: 'Hip', note: 'Slopes on all four sides to a ridge.' },
   { key: 'flat', label: 'Flat', note: 'Near-level with a slight drainage fall.' }
 ];
-function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOverhang, onShedFall }) {
+function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOverhang, onShedFall, onGutters, onDischarge }) {
   const roofType = spec.shell.roofType || 'gable';
   const pitch = Number(spec.shell.roofPitch || 0.32);
   const insulKey = resolveInsulation(utilitiesOf(spec).roofInsulation, 'cellulose');
@@ -1390,6 +1395,63 @@ function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOver
         {perSide ? '▾ one overhang all around' : '▸ a different overhang per side'}
       </button>
       <div className="rz-shape-note">A 2-ft overhang is the minimum that keeps rain off plastered natural walls; 2–3 ft on the south shades summer sun without blocking winter light.</div>
+
+      <DrainageControls spec={spec} derived={derived} roofType={roofType} onGutters={onGutters} onDischarge={onDischarge} />
+    </div>
+  );
+}
+
+// Where the water goes. A shed sends its WHOLE roof to one low eave, so this
+// matters most there — but every roof sheds water somewhere. Gutters collect
+// it, downspouts (auto-counted) carry it down, and the discharge choice sends
+// it to grade, to a rain garden / dry well to soak in, or to barrels / a
+// cistern to keep.
+const GUTTER_OPTIONS = [
+  { key: 'none', label: 'No gutters — water drips off the eave' },
+  { key: 'eaves', label: 'Gutters on the draining edge' },
+  { key: 'all', label: 'Gutters all around' }
+];
+function DrainageControls({ spec, derived, roofType, onGutters, onDischarge }) {
+  const drainage = resolveDrainage(spec.shell);
+  const rainYr = Number((spec.site || {}).rainInYr) || 38;
+  const stormGal = Math.round(roofRunoffGallons(derived.roofArea, 1));
+  const yearGal = Math.round(roofRunoffGallons(derived.roofArea, rainYr));
+  const eaveLabel = roofType === 'shed'
+    ? `the low (${drainage.lowEave}) eave`
+    : roofType === 'gable' ? 'both long eaves' : 'the eaves';
+  return (
+    <div className="rz-drainage">
+      <div className="rz-found-head">Drainage — where the water goes</div>
+      <label className="rz-field">
+        <span>Gutters</span>
+        <select value={drainage.gutters} onChange={(e) => onGutters(e.target.value)}>
+          {GUTTER_OPTIONS.map((g) => (
+            <option key={g.key} value={g.key}>{g.key === 'eaves' ? `Gutters on ${eaveLabel}` : g.label}</option>
+          ))}
+        </select>
+      </label>
+      {drainage.gutters !== 'none' && (
+        <>
+          <label className="rz-field">
+            <span>Where the runoff goes</span>
+            <select value={drainage.discharge} onChange={(e) => onDischarge(e.target.value)}>
+              {Object.values(DRAINAGE_DISCHARGE).map((d) => (
+                <option key={d.key} value={d.key}>{d.green ? '🌿 ' : ''}{d.label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="rz-shape-note">
+            {drainage.downspouts} downspout{drainage.downspouts === 1 ? '' : 's'} on {Math.round(drainage.gutterLf)} ft of gutter. {drainage.dischargeSpec.note}
+          </div>
+        </>
+      )}
+      <div className="rz-runoff">
+        This roof sheds <b>~{stormGal.toLocaleString()} gal</b> in a 1-inch rain — about <b>{yearGal.toLocaleString()} gal a year</b> here.
+        {drainage.gutters !== 'none' && drainage.dischargeSpec.reuse ? ' You’re keeping it.' : drainage.gutters === 'none' ? ' Right now it just falls off the edge.' : ' Right now it soaks away.'}
+      </div>
+      {roofType === 'shed' && drainage.gutters === 'none' && (
+        <div className="rz-shape-note rz-warn-note">A shed dumps its entire roof at the {drainage.lowEave} eave — a gutter there keeps it from trenching the ground and splashing the wall.</div>
+      )}
     </div>
   );
 }

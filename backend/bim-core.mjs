@@ -1144,7 +1144,7 @@ export function resolveFrameType(spec, level = 1) {
 // grew a set_shell op the engine then threw away.
 const SHELL_FIELD_NAMES = new Set(['widthFt', 'depthFt', 'wallHeightFt', 'padExtensionFt', 'storeys',
   'basementHeightFt', 'basementHeated', 'upperStoreyHeightFt', 'overhangFt', 'roofType',
-  'designApproach', 'projectName', 'sitePad']);
+  'designApproach', 'projectName', 'sitePad', 'gutters', 'discharge']);
 
 export const parseWxD = (value) => {
   const m = /^\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*$/i.exec(String(value || ''));
