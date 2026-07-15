@@ -35,7 +35,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 35 · Jul 14';
+const UPDATE_STAMP = 'update 36 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -682,6 +682,18 @@ export default function App() {
         </button>
         {trailOpen && (
           <div className="rz-trail-body">
+            <nav className="rz-chapters rz-chapters-top">
+              {CHAPTERS.map((c, i) => (
+                <button
+                  key={c.id}
+                  className={`rz-chapter ${c.id === activeChapter ? 'active' : ''}`}
+                  onClick={() => goChapter(c)}
+                >
+                  <span className="rz-chapter-num">{i + 1}</span>
+                  <span className="rz-chapter-label">{c.label}</span>
+                </button>
+              ))}
+            </nav>
             {activeChapter === 'shape' && (
               <ShapeControls
                 spec={spec}
@@ -750,18 +762,6 @@ export default function App() {
                 onDischarge={setDischarge}
               />
             )}
-            <nav className="rz-chapters">
-              {CHAPTERS.map((c, i) => (
-                <button
-                  key={c.id}
-                  className={`rz-chapter ${c.id === activeChapter ? 'active' : ''}`}
-                  onClick={() => goChapter(c)}
-                >
-                  <span className="rz-chapter-num">{i + 1}</span>
-                  <span className="rz-chapter-label">{c.label}</span>
-                </button>
-              ))}
-            </nav>
             <button className="rz-build-btn" onClick={timelineOpen ? closeTimeline : openTimeline}>
               {timelineOpen ? '× Back to designing' : '▶ Watch it build'}
             </button>
