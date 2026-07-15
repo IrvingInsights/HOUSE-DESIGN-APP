@@ -81,17 +81,19 @@
   top: 50%; left: 16px; transform: translateY(-50%);
   border-radius: 18px; padding: 14px; width: 236px;
   max-height: calc(100vh - 32px); display: flex; flex-direction: column; overflow: hidden;
-  transition: width 0.18s ease;
 }
-.rz-trail.closed { width: 44px; padding: 8px; }
+.rz-trail.closed { width: 44px; min-width: 44px; padding: 8px; }
 /* only the content scrolls, so the collapse toggle stays pinned at the top */
 .rz-trail-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: -2px -4px 0; padding: 2px 4px 0; }
 .rz-trail-toggle {
   position: absolute; top: 10px; right: 10px;
-  width: 24px; height: 24px; border-radius: 8px; cursor: pointer;
-  border: 1px solid var(--line, #dbd9ce); background: var(--raise, #fff);
-  color: var(--earth); font-size: 15px; line-height: 1;
+  width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
+  border: none; background: var(--evergreen, #3c6472); color: #fff;
+  font-size: 17px; font-weight: 700; line-height: 1;
+  box-shadow: 0 2px 8px rgba(30, 40, 30, 0.25); z-index: 2;
 }
+.rz-trail-toggle:hover { filter: brightness(1.1); }
+.rz-trail.closed .rz-trail-toggle { right: 8px; top: 8px; }
 .rz-greeting {
   font-size: 14px; line-height: 1.5; color: var(--ink, #22251f);
   margin: 6px 30px 16px 4px;
@@ -452,6 +454,15 @@
 }
 .rz-found-pick:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 55%, transparent); }
 .rz-found-pick small { color: var(--moss, #868a7c); white-space: nowrap; }
+/* a placed run/pad row with its own size fields */
+.rz-found-run { border-radius: 10px; padding: 4px 2px; }
+.rz-found-run.sel { background: color-mix(in srgb, var(--sage, #e2ecee) 70%, transparent); }
+.rz-found-run-top { display: flex; align-items: center; gap: 4px; }
+.rz-run-size { display: flex; align-items: center; gap: 6px; padding: 4px 8px 2px; }
+.rz-run-size label { display: flex; align-items: center; gap: 5px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--moss, #868a7c); }
+.rz-run-size .rz-num { width: 66px; }
+.rz-run-x { color: var(--moss, #868a7c); }
+.rz-run-area { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--ink, #22251f); }
 
 /* the Trail's door into the Time Machine */
 .rz-build-btn {

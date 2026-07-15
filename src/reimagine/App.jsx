@@ -35,7 +35,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 27 · Jul 14';
+const UPDATE_STAMP = 'update 28 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -325,6 +325,22 @@ export default function App() {
       x: -2, y: -2, w: Number(spec.shell.widthFt) + 4, d: Number(spec.shell.depthFt) + 4, h: 0.35, level: 1
     }]);
   };
+  // A separate slab pad for an OUTSIDE space — carport, patio, walkway. It's
+  // its own foundation (a 'slabpad' element), sized to the use and dropped
+  // beside the house to drag into place.
+  const placeOutdoorPad = (pad) => {
+    const runs = (spec.elements || []).filter((el) => el.category === 'foundation');
+    const same = runs.filter((el) => el.name === pad.name || el.name.startsWith(`${pad.name} `)).length;
+    const name = same === 0 ? pad.name : `${pad.name} ${same + 1}`;
+    applyOps([{
+      type: 'add_element', name, category: 'foundation', construction: 'slabpad',
+      x: Number(spec.shell.widthFt) + 3, y: 2 + runs.length * 3, w: pad.w, d: pad.d, h: 0.35, level: 1
+    }]);
+  };
+  // Set a run's size numerically — no dragging needed. For a strip run the
+  // number IS its length (the long axis, thin dimension kept); a pad takes
+  // width × depth.
+  const sizeRun = (el, w, d) => applyOps([{ type: 'resize_object', targetId: el.id, name: el.name, w, d, h: Number(el.h) || 0.35 }]);
   const placeFoundationRun = (preset) => {
     // Land beside the house (never at 0,0 — that's "unset" to the op layer),
     // staggered so repeated drops don't pile up; then drag it into place. Each
@@ -689,6 +705,8 @@ export default function App() {
                 onShell={setShellField}
                 onPlaceRun={placeFoundationRun}
                 onPlacePad={placeSlabPad}
+                onPlaceOutdoorPad={placeOutdoorPad}
+                onSizeRun={sizeRun}
                 onRemoveRun={removeElement}
                 onSelectRun={setSelectedId}
               />
@@ -1223,24 +1241,35 @@ function NumInput({ value, min, max, step = 1, unit = 'ft', onCommit }) {
 // Foundation chapter: the main type the house sits on, plus footing runs that
 // live on their own layout — under a heavy interior wall, a porch, a future
 // addition, inside or outside the rooms.
-function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, onPlaceRun, onPlacePad, onRemoveRun, onSelectRun }) {
+// Outdoor slab pads — a separate foundation under a space that isn't the house.
+const OUTDOOR_PADS = [
+  { name: 'Carport pad', w: 20, d: 12 },
+  { name: 'Patio pad', w: 14, d: 12 },
+  { name: 'Porch pad', w: 16, d: 8 },
+  { name: 'Walkway', w: 3, d: 20 }
+];
+function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, onPlaceRun, onPlacePad, onPlaceOutdoorPad, onSizeRun, onRemoveRun, onSelectRun }) {
   const u = utilitiesOf(spec);
   const basement = basementInfo(spec.shell);
   const typeVal = basement.present ? 'basement' : u.foundationType;
   const runs = (spec.elements || []).filter((el) => el.category === 'foundation');
+  const isPad = (el) => Boolean(FOUNDATION_RUN_TYPES[el.construction]?.perSf);
   const runCost = (el) => {
     const t = FOUNDATION_RUN_TYPES[el.construction] || FOUNDATION_RUN_TYPES.rubble;
     if (t.perSf) return Math.round((Number(el.w) * Number(el.d) || 0) * t.costSf);
     const lf = Math.max(Number(el.w) || 0, Number(el.d) || 0);
     return Math.round(lf * (t.costLf + t.stemCostLfFt * (Number(el.h) || 0)));
   };
-  const runMeasure = (el) => (FOUNDATION_RUN_TYPES[el.construction]?.perSf
-    ? `${Math.round(Number(el.w) * Number(el.d) || 0)} sf`
-    : `${Math.round(Math.max(Number(el.w) || 0, Number(el.d) || 0))} ft`);
+  // Set a strip run's LENGTH along its long axis, keeping its thin side.
+  const setRunLength = (el, len) => {
+    const alongW = (Number(el.w) || 0) >= (Number(el.d) || 0);
+    onSizeRun(el, alongW ? len : Number(el.w), alongW ? Number(el.d) : len);
+  };
+  const runLength = (el) => Math.round(Math.max(Number(el.w) || 0, Number(el.d) || 0) * 10) / 10;
   return (
     <div className="rz-found">
       <label className="rz-field">
-        <span>Main foundation</span>
+        <span>Main foundation (under the house)</span>
         <select value={typeVal} onChange={(e) => onChoose(e.target.value)}>
           <option value="rubble">🌿 Rubble trench — drained gravel, the least concrete</option>
           <option value="stemwall">Stem wall — concrete wall on a footing</option>
@@ -1260,11 +1289,22 @@ function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, on
           <NumInput value={basement.heightFt} min={6} max={12} step={0.5} onCommit={(v) => onShell('basementHeightFt', v)} />
         </label>
       )}
-      <div className="rz-found-head">The foundation's own layout</div>
+
+      <div className="rz-found-head">Pads for outside spaces</div>
+      <div className="rz-found-palette">
+        {OUTDOOR_PADS.map((pad) => (
+          <button key={pad.name} type="button" title={`A ${pad.w}×${pad.d} ft slab pad — resize it below or on the plan`} onClick={() => onPlaceOutdoorPad(pad)}>
+            <b>{pad.name}</b>
+            <small>{pad.w} × {pad.d} ft · ${FOUNDATION_RUN_TYPES.slabpad.costSf}/sf</small>
+          </button>
+        ))}
+      </div>
       <button type="button" className="rz-pad-btn" title={FOUNDATION_RUN_TYPES.slabpad.note} onClick={onPlacePad}>
         <b>Slab — one shape, any size</b>
-        <small>drops 2 ft bigger than the house · ${FOUNDATION_RUN_TYPES.slabpad.costSf}/sf{typeVal === 'slab' ? ' · becomes THE slab' : ''}</small>
+        <small>drops 2 ft bigger than the house{typeVal === 'slab' ? ' · becomes THE slab' : ''}</small>
       </button>
+
+      <div className="rz-found-head">Footings under specific walls</div>
       <div className="rz-found-palette">
         {FOUNDATION_RUN_PRESETS.map((preset) => {
           const t = FOUNDATION_RUN_TYPES[preset.construction];
@@ -1276,20 +1316,34 @@ function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, on
           );
         })}
       </div>
+
       {runs.length > 0 && (
         <div className="rz-found-list">
           {runs.map((el) => (
-            <div key={el.id} className={`rz-found-row ${selectedId === el.id ? 'sel' : ''}`}>
-              <button type="button" className="rz-found-pick" onClick={() => onSelectRun(el.id)}>
-                {(FOUNDATION_RUN_TYPES[el.construction] || FOUNDATION_RUN_TYPES.rubble).label}
-                <small>{runMeasure(el)} · {fmtMoney(runCost(el))}{FOUNDATION_RUN_TYPES[el.construction]?.perSf && typeVal === 'slab' ? ' — this IS the slab line' : ''}</small>
-              </button>
-              <button type="button" className="rz-x" title="Remove this footing" onClick={() => onRemoveRun(el)}>×</button>
+            <div key={el.id} className={`rz-found-run ${selectedId === el.id ? 'sel' : ''}`}>
+              <div className="rz-found-run-top">
+                <button type="button" className="rz-found-pick" onClick={() => onSelectRun(el.id)}>
+                  {el.name}<small>{fmtMoney(runCost(el))}{isPad(el) && typeVal === 'slab' ? ' — this IS the slab' : ''}</small>
+                </button>
+                <button type="button" className="rz-x" title="Remove this" onClick={() => onRemoveRun(el)}>×</button>
+              </div>
+              {isPad(el) ? (
+                <div className="rz-run-size">
+                  <label>W<NumInput value={Math.round(Number(el.w) * 10) / 10} min={2} max={120} step={0.5} unit="ft" onCommit={(v) => onSizeRun(el, v, Number(el.d))} /></label>
+                  <span className="rz-run-x">×</span>
+                  <label>D<NumInput value={Math.round(Number(el.d) * 10) / 10} min={2} max={120} step={0.5} unit="ft" onCommit={(v) => onSizeRun(el, Number(el.w), v)} /></label>
+                  <span className="rz-run-area">{Math.round(Number(el.w) * Number(el.d))} sf</span>
+                </div>
+              ) : (
+                <div className="rz-run-size">
+                  <label>Total length<NumInput value={runLength(el)} min={1} max={200} step={0.5} unit="ft" onCommit={(v) => setRunLength(el, v)} /></label>
+                </div>
+              )}
             </div>
           ))}
         </div>
       )}
-      <div className="rz-shape-note">Drop one, then drag and stretch it on the plan — bigger than the house, under a porch, anywhere. Strips price by the foot, slab shapes by the square foot; with a slab foundation your drawn shape IS the slab, priced once.</div>
+      <div className="rz-shape-note">Set the size right here, or drag and stretch each pad/run on the plan. Footings price by the foot; pads by the square foot; with a slab main foundation, a pad over the house becomes the slab (priced once).</div>
     </div>
   );
 }
