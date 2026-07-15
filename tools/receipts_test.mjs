@@ -30,6 +30,11 @@ const fixtures = () => {
   const padExtra = structuredClone(seedSpec);
   padExtra.utilities = { ...(padExtra.utilities || {}), foundationType: 'rubble' };
   padExtra.elements = [{ id: 'pad2', name: 'Carport slab', category: 'foundation', construction: 'slabpad', x: 40, y: 2, w: 20, d: 12, h: 0.35, level: 1 }];
+  // padOutsideOnSlab = a carport pad OUTSIDE the house, on a SLAB foundation —
+  // it must stay SEPARATE (not absorbed as the house slab).
+  const padOutsideOnSlab = structuredClone(seedSpec);
+  padOutsideOnSlab.utilities = { ...(padOutsideOnSlab.utilities || {}), foundationType: 'slab' };
+  padOutsideOnSlab.elements = [{ id: 'pad3', name: 'Carport pad', category: 'foundation', construction: 'slabpad', x: 40, y: 2, w: 20, d: 12, h: 0.35, level: 1 }];
   // a shed roof with full drainage: gutters all around + a cistern
   const drained = structuredClone(seedSpec);
   drained.shell = { ...drained.shell, roofType: 'shed', southWallHeightFt: 12, northWallHeightFt: 8, gutters: 'all', discharge: 'cistern' };
@@ -40,6 +45,7 @@ const fixtures = () => {
     loaded,
     padSlab,
     padExtra,
+    padOutsideOnSlab,
     drained
   };
 };
@@ -81,6 +87,14 @@ for (const [name, spec] of Object.entries(fixtures())) {
   const dExtra = deriveDesign(f.padExtra, getWallSections(f.padExtra));
   ok(Math.abs(dExtra.cost.foundation - (1008 * 8 + 128 * 6 + 240 * 15)) < 0.5,
     `padExtra: rubble house + 240 sf extra slab (got ${Math.round(dExtra.cost.foundation)})`);
+  // The fix: a carport pad OUTSIDE the house on a SLAB foundation stays a
+  // SEPARATE slab — the house slab is still just the floor (1008), and the
+  // 240 sf pad is priced on top, not absorbed.
+  const dOut = deriveDesign(f.padOutsideOnSlab, getWallSections(f.padOutsideOnSlab));
+  ok(Math.abs(dOut.cost.foundation - (1008 * 15 + 128 * 6 + 240 * 15)) < 0.5,
+    `padOutsideOnSlab: slab house (1008 sf) + separate 240 sf carport slab (got ${Math.round(dOut.cost.foundation)})`);
+  ok(dOut.receipts.systems.foundation.some((l) => /outside spaces/i.test(l.label)),
+    'padOutsideOnSlab: a separate "Slab for outside spaces" receipt line exists');
 }
 
 // Drainage lands in the roof line, itemized: gutters (perimeter × $8) +

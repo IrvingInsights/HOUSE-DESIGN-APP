@@ -3570,9 +3570,21 @@ export function deriveDesign(spec, wallSections) {
   // slab area (a carport apron beside a rubble-trench house).
   const foundationElements = (spec.elements || []).filter((element) => element.category === 'foundation');
   const slabPads = foundationElements.filter((element) => FOUNDATION_RUN_TYPES[element.construction]?.perSf);
-  const slabPadArea = slabPads.reduce((sum, element) => sum + (Number(element.w) * Number(element.d) || 0), 0);
-  const padIsTheSlab = !basement.present && utilities.foundationType === 'slab' && slabPadArea > 0;
-  const mainSlabArea = padIsTheSlab ? Math.max(slabPadArea, floor) : floor;
+  // A pad only BECOMES the house slab if it actually covers the footprint. A
+  // pad placed OUTSIDE — a patio or carport slab — is always separate concrete,
+  // never absorbed into the house slab, whatever the main foundation is.
+  const houseArea = Math.max(1, w * d);
+  const padCoversHouse = (el) => {
+    const px = Number(el.x) || 0, py = Number(el.y) || 0, pw = Number(el.w) || 0, pd = Number(el.d) || 0;
+    const ox = Math.max(0, Math.min(px + pw, w) - Math.max(px, 0));
+    const oy = Math.max(0, Math.min(py + pd, d) - Math.max(py, 0));
+    return ox * oy >= 0.4 * houseArea;
+  };
+  const coveringPadArea = slabPads.filter(padCoversHouse).reduce((sum, el) => sum + (Number(el.w) * Number(el.d) || 0), 0);
+  const outsidePadArea = slabPads.filter((el) => !padCoversHouse(el)).reduce((sum, el) => sum + (Number(el.w) * Number(el.d) || 0), 0);
+  const slabPadArea = coveringPadArea + outsidePadArea;
+  const padIsTheSlab = !basement.present && utilities.foundationType === 'slab' && coveringPadArea > 0;
+  const mainSlabArea = padIsTheSlab ? Math.max(coveringPadArea, floor) : floor;
   // A basement IS the foundation: concrete perimeter walls by face area plus
   // a slab — it supersedes the rubble/stemwall/slab choice while present.
   const foundationCostBase = (basement.present
@@ -3586,8 +3598,11 @@ export function deriveDesign(spec, wallSections) {
   // stem type adds its height component. Slab pads price by AREA — unless the
   // pad already became the main slab above. All fold into the foundation line.
   const foundationRuns = foundationElements.filter((element) => !FOUNDATION_RUN_TYPES[element.construction]?.perSf);
-  const slabPadCost = padIsTheSlab ? 0 : slabPadArea * (FOUNDATION_RUN_TYPES.slabpad.costSf);
-  const slabPadCarbon = padIsTheSlab ? 0 : slabPadArea * (FOUNDATION_RUN_TYPES.slabpad.carbonSf);
+  // Extra slab = outside pads (always) + any covering pad NOT already counted
+  // as the main slab. Never double-counts the concrete that became the house slab.
+  const extraPadArea = outsidePadArea + (padIsTheSlab ? 0 : coveringPadArea);
+  const slabPadCost = extraPadArea * (FOUNDATION_RUN_TYPES.slabpad.costSf);
+  const slabPadCarbon = extraPadArea * (FOUNDATION_RUN_TYPES.slabpad.carbonSf);
   const stripRunCost = foundationRuns.reduce((sum, element) => {
     const runType = FOUNDATION_RUN_TYPES[element.construction] || FOUNDATION_RUN_TYPES.rubble;
     const lengthFt = Math.max(Number(element.w) || 0, Number(element.d) || 0);
@@ -3747,7 +3762,7 @@ export function deriveDesign(spec, wallSections) {
         : rline('Perimeter insulation', perimeterFt * 6, perimeterFt, 'ft of perimeter', 6));
     }
     if (stripRunCost > 0) lines.push(rline('Foundation strips', stripRunCost, null, '', null, `${foundationRuns.length} placed run${foundationRuns.length === 1 ? '' : 's'} under specific walls, priced by the foot`));
-    if (slabPadCost > 0) lines.push(rline('Extra slab (drawn shapes)', slabPadCost, slabPadArea, 'sf of slab', FOUNDATION_RUN_TYPES.slabpad.costSf, 'slab beyond the main foundation — a carport apron, a patio pad'));
+    if (slabPadCost > 0) lines.push(rline('Slab for outside spaces', slabPadCost, extraPadArea, 'sf of slab', FOUNDATION_RUN_TYPES.slabpad.costSf, 'separate slab outside the house — a carport, patio, or porch pad'));
     costReceipts.foundation = lines;
   }
   { // frame
