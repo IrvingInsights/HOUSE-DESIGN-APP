@@ -3,7 +3,7 @@ import { ThreeScene, webglAvailable } from '../threeScene.jsx';
 import { PlanView } from '../planView.jsx';
 import {
   applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
-  INSULATION_TYPES, resolveInsulation
+  INSULATION_TYPES, resolveInsulation, OPENING_TYPES
 } from '../../backend/bim-core.mjs';
 import {
   seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS,
@@ -35,7 +35,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 37 · Jul 15';
+const UPDATE_STAMP = 'update 38 · Jul 15';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -241,6 +241,25 @@ export default function App() {
   const moveObject = (id, x, y) => { const o = findObj(id); if (o) applyOps([{ type: 'move_object', targetId: id, name: o.name, x, y }]); };
   const resizeObject = (id, x, y, w, d) => {
     const o = findObj(id); if (!o) return;
+    // Dragging an upper storey's extent plate smaller: pull its rooms in to fit
+    // so the plate keeps the size dragged instead of snapping back out to cover
+    // them (same rule as the numeric resizeFloor).
+    if (o.category === 'floor' && Number(o.level || 1) >= 2) {
+      const ops = [
+        { type: 'resize_object', targetId: id, name: o.name, w, d, h: Number(o.h) || 0.4 },
+        { type: 'move_object', targetId: id, name: o.name, x, y }
+      ];
+      (spec.rooms || []).filter((r) => Number(r.level || 1) === Number(o.level || 1)).forEach((r) => {
+        const nw = Math.min(Number(r.w), w);
+        const nd = Math.min(Number(r.d), d);
+        const nx = clamp(Number(r.x), x, x + w - nw);
+        const ny = clamp(Number(r.y), y, y + d - nd);
+        if (nw !== Number(r.w) || nd !== Number(r.d)) ops.push({ type: 'resize_object', targetId: r.id, name: r.name, w: nw, d: nd, h: Number(r.h) || 0.22 });
+        if (nx !== Number(r.x) || ny !== Number(r.y)) ops.push({ type: 'move_object', targetId: r.id, name: r.name, x: nx, y: ny });
+      });
+      applyOps(ops);
+      return;
+    }
     applyOps([
       { type: 'resize_object', targetId: id, name: o.name, w, d, h: Number(o.h) || 0.22 },
       { type: 'move_object', targetId: id, name: o.name, x, y }
@@ -269,6 +288,21 @@ export default function App() {
     const op = spec.openings?.[index]; if (!op || op.wall === 'roof') return;
     const field = op.wall === 'north' || op.wall === 'south' ? 'x' : 'y';
     applyOps([{ type: 'update_object', targetId: `opening-${index}`, field, value: along }]);
+  };
+  // Openings: drop a door/window on a wall (centered on that wall to start),
+  // or pull one out. Position and width are then tuned by dragging on the plan.
+  const addOpening = (wall, type) => {
+    const profile = OPENING_TYPES[type] || OPENING_TYPES.window;
+    const isRoof = wall === 'roof' || profile.roof;
+    const wallLen = wall === 'north' || wall === 'south' ? Number(spec.shell.widthFt) : Number(spec.shell.depthFt);
+    const widthFt = profile.defaultW || 3;
+    const positionFt = isRoof ? Number(spec.shell.widthFt) / 2 : Math.max(0.5, wallLen / 2 - widthFt / 2);
+    applyOps([{ type: 'add_opening', wall: isRoof ? 'roof' : wall, openingType: type, widthFt, positionFt }]);
+  };
+  const removeOpening = (index) => applyOps([{ type: 'remove_object', targetId: `opening-${index}` }]);
+  const sizeOpening = (index, widthFt) => {
+    const op = spec.openings?.[index]; if (!op) return;
+    applyOps([{ type: 'update_object', targetId: `opening-${index}`, field: 'widthFt', value: clamp(Number(widthFt), 1, 24) }]);
   };
   // Size any single object (room or element) — width × depth, position kept.
   const sizeObject = (obj, w, d) => applyOps([{ type: 'resize_object', targetId: obj.id, name: obj.name, w, d, h: Number(obj.h) || 0.22 }]);
@@ -302,6 +336,36 @@ export default function App() {
       .forEach((room) => ops.push({ type: 'update_object', targetId: room.id, name: room.name, field: 'level', value: '1' }));
     applyOps(ops);
     setActiveFloor((f) => (f === BASEMENT_LEVEL ? f : Math.min(f, floors - 1)));
+  };
+  // Size a floor's footprint by the numbers — reliable where a corner-drag is
+  // fiddly. Ground floor IS the shell; an upper floor is its extent plate. Any
+  // rooms on an upper floor are pulled in to fit the new outline, so the plate
+  // keeps the size you set instead of snapping back out to cover them.
+  const resizeFloor = (level, w, d) => {
+    const W = clamp(Number(w), 8, 96);
+    const D = clamp(Number(d), 8, 80);
+    if (level === 1) { resizeShell(W, D); return; }
+    const plate = (spec.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === level);
+    if (!plate) return;
+    const px = Number(plate.x) || 0;
+    const py = Number(plate.y) || 0;
+    const ops = [{ type: 'resize_object', targetId: plate.id, name: plate.name, w: W, d: D, h: Number(plate.h) || 0.4 }];
+    (spec.rooms || []).filter((r) => Number(r.level || 1) === level).forEach((r) => {
+      const nw = Math.min(Number(r.w), W);
+      const nd = Math.min(Number(r.d), D);
+      const nx = clamp(Number(r.x), px, px + W - nw);
+      const ny = clamp(Number(r.y), py, py + D - nd);
+      if (nw !== Number(r.w) || nd !== Number(r.d)) ops.push({ type: 'resize_object', targetId: r.id, name: r.name, w: nw, d: nd, h: Number(r.h) || 0.22 });
+      if (nx !== Number(r.x) || ny !== Number(r.y)) ops.push({ type: 'move_object', targetId: r.id, name: r.name, x: nx, y: ny });
+    });
+    applyOps(ops);
+  };
+  // One height knob per floor. The ground floor's height is the wall height
+  // (drives the roof); upper storeys carry their own upperStoreyHeightFt.
+  const setFloorHeight = (level, ft) => {
+    const v = clamp(Number(ft), 7, 16);
+    if (level === 1) setShellField('wallHeightFt', v);
+    else setShellField('upperStoreyHeightFt', v);
   };
 
   // --- foundation: the main type + free-roaming footing runs ----------------
@@ -706,6 +770,12 @@ export default function App() {
             )}
             {activeChapter === 'rooms' && (
               <div className="rz-found">
+                <FloorSizeControls
+                  spec={spec}
+                  level={activeFloor}
+                  onResizeFloor={resizeFloor}
+                  onFloorHeight={setFloorHeight}
+                />
                 <div className="rz-found-head">Add a room{activeFloor !== 1 ? ` — ${floorLabel(spec, activeFloor).toLowerCase()}` : ''}</div>
                 <div className="rz-found-palette rz-rooms-palette">
                   {ROOM_PRESETS.map((preset) => (
@@ -719,6 +789,19 @@ export default function App() {
                 {roomNote && <div className="rz-shape-note">{roomNote}</div>}
                 <div className="rz-shape-note">Tap a room on the plan to rename or remove it (or press Delete). Right-click for more.</div>
               </div>
+            )}
+            {activeChapter === 'openings' && (
+              <OpeningsControls
+                spec={spec}
+                selectedId={selectedId}
+                onAdd={addOpening}
+                onRemove={removeOpening}
+                onSize={sizeOpening}
+                onSelect={(index) => setSelectedId(`opening-${index}`)}
+              />
+            )}
+            {activeChapter === 'systems' && (
+              <SystemsControls spec={spec} derived={derived} onUtility={setUtilityField} />
             )}
             {activeChapter === 'foundation' && (
               <FoundationControls
@@ -1277,6 +1360,166 @@ function NumInput({ value, min, max, step = 1, unit = 'ft', onCommit }) {
       />
       <em>{unit}</em>
     </span>
+  );
+}
+
+// Per-floor size + height, shown in the Rooms chapter for whichever floor is
+// active. Numbers are the reliable way to size a floor (a corner-drag is fussy
+// on a small upper storey); the ground floor is the shell itself, an upper
+// storey its own footprint, and every floor gets a height.
+function FloorSizeControls({ spec, level, onResizeFloor, onFloorHeight }) {
+  if (level === BASEMENT_LEVEL) return null;
+  const isUpper = level > 1;
+  const plate = isUpper ? (spec.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === level) : null;
+  const w = isUpper ? Math.round((Number(plate?.w) || Number(spec.shell.widthFt)) * 10) / 10 : Number(spec.shell.widthFt);
+  const d = isUpper ? Math.round((Number(plate?.d) || Number(spec.shell.depthFt)) * 10) / 10 : Number(spec.shell.depthFt);
+  const { baseWallFt, upperFt } = storeyInfo(spec.shell);
+  const h = isUpper ? upperFt : baseWallFt;
+  return (
+    <div className="rz-floor-size">
+      <div className="rz-found-head">{floorLabel(spec, level)} — size &amp; height</div>
+      <div className="rz-floor-grid">
+        <label className="rz-field rz-field-num">
+          <span>Width</span>
+          <NumInput value={w} min={8} max={96} step={0.5} onCommit={(v) => onResizeFloor(level, v, d)} />
+        </label>
+        <label className="rz-field rz-field-num">
+          <span>Depth</span>
+          <NumInput value={d} min={8} max={80} step={0.5} onCommit={(v) => onResizeFloor(level, w, v)} />
+        </label>
+        <label className="rz-field rz-field-num">
+          <span>Height</span>
+          <NumInput value={Math.round(h * 10) / 10} min={7} max={16} step={0.5} onCommit={(v) => onFloorHeight(level, v)} />
+        </label>
+      </div>
+      <div className="rz-shape-note">
+        {isUpper
+          ? 'This storey can be smaller than the one below — a setback or half-storey. Shrinking it pulls its rooms in to fit; the roof steps down over the rest.'
+          : 'The ground floor is the whole footprint. Give each storey its own height.'}
+      </div>
+    </div>
+  );
+}
+
+// Openings chapter: drop doors and windows on a wall, then slide them on the
+// plan. Every opening type the engine knows is one tap; skylights land on the
+// roof. Openings live on the ground floor for now (upper-storey glazing +
+// dormers are a later pass — noted to Daniel).
+const OPENING_GROUPS = [
+  { head: 'Windows', keys: ['window', 'picture', 'awning', 'clerestory', 'bay'] },
+  { head: 'Doors', keys: ['door', 'french', 'slider', 'dutch', 'barn'] },
+  { head: 'Roof', keys: ['skylight'] }
+];
+function OpeningsControls({ spec, selectedId, onAdd, onRemove, onSize, onSelect }) {
+  const [wall, setWall] = useState('south');
+  const openings = spec.openings || [];
+  return (
+    <div className="rz-found">
+      <label className="rz-field">
+        <span>Add to which wall</span>
+        <select value={wall} onChange={(e) => setWall(e.target.value)}>
+          {WALL_SIDES.map((side) => <option key={side} value={side}>{WALL_SIDE_LABELS[side]}{side === 'south' ? ' — the sunny face' : ''}</option>)}
+        </select>
+      </label>
+      {OPENING_GROUPS.map((group) => (
+        <div key={group.head} className="rz-open-group">
+          <div className="rz-found-head">{group.head}</div>
+          <div className="rz-found-palette rz-open-palette">
+            {group.keys.map((key) => (
+              <button key={key} type="button" title={`${OPENING_TYPES[key].defaultW}′ to start — drag it along the wall after`} onClick={() => onAdd(wall, key)}>
+                <b>{OPENING_TYPES[key].label}</b>
+                <small>{group.head === 'Roof' ? 'on the roof' : `on the ${WALL_SIDE_LABELS[wall].toLowerCase()} wall`}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+      {openings.length > 0 && (
+        <div className="rz-open-list">
+          <div className="rz-found-head">Placed openings</div>
+          {openings.map((o, i) => {
+            const prof = OPENING_TYPES[o.type] || OPENING_TYPES.window;
+            const sel = String(selectedId || '') === `opening-${i}`;
+            return (
+              <div key={i} className={`rz-run-row${sel ? ' on' : ''}`}>
+                <button type="button" className="rz-run-name" onClick={() => onSelect(i)}>
+                  {o.label || prof.label} <small>{o.wall}</small>
+                </button>
+                <label className="rz-field rz-field-num rz-run-size">
+                  <NumInput value={Math.round((Number(o.widthFt) || prof.defaultW) * 10) / 10} min={1} max={24} step={0.5} onCommit={(v) => onSize(i, v)} />
+                </label>
+                <button type="button" className="rz-remove" title="Remove this opening" onClick={() => onRemove(i)}>✕</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div className="rz-shape-note">Openings sit on the ground floor for now. Slide any one along its wall by dragging it on the plan.</div>
+    </div>
+  );
+}
+
+// Systems chapter: the working parts — water, waste, power, heat. Plain choices
+// that drive the receipts and the council checks; DIY toggles turn labor into
+// sweat equity. (Mirrors the classic app's system pages, one dispatch each.)
+function SystemsControls({ spec, derived, onUtility }) {
+  const u = utilitiesOf(spec);
+  const gpd = Math.round(Number(derived?.septicGpd) || 0);
+  return (
+    <div className="rz-found">
+      <label className="rz-field">
+        <span>Water — where it comes from</span>
+        <select value={u.waterSource} onChange={(e) => onUtility('waterSource', e.target.value)}>
+          <option value="well">Drilled well — reliable, needs a pump</option>
+          <option value="spring">Spring — cheap if the land has one</option>
+          <option value="catchment">🌿 Rain catchment — roof + rain</option>
+          <option value="town">Town main — simplest</option>
+        </select>
+      </label>
+      <label className="rz-field rz-field-num">
+        <span>Storage tank</span>
+        <NumInput value={Number(u.tankGal) || 0} min={0} max={50000} step={100} unit="gal" onCommit={(v) => onUtility('tankGal', v)} />
+      </label>
+
+      <label className="rz-field">
+        <span>Waste — where used water goes</span>
+        <select value={u.wasteMethod} onChange={(e) => onUtility('wasteMethod', e.target.value)}>
+          <option value="septic">Septic + leach field — conventional</option>
+          <option value="composting">🌿 Composting toilet + greywater</option>
+          <option value="reedbed">Reed bed / constructed wetland</option>
+        </select>
+      </label>
+      {u.wasteMethod === 'septic' && (
+        <label className="rz-field rz-field-num">
+          <span>Well → septic</span>
+          <NumInput value={Number(u.wellSepticFt) || 120} min={0} max={2000} step={5} unit="ft" onCommit={(v) => onUtility('wellSepticFt', v)} />
+        </label>
+      )}
+
+      <label className="rz-field">
+        <span>Power — where electricity comes from</span>
+        <select value={u.powerMode} onChange={(e) => onUtility('powerMode', e.target.value)}>
+          <option value="offgrid">Off-grid — panels + battery, independent</option>
+          <option value="hybrid">Grid + solar — panels, grid as backup</option>
+          <option value="gridtie">Grid only — simplest, no battery</option>
+        </select>
+      </label>
+
+      <label className="rz-field">
+        <span>Heat — how you stay warm</span>
+        <select value={u.heatSource} onChange={(e) => onUtility('heatSource', e.target.value)}>
+          <option value="rocket_mass">🌿 Rocket mass heater — wood, very DIY</option>
+          <option value="masonry">Masonry heater — wood, slow radiant</option>
+          <option value="wood_stove">Wood stove — simple, familiar</option>
+          <option value="minisplit">Electric mini-split — no wood, draws power</option>
+        </select>
+      </label>
+      <label className="rz-nowall">
+        <input type="checkbox" checked={Boolean(u.diyHeat)} onChange={(e) => onUtility('diyHeat', e.target.checked)} />
+        <span>I'll build the heater myself (sweat equity)</span>
+      </label>
+      <div className="rz-shape-note">Design flow ≈ {gpd} gal/day. A septic field must sit at least 100 ft from a well; composting sidesteps most of that. Each choice updates the receipts.</div>
+    </div>
   );
 }
 

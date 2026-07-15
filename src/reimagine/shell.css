@@ -504,6 +504,28 @@
 .rz-run-x { color: var(--moss, #868a7c); }
 .rz-run-area { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--ink, #22251f); }
 
+/* per-floor size + height block (Rooms chapter) */
+.rz-floor-size { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 55%, transparent); }
+.rz-floor-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.rz-floor-grid .rz-field-num { flex-direction: column; align-items: stretch; gap: 3px; }
+.rz-floor-grid .rz-num { width: 100%; }
+
+/* Openings chapter */
+.rz-open-group { margin-top: 6px; }
+.rz-open-palette button small { text-transform: none; }
+.rz-open-list { margin-top: 10px; display: flex; flex-direction: column; gap: 2px; }
+.rz-run-row { display: flex; align-items: center; gap: 4px; border-radius: 9px; padding: 2px; }
+.rz-run-row.on { background: color-mix(in srgb, var(--sage, #e2ecee) 70%, transparent); }
+.rz-run-name {
+  flex: 1; display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  border: none; background: transparent; cursor: pointer; font: inherit; font-size: 12.5px;
+  color: var(--ink, #22251f); padding: 5px 8px; border-radius: 9px; text-align: left;
+}
+.rz-run-name:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 55%, transparent); }
+.rz-run-name small { color: var(--moss, #868a7c); text-transform: capitalize; }
+.rz-run-row .rz-run-size { padding: 0; }
+.rz-run-row .rz-num { width: 62px; }
+
 /* the Trail's door into the Time Machine */
 .rz-build-btn {
   margin: 12px 4px 0; width: calc(100% - 8px);
