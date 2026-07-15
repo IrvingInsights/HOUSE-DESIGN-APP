@@ -215,16 +215,20 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
   // Is there anything out there beyond the house frame worth switching for?
   const siteBeyondHouse = fitBox.x < houseBox.x - 1 || fitBox.y < houseBox.y - 1
     || fitBox.x + fitBox.w > houseBox.x + houseBox.w + 1 || fitBox.y + fitBox.h > houseBox.y + houseBox.h + 1;
-  const [planFrame, setPlanFrame] = useState(siteContext ? 'site' : 'house');
+  // Foundation pads/footings usually sit OUTSIDE the house, so frame the whole
+  // site there (like the site context) — a pad dropped east of the house must
+  // be visible, not off the edge.
+  const siteLikeFrame = siteContext || context === 'foundation';
+  const [planFrame, setPlanFrame] = useState(siteLikeFrame ? 'site' : 'house');
   const [viewOverride, setViewOverride] = useState(null);
   const [panDrag, setPanDrag] = useState(null);
   const vb = viewOverride || (planFrame === 'site' && siteBeyondHouse ? fitBox : houseBox);
   const vbRef = useRef(vb); vbRef.current = vb;
   const fitBoxRef = useRef(fitBox); fitBoxRef.current = fitBox;
   useEffect(() => {
-    setPlanFrame(siteContext ? 'site' : 'house');
+    setPlanFrame(siteLikeFrame ? 'site' : 'house');
     setViewOverride(null);
-  }, [activeFloor, context, siteContext]);
+  }, [activeFloor, context, siteContext, siteLikeFrame]);
   // Wheel = zoom at the cursor. Manual listener: React's onWheel can't
   // preventDefault (passive), and the page must not scroll instead.
   useEffect(() => {
