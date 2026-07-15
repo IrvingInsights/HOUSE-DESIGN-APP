@@ -35,7 +35,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 26 · Jul 14';
+const UPDATE_STAMP = 'update 27 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -143,6 +143,11 @@ export default function App() {
   const [phaseOrder, setPhaseOrder] = useState(null);
   const [focusPhaseId, setFocusPhaseId] = useState(null);
   const [timelineMsg, setTimelineMsg] = useState(null);
+  // Undo/redo: stacks of past/future spec snapshots. Clipboard: a copied
+  // room or element, for cut/copy/paste.
+  const [undoStack, setUndoStack] = useState([]);
+  const [redoStack, setRedoStack] = useState([]);
+  const [clipboard, setClipboard] = useState(null);
 
   const webglOK = useMemo(() => webglAvailable(), []);
   const wallSections = useMemo(() => getWallSections(spec), [spec]);
@@ -207,9 +212,31 @@ export default function App() {
 
   // --- direct editing: apply ops CLIENT-SIDE, no server round-trip ----------
   const findObj = (id) => spec.rooms.find((r) => r.id === id) || (spec.elements || []).find((e) => e.id === id);
+  // Every change goes through commitSpec so it lands on the undo stack (capped
+  // at 80) and clears the redo future. Undo/redo just swap snapshots.
+  const commitSpec = (nextSpec) => {
+    setUndoStack((st) => [...st, spec].slice(-80));
+    setRedoStack([]);
+    setSpec(nextSpec);
+  };
   const applyOps = (operations) => {
     const report = applyBimOperations(spec, { operations });
-    if (report?.spec) setSpec(report.spec);
+    if (report?.spec) commitSpec(report.spec);
+  };
+  const undo = () => {
+    if (!undoStack.length) return;
+    const prev = undoStack[undoStack.length - 1];
+    setUndoStack(undoStack.slice(0, -1));
+    setRedoStack((r) => [...r, spec].slice(-80));
+    setSpec(prev);
+    setSelectedId((id) => (prev.rooms.some((x) => x.id === id) || (prev.elements || []).some((x) => x.id === id) ? id : null));
+  };
+  const redo = () => {
+    if (!redoStack.length) return;
+    const nxt = redoStack[redoStack.length - 1];
+    setRedoStack(redoStack.slice(0, -1));
+    setUndoStack((u) => [...u, spec].slice(-80));
+    setSpec(nxt);
   };
   const moveObject = (id, x, y) => { const o = findObj(id); if (o) applyOps([{ type: 'move_object', targetId: id, name: o.name, x, y }]); };
   const resizeObject = (id, x, y, w, d) => {
@@ -342,6 +369,31 @@ export default function App() {
     if (activeChapter === 'rooms') setActiveFloor(level);
   };
 
+  // --- cut / copy / paste of the selected room or element --------------------
+  const selectedObj = () => spec.rooms.find((r) => r.id === selectedId)
+    || (spec.elements || []).find((e) => e.id === selectedId) || null;
+  const isRoom = (o) => o && spec.rooms.some((r) => r.id === o.id);
+  const copySelection = () => { const o = selectedObj(); if (o) setClipboard({ isRoom: isRoom(o), obj: structuredClone(o) }); };
+  const cutSelection = () => { const o = selectedObj(); if (o) { setClipboard({ isRoom: isRoom(o), obj: structuredClone(o) }); removeObject(o); } };
+  const pasteClipboard = () => {
+    if (!clipboard) return;
+    const o = clipboard.obj;
+    if (clipboard.isRoom) {
+      // place cleanly via the room packer (free spot, auto-unique name)
+      const plan = planNewRoomPlacements(spec, [{ name: o.name, type: o.type, w: Number(o.w), d: Number(o.d) }], activeFloor === BASEMENT_LEVEL ? BASEMENT_LEVEL : activeFloor);
+      if (plan.ops.length) applyOps(plan.ops);
+    } else {
+      // drop a copy a little down-and-right of the original (ids are unique;
+      // same name is fine now that ops resolve by id)
+      applyOps([{
+        type: 'add_element', name: `${o.name} copy`, category: o.category, construction: o.construction || '',
+        x: Number(o.x) + 2, y: Number(o.y) + 2, z: Number(o.z) || 0,
+        w: Number(o.w), d: Number(o.d), h: Number(o.h) || 1, level: Number(o.level) || 1,
+        roofType: o.roofType || ''
+      }]);
+    }
+  };
+
   // Compass heading: poll the live camera on a timer (NOT the render loop —
   // a timer keeps ticking even when requestAnimationFrame is throttled, so the
   // compass never freezes). Heading = azimuth around Y; north is world −z.
@@ -367,7 +419,7 @@ export default function App() {
   const startFresh = () => {
     if (!window.confirm('Start over with the sample design? Your current design will be cleared.')) return;
     try { localStorage.removeItem(STORE_KEY); } catch { /* fine */ }
-    setSpec(structuredClone(seedSpec));
+    commitSpec(structuredClone(seedSpec)); // undoable — Ctrl+Z brings the design back
     setSelectedId(null);
     setPhaseOrder(null);
   };
@@ -428,20 +480,33 @@ export default function App() {
     if (name.trim() && name.trim() !== obj.name) applyOps([{ type: 'update_object', targetId: obj.id, name: obj.name, field: 'name', value: name.trim() }]);
   };
 
-  // Delete/Backspace removes the selected room or element in plan mode — but
-  // NEVER while typing in a field or with text highlighted (the classic app
-  // once ate highlighted text this way).
+  // Keyboard: undo/redo (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z), cut/copy/paste
+  // (Ctrl+X/C/V) of the selected object, and Delete/Backspace to remove it.
+  // NEVER hijack while typing in a field or with text highlighted — the field's
+  // own undo and the browser's own copy/paste must keep working there.
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
-      if (timelineOpen || !selectedId) return;
       const tag = document.activeElement?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (String(window.getSelection?.() || '').length > 0) return;
-      const obj = spec.rooms.find((r) => r.id === selectedId) || (spec.elements || []).find((el) => el.id === selectedId);
-      if (!obj) return;
-      e.preventDefault();
-      removeObject(obj);
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+      const hasTextSel = String(window.getSelection?.() || '').length > 0;
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+
+      if (mod && key === 'z' && !e.shiftKey) { if (typing) return; e.preventDefault(); undo(); return; }
+      if (mod && (key === 'y' || (key === 'z' && e.shiftKey))) { if (typing) return; e.preventDefault(); redo(); return; }
+
+      if (typing || hasTextSel || timelineOpen) return;
+
+      if (mod && key === 'c') { if (selectedId) { e.preventDefault(); copySelection(); } return; }
+      if (mod && key === 'x') { if (selectedId) { e.preventDefault(); cutSelection(); } return; }
+      if (mod && key === 'v') { if (clipboard) { e.preventDefault(); pasteClipboard(); } return; }
+
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+        const obj = spec.rooms.find((r) => r.id === selectedId) || (spec.elements || []).find((el) => el.id === selectedId);
+        if (!obj) return;
+        e.preventDefault();
+        removeObject(obj);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -542,9 +607,17 @@ export default function App() {
           : <span className="rz-status-item rz-flag">{flags.length} to look at</span>}
       </div>
 
+      {/* undo / redo — top-left, always available (Ctrl+Z / Ctrl+Y) */}
+      {!timelineOpen && (
+        <div className="rz-history">
+          <button disabled={!undoStack.length} title="Undo (Ctrl+Z)" onClick={undo}>↶</button>
+          <button disabled={!redoStack.length} title="Redo (Ctrl+Y)" onClick={redo}>↷</button>
+        </div>
+      )}
+
       {/* floor selector — the layout controller works one level at a time */}
       {!timelineOpen && viewMode === 'plan' && activeChapter === 'rooms' && (
-        <div className="rz-floors">
+        <div className="rz-floors rz-floors-shifted">
           <span className="rz-floors-lead">Floor</span>
           {hasBasement && (
             <button className={activeFloor === BASEMENT_LEVEL ? 'on' : ''} onClick={() => setActiveFloor(BASEMENT_LEVEL)}>Basement</button>

@@ -355,6 +355,22 @@
   box-shadow: 0 8px 30px rgba(30, 40, 30, 0.12);
 }
 
+/* undo / redo — top left */
+.rz-history {
+  position: absolute; z-index: 5; top: 16px; left: 16px;
+  display: flex; gap: 2px; padding: 4px; border-radius: 12px;
+  background: color-mix(in srgb, var(--ivory, #fbfaf6) 88%, transparent);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 70%, transparent);
+  box-shadow: 0 8px 30px rgba(30, 40, 30, 0.12);
+}
+.rz-history button {
+  width: 30px; height: 30px; border: none; background: transparent; border-radius: 9px; cursor: pointer;
+  font-size: 17px; line-height: 1; color: var(--earth, #565a4f);
+}
+.rz-history button:hover:not(:disabled) { background: color-mix(in srgb, var(--sage, #e2ecee) 70%, transparent); color: var(--ink, #22251f); }
+.rz-history button:disabled { opacity: 0.32; cursor: default; }
+
 /* floor pills — top left, the plan's level selector */
 .rz-floors {
   position: absolute; z-index: 5; top: 16px; left: 16px;
@@ -374,6 +390,8 @@
 .rz-floors .rz-floors-add { color: var(--evergreen, #3c6472); }
 .rz-floors .rz-floors-del { color: var(--bad, #ae452f); font-weight: 500; font-size: 12px; }
 .rz-floors-lead { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); padding: 0 4px 0 6px; }
+/* sit to the right of the undo/redo cluster */
+.rz-floors-shifted { left: 96px; }
 
 /* Shell chapter — storey stepper */
 .rz-storeys { display: flex; align-items: center; gap: 10px; }
