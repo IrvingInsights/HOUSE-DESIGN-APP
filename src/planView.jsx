@@ -479,7 +479,9 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
   for (let gx = 0; gx <= W + 0.01; gx += gridStep) gridLines.push(<line key={`gx${gx}`} x1={gx} y1={0} x2={gx} y2={D} stroke="var(--line)" strokeWidth={0.06} opacity={0.5} />);
   for (let gy = 0; gy <= D + 0.01; gy += gridStep) gridLines.push(<line key={`gy${gy}`} x1={0} y1={gy} x2={W} y2={gy} stroke="var(--line)" strokeWidth={0.06} opacity={0.5} />);
 
-  const openings = (spec.openings || []).filter((o) => o.wall !== 'roof');
+  // Openings show on their own floor's plan — a 2nd-floor window draws on the
+  // 2nd-floor layout, not the ground. (Roof openings are drawn in 3D only.)
+  const openings = (spec.openings || []).filter((o) => o.wall !== 'roof' && Number(o.level || 1) === activeFloor);
 
   return (
     <div className="planWrap">
@@ -689,7 +691,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
           const y1 = horizontal ? lineC : along;
           const x2 = horizontal ? along + wide : lineC;
           const y2 = horizontal ? lineC : along + wide;
-          const draggable = Boolean(onMoveOpening) && activeFloor === 1 && !buildingContext && !siteContext;
+          const draggable = Boolean(onMoveOpening) && !buildingContext && !siteContext;
           return (
             <g key={index}>
               <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={stroke} strokeWidth={sw} />
