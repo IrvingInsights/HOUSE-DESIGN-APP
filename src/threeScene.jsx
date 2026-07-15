@@ -50,7 +50,7 @@ function cutPlanes(spec, cut) {
   return [new THREE.Plane(new THREE.Vector3(0, 0, -1), cutZ)];
 }
 
-export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, viewRequest = null, sectionCut = 1, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview, onFallbackNav, context = null }) {
+export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, viewRequest = null, sectionCut = 1, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview, onFallbackNav, showCompass = false, context = null }) {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraStateRef = useRef(null);
@@ -1903,6 +1903,36 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         grid.userData.generated = true;
         group.add(grid);
       }
+      }
+
+      // Direction markers ON the model — the least ambiguous compass there is.
+      // Placed by the SAME axes as everything else: north is −z, south +z (the
+      // solar face, where the sun and the deeper south overhang are), east +x,
+      // west −x. A big south overhang sits right next to the 'S' disc.
+      if (showCompass) {
+        const oh = resolveOverhangs(spec.shell);
+        const dirMark = (letter, wx, wz, rgb) => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 128; canvas.height = 128;
+          const ctx = canvas.getContext('2d');
+          ctx.beginPath(); ctx.arc(64, 64, 60, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(251,250,246,0.92)'; ctx.fill();
+          ctx.lineWidth = 7; ctx.strokeStyle = rgb; ctx.stroke();
+          ctx.fillStyle = rgb; ctx.font = 'bold 78px system-ui, sans-serif';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(letter, 64, 70);
+          const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthTest: false }));
+          sprite.scale.set(3.2, 3.2, 1);
+          sprite.position.set(wx, 2.2, wz);
+          sprite.renderOrder = 999;
+          sprite.userData.generated = true;
+          group.add(sprite);
+        };
+        const cx = width / 2, cz = depth / 2;
+        dirMark('N', cx, -(oh.north + 4), '#ae452f');            // north: −z
+        dirMark('S', cx, depth + oh.south + 4, '#3c6472');       // south: +z (solar)
+        dirMark('E', width + oh.east + 4, cz, '#565a4f');        // east: +x
+        dirMark('W', -(oh.west + 4), cz, '#565a4f');             // west: −x
       }
 
       // The 3D view reflects the selection like Plan and Detail do: whatever
