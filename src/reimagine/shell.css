@@ -341,6 +341,18 @@
 .rz-floors button.on { background: var(--evergreen, #3c6472); color: #fff; }
 .rz-floors .rz-floors-add { color: var(--evergreen, #3c6472); }
 .rz-floors .rz-floors-del { color: var(--bad, #ae452f); font-weight: 500; font-size: 12px; }
+.rz-floors-lead { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); padding: 0 4px 0 6px; }
+
+/* Shell chapter — storey stepper */
+.rz-storeys { display: flex; align-items: center; gap: 10px; }
+.rz-storeys b { font-size: 14px; color: var(--ink, #22251f); min-width: 62px; text-align: center; }
+.rz-storeys button {
+  width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--line, #dbd9ce); background: var(--raise, #fff);
+  font-size: 17px; line-height: 1; color: var(--evergreen, #3c6472);
+}
+.rz-storeys button:disabled { opacity: 0.4; cursor: default; color: var(--moss, #868a7c); }
+.rz-inline-link { border: none; background: transparent; cursor: pointer; padding: 0; font: inherit; font-size: inherit; font-weight: 600; color: var(--evergreen, #3c6472); }
 
 /* shared Trail-block field styles (Foundation + Shell chapters) */
 .rz-found { display: flex; flex-direction: column; gap: 9px; margin: 0 4px 14px; }

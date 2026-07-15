@@ -23,7 +23,7 @@ import './shell.css';
 // so each chapter looks and acts like what it's for.
 const CHAPTERS = [
   { id: 'shape', label: 'Shape', view: 'plan', planContext: 'shell', greet: (d) => `Start with the outline — a plain rectangle or an L, T, or U. Set the size below, or drag any wall edge right on the plan. Right now it's ${fmtNum(d.floor)} sq ft.` },
-  { id: 'rooms', label: 'Rooms', view: 'plan', planContext: 'rooms', greet: () => 'Lay the rooms out flat, from above. Drag a room to move it, grab a corner to resize — and use the floor pills (top left) to work each level, add one, or take one away.' },
+  { id: 'rooms', label: 'Rooms', view: 'plan', planContext: 'rooms', greet: () => 'Lay the rooms out flat, from above. Use the Floor selector (top left) to add a floor or switch between them — each floor keeps its own rooms and its own outline. Drag a room to move it, a corner to resize.' },
   { id: 'foundation', label: 'Foundation', view: 'plan', planContext: 'foundation', greet: () => 'What the house sits on. Pick the main type below — and the foundation doesn’t have to match the rooms: drop extra footings and drag them under whatever they carry, even outside the walls.' },
   { id: 'shell', label: 'Shell', view: '3d', greet: (d) => `The shell stands ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'}. Pick the wall system and the frame that carries the roof — the timeline and every receipt follow along.` },
   { id: 'roof', label: 'Roof', view: '3d', greet: () => 'Choose how the roof sheds weather and sun. Pick the shape, how steep it runs, what insulates it, and how far it reaches past the walls.' },
@@ -34,7 +34,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 19 · Jul 14';
+const UPDATE_STAMP = 'update 20 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -515,9 +515,10 @@ export default function App() {
           : <span className="rz-status-item rz-flag">{flags.length} to look at</span>}
       </div>
 
-      {/* floor pills — the layout controller works one level at a time */}
+      {/* floor selector — the layout controller works one level at a time */}
       {!timelineOpen && viewMode === 'plan' && activeChapter === 'rooms' && (
         <div className="rz-floors">
+          <span className="rz-floors-lead">Floor</span>
           {hasBasement && (
             <button className={activeFloor === BASEMENT_LEVEL ? 'on' : ''} onClick={() => setActiveFloor(BASEMENT_LEVEL)}>Basement</button>
           )}
@@ -525,9 +526,9 @@ export default function App() {
             <button key={f} className={activeFloor === f ? 'on' : ''} onClick={() => setActiveFloor(f)}>{floorLabel(spec, f)}</button>
           ))}
           {floors < 3 && (
-            <button className="rz-floors-add" title="Add a storey — it gets an extent plate you can resize on its floor" onClick={addFloor}>+ floor</button>
+            <button className="rz-floors-add" title="Add a floor on top — it gets its own outline and room layout" onClick={addFloor}>+ add floor</button>
           )}
-          {floors > 1 && activeFloor === floors && (
+          {floors > 1 && activeFloor === floors && activeFloor !== BASEMENT_LEVEL && (
             <button className="rz-floors-del" title="Remove this floor — its rooms move to the ground floor, nothing is deleted" onClick={removeFloor}>remove</button>
           )}
         </div>
@@ -595,11 +596,15 @@ export default function App() {
             {activeChapter === 'shell' && (
               <StructureControls
                 spec={spec}
+                floors={floors}
                 onAllWalls={setAllWalls}
                 onFrame={setFrame}
                 onShell={setShellField}
                 onWallSide={setWallSide}
                 onSelectWall={(side) => { setSelectedId(`wall-${side}`); setViewMode('3d'); }}
+                onAddFloor={addFloor}
+                onRemoveFloor={removeFloor}
+                onLayoutFloors={() => { setActiveChapter('rooms'); setViewMode('plan'); }}
               />
             )}
             {activeChapter === 'roof' && (
@@ -1190,7 +1195,7 @@ function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, on
 // Shell chapter: the structure in three plain choices — what the walls are,
 // what carries the roof, how tall the walls run. The timeline's build order
 // and every receipt follow these.
-function StructureControls({ spec, onAllWalls, onFrame, onShell, onWallSide, onSelectWall }) {
+function StructureControls({ spec, floors, onAllWalls, onFrame, onShell, onWallSide, onSelectWall, onAddFloor, onRemoveFloor, onLayoutFloors }) {
   const resolved = WALL_SIDES.map((side) => resolveWallSide(spec, side));
   const wallKeys = new Set(resolved.map((r) => r.assemblyKey));
   const wallVal = wallKeys.size === 1 ? [...wallKeys][0] : '__mixed';
@@ -1199,6 +1204,20 @@ function StructureControls({ spec, onAllWalls, onFrame, onShell, onWallSide, onS
   const shed = (spec.shell.roofType || 'gable') === 'shed';
   return (
     <div className="rz-found">
+      <div className="rz-field">
+        <span>Storeys</span>
+        <div className="rz-storeys">
+          <button type="button" disabled={floors <= 1} onClick={onRemoveFloor} title="Remove the top floor — its rooms come down to the ground floor">−</button>
+          <b>{floors} floor{floors === 1 ? '' : 's'}</b>
+          <button type="button" disabled={floors >= 3} onClick={onAddFloor} title="Add a floor on top">+</button>
+        </div>
+      </div>
+      <div className="rz-shape-note">
+        {floors > 1
+          ? <>Each floor has its own outline and rooms — <button type="button" className="rz-inline-link" onClick={onLayoutFloors}>lay out each floor in Rooms ›</button></>
+          : 'Add a floor and each one gets its own outline and room layout, worked in Rooms.'}
+      </div>
+
       <label className="rz-field">
         <span>Walls (all sides)</span>
         <select value={wallVal} onChange={(e) => { if (e.target.value !== '__mixed') onAllWalls(e.target.value); }}>
