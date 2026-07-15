@@ -371,6 +371,21 @@
   box-shadow: 0 8px 30px rgba(30, 40, 30, 0.12);
 }
 
+/* the foreman greeting — its own card at the top, so the left bar is controls
+   only. Constrained so it never reaches the compass (top-right). */
+.rz-greet-card {
+  position: absolute; z-index: 5;
+  top: 82px; left: 50%; transform: translateX(-50%);
+  max-width: min(460px, calc(100vw - 360px));
+  padding: 10px 16px; border-radius: 14px; text-align: center;
+  font-size: 13.5px; line-height: 1.5; color: var(--ink, #22251f);
+  background: color-mix(in srgb, var(--ivory, #fbfaf6) 90%, transparent);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 70%, transparent);
+  box-shadow: 0 8px 30px rgba(30, 40, 30, 0.12);
+}
+@media (max-width: 900px) { .rz-greet-card { display: none; } }
+
 /* undo / redo — top left */
 .rz-history {
   position: absolute; z-index: 5; top: 16px; left: 16px;

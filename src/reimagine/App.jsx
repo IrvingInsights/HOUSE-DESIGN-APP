@@ -35,7 +35,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 30 · Jul 14';
+const UPDATE_STAMP = 'update 31 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -631,6 +631,12 @@ export default function App() {
           : <span className="rz-status-item rz-flag">{flags.length} to look at</span>}
       </div>
 
+      {/* the foreman's guidance for this chapter — its own card, so the left
+          surface stays controls-only */}
+      {!timelineOpen && trailOpen && (
+        <div className="rz-greet-card">{chapter.greet(derived)}</div>
+      )}
+
       {/* undo / redo — top-left, always available (Ctrl+Z / Ctrl+Y) */}
       {!timelineOpen && (
         <div className="rz-history">
@@ -676,7 +682,6 @@ export default function App() {
         </button>
         {trailOpen && (
           <div className="rz-trail-body">
-            <div className="rz-greeting">{chapter.greet(derived)}</div>
             {activeChapter === 'shape' && (
               <ShapeControls
                 spec={spec}
