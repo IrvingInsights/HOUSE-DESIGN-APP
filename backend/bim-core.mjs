@@ -737,7 +737,17 @@ function objectBounds(spec, object) {
   const gridSize = Number(spec.shell?.outdoorGridSizeFt || DEFAULT_OUTDOOR_GRID_SIZE_FT);
   const isPlacedElement = Boolean((spec.elements || []).some((element) => element.id === object?.id));
   const isOutdoorSpace = OUTDOOR_SPACE_TYPES.has(object?.type) || OUTDOOR_SPACE_TYPES.has(object?.category);
-  const margin = isPlacedElement || isOutdoorSpace ? Math.max(gridSize / 2, pad + 24) : Math.max(16, pad * 0.25);
+  // Foundation pads/runs and outbuildings are SITE objects: they belong out on
+  // the land, fully clear of the house (a carport slab, a patio). Give them a
+  // generous margin — at least their own size plus a buffer — so they can be
+  // dropped and dragged well outside the footprint, not pinned to its edge.
+  // (Checked by CATEGORY, so it holds at placement time too, before the object
+  // is in spec.elements.)
+  const isSiteObject = object?.category === 'foundation' || object?.category === 'outbuilding';
+  const own = Math.max(Number(object?.w) || 0, Number(object?.d) || 0);
+  const margin = (isPlacedElement || isOutdoorSpace || isSiteObject)
+    ? Math.max(gridSize, pad + 24, own + 8)
+    : Math.max(16, pad * 0.25);
   return {
     minX: -margin,
     minY: -margin,
