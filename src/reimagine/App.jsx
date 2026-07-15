@@ -35,7 +35,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 34 · Jul 14';
+const UPDATE_STAMP = 'update 35 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1502,11 +1502,22 @@ function WallCard({ side, spec, onWallSide, onClose }) {
           ))}
         </select>
       </label>
+      {/* greenhouse face: slanted glazing on this wall, carried by the frame */}
+      <label className="rz-nowall">
+        <input type="checkbox" checked={Boolean(r.sunGlazing)} onChange={(e) => onWallSide(side, 'sunGlazing', e.target.checked)} />
+        <span>Sun glazing — slanted greenhouse glass on this wall</span>
+      </label>
+      {r.sunGlazing && (
+        <label className="rz-field rz-field-num">
+          <span>Glass tilt (from vertical)</span>
+          <NumInput value={Math.round(Number(r.sunGlazingTiltDeg ?? 30))} min={0} max={45} step={5} unit="°" onCommit={(v) => onWallSide(side, 'sunGlazingTiltDeg', v)} />
+        </label>
+      )}
       <label className="rz-nowall">
         <input type="checkbox" checked={Boolean(r.omitted)} onChange={(e) => onWallSide(side, 'omitted', e.target.checked)} />
         <span>No wall on this side (opens to an attached space)</span>
       </label>
-      <p className="rz-muted" style={{ marginTop: 8 }}>Just this wall — the other three keep their own height, system, and face.</p>
+      <p className="rz-muted" style={{ marginTop: 8 }}>Just this wall — the other three keep their own height, system, and face. Slanted glazing on the south face makes a greenhouse; a full glass wall is the “Glazed” wall system above.</p>
     </div>
   );
 }
