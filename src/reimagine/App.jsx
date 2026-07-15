@@ -35,7 +35,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 21 · Jul 14';
+const UPDATE_STAMP = 'update 22 · Jul 14';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -129,6 +129,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState('plan'); // 'plan' (top-down) | '3d'
   const [trailOpen, setTrailOpen] = useState(true);
   const [viewRequest, setViewRequest] = useState({ mode: 'iso', n: 1 });
+  const [heading, setHeading] = useState(0); // camera compass heading (radians) for the overlay compass
   const [askText, setAskText] = useState('');
   const [askEcho, setAskEcho] = useState(null);
   const [budgetOpen, setBudgetOpen] = useState(false);
@@ -495,9 +496,13 @@ export default function App() {
               else moveObject(id, x, y);
             }}
             onResizeEnd={(id, w, d) => { const o = findObj(id); if (o) applyOps([{ type: 'resize_object', targetId: id, name: o.name, w, d, h: Number(o.h) || 0.22 }]); }}
+            onHeading={setHeading}
             onFallbackNav={() => {}}
           />
         )}
+        {/* compass — always know which way you're looking; north tracks the
+            camera so the south face (the solar face) is never a guess */}
+        {viewMode === '3d' && !timelineOpen && <Compass heading={heading} />}
       </div>
 
       {/* SURFACE 5b — one-line status strip (whole-house facts) */}
@@ -1461,6 +1466,28 @@ function Vital({ label, value }) {
     <div className="rz-vital">
       <div className="rz-vital-label">{label}</div>
       <div className="rz-vital-value">{value}</div>
+    </div>
+  );
+}
+
+// A compass that tracks the camera. The rose rotates so N always points to
+// true north in the model; each letter counter-rotates to stay upright.
+// N is world −z, S +z (the solar face), E +x, W −x — the same axes the plan,
+// the walls, and the sun all use.
+function Compass({ heading }) {
+  const deg = (heading * 180) / Math.PI;
+  const marks = [['N', 0], ['E', 90], ['S', 180], ['W', 270]];
+  return (
+    <div className="rz-compass" title="Which way the model faces — N tracks true north">
+      <div className="rz-compass-rose" style={{ transform: `rotate(${deg}deg)` }}>
+        {marks.map(([label, a]) => (
+          <span
+            key={label}
+            className={`rz-compass-mark ${label === 'N' ? 'n' : ''} ${label === 'S' ? 's' : ''}`}
+            style={{ transform: `rotate(${a}deg) translateY(-21px) rotate(${-a - deg}deg)` }}
+          >{label}</span>
+        ))}
+      </div>
     </div>
   );
 }

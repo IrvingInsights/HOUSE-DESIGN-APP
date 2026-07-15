@@ -50,7 +50,7 @@ function cutPlanes(spec, cut) {
   return [new THREE.Plane(new THREE.Vector3(0, 0, -1), cutZ)];
 }
 
-export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, viewRequest = null, sectionCut = 1, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview, onFallbackNav, context = null }) {
+export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, viewRequest = null, sectionCut = 1, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview, onFallbackNav, onHeading = null, context = null }) {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraStateRef = useRef(null);
@@ -2537,6 +2537,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       }
     }
 
+    let rafId = 0;
+    let lastHeading = 999;
     function animate() {
       const tween = tweenRef.current;
       if (tween) {
@@ -2547,6 +2549,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         if (tween.t >= 1) tweenRef.current = null;
       }
       controls.update();
+      // Report the camera's compass heading so the overlay compass can track
+      // it (azimuth around Y; north is world −z, east is +x).
+      if (onHeading) {
+        const h = Math.atan2(camera.position.x - controls.target.x, camera.position.z - controls.target.z);
+        if (Math.abs(h - lastHeading) > 0.01) { lastHeading = h; onHeading(h); }
+      }
       composer.render();
       sceneRef.current = { renderer, scene, camera, controls };
       // Dev/test handle: lets automated checks measure real member geometry
@@ -2556,7 +2564,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         window.__nbScene = scene;
         window.__nbView = { renderer, scene, camera, controls, composer };
       }
-      requestAnimationFrame(animate);
+      rafId = requestAnimationFrame(animate);
     }
 
     function resize() {
@@ -2600,6 +2608,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     mountObserver?.observe(mount);
 
     return () => {
+      // Stop THIS loop before the next scene build starts its own — otherwise
+      // every spec edit leaks another render loop, and the stale loops fight
+      // over the shared camera/tween (dead view buttons, a model that won't
+      // orient). One loop at a time.
+      if (rafId) cancelAnimationFrame(rafId);
       cameraStateRef.current = {
         position: camera.position.clone(),
         target: controls.target.clone()
