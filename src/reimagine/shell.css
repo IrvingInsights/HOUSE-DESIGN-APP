@@ -438,6 +438,12 @@
 }
 .rz-storeys button:disabled { opacity: 0.4; cursor: default; color: var(--moss, #868a7c); }
 .rz-inline-link { border: none; background: transparent; cursor: pointer; padding: 0; font: inherit; font-size: inherit; font-weight: 600; color: var(--evergreen, #3c6472); }
+/* per-storey extent rows in the Shape chapter */
+.rz-storeys-block { margin-top: 4px; }
+.rz-storey-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.rz-storey-name { flex: 0 0 66px; font-size: 12px; color: var(--moss, #868a7c); }
+.rz-storey-row .rz-run-size { flex: 1; padding: 0; }
+.rz-storey-row .rz-num { width: 58px; }
 
 /* shared Trail-block field styles (Foundation + Shell chapters) */
 .rz-found { display: flex; flex-direction: column; gap: 9px; margin: 0 4px 14px; }

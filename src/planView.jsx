@@ -629,11 +629,21 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
           const isSel = raw.id === selectedRoom;
           const w = Number(el.w) || 4;
           const d = Number(el.d) || 4;
+          // A storey's extent plate is a NON-interactive backdrop — it shows this
+          // floor's outline for context, but never intercepts a room click or
+          // drags. The storey's size is set by the numbers in the Shape chapter,
+          // so the plate stays out of the way while you lay out rooms.
+          if (raw.category === 'floor') {
+            return (
+              <rect key={raw.id} x={el.x} y={el.y} width={w} height={d}
+                fill="none" stroke="var(--line)" strokeWidth={0.3} strokeDasharray="1.2 0.8"
+                opacity={0.55} pointerEvents="none" />
+            );
+          }
           // In a building context most elements are backdrop — EXCEPT the ones
           // the context is FOR: foundation runs are the subject of the
-          // Foundation view (drag them under whatever they carry), like extent
-          // plates always are. The foundation's layout is its own thing.
-          const isContextSubject = raw.category === 'floor' || (context === 'foundation' && raw.category === 'foundation');
+          // Foundation view (drag them under whatever they carry).
+          const isContextSubject = context === 'foundation' && raw.category === 'foundation';
           return (
             <g key={raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
               <rect
