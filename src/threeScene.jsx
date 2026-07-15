@@ -11,7 +11,7 @@ import { FRAME_MEMBERS } from './frameDrawings.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
   OPENING_TYPES, resolveFrameType, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, decomposeFootprint, subtractRect,
-  subtractRectFromFootprint, pointInFootprint, edgeForOpening, gradeElevationAt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES
+  subtractRectFromFootprint, pointInFootprint, edgeForOpening, gradeElevationAt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, storeyElevationFt
 } from '../backend/bim-core.mjs';
 import {
   DEFAULT_OUTDOOR_GRID_SIZE_FT, clamp, padExtension, sitePadRect, objectBounds, titleCase, roofProfile, storeyInfo,
@@ -534,6 +534,10 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const gapByOpening = []; // index-aligned with spec.openings; .cut set when the hole is real
       if (layers.openings) (spec.openings || []).forEach((opening, openingIdx) => {
         if (opening.wall === 'roof') return;
+        // Only ground-floor openings cut the ground walls. Upper-floor openings
+        // sit on their own storey (rendered at elevation, dormered through the
+        // roof) and must NOT punch a hole in the wall below them.
+        if (Number(opening.level || 1) !== 1) return;
         const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
         let key;
         let along;
@@ -1588,7 +1592,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         const size = opening.widthFt;
         const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
         const openH = profile.h;
-        const centerY = profile.sill + openH / 2;
+        // Which storey the opening lives on lifts the whole assembly: a
+        // 2nd-floor window sits at that storey's floor elevation, not the ground.
+        const oLevel = opening.wall === 'roof' ? 1 : Number(opening.level || 1);
+        const baseY = storeyElevationFt(spec.shell, oLevel);
+        const sill = baseY + profile.sill;
+        const centerY = sill + openH / 2;
         const mat = profile.glazed ? glassMat : doorMat;
         let mesh;
         if (opening.wall === 'roof') {
@@ -1664,15 +1673,15 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const recessed = Boolean(gapByOpening[index]?.cut);
             const rIn = recessed ? -(tHere / 2) : 0.05;
             // exterior casing (head, sill trim, jamb trim)
-            part(size + fw * 2, fw, 0.3, mid, profile.sill + openH + fw / 2, 0.14, frameMat);
-            part(size + fw * 2, fw, 0.3, mid, Math.max(fw / 2, profile.sill - fw / 2), 0.14, frameMat);
+            part(size + fw * 2, fw, 0.3, mid, sill + openH + fw / 2, 0.14, frameMat);
+            part(size + fw * 2, fw, 0.3, mid, Math.max(baseY + fw / 2, sill - fw / 2), 0.14, frameMat);
             part(fw, openH, 0.3, mid - size / 2 - fw / 2, centerY, 0.14, frameMat);
             part(fw, openH, 0.3, mid + size / 2 + fw / 2, centerY, 0.14, frameMat);
             if (recessed) {
               // reveal liners — the window buck lining the hole through the wall
               const revealD = Math.max(0.6, tHere - 0.06);
-              part(size, 0.12, revealD, mid, profile.sill + openH - 0.06, rIn, frameMat);
-              part(size, 0.12, revealD, mid, profile.sill + 0.06, rIn, frameMat);
+              part(size, 0.12, revealD, mid, sill + openH - 0.06, rIn, frameMat);
+              part(size, 0.12, revealD, mid, sill + 0.06, rIn, frameMat);
               part(0.12, openH, revealD, mid - size / 2 + 0.06, centerY, rIn, frameMat);
               part(0.12, openH, revealD, mid + size / 2 - 0.06, centerY, rIn, frameMat);
             }
@@ -1688,11 +1697,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             }
             if (profile.entry && !profile.glazed) {
               // door hardware — a small knob at the latch side
-              part(0.14, 0.14, 0.14, mid + size * 0.34, profile.sill + Math.min(3.1, openH * 0.45), rIn + 0.16, frameMat);
+              part(0.14, 0.14, 0.14, mid + size * 0.34, sill + Math.min(3.1, openH * 0.45), rIn + 0.16, frameMat);
             }
             if (profile.sill > 0.6) {
               // projecting exterior sill ledge under windows
-              part(size + 0.5, 0.13, 0.5, mid, profile.sill - fw - 0.04, 0.22, frameMat);
+              part(size + 0.5, 0.13, 0.5, mid, sill - fw - 0.04, 0.22, frameMat);
             }
           }
         }
@@ -1701,6 +1710,55 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           mesh.userData.roomId = `opening-${index}`;
           roomMeshes.push(mesh);
           group.add(mesh);
+        }
+
+        // DORMER — an upper-floor window the main roof would bury gets a little
+        // gabled dormer projecting from the roof, so the glass meets daylight
+        // instead of roof deck. Built only when the window top rises above the
+        // roof underside at its plan spot (a window that already sits inside a
+        // tall wall or a gable end needs none).
+        if (layers.roof && oLevel > 1 && opening.wall !== 'roof' && profile.glazed) {
+          const horiz = opening.wall === 'north' || opening.wall === 'south';
+          const px = horiz ? (Number(opening.x) || 0) + size / 2 : (opening.wall === 'east' ? width : 0);
+          const pz = horiz ? (opening.wall === 'south' ? depth : 0) : (Number(opening.y) || 0) + size / 2;
+          const windowTop = sill + openH;
+          const roofHere = roofUnderAt(px, pz);
+          if (windowTop > roofHere + 0.3) {
+            const inw = (opening.wall === 'south' || opening.wall === 'east') ? -1 : 1; // inward (toward ridge)
+            const dW = size + 1.3;                 // dormer width along the wall
+            const dTop = windowTop + 0.55;         // dormer ridge height
+            const wallLine = horiz ? pz : px;      // the eave line coord the front sits on
+            // Walk inward until the main roof rises to the dormer ridge (capped).
+            let back = 1;
+            for (let s = 1; s <= 16; s += 0.5) {
+              const qx = horiz ? px : px + inw * s;
+              const qz = horiz ? pz + inw * s : pz;
+              back = s;
+              if (roofUnderAt(qx, qz) >= dTop - 0.05) break;
+            }
+            const dMat = new THREE.MeshStandardMaterial({ color: roofMat.color, roughness: 0.5, metalness: 0.22, side: THREE.DoubleSide });
+            const cheekMat = wallMatFor(opening.wall);
+            const dpart = (m) => { m.userData.roomId = `opening-${index}`; m.userData.generated = true; group.add(m); return m; };
+            // A box laid along the inward axis at (alongCenter on the wall, y, inwardCenter).
+            const at = (alongC, y, inC, wAlong, h, deep, mat) => dpart(horiz
+              ? box(wAlong, h, deep, alongC, y, inC, mat)
+              : box(deep, h, wAlong, inC, y, alongC, mat));
+            const inMid = wallLine + inw * (back / 2);
+            const frontBase = Math.min(sill - 0.2, roofHere);
+            // Front gable wall: from the window head up to the ridge, full dormer width.
+            at(px, (windowTop + dTop) / 2, wallLine + inw * 0.05, dW, Math.max(0.3, dTop - windowTop), 0.4, cheekMat);
+            // Cheeks: a wall each side running inward, tall at the front, meeting the roof at the back.
+            for (const sgn of [-1, 1]) {
+              const cAlong = px + sgn * dW / 2;
+              const midH = (dTop + roofHere) / 2;
+              at(cAlong, (frontBase + midH) / 2, inMid, 0.18, Math.max(0.5, midH - frontBase), back, cheekMat);
+            }
+            // Two little roof planes from the front ridge sloping back down to the main roof.
+            const planeLen = Math.hypot(back, dTop - roofHere) + 0.3;
+            const ang = Math.atan2(dTop - roofHere, Math.max(0.5, back));
+            const roofPlane = at(px, (dTop + roofHere) / 2 + 0.15, inMid, dW + 0.3, 0.14, planeLen, dMat);
+            if (horiz) roofPlane.rotation.x = inw * ang; else roofPlane.rotation.z = -inw * ang;
+          }
         }
       });
 

@@ -1724,11 +1724,15 @@ export function applyBimOperations(currentSpec, plan) {
         const y = clamp(Number(operation.y ?? 4), 0, Math.max(0, next.shell.depthFt - widthFt));
         next.openings.push({ type: 'skylight', wall: 'roof', x, y, widthFt, label });
       } else {
+        // Which storey the opening lives on. Openings on different floors of the
+        // same wall never clash — a ground door and a 2nd-floor window can share
+        // the same run of wall, one above the other. Legacy openings are level 1.
+        const level = clamp(Math.round(Number(operation.level || 1)), 1, Math.max(1, Math.ceil(Number(next.shell.storeys || 1))));
         const maxAlong = wall === 'north' || wall === 'south' ? next.shell.widthFt : next.shell.depthFt;
         const explicitPos = Number(operation.positionFt) > 0;
         let along = clamp(Number(operation.positionFt || 0), 0, Math.max(0, maxAlong - widthFt));
         const overlapsAt = (start) => next.openings.some((existing) => {
-          if (existing.wall !== wall) return false;
+          if (existing.wall !== wall || Number(existing.level || 1) !== level) return false;
           const e0 = Number(existing.x ?? existing.y ?? 0);
           const e1 = e0 + (Number(existing.widthFt) || 3);
           return start < e1 - 0.05 && start + widthFt > e0 + 0.05;
@@ -1742,15 +1746,15 @@ export function applyBimOperations(currentSpec, plan) {
           }
         }
         const incoming = wall === 'north' || wall === 'south'
-          ? { type: openingType, wall, x: along, widthFt, label }
-          : { type: openingType, wall, y: along, widthFt, label };
+          ? { type: openingType, wall, x: along, widthFt, label, level }
+          : { type: openingType, wall, y: along, widthFt, label, level };
         // Openings have no ids, so a re-trace lands the same window again a
         // foot to the left — forever. An EXPLICITLY placed opening that
         // overlaps an existing one REPLACES it instead of stacking (two doors
         // can't share the same stretch of wall in the real world either).
         const a0 = along, a1 = along + widthFt;
         const clashIndex = next.openings.findIndex((existing) => {
-          if (existing.wall !== wall) return false;
+          if (existing.wall !== wall || Number(existing.level || 1) !== level) return false;
           const e0 = Number(existing.x ?? existing.y ?? 0);
           const e1 = e0 + (Number(existing.widthFt) || 3);
           return a0 < e1 - 0.05 && a1 > e0 + 0.05;

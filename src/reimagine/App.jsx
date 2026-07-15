@@ -35,7 +35,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 38 · Jul 15';
+const UPDATE_STAMP = 'update 39 · Jul 15';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -291,13 +291,13 @@ export default function App() {
   };
   // Openings: drop a door/window on a wall (centered on that wall to start),
   // or pull one out. Position and width are then tuned by dragging on the plan.
-  const addOpening = (wall, type) => {
+  const addOpening = (wall, type, level = 1) => {
     const profile = OPENING_TYPES[type] || OPENING_TYPES.window;
     const isRoof = wall === 'roof' || profile.roof;
     const wallLen = wall === 'north' || wall === 'south' ? Number(spec.shell.widthFt) : Number(spec.shell.depthFt);
     const widthFt = profile.defaultW || 3;
     const positionFt = isRoof ? Number(spec.shell.widthFt) / 2 : Math.max(0.5, wallLen / 2 - widthFt / 2);
-    applyOps([{ type: 'add_opening', wall: isRoof ? 'roof' : wall, openingType: type, widthFt, positionFt }]);
+    applyOps([{ type: 'add_opening', wall: isRoof ? 'roof' : wall, openingType: type, widthFt, positionFt, level: isRoof ? 1 : level }]);
   };
   const removeOpening = (index) => applyOps([{ type: 'remove_object', targetId: `opening-${index}` }]);
   const sizeOpening = (index, widthFt) => {
@@ -653,7 +653,7 @@ export default function App() {
             onMoveOpening={moveOpening}
             context={planContext}
             onContext={timelineOpen ? null : openContext}
-            activeFloor={activeChapter === 'rooms' ? activeFloor : 1}
+            activeFloor={activeChapter === 'rooms' || activeChapter === 'openings' ? activeFloor : 1}
           />
         ) : (
           <ThreeScene
@@ -710,7 +710,7 @@ export default function App() {
       )}
 
       {/* floor selector — the layout controller works one level at a time */}
-      {!timelineOpen && viewMode === 'plan' && activeChapter === 'rooms' && (
+      {!timelineOpen && viewMode === 'plan' && (activeChapter === 'rooms' || activeChapter === 'openings') && (
         <div className="rz-floors rz-floors-shifted">
           <span className="rz-floors-lead">Floor</span>
           {hasBasement && (
@@ -794,6 +794,7 @@ export default function App() {
               <OpeningsControls
                 spec={spec}
                 selectedId={selectedId}
+                level={activeFloor}
                 onAdd={addOpening}
                 onRemove={removeOpening}
                 onSize={sizeOpening}
@@ -1403,18 +1404,21 @@ function FloorSizeControls({ spec, level, onResizeFloor, onFloorHeight }) {
 
 // Openings chapter: drop doors and windows on a wall, then slide them on the
 // plan. Every opening type the engine knows is one tap; skylights land on the
-// roof. Openings live on the ground floor for now (upper-storey glazing +
-// dormers are a later pass — noted to Daniel).
+// roof. Openings carry the floor picked in the Floor selector — a 2nd-floor
+// window goes in the upper wall, and a dormer opens the roof to meet it.
 const OPENING_GROUPS = [
   { head: 'Windows', keys: ['window', 'picture', 'awning', 'clerestory', 'bay'] },
   { head: 'Doors', keys: ['door', 'french', 'slider', 'dutch', 'barn'] },
   { head: 'Roof', keys: ['skylight'] }
 ];
-function OpeningsControls({ spec, selectedId, onAdd, onRemove, onSize, onSelect }) {
+function OpeningsControls({ spec, selectedId, level = 1, onAdd, onRemove, onSize, onSelect }) {
   const [wall, setWall] = useState('south');
   const openings = spec.openings || [];
+  const onThisFloor = (o) => o.wall === 'roof' ? level === 1 : Number(o.level || 1) === level;
+  const floorWord = level === 1 ? 'ground floor' : floorLabel(spec, level).toLowerCase();
   return (
     <div className="rz-found">
+      {level > 1 && <div className="rz-shape-note" style={{ marginBottom: 6 }}>Placing on the <b>{floorWord}</b> — switch floors with the Floor selector (top left). A window here goes in the upper wall; if the roof covers that wall it opens a dormer to meet it.</div>}
       <label className="rz-field">
         <span>Add to which wall</span>
         <select value={wall} onChange={(e) => setWall(e.target.value)}>
@@ -1426,18 +1430,18 @@ function OpeningsControls({ spec, selectedId, onAdd, onRemove, onSize, onSelect 
           <div className="rz-found-head">{group.head}</div>
           <div className="rz-found-palette rz-open-palette">
             {group.keys.map((key) => (
-              <button key={key} type="button" title={`${OPENING_TYPES[key].defaultW}′ to start — drag it along the wall after`} onClick={() => onAdd(wall, key)}>
+              <button key={key} type="button" title={`${OPENING_TYPES[key].defaultW}′ to start — drag it along the wall after`} onClick={() => onAdd(wall, key, level)}>
                 <b>{OPENING_TYPES[key].label}</b>
-                <small>{group.head === 'Roof' ? 'on the roof' : `on the ${WALL_SIDE_LABELS[wall].toLowerCase()} wall`}</small>
+                <small>{group.head === 'Roof' ? 'on the roof' : `${WALL_SIDE_LABELS[wall].toLowerCase()} wall · ${floorWord}`}</small>
               </button>
             ))}
           </div>
         </div>
       ))}
-      {openings.length > 0 && (
+      {openings.some(onThisFloor) && (
         <div className="rz-open-list">
-          <div className="rz-found-head">Placed openings</div>
-          {openings.map((o, i) => {
+          <div className="rz-found-head">On the {floorWord}</div>
+          {openings.map((o, i) => ({ o, i })).filter(({ o }) => onThisFloor(o)).map(({ o, i }) => {
             const prof = OPENING_TYPES[o.type] || OPENING_TYPES.window;
             const sel = String(selectedId || '') === `opening-${i}`;
             return (
@@ -1454,7 +1458,7 @@ function OpeningsControls({ spec, selectedId, onAdd, onRemove, onSize, onSelect 
           })}
         </div>
       )}
-      <div className="rz-shape-note">Openings sit on the ground floor for now. Slide any one along its wall by dragging it on the plan.</div>
+      <div className="rz-shape-note">Slide any opening along its wall by dragging it on the plan. Switch floors with the Floor selector to place windows upstairs.</div>
     </div>
   );
 }
