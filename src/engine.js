@@ -2412,9 +2412,19 @@ export function uniqueObjectId(spec, preferred) {
 
 export function findDesignObject(spec, targetId, name = '') {
   if (!targetId && !name) return null;
+  // ID wins — a name match on an earlier object must not beat the real id
+  // match on a later one (same-named foundation runs snapping together). Empty
+  // name must not match ("x".includes('') is always true).
+  if (targetId) {
+    const byId = (spec.rooms || []).find((room) => room.id === targetId)
+      || (spec.elements || []).find((element) => element.id === targetId);
+    if (byId) return byId;
+  }
   const normalizedName = normalizeDesignLabel(name);
-  return spec.rooms.find((room) => room.id === targetId || normalizeDesignLabel(room.name) === normalizedName || normalizeDesignLabel(room.name).includes(normalizedName))
-    || (spec.elements || []).find((element) => element.id === targetId || normalizeDesignLabel(element.name) === normalizedName || normalizeDesignLabel(element.name).includes(normalizedName))
+  if (!normalizedName) return null;
+  const nameMatches = (label) => normalizeDesignLabel(label) === normalizedName || normalizeDesignLabel(label).includes(normalizedName);
+  return (spec.rooms || []).find((room) => nameMatches(room.name))
+    || (spec.elements || []).find((element) => nameMatches(element.name))
     || null;
 }
 
