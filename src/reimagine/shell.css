@@ -74,13 +74,18 @@
 .rz-views button.on { background: var(--evergreen, #3c6472); color: #fff; }
 .rz-views-sep { width: 1px; align-self: stretch; background: var(--line2, #cac8bb); margin: 2px 4px; }
 
-/* SURFACE 2 — the Trail spine, left edge */
+/* SURFACE 2 — the Trail spine, left edge. Centered when short; when a chapter's
+   controls make it taller than the screen it caps to the viewport and scrolls
+   inside, so the greeting and the build button never slide off the top/bottom. */
 .rz-trail {
   top: 50%; left: 16px; transform: translateY(-50%);
   border-radius: 18px; padding: 14px; width: 236px;
+  max-height: calc(100vh - 32px); display: flex; flex-direction: column; overflow: hidden;
   transition: width 0.18s ease;
 }
 .rz-trail.closed { width: 44px; padding: 8px; }
+/* only the content scrolls, so the collapse toggle stays pinned at the top */
+.rz-trail-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: -2px -4px 0; padding: 2px 4px 0; }
 .rz-trail-toggle {
   position: absolute; top: 10px; right: 10px;
   width: 24px; height: 24px; border-radius: 8px; cursor: pointer;
