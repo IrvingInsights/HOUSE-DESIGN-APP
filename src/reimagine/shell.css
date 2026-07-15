@@ -211,6 +211,16 @@
   font: inherit; font-size: 12px; font-weight: 600; color: var(--evergreen, #3c6472);
 }
 
+/* roof drainage */
+.rz-drainage { display: flex; flex-direction: column; gap: 9px; margin-top: 12px; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 60%, transparent); }
+.rz-runoff {
+  font-size: 12.5px; line-height: 1.5; color: var(--earth, #565a4f);
+  background: color-mix(in srgb, var(--sage, #e2ecee) 40%, transparent);
+  border-radius: 10px; padding: 8px 11px;
+}
+.rz-runoff b { color: var(--ink, #22251f); font-weight: 700; }
+.rz-warn-note { color: var(--bad, #ae452f); font-weight: 500; }
+
 /* right-click menu on the plan */
 .rz-ctx {
   position: fixed; z-index: 20; min-width: 190px;

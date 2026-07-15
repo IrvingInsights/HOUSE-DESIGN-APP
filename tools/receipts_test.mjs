@@ -30,13 +30,17 @@ const fixtures = () => {
   const padExtra = structuredClone(seedSpec);
   padExtra.utilities = { ...(padExtra.utilities || {}), foundationType: 'rubble' };
   padExtra.elements = [{ id: 'pad2', name: 'Carport slab', category: 'foundation', construction: 'slabpad', x: 40, y: 2, w: 20, d: 12, h: 0.35, level: 1 }];
+  // a shed roof with full drainage: gutters all around + a cistern
+  const drained = structuredClone(seedSpec);
+  drained.shell = { ...drained.shell, roofType: 'shed', southWallHeightFt: 12, northWallHeightFt: 8, gutters: 'all', discharge: 'cistern' };
   return {
     seed: structuredClone(seedSpec),
     standard: convertSpecApproach(structuredClone(seedSpec), 'standard'),
     strawBale,
     loaded,
     padSlab,
-    padExtra
+    padExtra,
+    drained
   };
 };
 
@@ -77,6 +81,20 @@ for (const [name, spec] of Object.entries(fixtures())) {
   const dExtra = deriveDesign(f.padExtra, getWallSections(f.padExtra));
   ok(Math.abs(dExtra.cost.foundation - (1008 * 8 + 128 * 6 + 240 * 15)) < 0.5,
     `padExtra: rubble house + 240 sf extra slab (got ${Math.round(dExtra.cost.foundation)})`);
+}
+
+// Drainage lands in the roof line, itemized: gutters (perimeter × $8) +
+// downspouts ($55 ea) + cistern ($3,800) all show and sum into cost.roof.
+{
+  const f = fixtures();
+  const d = deriveDesign(f.drained, getWallSections(f.drained));
+  const roofLines = d.receipts.systems.roof.map((l) => l.label);
+  ok(roofLines.some((l) => l === 'Gutters'), 'drained: a Gutters receipt line exists');
+  ok(roofLines.some((l) => l === 'Downspouts'), 'drained: a Downspouts receipt line exists');
+  ok(roofLines.some((l) => /Cistern/.test(l)), 'drained: a cistern runoff line exists');
+  const perim = 2 * (Number(f.drained.shell.widthFt) + Number(f.drained.shell.depthFt));
+  const gutterLine = d.receipts.systems.roof.find((l) => l.label === 'Gutters');
+  ok(Math.abs(gutterLine.amount - perim * 8) < 0.5, `drained: gutters = ${perim} ft × $8 (got ${Math.round(gutterLine.amount)})`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

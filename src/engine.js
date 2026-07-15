@@ -550,7 +550,50 @@ export function roofProfile(shell = {}) {
   const riseFt = Math.abs(southWallHeightFt - northWallHeightFt);
   const pitch = roofType === 'shed' && shell.depthFt ? riseFt / shell.depthFt : Number(shell.roofPitch || 0.32);
   const highSide = southWallHeightFt >= northWallHeightFt ? 'south' : 'north';
-  return { roofType, southWallHeightFt, northWallHeightFt, highWallHeightFt, lowWallHeightFt, riseFt, pitch, highSide };
+  const lowSide = highSide === 'south' ? 'north' : 'south';
+  return { roofType, southWallHeightFt, northWallHeightFt, highWallHeightFt, lowWallHeightFt, riseFt, pitch, highSide, lowSide };
+}
+
+// Roof drainage — where the water goes once it comes off the roof. A shed
+// sends its WHOLE roof to one low eave, so a gutter there and a plan for the
+// runoff matters more than on any other shape. Priced into the roof line;
+// absent = no gutters, water drips at the eave (the current implicit state,
+// $0 — existing designs unchanged).
+export const DRAINAGE_DISCHARGE = {
+  grade:      { key: 'grade',      label: 'To grade — splash blocks',   cost: 200,  carbon: 20,  reuse: false, infiltrate: false, note: 'Cheapest: carry the water a few feet off the wall and let it soak away.' },
+  raingarden: { key: 'raingarden', label: 'Rain garden',                cost: 900,  carbon: 40,  reuse: false, infiltrate: true,  green: true, note: 'A planted low spot that drinks the runoff and recharges groundwater.' },
+  drywell:    { key: 'drywell',    label: 'Dry well (buried)',           cost: 1400, carbon: 130, reuse: false, infiltrate: true,  note: 'A buried gravel or chamber pit that soaks a big roof’s water underground.' },
+  barrels:    { key: 'barrels',    label: 'Rain barrels',                cost: 450,  carbon: 60,  reuse: true,  infiltrate: false, green: true, note: 'A few hundred gallons at the downspouts for the garden.' },
+  cistern:    { key: 'cistern',    label: 'Cistern — stored for reuse',  cost: 3800, carbon: 300, reuse: true,  infiltrate: false, green: true, note: 'Big storage sized to the dry spell; can feed irrigation or the house.' }
+};
+export const GUTTER_COST_LF = 8;
+export const GUTTER_CARBON_LF = 1.2;
+export const DOWNSPOUT_COST = 55;
+
+// Resolve the drainage config + its derived quantities from the shell. Gutter
+// run depends on the roof shape: a shed's draining edge is its low eave (the
+// full width); a gable drains off its two long eaves; flat/hip run all around.
+export function resolveDrainage(shell = {}) {
+  const gutters = ['none', 'eaves', 'all'].includes(shell.gutters) ? shell.gutters : 'none';
+  const discharge = DRAINAGE_DISCHARGE[shell.discharge] ? shell.discharge : 'grade';
+  const w = Number(shell.widthFt) || 0;
+  const d = Number(shell.depthFt) || 0;
+  const perim = 2 * (w + d);
+  const roofType = shell.roofType || 'gable';
+  let gutterLf = 0;
+  if (gutters === 'all') gutterLf = perim;
+  else if (gutters === 'eaves') {
+    gutterLf = roofType === 'shed' ? w : roofType === 'gable' ? 2 * w : perim;
+  }
+  const downspouts = gutterLf > 0 ? Math.max(2, Math.ceil(gutterLf / 40)) : 0;
+  const profile = roofProfile(shell);
+  return { gutters, discharge, gutterLf, downspouts, lowEave: profile.lowSide, dischargeSpec: DRAINAGE_DISCHARGE[discharge] };
+}
+
+// Gallons a roof sheds in a given rainfall (inches). 0.623 gal per sf per inch,
+// 0.9 capture efficiency off a hard roof.
+export function roofRunoffGallons(roofAreaSf, inches) {
+  return roofAreaSf * (Number(inches) || 0) * 0.623 * 0.9;
 }
 
 // Storeys: 1 = single storey, 1.5 = loft with knee walls, 2 = full two storey.
@@ -3112,8 +3155,26 @@ export function detectIssues(spec) {
     issues.push({ severity: 'warning', title: 'Tall walls need explicit lateral strategy', owner: 'Engineer', system: 'walls', fix: 'Add shear wall schedule, hold-downs, and diaphragm notes.' });
   }
   const shedFall = Math.abs(Number(spec.shell.southWallHeightFt || spec.shell.wallHeightFt || 10) - Number(spec.shell.northWallHeightFt || spec.shell.wallHeightFt || 10));
-  if ((spec.shell.roofType || 'gable') === 'shed' && shedFall < 0.5) {
+  const roofTypeForDrain = spec.shell.roofType || 'gable';
+  if (roofTypeForDrain === 'shed' && shedFall < 0.5) {
     issues.push({ severity: 'warning', title: "Shed roof is flat — it won't drain", owner: 'Engineer', system: 'roof', fixId: 'give-shed-fall', fix: 'A shed needs a high eave and a low one. Set "Drains to" on the Roof page — high south wall draining north is the solar classic.' });
+  }
+  // Drainage: a shed dumps its WHOLE roof at one low eave, so no gutter there
+  // trenches the ground and splashes the wall — worse under plastered natural
+  // walls. This is the shed-specific drainage catch.
+  const drain = resolveDrainage(spec.shell);
+  const hasNaturalWall = WALL_SIDES.some((side) => { const r = resolveWallSide(spec, side); return !r.omitted && r.assemblyKey !== 'framed' && r.assemblyKey !== 'sips' && r.assemblyKey !== 'icf' && r.assemblyKey !== 'ply-insulated'; });
+  if (roofTypeForDrain === 'shed' && shedFall >= 0.5 && drain.gutters === 'none') {
+    issues.push({ severity: hasNaturalWall ? 'critical' : 'warning', title: `Shed roof has no gutter on its low (${drain.lowEave}) eave`, owner: 'Natural Builder', system: 'roof', fixId: 'add-eave-gutter', fix: `A shed sends its entire roof to the ${drain.lowEave} eave. Put a gutter there and route the water somewhere — without it the runoff trenches the ground${hasNaturalWall ? ' and splashes your plastered walls' : ''}. Set gutters on the Roof page.` });
+  }
+  // Opportunity: you're collecting rain (gutters on) but throwing it away, and
+  // there's a meaningful amount — nudge toward barrels or a cistern.
+  if (drain.gutters !== 'none' && !drain.dischargeSpec.reuse) {
+    const rainYr = Number((spec.site || {}).rainInYr) || 38;
+    const couldCatch = roofRunoffGallons((Number(spec.shell.widthFt) || 0) * (Number(spec.shell.depthFt) || 0), rainYr);
+    if (couldCatch > 8000) {
+      issues.push({ severity: 'warning', title: `Your roof could catch ~${Math.round(couldCatch / 1000)}k gal a year — it's going to waste`, owner: 'Natural Builder', system: 'roof', fix: 'You’ve got gutters but the water drains away. Rain barrels or a cistern (Roof page → where the runoff goes) would bank it for the garden or the house.' });
+    }
   }
   const glazedOffSouth = WALL_SIDES.filter((side) => { const r = resolveWallSide(spec, side); return !r.omitted && side !== 'south' && (r.assemblyKey === 'glazed' || r.sunGlazing); });
   if (naturalApproach && glazedOffSouth.length) {
@@ -3574,7 +3635,13 @@ export function deriveDesign(spec, wallSections) {
   const windowsCostRaw = totalGlass * (utilities.windowQuality === 'triple' ? 70 : 45);
   const roofInsulCost = roofArea * INSULATION_TYPES[roofInsulKey].costPsf;
   const floorInsulCost = floor * INSULATION_TYPES[floorInsulKey].costPsf;
-  const roofCostRaw = roofArea * 10 + roofInsulCost;
+  // Drainage (gutters + downspouts + where the runoff goes) rides the roof line.
+  const drainage = resolveDrainage(spec.shell);
+  const gutterCost = drainage.gutterLf * GUTTER_COST_LF;
+  const downspoutCost = drainage.downspouts * DOWNSPOUT_COST;
+  const dischargeCost = drainage.gutters !== 'none' ? (drainage.dischargeSpec?.cost || 0) : 0;
+  const drainageCost = gutterCost + downspoutCost + dischargeCost;
+  const roofCostRaw = roofArea * 10 + roofInsulCost + drainageCost;
   const cost = {
     foundation: foundationCostBase + foundationRunCost,
     frame: frameCost,
@@ -3612,7 +3679,8 @@ export function deriveDesign(spec, wallSections) {
   const wallCarbonRaw = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0) + partitionCarbon + claddingCarbon;
   const wallCarbon = wallCarbonRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.carbon : 1);
   const frameCarbon = frameCarbonRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.carbon : 1);
-  const roofCarbonRaw = roofArea * (12 + INSULATION_TYPES[roofInsulKey].carbonPsf);
+  const drainageCarbon = drainage.gutterLf * GUTTER_CARBON_LF + (drainage.gutters !== 'none' ? (drainage.dischargeSpec?.carbon || 0) : 0);
+  const roofCarbonRaw = roofArea * (12 + INSULATION_TYPES[roofInsulKey].carbonPsf) + drainageCarbon;
   const roofCarbon = roofCarbonRaw * (reclaimed.roof ? RECLAIMED_FACTORS.roof.carbon : 1);
   const flooringCarbon = flooringCarbonRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.carbon : 1) + subfloorCarbon + floor * INSULATION_TYPES[floorInsulKey].carbonPsf;
   const stemCarbonExtra = utilities.foundationType === 'stemwall' ? perimeterFt * Math.max(0, stemwallHeightFt - 1.5) * 40 : 0;
@@ -3736,6 +3804,9 @@ export function deriveDesign(spec, wallSections) {
       rline('Roof structure & cladding', roofArea * 10, roofArea, 'sf of roof surface', 10),
       rline(`Roof insulation — ${INSULATION_TYPES[roofInsulKey]?.label || roofInsulKey}`, roofInsulCost, roofArea, 'sf of roof', INSULATION_TYPES[roofInsulKey].costPsf)
     ];
+    if (gutterCost > 0) lines.push(rline('Gutters', gutterCost, drainage.gutterLf, 'ft of eave', GUTTER_COST_LF));
+    if (downspoutCost > 0) lines.push(rline('Downspouts', downspoutCost, drainage.downspouts, 'downspouts', DOWNSPOUT_COST, '', true));
+    if (dischargeCost > 0) lines.push(rline(`Runoff — ${drainage.dischargeSpec.label}`, dischargeCost, null, '', null, drainage.dischargeSpec.note));
     if (reclaimed.roof) lines.push(rline('Reclaimed roofing', -(roofCostRaw - cost.roof), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.roof.cost * 100)}% of new`));
     costReceipts.roof = lines;
   }
