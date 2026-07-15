@@ -834,8 +834,9 @@ function normalizeRooms(spec) {
         x: clamp(room.x, -roomMargin * 0.25, spec.shell.widthFt + 8),
         y: clamp(room.y, -roomMargin * 0.25, spec.shell.depthFt + 8)
       }),
-    w: clamp(room.w, 4, spec.shell.widthFt),
-    d: clamp(room.d, 4, spec.shell.depthFt)
+    // 2-ft floor, not 4: a reach-in closet is a legitimate 2-ft-deep room.
+    w: clamp(room.w, 2, spec.shell.widthFt),
+    d: clamp(room.d, 2, spec.shell.depthFt)
   }));
   if (Array.isArray(spec.elements)) {
     spec.elements = spec.elements.map((element) => {
@@ -1825,8 +1826,8 @@ export function applyBimOperations(currentSpec, plan) {
         x: Number(operation.x || 2),
         y: Number(operation.y || 2),
         z: Number(operation.z || 0),
-        w: clamp(Number(operation.w || 10), 4, next.shell.widthFt),
-        d: clamp(Number(operation.d || 10), 4, next.shell.depthFt),
+        w: clamp(Number(operation.w || 10), 2, next.shell.widthFt),
+        d: clamp(Number(operation.d || 10), 2, next.shell.depthFt),
         h: Number(operation.h || 0.22),
         level: Number(operation.level || 1),
         type: operation.category || profile.type,

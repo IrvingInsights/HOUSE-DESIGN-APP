@@ -653,7 +653,11 @@ export const FOUNDATION_RUN_TYPES = {
   rubble: { label: 'Rubble trench', costLf: 22, stemCostLfFt: 0, carbonLf: 6, note: 'Drained gravel trench — carries a wall with almost no concrete.' },
   'rubble-stem': { label: 'Rubble trench + stem wall', costLf: 26, stemCostLfFt: 18, carbonLf: 10, note: 'The full natural detail: drained trench below, masonry stem above splash height. What a bale or cob wall wants.' },
   stemwall: { label: 'Stem wall on footing', costLf: 20, stemCostLfFt: 18, carbonLf: 18, note: 'Concrete footing and stem — conventional and strong.' },
-  thickened: { label: 'Thickened slab edge / grade beam', costLf: 24, stemCostLfFt: 0, carbonLf: 22, note: 'For slab foundations: a deepened, reinforced strip under the load.' }
+  thickened: { label: 'Thickened slab edge / grade beam', costLf: 24, stemCostLfFt: 0, carbonLf: 22, note: 'For slab foundations: a deepened, reinforced strip under the load.' },
+  // perSf: an AREA of slab drawn as one shape, not a strip priced by the foot.
+  // Rates match the main slab foundation ($15/sf, 25 kg/sf) so the same
+  // concrete never prices differently depending on which control drew it.
+  slabpad: { label: 'Slab — one shape, any size', costSf: 15, carbonSf: 25, perSf: true, note: 'A whole slab drawn as one shape — bigger than the house, out under a porch or carport, wherever it needs to reach. With a slab foundation this shape IS the slab.' }
 };
 export const FOUNDATION_RUN_PRESETS = [
   { name: 'Rubble trench run', construction: 'rubble', w: 12, d: 1.5, h: 0.3 },
@@ -713,7 +717,8 @@ export const ROOM_PRESETS = [
   { name: 'Bathroom', type: 'wet', w: 8, d: 8 },
   { name: 'Office', type: 'work', w: 10, d: 10 },
   { name: 'Mudroom', type: 'service', w: 8, d: 8 },
-  { name: 'Pantry', type: 'storage', w: 8, d: 6 }
+  { name: 'Pantry', type: 'storage', w: 8, d: 6 },
+  { name: 'Hallway', type: 'service', w: 12, d: 4 }
 ];
 
 // Button label for each one-click flag fix (keyed by issue.fixId). Absence of a
@@ -797,8 +802,27 @@ export const ROOM_SYNONYMS = [
   { re: /\b(greenhouses?|sunrooms?|sun rooms?|solariums?|conservatories|conservatory)\b/, name: 'Sunroom', type: 'plant', w: 12, d: 10 },
   { re: /\b(porches|porch|verandas?|decks?)\b/, name: 'Porch', type: 'living', w: 16, d: 8 },
   { re: /\b(nurseries|nursery|kids rooms?|childrens rooms?)\b/, name: 'Nursery', type: 'sleeping', w: 10, d: 10 },
+  { re: /\b(hallways?|halls?|corridors?|passageways?|passages?)\b/, name: 'Hallway', type: 'service', w: 12, d: 4 },
+  { re: /\b(foyers?|entryways?|entry halls?|entries|entrances?|vestibules?)\b/, name: 'Entry', type: 'service', w: 8, d: 6 },
+  { re: /\b(workshops?|craft rooms?|makerspaces?)\b/, name: 'Workshop', type: 'work', w: 14, d: 12 },
   { re: /\b(rooms?|spaces?)\b/, name: 'Room', type: 'living', w: 12, d: 12 }
 ];
+
+// Turn ANY typed room name into an addable preset: recognized names get their
+// sensible type and starting size (a hallway starts long and narrow), unknown
+// names get a friendly default — the room keeps the name YOU typed either way.
+export function roomPresetFromName(rawName) {
+  const name = String(rawName || '').trim().replace(/\s+/g, ' ');
+  if (!name) return null;
+  const titled = name.replace(/\b\w/g, (c) => c.toUpperCase());
+  const syn = ROOM_SYNONYMS.find((s) => s.re.test(name.toLowerCase()));
+  return {
+    name: titled,
+    type: syn?.type || 'living',
+    w: syn?.w || 10,
+    d: syn?.d || 10
+  };
+}
 
 export const WORD_COUNTS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, another: 1 };
 
@@ -828,8 +852,8 @@ export function parseLocalRoomAdds(text) {
     const dimMatch = clause.match(/(\d+(?:\.\d+)?)\s*(?:x|by|×)\s*(\d+(?:\.\d+)?)/);
     if (numMatch && !(dimMatch && dimMatch[0].includes(numMatch[1]))) count = clamp(Number(numMatch[1]), 1, 8);
     else if (wordMatch) count = WORD_COUNTS[wordMatch[1]] || 1;
-    const w = dimMatch ? clamp(Number(dimMatch[1]), 4, 60) : match.w;
-    const d = dimMatch ? clamp(Number(dimMatch[2]), 4, 60) : match.d;
+    const w = dimMatch ? clamp(Number(dimMatch[1]), 2, 60) : match.w;
+    const d = dimMatch ? clamp(Number(dimMatch[2]), 2, 60) : match.d;
     for (let i = 0; i < count; i += 1) {
       nameCount[match.name] = (nameCount[match.name] || 0) + 1;
       rooms.push({ name: match.name, type: match.type, w, d });
@@ -979,6 +1003,8 @@ export function arrangeRoomsPlan(spec) {
 // combination for inspection (walls per side, roof, floors, rooms, openings,
 // site, element categories), plus x-ray walls. Persisted with the design.
 export const DEFAULT_MODEL_LAYERS = {
+  frame: true,
+  foundation: true,
   wallNorth: true,
   wallSouth: true,
   wallEast: true,
@@ -1087,6 +1113,118 @@ export function buildTimeline(spec, derived) {
   return phases;
 }
 
+// ---- The Time Machine: build-order dependencies + the week-by-week schedule.
+// Hard dependencies come from the CONSTRUCTION ITSELF (what carries what, what
+// must stay dry, what must cure) — never from taste. Everything not listed
+// here is the builder's call to re-order. Each rule carries its reason in
+// plain English so the app can EXPLAIN a refusal instead of just refusing.
+// A rule may also carry a waiting gap (gapWeeks) that must pass after the
+// needed phase ends — concrete curing is the canonical case.
+export function phaseDependencies(spec, phases) {
+  const ids = new Set(phases.map((phase) => phase.id));
+  const deps = [];
+  const need = (id, needs, why, gapWeeks = 0, gapWhy = '') => {
+    if (ids.has(id) && ids.has(needs)) deps.push({ id, needs, why, gapWeeks, gapWhy });
+  };
+  const loadBearing = resolveFrameType(spec, 1) === 'load-bearing';
+  // Straw-based infill must never take rain — the classic natural-building rule.
+  const strawWalls = WALL_SIDES
+    .map((side) => resolveWallSide(spec, side))
+    .some((r) => !r.omitted && ['straw-bale', 'light-straw-clay'].includes(r.assemblyKey));
+
+  need('foundation', 'site-prep', 'You can’t pour a foundation into unexcavated ground.');
+  if (loadBearing) {
+    // The walls ARE the structure: they stand on the foundation, and the roof
+    // structure goes up on top of them.
+    need('walls', 'foundation', 'These walls carry the roof — they stand straight on the foundation.');
+    need('framing', 'walls', 'With load-bearing walls, the roof structure is built on top of the finished walls.');
+    need('roofing', 'framing', 'The roof cladding needs its structure underneath first.');
+  } else {
+    need('framing', 'foundation', 'The frame anchors to the foundation.');
+    need('roofing', 'framing', 'The rafters land on the frame.');
+    need('walls', 'framing', 'The infill walls fill the frame’s bays.');
+    if (strawWalls) need('walls', 'roofing', 'Straw must stay bone dry — the roof goes on before the bales go in.');
+  }
+  need('utilities', 'roofing', 'Rough plumbing and wiring is sheltered work — the building needs its roof first.');
+  need('heater', 'foundation', 'Tons of masonry will stand on that concrete — it has to cure hard first.', 4, 'about 4 weeks of curing');
+  need('heater', 'roofing', 'The heater is indoor work — roof on first.');
+  need('plaster', 'walls', 'Plaster goes onto finished walls.');
+  need('plaster', 'utilities', 'Plaster closes over the wiring and pipe chases.');
+  phases.forEach((phase) => {
+    if (phase.id !== 'occupancy') need('occupancy', phase.id, 'The inspector signs off on a FINISHED house — everything comes before this.');
+  });
+  return deps;
+}
+
+// Repair an order so it satisfies the dependencies, staying as close to the
+// given order as possible: walk the list, always taking the earliest phase
+// whose needs are already placed. Also how the DEFAULT order adapts to the
+// construction (a timber frame with straw-bale infill roofs before it walls).
+export function orderPhasesByDeps(phases, deps) {
+  const remaining = [...phases];
+  const placed = [];
+  const done = new Set();
+  while (remaining.length) {
+    const idx = remaining.findIndex((phase) => deps
+      .filter((dep) => dep.id === phase.id)
+      .every((dep) => done.has(dep.needs) || !remaining.some((r) => r.id === dep.needs)));
+    const pick = remaining.splice(Math.max(0, idx), 1)[0]; // idx -1 would be a rule cycle; take the head rather than hang
+    placed.push(pick);
+    done.add(pick.id);
+  }
+  return placed;
+}
+
+const wk = (n) => Math.round(n * 10) / 10;
+
+// Lay the ordered phases on the calendar (one crew, one phase at a time) and
+// receipt-check every dependency in plain English: "Foundation done week 3.5
+// + 4 weeks curing = ready week 7.5 — this starts week 13. OK." The same
+// sentences explain a refused drag.
+export function scheduleTimeline(orderedPhases, deps) {
+  let clock = 0;
+  const byId = {};
+  const rows = orderedPhases.map((phase) => {
+    const row = { ...phase, startWeek: wk(clock), endWeek: wk(clock + (Number(phase.weeks) || 0)), checks: [] };
+    clock = row.endWeek;
+    byId[row.id] = row;
+    return row;
+  });
+  rows.forEach((row) => {
+    deps.filter((dep) => dep.id === row.id).forEach((dep) => {
+      const needRow = byId[dep.needs];
+      if (!needRow) return;
+      const readyWeek = wk(needRow.endWeek + (dep.gapWeeks || 0));
+      const ok = readyWeek <= row.startWeek && needRow.endWeek <= row.startWeek;
+      const gapTxt = dep.gapWeeks ? ` + ${dep.gapWeeks} weeks (${dep.gapWhy}) = ready week ${readyWeek}` : '';
+      row.checks.push({
+        needs: dep.needs,
+        needsTitle: needRow.title,
+        ok,
+        why: dep.why,
+        text: ok
+          ? `${needRow.title} done week ${needRow.endWeek}${gapTxt} — this starts week ${row.startWeek}. OK.`
+          : `${needRow.title} isn’t ${dep.gapWeeks ? 'ready' : 'done'} until week ${readyWeek}, and this starts week ${row.startWeek}. ${dep.why}`
+      });
+    });
+  });
+  return rows;
+}
+
+// Judge a proposed order (a drag) BEFORE accepting it. Returns the schedule
+// either way, plus every broken rule as a plain sentence. Unknown ids are
+// ignored; missing phases are appended in their current position.
+export function validatePhaseOrder(phases, orderIds, deps) {
+  const byId = new Map(phases.map((phase) => [phase.id, phase]));
+  const ordered = orderIds.map((id) => byId.get(id)).filter(Boolean);
+  phases.forEach((phase) => { if (!ordered.includes(phase)) ordered.push(phase); });
+  const schedule = scheduleTimeline(ordered, deps);
+  const problems = schedule.flatMap((row) => row.checks
+    .filter((check) => !check.ok)
+    .map((check) => ({ phaseId: row.id, phaseTitle: row.title, text: check.text })));
+  return { ok: problems.length === 0, problems, schedule };
+}
+
 // The Build page's materials list. LAW: every system the design PRICES (each
 // non-zero derived.cost line) shows up here — with a real quantity where the
 // model can compute one, and an honest "not calculated yet" where it can't.
@@ -1109,10 +1247,15 @@ export function materialsTakeoff(spec, derived) {
   } else if (u.foundationType === 'slab') {
     add('foundation', 'Concrete (slab)', `${Math.round(derived.floor * 0.33 / 27)} yd³`, '4" slab over insulation');
   }
-  const runs = (spec.elements || []).filter((el) => el.category === 'foundation');
+  const runs = (spec.elements || []).filter((el) => el.category === 'foundation' && !FOUNDATION_RUN_TYPES[el.construction]?.perSf);
   if (runs.length) {
     const runLf = runs.reduce((sum, el) => sum + Math.max(Number(el.w) || 0, Number(el.d) || 0), 0);
     add('foundation', 'Foundation runs', `${Math.round(runLf)} lf`, 'strips under specific walls');
+  }
+  const pads = (spec.elements || []).filter((el) => el.category === 'foundation' && FOUNDATION_RUN_TYPES[el.construction]?.perSf);
+  if (pads.length) {
+    const padSf = pads.reduce((sum, el) => sum + (Number(el.w) * Number(el.d) || 0), 0);
+    add('foundation', 'Concrete (drawn slab shapes)', `${Math.round(padSf * 0.33 / 27)} yd³`, `${Math.round(padSf)} sf of slab drawn as its own shape`);
   }
 
   // Frame
@@ -1990,8 +2133,8 @@ export function applyNaturalLanguageDesign(prompt, currentSpec, attachedImages =
     if (resize) {
       const room = findRoom(next, resize[1]);
       if (room) {
-        room.w = clamp(Number(resize[2]), 4, next.shell.widthFt);
-        room.d = clamp(Number(resize[3]), 4, next.shell.depthFt);
+        room.w = clamp(Number(resize[2]), 2, next.shell.widthFt);
+        room.d = clamp(Number(resize[3]), 2, next.shell.depthFt);
         changedIds.push(room.id);
         actions.push(`Resized ${room.name} to ${room.w}' x ${room.d}'.`);
       } else {
@@ -2011,8 +2154,8 @@ export function applyNaturalLanguageDesign(prompt, currentSpec, attachedImages =
     if (!rawName || rawName.length < 3) continue;
     const profile = roomProfile(rawName);
     const dims = dimensionsFromText(chunk, profile);
-    const width = clamp(dims.w, 4, Math.max(4, next.shell.widthFt));
-    const depth = clamp(dims.d, 4, Math.max(4, next.shell.depthFt));
+    const width = clamp(dims.w, 2, Math.max(2, next.shell.widthFt));
+    const depth = clamp(dims.d, 2, Math.max(2, next.shell.depthFt));
     const location = nextRoomLocation(next, width, depth, rawName);
     const existing = findRoom(next, rawName);
     const room = {
@@ -2834,8 +2977,9 @@ export function normalizeRooms(spec) {
         x: clamp(room.x, -roomMargin * 0.25, spec.shell.widthFt + 8),
         y: clamp(room.y, -roomMargin * 0.25, spec.shell.depthFt + 8)
       }),
-    w: clamp(room.w, 4, spec.shell.widthFt),
-    d: clamp(room.d, 4, spec.shell.depthFt)
+    // 2-ft floor, not 4: a reach-in closet is a legitimate 2-ft-deep room.
+    w: clamp(room.w, 2, spec.shell.widthFt),
+    d: clamp(room.d, 2, spec.shell.depthFt)
   }));
   if (Array.isArray(spec.elements)) {
     spec.elements = spec.elements.map((element) => {
@@ -3347,27 +3491,42 @@ export function deriveDesign(spec, wallSections) {
   // 18" stem matches the old flat $12/sf).
   const foundationInsulation = utilities.foundationInsulation || 'perimeter';
   const foundationInsulationCost = foundationInsulation === 'full' ? floor * 3 : foundationInsulation === 'perimeter' ? perimeterFt * 6 : 0;
+  // Slab PADS are areas of slab drawn as one shape (foundation elements with a
+  // perSf run type). When the main foundation is itself a slab, the drawn
+  // shape IS the slab — priced ONCE, by whichever is bigger (the shape must at
+  // least cover the house). Never both; a receipt must never double-count the
+  // same concrete. With any other main foundation the pads price as extra
+  // slab area (a carport apron beside a rubble-trench house).
+  const foundationElements = (spec.elements || []).filter((element) => element.category === 'foundation');
+  const slabPads = foundationElements.filter((element) => FOUNDATION_RUN_TYPES[element.construction]?.perSf);
+  const slabPadArea = slabPads.reduce((sum, element) => sum + (Number(element.w) * Number(element.d) || 0), 0);
+  const padIsTheSlab = !basement.present && utilities.foundationType === 'slab' && slabPadArea > 0;
+  const mainSlabArea = padIsTheSlab ? Math.max(slabPadArea, floor) : floor;
   // A basement IS the foundation: concrete perimeter walls by face area plus
   // a slab — it supersedes the rubble/stemwall/slab choice while present.
   const foundationCostBase = (basement.present
     ? perimeterFt * basement.heightFt * 24 + floor * 7 + basementRoomArea * 9
     : (utilities.foundationType === 'stemwall'
       ? floor * 8 + perimeterFt * stemwallHeightFt * 18
-      : floor * (foundationCostPsf[utilities.foundationType] ?? 10))) + foundationInsulationCost;
+      : (utilities.foundationType === 'slab' ? mainSlabArea : floor) * (foundationCostPsf[utilities.foundationType] ?? 10))) + foundationInsulationCost;
   const outbuildingCost = (spec.elements || []).filter((element) => element.category === 'outbuilding')
     .reduce((sum, element) => sum + (Number(element.w) * Number(element.d) || 0) * (OUTBUILDING_CONSTRUCTION[element.construction]?.costPsf ?? 60), 0);
-  // Placed foundation RUNS (strips under specific interior walls) price by the
-  // foot; a stem type adds its height component. Folded into the foundation line.
-  const foundationRuns = (spec.elements || []).filter((element) => element.category === 'foundation');
-  const foundationRunCost = foundationRuns.reduce((sum, element) => {
+  // Placed foundation RUNS (strips under specific walls) price by the foot; a
+  // stem type adds its height component. Slab pads price by AREA — unless the
+  // pad already became the main slab above. All fold into the foundation line.
+  const foundationRuns = foundationElements.filter((element) => !FOUNDATION_RUN_TYPES[element.construction]?.perSf);
+  const slabPadCost = padIsTheSlab ? 0 : slabPadArea * (FOUNDATION_RUN_TYPES.slabpad.costSf);
+  const slabPadCarbon = padIsTheSlab ? 0 : slabPadArea * (FOUNDATION_RUN_TYPES.slabpad.carbonSf);
+  const stripRunCost = foundationRuns.reduce((sum, element) => {
     const runType = FOUNDATION_RUN_TYPES[element.construction] || FOUNDATION_RUN_TYPES.rubble;
     const lengthFt = Math.max(Number(element.w) || 0, Number(element.d) || 0);
     return sum + lengthFt * (runType.costLf + runType.stemCostLfFt * (Number(element.h) || 0));
   }, 0);
+  const foundationRunCost = stripRunCost + slabPadCost;
   const foundationRunCarbon = foundationRuns.reduce((sum, element) => {
     const runType = FOUNDATION_RUN_TYPES[element.construction] || FOUNDATION_RUN_TYPES.rubble;
     return sum + Math.max(Number(element.w) || 0, Number(element.d) || 0) * runType.carbonLf;
-  }, 0);
+  }, 0) + slabPadCarbon;
   // A porch/deck canopy (element.roofType) is a light roof on posts: framing,
   // decking, and metal over the covered footprint, ~$14/sf.
   const canopyCost = (spec.elements || []).filter((element) => element.roofType && element.category !== 'foundation' && element.category !== 'floor')
@@ -3461,7 +3620,7 @@ export function deriveDesign(spec, wallSections) {
   // regular foundation's coefficient while present.
   const foundationCarbon = basement.present
     ? perimeterFt * basement.heightFt * 16 + floor * 12
-    : floor * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra;
+    : (utilities.foundationType === 'slab' ? mainSlabArea : floor) * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra;
   const carbonKg = foundationCarbon + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
   // What the reclaimed choices saved vs. buying everything new.
@@ -3478,7 +3637,134 @@ export function deriveDesign(spec, wallSections) {
     count: Object.values(reclaimed).filter(Boolean).length
   };
 
+  // ---- Receipts: the itemized math behind every cost line -------------------
+  // Built HERE, from the SAME variables the costs were just computed from, in
+  // the same pass — so a receipt can never drift from its number. Each line:
+  // {label, amount, qty, unit, rate, each, note}; flat items omit qty/rate.
+  // tools/receipts_test.mjs asserts every system's lines sum to cost.<system>.
+  const rline = (label, amount, qty = null, unit = '', rate = null, note = '', each = false) => ({ label, amount, qty, unit, rate, note, each });
+  const costReceipts = {};
+  { // foundation
+    const lines = [];
+    if (basement.present) {
+      lines.push(rline('Basement walls (concrete)', perimeterFt * basement.heightFt * 24, perimeterFt * basement.heightFt, 'sf of wall face', 24));
+      lines.push(rline('Basement slab', floor * 7, floor, 'sf of floor', 7));
+      if (basementRoomArea > 0) lines.push(rline('Finished basement rooms', basementRoomArea * 9, basementRoomArea, 'sf of room', 9));
+    } else if (utilities.foundationType === 'stemwall') {
+      lines.push(rline('Footing & site prep', floor * 8, floor, 'sf of floor', 8));
+      lines.push(rline(`Stem wall, ${stemwallHeightFt}' tall`, perimeterFt * stemwallHeightFt * 18, perimeterFt * stemwallHeightFt, 'sf of stem face', 18));
+    } else if (padIsTheSlab) {
+      lines.push(rline('Slab — your drawn shape', mainSlabArea * 15, mainSlabArea, 'sf of slab', 15,
+        slabPadArea >= floor
+          ? 'the shape you drew IS the slab — bigger than the house, priced once'
+          : 'the drawn shape is smaller than the house, so the house area sets the price'));
+    } else {
+      const rate = foundationCostPsf[utilities.foundationType] ?? 10;
+      const label = utilities.foundationType === 'rubble' ? 'Rubble trench foundation' : utilities.foundationType === 'slab' ? 'Slab on grade' : 'Foundation';
+      lines.push(rline(label, floor * rate, floor, 'sf of floor', rate));
+    }
+    if (foundationInsulationCost > 0) {
+      lines.push(foundationInsulation === 'full'
+        ? rline('Under-slab insulation (full)', floor * 3, floor, 'sf of floor', 3)
+        : rline('Perimeter insulation', perimeterFt * 6, perimeterFt, 'ft of perimeter', 6));
+    }
+    if (stripRunCost > 0) lines.push(rline('Foundation strips', stripRunCost, null, '', null, `${foundationRuns.length} placed run${foundationRuns.length === 1 ? '' : 's'} under specific walls, priced by the foot`));
+    if (slabPadCost > 0) lines.push(rline('Extra slab (drawn shapes)', slabPadCost, slabPadArea, 'sf of slab', FOUNDATION_RUN_TYPES.slabpad.costSf, 'slab beyond the main foundation — a carport apron, a patio pad'));
+    costReceipts.foundation = lines;
+  }
+  { // frame
+    const lines = [];
+    const gRate = FRAME_TYPES[groundFrameKey]?.costPsf ?? 0;
+    const uRate = FRAME_TYPES[upperFrameKey]?.costPsf ?? 0;
+    if (groundFrameArea > 0) lines.push(rline(`Ground frame — ${FRAME_TYPES[groundFrameKey]?.label || groundFrameKey}`, groundFrameArea * gRate, groundFrameArea, 'sf of frame plane', gRate, gRate === 0 ? 'load-bearing walls carry the roof themselves — no separate frame to buy' : 'perimeter × wall height' + (bandFrameArea > 0 ? ' + sun-glazing bands' : '')));
+    if (upperFrameArea > 0) lines.push(rline(`Upper frame — ${FRAME_TYPES[upperFrameKey]?.label || upperFrameKey}`, upperFrameArea * uRate, upperFrameArea, 'sf of frame plane', uRate));
+    if (reclaimed.frame && frameCostRaw > 0) lines.push(rline('Reclaimed timber', -(frameCostRaw - frameCost), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.frame.cost * 100)}% of the new-material price`));
+    costReceipts.frame = lines;
+  }
+  { // flooring
+    const lines = [];
+    const fRate = FLOORING_TYPES[flooringKey]?.costPsf ?? 4;
+    const finishFinal = flooringCostRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.cost : 1);
+    lines.push(rline(`Finish floor — ${FLOORING_TYPES[flooringKey]?.label || flooringKey}`, flooringCostRaw, heatedFloor, 'sf of heated floor', fRate));
+    if (reclaimed.flooring) lines.push(rline('Reclaimed boards', -(flooringCostRaw - finishFinal), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.flooring.cost * 100)}% of new`));
+    if (subfloorCost > 0) lines.push(rline(`Subfloor — ${SUBFLOOR_TYPES[subfloorKey]?.label || subfloorKey}`, subfloorCost, floor, 'sf of deck', SUBFLOOR_TYPES[subfloorKey]?.costPsf ?? 0));
+    if (floorInsulCost > 0) lines.push(rline(`Floor insulation — ${INSULATION_TYPES[floorInsulKey]?.label || floorInsulKey}`, floorInsulCost, floor, 'sf of floor', INSULATION_TYPES[floorInsulKey].costPsf));
+    costReceipts.flooring = lines;
+  }
+  { // upper floors
+    const area = upperFloorArea + loftTowerArea;
+    costReceipts.upperFloors = area > 0 ? [rline('Upper floor decks', area * 12, area, 'sf of deck', 12, 'joists + deck between storeys')] : [];
+  }
+  { // outdoors
+    const lines = [];
+    for (const item of OUTDOOR_ITEMS) {
+      if (!outdoorItemPresent(spec, item)) continue;
+      if (item.key === 'greenhouse') {
+        const gCost = (spec.elements || []).filter((element) => element.name === item.name)
+          .reduce((s, element) => s + Math.max(24, (Number(element.w) || item.w) * (Number(element.d) || item.d)) * greenhouseCostSf, 0);
+        lines.push(rline('Greenhouse', gCost, gCost / greenhouseCostSf, 'sf of footprint', greenhouseCostSf));
+      } else {
+        lines.push(rline(item.name, item.cost));
+      }
+    }
+    if (outbuildingCost > 0) lines.push(rline('Outbuildings', outbuildingCost, null, '', null, 'each footprint × its construction rate'));
+    if (canopyCost > 0) lines.push(rline('Porch / deck canopies', canopyCost, canopyCost / 14, 'sf covered', 14, 'light roof on posts'));
+    costReceipts.outdoors = lines;
+  }
+  { // walls
+    const lines = [];
+    const areaByAssembly = new Map();
+    for (const wall of wallSections) areaByAssembly.set(wall.assemblyKey, (areaByAssembly.get(wall.assemblyKey) || 0) + wallFaceArea(wall));
+    for (const [key, area] of areaByAssembly) {
+      if (area <= 0) continue;
+      const rate = wallCostPsf[key] ?? 16;
+      lines.push(rline(`${WALL_ASSEMBLIES[key]?.label || key} walls`, area * rate, area, 'sf of wall face', rate));
+    }
+    if (partitionCost > 0) lines.push(rline('Interior partitions', partitionCost, null, '', null, 'length × height × the partition rate'));
+    if (claddingCost > 0) lines.push(rline('Exterior cladding', claddingCost, null, '', null, 'face area × the cladding rate (render is already in the wall price)'));
+    if (reclaimed.walls) lines.push(rline('Reclaimed wall materials', -(wallsCostRaw - cost.walls), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.walls.cost * 100)}% of new`));
+    costReceipts.walls = lines;
+  }
+  { // windows
+    const rate = utilities.windowQuality === 'triple' ? 70 : 45;
+    const lines = [rline(`Glazing — ${utilities.windowQuality === 'triple' ? 'triple' : 'double'} pane`, windowsCostRaw, totalGlass, 'sf of glass', rate, 'every window, glazed door, skylight, and sun band')];
+    if (reclaimed.windows) lines.push(rline('Reclaimed windows', -(windowsCostRaw - cost.windows), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.windows.cost * 100)}% of new`));
+    costReceipts.windows = lines;
+  }
+  { // roof
+    const lines = [
+      rline('Roof structure & cladding', roofArea * 10, roofArea, 'sf of roof surface', 10),
+      rline(`Roof insulation — ${INSULATION_TYPES[roofInsulKey]?.label || roofInsulKey}`, roofInsulCost, roofArea, 'sf of roof', INSULATION_TYPES[roofInsulKey].costPsf)
+    ];
+    if (reclaimed.roof) lines.push(rline('Reclaimed roofing', -(roofCostRaw - cost.roof), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.roof.cost * 100)}% of new`));
+    costReceipts.roof = lines;
+  }
+  { // heat / water / waste / power
+    const heatNames = { rocket_mass: 'Rocket mass heater', masonry: 'Masonry heater', wood_stove: 'Wood stove', minisplit: 'Mini-split heat pump' };
+    costReceipts.heat = [rline(heatNames[utilities.heatSource] || 'Heat source', heatCostBySource[utilities.heatSource] ?? 3000, null, '', null, 'installed, flat planning figure')];
+    const waterNames = { well: 'Drilled well', spring: 'Spring development', catchment: 'Roof catchment system', town: 'Town water hookup' };
+    const waterLines = [rline(waterNames[utilities.waterSource] || 'Water source', waterCostBySource[utilities.waterSource] ?? 5000)];
+    if ((Number(utilities.tankGal) || 0) > 0) waterLines.push(rline('Storage tank', Number(utilities.tankGal) * 1.5, Number(utilities.tankGal), 'gal of storage', 1.5));
+    costReceipts.water = waterLines;
+    const wasteNames = { septic: 'Septic system', composting: 'Composting toilet setup', reedbed: 'Reed bed greywater' };
+    costReceipts.waste = [rline(wasteNames[utilities.wasteMethod] || 'Waste system', wasteCostByMethod[utilities.wasteMethod] ?? 5000)];
+    costReceipts.power = utilities.powerMode === 'gridtie'
+      ? [rline('Grid connection', 4200, null, '', null, 'hookup + panel, flat planning figure')]
+      : [
+        rline('Solar panels', panels * 900, panels, 'panels', 900, '', true),
+        rline('Battery bank', batteryKwh * 500, batteryKwh, 'kWh of storage', 500),
+        rline('Inverter, wiring & mounts', 3000)
+      ];
+  }
+  const sweatLines = [];
+  if (utilities.diyFoundation && cost.foundation) sweatLines.push(rline('Foundation — your own labor', -cost.foundation * sweatFoundationFrac, null, '', null, `${Math.round(sweatFoundationFrac * 100)}% of that line is labor`));
+  if (utilities.diyFrame && cost.frame) sweatLines.push(rline('Frame — your own labor', -cost.frame * sweatFrameFrac, null, '', null, `${Math.round(sweatFrameFrac * 100)}% of that line is labor`));
+  if (utilities.diyWalls && cost.walls) sweatLines.push(rline('Walls — your own labor', -cost.walls * sweatWallsFrac, null, '', null, `${Math.round(sweatWallsFrac * 100)}% of that line is labor`));
+  if (utilities.diyRoof && cost.roof) sweatLines.push(rline('Roof — your own labor', -cost.roof * sweatRoofFrac, null, '', null, `${Math.round(sweatRoofFrac * 100)}% of that line is labor`));
+  if (utilities.diyHeat && cost.heat) sweatLines.push(rline('Heat — your own labor', -cost.heat * sweatHeatFrac, null, '', null, `${Math.round(sweatHeatFrac * 100)}% of that line is labor`));
+
   return {
+    receipts: { systems: costReceipts, sweat: sweatLines },
     site, utilities, reclaimed, reclaimedSavings, floor, heatedFloor, storeys, basement, basementRoomArea, basementHeated, roofArea, roofFootprint, overhangs, wallArea, glazedWallArea, wallR, southGlass, glassPct,
     skylightArea, totalGlass, glazingU, stemwallHeightFt, azimuthDeg, solarFactor,
     sunWinterDeg, sunSummerDeg, winterShadeFrac, summerShadeFrac,

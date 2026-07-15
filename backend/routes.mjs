@@ -8,6 +8,7 @@ import { applyBimOperations } from './bim-core.mjs';
 import { buildContextPacket, ensureProjectBrain, updateProjectBrainAfterOperation } from './project-brain-service.mjs';
 import { respondFromStudioAgent } from './studio-agent-service.mjs';
 import { getTraceJob, startTraceJob } from './trace-jobs.mjs';
+import { applyUpdate, checkForUpdate } from './update.mjs';
 
 // The one true apply path: plan (if needed) -> apply ops -> update the project
 // brain -> persist. Both the synchronous POST /api/bim/apply route and the
@@ -50,6 +51,17 @@ async function runBimApply(payload) {
 }
 
 export async function handleApiRoute(req, res, pathname) {
+  // Self-update: check GitHub for newer work / apply it. The frontend shows a
+  // one-tap "Update now" chip so nobody has to restart anything by hand.
+  if (req.method === 'GET' && pathname === '/api/update/check') {
+    sendJson(res, 200, await checkForUpdate());
+    return true;
+  }
+  if (req.method === 'POST' && pathname === '/api/update/apply') {
+    sendJson(res, 200, await applyUpdate());
+    return true;
+  }
+
   if (req.method === 'GET' && pathname === '/api/projects') {
     const projects = await listProjects();
     sendJson(res, 200, { projects, currentProjectId: projects[0]?.id || DEFAULT_PROJECT_ID });

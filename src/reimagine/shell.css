@@ -54,6 +54,8 @@
   font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 9px; cursor: pointer;
 }
 .rz-views button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 70%, transparent); color: var(--ink); }
+.rz-views button.on { background: var(--evergreen, #3c6472); color: #fff; }
+.rz-views-sep { width: 1px; align-self: stretch; background: var(--line2, #cac8bb); margin: 2px 4px; }
 
 /* SURFACE 2 — the Trail spine, left edge */
 .rz-trail {
@@ -88,6 +90,53 @@
   background: color-mix(in srgb, var(--sage, #e2ecee) 80%, transparent); color: var(--evergreen, #3c6472);
 }
 .rz-chapter-label { font-size: 14px; font-weight: 500; }
+.rz-stamp { margin: 12px 4px 0; font-size: 11px; color: var(--moss, #868a7c); text-align: right; display: flex; justify-content: space-between; align-items: baseline; }
+.rz-fresh {
+  border: none; background: transparent; cursor: pointer; padding: 0;
+  font: inherit; font-size: 11px; color: var(--moss, #868a7c); text-decoration: underline dotted;
+}
+.rz-fresh:hover { color: var(--bad, #ae452f); }
+
+/* self-update chip — top center, under the status strip */
+.rz-update {
+  position: absolute; z-index: 15; top: 60px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; max-width: min(640px, calc(100vw - 40px));
+  padding: 8px 14px; border-radius: 999px; font-size: 13px; color: var(--ink, #22251f);
+  background: color-mix(in srgb, var(--sage, #e2ecee) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--evergreen, #3c6472) 40%, transparent);
+  box-shadow: 0 8px 30px rgba(30, 40, 30, 0.14);
+}
+.rz-update button {
+  border: none; border-radius: 999px; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 700;
+  background: var(--evergreen, #3c6472); color: #fff; padding: 5px 14px;
+}
+.rz-update .rz-update-later { background: transparent; color: var(--earth, #565a4f); font-weight: 500; }
+.rz-update-busy { color: var(--earth, #565a4f); }
+.rz-update-err { color: var(--bad, #ae452f); }
+
+/* Shape chapter controls — pick an outline, then the size in numbers */
+.rz-shape { display: flex; flex-direction: column; gap: 8px; margin: 0 4px 14px; }
+.rz-shape-presets { display: flex; gap: 4px; }
+.rz-shape-presets button {
+  flex: 1; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  color: var(--earth, #565a4f); background: var(--raise, #fff);
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 6px 0;
+}
+.rz-shape-presets button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 60%, transparent); }
+.rz-shape-presets button.on { background: var(--evergreen, #3c6472); border-color: var(--evergreen, #3c6472); color: #fff; }
+.rz-shape-note { font-size: 11px; color: var(--moss, #868a7c); }
+.rz-shape-size { display: flex; align-items: end; gap: 8px; }
+.rz-shape-field { display: flex; flex-direction: column; gap: 3px; flex: 1; }
+.rz-shape-field span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); }
+.rz-shape-field { position: relative; }
+.rz-shape-field input {
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 15px; font-weight: 600;
+  color: var(--ink, #22251f); background: var(--raise, #fff);
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 6px 26px 6px 10px;
+}
+.rz-shape-field input:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; }
+.rz-shape-field em { position: absolute; right: 9px; bottom: 8px; font-style: normal; font-size: 12px; color: var(--moss, #868a7c); }
+.rz-shape-x { padding-bottom: 8px; color: var(--moss, #868a7c); }
 
 /* SURFACE 3 — the Card, bottom-right, appears on tap */
 .rz-card {
@@ -96,6 +145,94 @@
 }
 .rz-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .rz-card-head h2 { margin: 0; font-size: 18px; font-weight: 700; color: var(--ink, #22251f); }
+/* the card title doubles as the rename field — looks like a heading until tapped */
+.rz-card-name {
+  flex: 1; min-width: 0; margin: 0; padding: 1px 4px 1px 0; border: none; border-radius: 6px;
+  background: transparent; font: inherit; font-size: 18px; font-weight: 700; color: var(--ink, #22251f);
+}
+.rz-card-name:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 50%, transparent); }
+.rz-card-name:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; background: var(--raise, #fff); }
+.rz-remove {
+  margin-top: 12px; width: 100%; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--bad, #ae452f);
+  background: transparent; border: 1px solid color-mix(in srgb, var(--bad, #ae452f) 40%, transparent);
+  border-radius: 9px; padding: 7px 0;
+}
+.rz-remove:hover { background: color-mix(in srgb, #ae452f 8%, transparent); }
+.rz-rooms-palette button b { font-weight: 600; }
+.rz-room-custom { display: flex; gap: 4px; }
+.rz-room-custom input {
+  flex: 1; min-width: 0; font: inherit; font-size: 12.5px; color: var(--ink, #22251f);
+  background: var(--raise, #fff); border: 1px solid var(--line, #dbd9ce);
+  border-radius: 9px; padding: 6px 9px;
+}
+.rz-room-custom input:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; }
+.rz-room-custom input::placeholder { color: var(--moss, #868a7c); }
+.rz-room-custom button {
+  flex: 0 0 auto; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer;
+  color: #fff; background: var(--evergreen, #3c6472); border: none; border-radius: 9px; padding: 6px 14px;
+}
+.rz-room-custom button:disabled { opacity: 0.45; cursor: default; }
+
+/* per-wall heights disclosure (Shell chapter) */
+.rz-perwall summary {
+  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--evergreen, #3c6472);
+  list-style: none; padding: 2px 0;
+}
+.rz-perwall summary::-webkit-details-marker { display: none; }
+.rz-perwall[open] summary { margin-bottom: 6px; }
+.rz-perwall-row { margin-bottom: 5px; }
+.rz-perwall-name {
+  border: none; background: transparent; cursor: pointer; text-align: left; padding: 0;
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--ink, #22251f);
+}
+.rz-perwall-name small { font-weight: 400; color: var(--moss, #868a7c); }
+.rz-perwall-name:hover { color: var(--evergreen, #3c6472); }
+.rz-perwall-row { display: flex; align-items: center; gap: 6px; }
+.rz-perwall-row .rz-perwall-name { flex: 0 0 44px; }
+.rz-perwall-sys {
+  flex: 1; min-width: 0; font: inherit; font-size: 12px; color: var(--ink, #22251f);
+  background: var(--raise, #fff); border: 1px solid var(--line, #dbd9ce);
+  border-radius: 8px; padding: 4px 5px;
+}
+.rz-perwall-row .rz-num { width: 74px; flex: 0 0 auto; }
+.rz-nowall { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--earth, #565a4f); cursor: pointer; }
+.rz-nowall input { accent-color: var(--evergreen, #3c6472); }
+
+/* roof chapter — overhang controls */
+.rz-field-lead { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); }
+.rz-field-num .rz-field-lead { flex: 1; }
+.rz-overhang-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.rz-overhang-cell { flex-direction: column; align-items: stretch; }
+.rz-overhang-cell span { font-size: 11px; color: var(--moss, #868a7c); }
+.rz-overhang-cell .rz-num { width: 100%; }
+.rz-perwall-toggle {
+  border: none; background: transparent; cursor: pointer; padding: 2px 0; text-align: left;
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--evergreen, #3c6472);
+}
+
+/* right-click menu on the plan */
+.rz-ctx {
+  position: fixed; z-index: 20; min-width: 190px;
+  display: flex; flex-direction: column; padding: 5px;
+  background: color-mix(in srgb, var(--ivory, #fbfaf6) 97%, transparent);
+  border: 1px solid var(--line, #dbd9ce); border-radius: 12px;
+  box-shadow: 0 10px 34px rgba(30, 40, 30, 0.2);
+}
+.rz-ctx-title {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--moss, #868a7c); padding: 5px 10px 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 60%, transparent);
+  margin-bottom: 3px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rz-ctx button {
+  border: none; background: transparent; cursor: pointer; text-align: left;
+  font: inherit; font-size: 13px; color: var(--ink, #22251f);
+  padding: 7px 10px; border-radius: 8px;
+}
+.rz-ctx button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 70%, transparent); }
+.rz-ctx .rz-ctx-danger { color: var(--bad, #ae452f); }
+.rz-ctx .rz-ctx-danger:hover { background: color-mix(in srgb, #ae452f 9%, transparent); }
 .rz-x {
   border: none; background: transparent; cursor: pointer;
   font-size: 20px; line-height: 1; color: var(--moss, #868a7c); padding: 0 2px;
@@ -119,6 +256,50 @@
 .rz-more-body { margin-top: 8px; }
 .rz-muted { color: var(--earth, #565a4f); font-size: 13px; line-height: 1.5; margin: 0; }
 
+/* status strip cost is tappable */
+.rz-status-btn { border: none; background: transparent; font: inherit; cursor: pointer; padding: 0; }
+.rz-status-btn:hover b { color: var(--evergreen, #3c6472); }
+
+/* SURFACE 4a — the Budget sheet (receipts) */
+.rz-budget {
+  top: 64px; right: 20px; bottom: 76px; width: 360px;
+  border-radius: 16px; display: flex; flex-direction: column; z-index: 6;
+  position: absolute;
+  background: color-mix(in srgb, var(--ivory, #fbfaf6) 94%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 70%, transparent);
+  box-shadow: 0 8px 30px rgba(30, 40, 30, 0.14);
+}
+.rz-budget-head { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 18px 8px; }
+.rz-budget-head h2 { margin: 0; font-size: 16px; font-weight: 700; }
+.rz-budget-rows { flex: 1; overflow-y: auto; padding: 0 10px; }
+.rz-brow { border-radius: 10px; }
+.rz-brow.open { background: color-mix(in srgb, var(--sage, #e2ecee) 35%, transparent); }
+.rz-brow-head {
+  display: grid; grid-template-columns: 92px 1fr 76px; align-items: center; gap: 10px;
+  width: 100%; border: none; background: transparent; cursor: pointer;
+  font: inherit; padding: 7px 8px; text-align: left; border-radius: 10px;
+}
+.rz-brow-head:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 50%, transparent); }
+.rz-brow-label { font-size: 13px; color: var(--earth, #565a4f); }
+.rz-brow-bar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--line, #dbd9ce) 45%, transparent); overflow: hidden; }
+.rz-brow-bar span { display: block; height: 100%; border-radius: 3px; background: var(--evergreen, #3c6472); }
+.rz-brow-amount { font-size: 13px; font-weight: 700; text-align: right; color: var(--ink, #22251f); }
+.rz-brow-body { padding: 2px 10px 10px; }
+.rz-rline { padding: 6px 0; border-top: 1px dashed color-mix(in srgb, var(--line, #dbd9ce) 60%, transparent); }
+.rz-rline:first-child { border-top: none; }
+.rz-rline-main { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
+.rz-rline-label { color: var(--ink, #22251f); }
+.rz-rline-amount { font-weight: 600; white-space: nowrap; }
+.rz-rline-amount.neg { color: var(--good, #3e7b53); }
+.rz-rline-math { margin-top: 2px; font-size: 12px; color: var(--moss, #868a7c); }
+.rz-budget-foot { border-top: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 70%, transparent); padding: 10px 18px 14px; }
+.rz-bfoot-row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 2px 0; color: var(--earth, #565a4f); }
+.rz-bfoot-sweat b { color: var(--good, #3e7b53); }
+.rz-bfoot-total { font-size: 15px; color: var(--ink, #22251f); padding-top: 6px; }
+.rz-budget-note { margin-top: 8px; font-size: 11px; line-height: 1.45; color: var(--moss, #868a7c); }
+
 /* SURFACE 4b — the Ask bar, bottom center */
 .rz-ask {
   bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -141,6 +322,154 @@
   border-radius: 12px; padding: 10px 14px; font-size: 13px; color: var(--earth, #565a4f);
   box-shadow: 0 8px 30px rgba(30, 40, 30, 0.12);
 }
+
+/* floor pills — top left, the plan's level selector */
+.rz-floors {
+  position: absolute; z-index: 5; top: 16px; left: 16px;
+  display: flex; gap: 3px; padding: 4px; border-radius: 12px;
+  background: color-mix(in srgb, var(--ivory, #fbfaf6) 88%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 70%, transparent);
+  box-shadow: 0 8px 30px rgba(30, 40, 30, 0.12);
+}
+.rz-floors button {
+  border: none; background: transparent; color: var(--earth, #565a4f);
+  font: inherit; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 9px; cursor: pointer;
+}
+.rz-floors button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 70%, transparent); color: var(--ink); }
+.rz-floors button.on { background: var(--evergreen, #3c6472); color: #fff; }
+.rz-floors .rz-floors-add { color: var(--evergreen, #3c6472); }
+.rz-floors .rz-floors-del { color: var(--bad, #ae452f); font-weight: 500; font-size: 12px; }
+.rz-floors-lead { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); padding: 0 4px 0 6px; }
+
+/* Shell chapter — storey stepper */
+.rz-storeys { display: flex; align-items: center; gap: 10px; }
+.rz-storeys b { font-size: 14px; color: var(--ink, #22251f); min-width: 62px; text-align: center; }
+.rz-storeys button {
+  width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--line, #dbd9ce); background: var(--raise, #fff);
+  font-size: 17px; line-height: 1; color: var(--evergreen, #3c6472);
+}
+.rz-storeys button:disabled { opacity: 0.4; cursor: default; color: var(--moss, #868a7c); }
+.rz-inline-link { border: none; background: transparent; cursor: pointer; padding: 0; font: inherit; font-size: inherit; font-weight: 600; color: var(--evergreen, #3c6472); }
+
+/* shared Trail-block field styles (Foundation + Shell chapters) */
+.rz-found { display: flex; flex-direction: column; gap: 9px; margin: 0 4px 14px; }
+.rz-field { display: flex; flex-direction: column; gap: 3px; }
+.rz-field > span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); }
+.rz-field select {
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 13px;
+  color: var(--ink, #22251f); background: var(--raise, #fff);
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 6px 8px;
+}
+.rz-field select:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; }
+.rz-field-num { flex-direction: row; align-items: center; justify-content: space-between; }
+.rz-num { position: relative; width: 96px; }
+.rz-num input {
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; font-weight: 600;
+  color: var(--ink, #22251f); background: var(--raise, #fff);
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 5px 24px 5px 9px;
+}
+.rz-num input:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; }
+.rz-num em { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-style: normal; font-size: 11px; color: var(--moss, #868a7c); }
+.rz-found-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); margin-top: 4px; }
+.rz-pad-btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  font: inherit; font-size: 12.5px; cursor: pointer; text-align: left;
+  color: var(--ink, #22251f); background: color-mix(in srgb, var(--sage, #e2ecee) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--evergreen, #3c6472) 35%, transparent);
+  border-radius: 9px; padding: 7px 9px;
+}
+.rz-pad-btn:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 85%, transparent); }
+.rz-pad-btn small { color: var(--moss, #868a7c); }
+.rz-found-palette { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.rz-found-palette button {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  font: inherit; font-size: 12px; cursor: pointer; text-align: left;
+  color: var(--ink, #22251f); background: var(--raise, #fff);
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 6px 8px;
+}
+.rz-found-palette button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 60%, transparent); }
+.rz-found-palette small { color: var(--moss, #868a7c); }
+.rz-found-list { display: flex; flex-direction: column; gap: 2px; }
+.rz-found-row { display: flex; align-items: center; gap: 4px; border-radius: 9px; }
+.rz-found-row.sel { background: color-mix(in srgb, var(--sage, #e2ecee) 70%, transparent); }
+.rz-found-pick {
+  flex: 1; display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  border: none; background: transparent; cursor: pointer; font: inherit; font-size: 12.5px;
+  color: var(--ink, #22251f); padding: 5px 8px; border-radius: 9px; text-align: left;
+}
+.rz-found-pick:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 55%, transparent); }
+.rz-found-pick small { color: var(--moss, #868a7c); white-space: nowrap; }
+
+/* the Trail's door into the Time Machine */
+.rz-build-btn {
+  margin: 12px 4px 0; width: calc(100% - 8px);
+  font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+  color: #fff; background: var(--evergreen, #3c6472);
+  border: none; border-radius: 11px; padding: 9px 0;
+}
+.rz-build-btn:hover { filter: brightness(1.08); }
+
+/* SURFACE 4 — the Time Machine strip, bottom center */
+.rz-timeline {
+  position: absolute; z-index: 6;
+  bottom: 16px; left: 50%; transform: translateX(-50%);
+  width: min(860px, calc(100vw - 320px));
+  border-radius: 16px; padding: 10px 14px 10px;
+  background: color-mix(in srgb, var(--ivory, #fbfaf6) 92%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 70%, transparent);
+  box-shadow: 0 8px 30px rgba(30, 40, 30, 0.14);
+}
+.rz-tl-top { display: flex; align-items: center; gap: 10px; }
+.rz-tl-play {
+  flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%; cursor: pointer;
+  border: none; background: var(--evergreen, #3c6472); color: #fff; font-size: 13px;
+}
+.rz-tl-headline { font-size: 13.5px; font-weight: 600; color: var(--ink, #22251f); }
+.rz-tl-spacer { flex: 1; }
+.rz-tl-reset {
+  border: 1px solid var(--line, #dbd9ce); background: var(--raise, #fff);
+  font: inherit; font-size: 12px; color: var(--earth, #565a4f);
+  border-radius: 9px; padding: 4px 10px; cursor: pointer;
+}
+.rz-tl-scrub { width: 100%; margin: 8px 0 6px; accent-color: var(--evergreen, #3c6472); cursor: pointer; }
+.rz-tl-chips { display: flex; gap: 3px; }
+.rz-chip {
+  position: relative; flex-basis: 0; min-width: 34px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px;
+  background: var(--raise, #fff); color: var(--moss, #868a7c);
+  font: inherit; font-size: 12px; font-weight: 600; padding: 6px 4px;
+  cursor: grab; white-space: nowrap;
+}
+.rz-chip.done { background: color-mix(in srgb, var(--sage, #e2ecee) 75%, transparent); color: var(--evergreen, #3c6472); border-color: color-mix(in srgb, var(--evergreen, #3c6472) 35%, transparent); }
+.rz-chip.now { background: var(--evergreen, #3c6472); color: #fff; border-color: var(--evergreen, #3c6472); }
+.rz-chip.focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: 1px; }
+.rz-chip.dropmark { box-shadow: inset 3px 0 0 var(--evergreen, #3c6472); }
+.rz-chip-badge { font-size: 10px; opacity: 0.75; }
+.rz-chip-warn {
+  width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto;
+  display: grid; place-items: center; font-size: 10px; font-weight: 800;
+  background: var(--warn, #a9781f); color: #fff;
+}
+.rz-tl-msg { margin-top: 7px; font-size: 12.5px; line-height: 1.45; }
+.rz-tl-msg.hint { color: var(--moss, #868a7c); }
+.rz-tl-msg.ok { color: var(--good, #3e7b53); }
+.rz-tl-msg.no { color: var(--bad, #ae452f); font-weight: 600; }
+
+/* the phase card floats above the strip */
+.rz-phase-card { bottom: 158px; }
+.rz-phase-checks { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
+.rz-check {
+  font-size: 12.5px; line-height: 1.45; padding: 8px 10px; border-radius: 10px;
+}
+.rz-check.ok { background: color-mix(in srgb, var(--sage, #e2ecee) 45%, transparent); color: var(--earth, #565a4f); }
+.rz-check.bad { background: color-mix(in srgb, #ae452f 12%, transparent); color: var(--bad, #ae452f); font-weight: 600; }
+.rz-phase-more p { margin: 0 0 6px; }
 
 /* when the view gets tight, the Ask bar yields to the model */
 @media (max-width: 720px) {

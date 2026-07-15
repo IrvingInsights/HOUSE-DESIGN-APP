@@ -809,7 +809,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // the raising view). Load-bearing walls have no separate frame; custom
       // outlines come later (v1 rect).
       const frameKey3d = resolveFrameType(spec, 1);
-      if (!customFp && frameKey3d !== 'load-bearing') {
+      if (layers.frame !== false && !customFp && frameKey3d !== 'load-bearing') {
         const fm = FRAME_MEMBERS[frameKey3d] || FRAME_MEMBERS['post-beam'];
         const framePart = (m) => {
           m.userData.roomId = 'frame-main';
@@ -1063,7 +1063,9 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // lives in the selection chip and the Walls page; it was pure clutter.)
 
       // Stem wall foundation: a visible concrete plinth ring under the walls.
-      if (utilitiesOf(spec).foundationType === 'stemwall') {
+      // (layers.foundation gates all three foundation renders — the Time
+      // Machine reveals them at the foundation phase; default is visible.)
+      if (layers.foundation !== false && utilitiesOf(spec).foundationType === 'stemwall') {
         const stemH = Math.min(6, Math.max(0.5, Number(utilitiesOf(spec).stemwallHeightFt) || 1.5));
         const stemMat = new THREE.MeshStandardMaterial({ color: 0xaaa79b, roughness: 0.95, map: grainTexture('concrete'), bumpMap: bumpTexture('concrete'), bumpScale: 0.15 });
         const lip = 0.25;
@@ -1092,7 +1094,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // footprint edge gets a concrete face from the sill (y≈0) to the grade
       // line at its two ends, so the bottom follows the falling ground.
       const slopeNow = Math.max(0, Number(siteOf(spec).slopeFt) || 0);
-      if (slopeNow > 0) {
+      if (layers.foundation !== false && slopeNow > 0) {
         const foundMat = new THREE.MeshStandardMaterial({ color: 0x9c988c, roughness: 0.96, map: grainTexture('concrete'), side: THREE.DoubleSide });
         footprintEdges(spec).forEach((edge) => {
           const gA = gradeElevationAt(spec, edge.x0, edge.y0);
@@ -1118,7 +1120,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // site the terrain falls below 0 downhill, exposing the wall — that IS
       // the walkout. Bounding-rect walls (same honest simplification as the
       // Blender/permit exports on custom footprints).
-      if (basementH > 0) {
+      if (layers.foundation !== false && basementH > 0) {
         const bMat = new THREE.MeshStandardMaterial({ color: 0xa8a49a, roughness: 0.95, map: grainTexture('concrete') });
         const bT = 0.8;
         const reveal = 0.55;
@@ -1233,6 +1235,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           if (construction === 'rubble-stem' || construction === 'stemwall') {
             mesh = box(element.w, stemH + 0.1, element.d, cx, (stemH + 0.1) / 2 - 0.05, cz, stemMatRun);
             elementHeight = stemH;
+          } else if (construction === 'slabpad') {
+            // A slab drawn as one SHAPE (area, not a strip): a flat concrete
+            // pad mostly buried, its surface just proud of grade so it reads —
+            // and walks — like a real slab.
+            mesh = box(element.w, 0.5, element.d, cx, -0.17, cz, stemMatRun);
+            elementHeight = 0.16;
           } else if (construction === 'thickened') {
             mesh = box(element.w, 1.1, element.d, cx, -0.45, cz, stemMatRun);
             elementHeight = 0.2;

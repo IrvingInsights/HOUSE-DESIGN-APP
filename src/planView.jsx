@@ -174,7 +174,7 @@ function planLabelFit(name, w, d, isSel, maxSize = 2) {
   return null;
 }
 
-export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShell, onMoveEdge, onMoveOpening, context = null, activeFloor = 1 }) {
+export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShell, onMoveEdge, onMoveOpening, onContext = null, context = null, activeFloor = 1 }) {
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
   const [shellGhost, setShellGhost] = useState(null);
@@ -306,8 +306,9 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
       let { x, y, w, d } = o;
       const right = o.x + o.w;
       const bottom = o.y + o.d;
-      if (drag.mode.includes('w')) { x = clamp(snap(o.x + dx), right - 60, right - 3); w = right - x; } else if (drag.mode.includes('e')) { w = clamp(snap(o.w + dx), 3, 60); }
-      if (drag.mode.includes('n')) { y = clamp(snap(o.y + dy), bottom - 60, bottom - 3); d = bottom - y; } else if (drag.mode.includes('s')) { d = clamp(snap(o.d + dy), 3, 60); }
+      // 2-ft floor: a reach-in closet is a real 2-ft-deep room.
+      if (drag.mode.includes('w')) { x = clamp(snap(o.x + dx), right - 60, right - 2); w = right - x; } else if (drag.mode.includes('e')) { w = clamp(snap(o.w + dx), 2, 60); }
+      if (drag.mode.includes('n')) { y = clamp(snap(o.y + dy), bottom - 60, bottom - 2); d = bottom - y; } else if (drag.mode.includes('s')) { d = clamp(snap(o.d + dy), 2, 60); }
       ghost = { x, y, w, d };
     }
     setDrag((current) => current && { ...current, ghost });
@@ -452,6 +453,23 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
   }
 
   const roomAt = (room) => (drag && drag.id === room.id ? { ...room, ...drag.ghost } : room);
+  // Live size readout DURING a corner drag: big digits inside the box that
+  // track every half-foot as it changes — nobody should have to read tiny
+  // numbers somewhere else while their hand is mid-resize.
+  const isResizing = (id) => drag && drag.id === id && drag.mode !== 'move';
+  const fmtFt = (v) => String(Math.round(Number(v) * 2) / 2);
+  const liveDimsText = (rect) => `${fmtFt(rect.w)} × ${fmtFt(rect.d)}′`;
+  const liveDimsLabel = (rect) => {
+    const text = liveDimsText(rect);
+    const size = Math.max(0.9, Math.min(2.4, (rect.w - 0.6) / (text.length * LABEL_CHAR_W), rect.d * 0.5));
+    return (
+      <text
+        x={rect.x + rect.w / 2} y={rect.y + rect.d / 2 + size * 0.35}
+        textAnchor="middle" fontSize={size} fontWeight="700" fill="#1f2a26" pointerEvents="none"
+        paintOrder="stroke" stroke="rgba(246,244,236,0.92)" strokeWidth={size * 0.2}
+      >{text}</text>
+    );
+  };
   const gridStep = W > 60 ? 10 : 5;
   const gridLines = [];
   for (let gx = 0; gx <= W + 0.01; gx += gridStep) gridLines.push(<line key={`gx${gx}`} x1={gx} y1={0} x2={gx} y2={D} stroke="var(--line)" strokeWidth={0.06} opacity={0.5} />);
@@ -558,15 +576,18 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                 strokeWidth={isSel ? 0.4 : 0.18}
                 pointerEvents={buildingContext || siteContext ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
+                onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}
               />
               {(() => {
+                // mid-resize the room speaks in one voice: its live size
+                if (isResizing(raw.id)) return liveDimsLabel(room);
                 const lab = planLabelFit(raw.name, room.w, room.d, isSel);
                 if (!lab) return null;
                 const cx = room.x + room.w / 2;
                 const cy = room.y + room.d / 2;
                 const ink = planLabelInk(PLAN_ZONE_HEX[raw.type] || '#79a7a8');
                 const lineH = lab.size * 1.2;
-                const dimText = `${raw.w}×${raw.d}′`;
+                const dimText = liveDimsText(room);
                 const dimSize = Math.min(1.4, room.w / 6);
                 // dims only when they fit under the name without touching it
                 const showDims = lab.lines.length === 1
@@ -602,19 +623,26 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
           const isSel = raw.id === selectedRoom;
           const w = Number(el.w) || 4;
           const d = Number(el.d) || 4;
+          // In a building context most elements are backdrop — EXCEPT the ones
+          // the context is FOR: foundation runs are the subject of the
+          // Foundation view (drag them under whatever they carry), like extent
+          // plates always are. The foundation's layout is its own thing.
+          const isContextSubject = raw.category === 'floor' || (context === 'foundation' && raw.category === 'foundation');
           return (
             <g key={raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
               <rect
                 x={el.x} y={el.y} width={w} height={d}
                 fill={PLAN_ELEMENT_HEX[raw.category] || '#8a7768'}
-                fillOpacity={raw.category === 'partition' ? (isSel ? 1 : 0.95) : (isSel ? 0.92 : 0.7) * (buildingContext && raw.category !== 'floor' ? 0.25 : 1)}
+                fillOpacity={raw.category === 'partition' ? (isSel ? 1 : 0.95) : (isSel ? 0.92 : 0.7) * (buildingContext && !isContextSubject ? 0.25 : 1)}
                 stroke={isSel ? 'var(--active-line)' : '#5a5348'}
                 strokeWidth={isSel ? 0.4 : 0.22}
                 strokeDasharray={raw.category === 'partition' ? undefined : '0.8 0.5'}
-                pointerEvents={buildingContext && raw.category !== 'floor' ? 'none' : undefined}
+                pointerEvents={buildingContext && !isContextSubject ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
+                onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}
               />
               {(() => {
+                if (isResizing(raw.id)) return liveDimsLabel({ x: el.x, y: el.y, w, d });
                 const lab = planLabelFit(raw.name, w, d, isSel, 1.5);
                 if (!lab) return null;
                 const ink = planLabelInk(PLAN_ELEMENT_HEX[raw.category] || '#8a7768');
@@ -776,8 +804,9 @@ export function PlanMoveBoard({ spec, selectedRoom, selectedObject, onSelectRoom
     if (!room) return;
     const point = pointToFeet(event);
     if (drag.mode === 'resize') {
-      const nextW = clamp(Math.round((point.x - room.x) * 2) / 2, 4, Math.max(4, shellW - room.x));
-      const nextD = clamp(Math.round((point.y - room.y) * 2) / 2, 4, Math.max(4, shellD - room.y));
+      // Rooms go down to 2 ft — a real reach-in closet is a 2-ft-deep room.
+      const nextW = clamp(Math.round((point.x - room.x) * 2) / 2, 2, Math.max(2, shellW - room.x));
+      const nextD = clamp(Math.round((point.y - room.y) * 2) / 2, 2, Math.max(2, shellD - room.y));
       dragRef.current = { ...drag, w: nextW, d: nextD };
       onResize(room.id, nextW, nextD, false);
       return;
