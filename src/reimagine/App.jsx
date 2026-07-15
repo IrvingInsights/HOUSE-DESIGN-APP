@@ -3,7 +3,8 @@ import { ThreeScene, webglAvailable } from '../threeScene.jsx';
 import { PlanView } from '../planView.jsx';
 import {
   applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
-  INSULATION_TYPES, resolveInsulation, OPENING_TYPES
+  INSULATION_TYPES, resolveInsulation, OPENING_TYPES,
+  FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS
 } from '../../backend/bim-core.mjs';
 import {
   seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS,
@@ -35,7 +36,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 39 · Jul 15';
+const UPDATE_STAMP = 'update 40 · Jul 15';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -600,6 +601,11 @@ export default function App() {
   const setAllWalls = (value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, field: 'assembly', value })));
   const setFrame = (value) => applyOps([{ type: 'set_frame', value }]);
   const setWallSide = (side, field, value) => applyOps([{ type: 'set_wall_side', wall: side, field, value }]);
+  // --- finishes: floor, exterior cladding, reclaimed materials ---------------
+  const setFlooring = (value) => applyOps([{ type: 'set_flooring', value }]);
+  const setSubfloor = (value) => applyOps([{ type: 'set_flooring', field: 'subfloor', value }]);
+  const setAllCladding = (value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, field: 'cladding', value })));
+  const setReclaimed = (system, on) => applyOps([{ type: 'set_reclaimed', system, value: on }]);
 
   // --- roof: shape, pitch, insulation, overhang, shed direction --------------
   const setRoofType = (value) => {
@@ -803,6 +809,16 @@ export default function App() {
             )}
             {activeChapter === 'systems' && (
               <SystemsControls spec={spec} derived={derived} onUtility={setUtilityField} />
+            )}
+            {activeChapter === 'finishes' && (
+              <FinishesControls
+                spec={spec}
+                derived={derived}
+                onFlooring={setFlooring}
+                onSubfloor={setSubfloor}
+                onCladding={setAllCladding}
+                onReclaimed={setReclaimed}
+              />
             )}
             {activeChapter === 'foundation' && (
               <FoundationControls
@@ -1523,6 +1539,72 @@ function SystemsControls({ spec, derived, onUtility }) {
         <span>I'll build the heater myself (sweat equity)</span>
       </label>
       <div className="rz-shape-note">Design flow ≈ {gpd} gal/day. A septic field must sit at least 100 ft from a well; composting sidesteps most of that. Each choice updates the receipts.</div>
+    </div>
+  );
+}
+
+// Finishes chapter: the surfaces you touch and see — the floor underfoot, the
+// cladding the weather hits, and whether the materials are new or salvaged.
+// Whole-house choices here; a single wall's face is tuned in Shell (wall by
+// wall) and a single room's floor by tapping it. Every pick moves the receipts.
+const RECLAIMED_ITEMS = [
+  { key: 'frame', label: 'Timber frame', note: 'salvaged beams & posts' },
+  { key: 'walls', label: 'Wall materials', note: 'reclaimed cladding / infill' },
+  { key: 'windows', label: 'Windows & doors', note: 'salvaged units' },
+  { key: 'roof', label: 'Roofing', note: 'reclaimed metal / tile' }
+];
+function FinishesControls({ spec, derived, onFlooring, onSubfloor, onCladding, onReclaimed }) {
+  const flooringKey = resolveFlooring(spec);
+  const subfloorKey = resolveSubfloor(spec);
+  const claddingKey = spec.walls?.south?.cladding || 'render';
+  const reclaimed = { ...RECLAIMED_DEFAULTS, ...(spec.reclaimed || {}) };
+  const claddingVals = WALL_SIDES.map((side) => spec.walls?.[side]?.cladding || 'render');
+  const claddingMixed = new Set(claddingVals).size > 1;
+  return (
+    <div className="rz-found">
+      <div className="rz-found-head">The floor underfoot</div>
+      <label className="rz-field">
+        <span>Finished floor</span>
+        <select value={flooringKey} onChange={(e) => onFlooring(e.target.value)}>
+          {Object.entries(FLOORING_TYPES).map(([key, f]) => (
+            <option key={key} value={key}>{f.green ? '🌿 ' : ''}{f.label}</option>
+          ))}
+        </select>
+      </label>
+      <label className="rz-field">
+        <span>Deck under it</span>
+        <select value={subfloorKey} onChange={(e) => onSubfloor(e.target.value)}>
+          {Object.entries(SUBFLOOR_TYPES).map(([key, s]) => (
+            <option key={key} value={key}>{s.label}</option>
+          ))}
+        </select>
+      </label>
+      <label className="rz-nowall">
+        <input type="checkbox" checked={Boolean(reclaimed.flooring)} onChange={(e) => onReclaimed('flooring', e.target.checked)} />
+        <span>Reclaimed / salvaged floor (cuts cost &amp; carbon)</span>
+      </label>
+      <div className="rz-shape-note">{FLOORING_TYPES[flooringKey]?.note} Covers the {fmtNum(derived?.heatedFloor || 0)} sf heated floor — {fmtMoney(derived?.cost?.flooring || 0)} for deck + finish. A single room can differ (tap its floor).</div>
+
+      <div className="rz-found-head" style={{ marginTop: 12 }}>What the weather hits — cladding</div>
+      <label className="rz-field">
+        <span>Exterior cladding (all walls)</span>
+        <select value={claddingMixed ? '' : claddingKey} onChange={(e) => onCladding(e.target.value)}>
+          {claddingMixed && <option value="">— mixed, pick to set all —</option>}
+          {Object.values(CLADDING_TYPES).map((c) => (
+            <option key={c.key} value={c.key}>{c.green ? '🌿 ' : ''}{c.label}</option>
+          ))}
+        </select>
+      </label>
+      <div className="rz-shape-note">Sets every wall's outer face at once. To give one wall its own look, tap it in the Shell chapter (wall by wall).</div>
+
+      <div className="rz-found-head" style={{ marginTop: 12 }}>New or salvaged</div>
+      {RECLAIMED_ITEMS.map((item) => (
+        <label key={item.key} className="rz-nowall">
+          <input type="checkbox" checked={Boolean(reclaimed[item.key])} onChange={(e) => onReclaimed(item.key, e.target.checked)} />
+          <span>{item.label} — reclaimed <small style={{ color: 'var(--moss, #868a7c)' }}>({item.note})</small></span>
+        </label>
+      ))}
+      <div className="rz-shape-note">Salvaged materials lean the budget and the carbon down — the receipts and the footprint follow each toggle.</div>
     </div>
   );
 }
