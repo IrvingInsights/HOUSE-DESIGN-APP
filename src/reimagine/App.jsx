@@ -36,7 +36,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 40 · Jul 15';
+const UPDATE_STAMP = 'update 41 · Jul 15';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -768,20 +768,19 @@ export default function App() {
               <ShapeControls
                 spec={spec}
                 selectedId={selectedId}
+                floors={floors}
                 onSelectTarget={setSelectedId}
                 onShapeBuilding={setShape}
                 onSizeBuilding={resizeShell}
                 onSizeObject={sizeObject}
+                onAddFloor={addFloor}
+                onRemoveFloor={removeFloor}
+                onResizeFloor={resizeFloor}
+                onFloorHeight={setFloorHeight}
               />
             )}
             {activeChapter === 'rooms' && (
               <div className="rz-found">
-                <FloorSizeControls
-                  spec={spec}
-                  level={activeFloor}
-                  onResizeFloor={resizeFloor}
-                  onFloorHeight={setFloorHeight}
-                />
                 <div className="rz-found-head">Add a room{activeFloor !== 1 ? ` — ${floorLabel(spec, activeFloor).toLowerCase()}` : ''}</div>
                 <div className="rz-found-palette rz-rooms-palette">
                   {ROOM_PRESETS.map((preset) => (
@@ -1293,7 +1292,7 @@ function BudgetSheet({ derived, onClose }) {
 // building or any single room/element — from the dropdown. The building gets
 // the outline presets (Rectangle / L / T / U) and its size; a room or element
 // gets its own width × depth. One general control instead of building-only.
-function ShapeControls({ spec, selectedId, onSelectTarget, onShapeBuilding, onSizeBuilding, onSizeObject }) {
+function ShapeControls({ spec, selectedId, floors, onSelectTarget, onShapeBuilding, onSizeBuilding, onSizeObject, onAddFloor, onRemoveFloor, onResizeFloor, onFloorHeight }) {
   const rooms = spec.rooms || [];
   const elements = (spec.elements || []).filter((e) => e.category !== 'floor');
   const target = selectedId
@@ -1342,6 +1341,7 @@ function ShapeControls({ spec, selectedId, onSelectTarget, onShapeBuilding, onSi
             <span className="rz-run-x">×</span>
             <label>Depth<NumInput value={bD} min={12} max={80} step={1} unit="ft" onCommit={(v) => onSizeBuilding(bW, v)} /></label>
           </div>
+          <StoreysControl spec={spec} floors={floors} onAddFloor={onAddFloor} onRemoveFloor={onRemoveFloor} onResizeFloor={onResizeFloor} onFloorHeight={onFloorHeight} />
         </>
       ) : (
         <>
@@ -1380,39 +1380,51 @@ function NumInput({ value, min, max, step = 1, unit = 'ft', onCommit }) {
   );
 }
 
-// Per-floor size + height, shown in the Rooms chapter for whichever floor is
-// active. Numbers are the reliable way to size a floor (a corner-drag is fussy
-// on a small upper storey); the ground floor is the shell itself, an upper
-// storey its own footprint, and every floor gets a height.
-function FloorSizeControls({ spec, level, onResizeFloor, onFloorHeight }) {
-  if (level === BASEMENT_LEVEL) return null;
-  const isUpper = level > 1;
-  const plate = isUpper ? (spec.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === level) : null;
-  const w = isUpper ? Math.round((Number(plate?.w) || Number(spec.shell.widthFt)) * 10) / 10 : Number(spec.shell.widthFt);
-  const d = isUpper ? Math.round((Number(plate?.d) || Number(spec.shell.depthFt)) * 10) / 10 : Number(spec.shell.depthFt);
-  const { baseWallFt, upperFt } = storeyInfo(spec.shell);
-  const h = isUpper ? upperFt : baseWallFt;
+// Storeys — how the building STACKS, shown in the Shape chapter next to the
+// footprint. Add/remove a storey, and give each upper storey its own extent
+// (it can set back, smaller than the floor below) and the shared upper-floor
+// height. Sizing is by the numbers here, on purpose: the plan stays free for
+// laying out rooms (the extent plate is a non-interactive outline there), so
+// storey-sizing and room-work never fight over the same drag.
+function StoreysControl({ spec, floors, onAddFloor, onRemoveFloor, onResizeFloor, onFloorHeight }) {
+  const { upperFt } = storeyInfo(spec.shell);
+  const uppers = [];
+  for (let lvl = 2; lvl <= floors; lvl += 1) uppers.push(lvl);
   return (
-    <div className="rz-floor-size">
-      <div className="rz-found-head">{floorLabel(spec, level)} — size &amp; height</div>
-      <div className="rz-floor-grid">
-        <label className="rz-field rz-field-num">
-          <span>Width</span>
-          <NumInput value={w} min={8} max={96} step={0.5} onCommit={(v) => onResizeFloor(level, v, d)} />
-        </label>
-        <label className="rz-field rz-field-num">
-          <span>Depth</span>
-          <NumInput value={d} min={8} max={80} step={0.5} onCommit={(v) => onResizeFloor(level, w, v)} />
-        </label>
-        <label className="rz-field rz-field-num">
-          <span>Height</span>
-          <NumInput value={Math.round(h * 10) / 10} min={7} max={16} step={0.5} onCommit={(v) => onFloorHeight(level, v)} />
-        </label>
+    <div className="rz-storeys-block">
+      <div className="rz-found-head" style={{ marginTop: 10 }}>Storeys</div>
+      <div className="rz-field">
+        <div className="rz-storeys">
+          <button type="button" disabled={floors <= 1} onClick={onRemoveFloor} title="Remove the top floor — its rooms come down a floor">−</button>
+          <b>{floors} floor{floors === 1 ? '' : 's'}</b>
+          <button type="button" disabled={floors >= 3} onClick={onAddFloor} title="Add a floor on top">+</button>
+        </div>
       </div>
+      {uppers.length > 0 && (
+        <label className="rz-field rz-field-num">
+          <span>Upper floor height</span>
+          <NumInput value={Math.round(upperFt * 10) / 10} min={7} max={16} step={0.5} onCommit={(v) => onFloorHeight(2, v)} />
+        </label>
+      )}
+      {uppers.map((lvl) => {
+        const plate = (spec.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === lvl);
+        const w = Math.round((Number(plate?.w) || Number(spec.shell.widthFt)) * 10) / 10;
+        const d = Math.round((Number(plate?.d) || Number(spec.shell.depthFt)) * 10) / 10;
+        return (
+          <div key={lvl} className="rz-storey-row">
+            <span className="rz-storey-name">{floorLabel(spec, lvl)}</span>
+            <div className="rz-run-size">
+              <label>W<NumInput value={w} min={8} max={96} step={0.5} unit="" onCommit={(v) => onResizeFloor(lvl, v, d)} /></label>
+              <span className="rz-run-x">×</span>
+              <label>D<NumInput value={d} min={8} max={80} step={0.5} unit="ft" onCommit={(v) => onResizeFloor(lvl, w, v)} /></label>
+            </div>
+          </div>
+        );
+      })}
       <div className="rz-shape-note">
-        {isUpper
-          ? 'This storey can be smaller than the one below — a setback or half-storey. Shrinking it pulls its rooms in to fit; the roof steps down over the rest.'
-          : 'The ground floor is the whole footprint. Give each storey its own height.'}
+        {floors > 1
+          ? 'An upper storey can set back — a smaller extent than the floor below, and the roof steps down over the rest. Lay out each floor’s rooms in the Rooms chapter.'
+          : 'Add a floor and it gets its own outline; you can set it back from the ground floor and lay out its rooms in Rooms.'}
       </div>
     </div>
   );
@@ -1731,18 +1743,8 @@ function StructureControls({ spec, floors, onAllWalls, onFrame, onShell, onWallS
   const shed = (spec.shell.roofType || 'gable') === 'shed';
   return (
     <div className="rz-found">
-      <div className="rz-field">
-        <span>Storeys</span>
-        <div className="rz-storeys">
-          <button type="button" disabled={floors <= 1} onClick={onRemoveFloor} title="Remove the top floor — its rooms come down to the ground floor">−</button>
-          <b>{floors} floor{floors === 1 ? '' : 's'}</b>
-          <button type="button" disabled={floors >= 3} onClick={onAddFloor} title="Add a floor on top">+</button>
-        </div>
-      </div>
-      <div className="rz-shape-note">
-        {floors > 1
-          ? <>Each floor has its own outline and rooms — <button type="button" className="rz-inline-link" onClick={onLayoutFloors}>lay out each floor in Rooms ›</button></>
-          : 'Add a floor and each one gets its own outline and room layout, worked in Rooms.'}
+      <div className="rz-shape-note" style={{ marginTop: 0 }}>
+        {floors > 1 ? `${floors} storeys` : 'One storey'} — storeys, their setbacks, and heights live in the <b>Shape</b> chapter. This page is the walls, frame, and roof structure.
       </div>
 
       <label className="rz-field">
