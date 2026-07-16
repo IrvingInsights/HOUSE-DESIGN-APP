@@ -383,10 +383,17 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // Exact for shed/flat (incl. the stepped plate), long-axis-ridge
       // approximation for gable/hip.
       const roofUnderAt = (px, pz) => {
-        const plateR = upperPlateRect(spec, 2);
-        const stepped = storeyLift > 0 && plateR && plateR.w * plateR.d < width * depth - 1;
-        const inPlateR = plateR && px >= plateR.x && px <= plateR.x + plateR.w && pz >= plateR.y && pz <= plateR.y + plateR.d;
-        const lift = stepped ? (inPlateR ? storeyLift : 0) : storeyLift;
+        // TIER-AWARE lift: the roof over a plan point is raised by exactly the
+        // storeys whose extents stand there — every level consulted (a 3rd
+        // floor set back inside the 2nd steps the roof twice, and everything
+        // that reads the roof underside follows).
+        let lift = 0;
+        for (let lv = 2; lv <= Math.ceil(storeys); lv += 1) {
+          const hLv = heightAt(lv);
+          if (hLv <= 0) continue;
+          const pR = upperPlateRect(spec, lv);
+          if (!pR || (px >= pR.x && px <= pR.x + pR.w && pz >= pR.y && pz <= pR.y + pR.d)) lift += hLv;
+        }
         if (roofSpec.roofType === 'shed') {
           const nH = roofSpec.northWallHeightFt; const sH = roofSpec.southWallHeightFt;
           return nH + (sH - nH) * clamp(depth > 0 ? pz / depth : 0, 0, 1) + lift;
@@ -759,33 +766,75 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         const eaveAtZ = (zz) => northWallHeight + (southWallHeight - northWallHeight) * clamp(depth > 0 ? zz / depth : 0, 0, 1);
         pushSideBoxes('north', hN, tN, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north'), yBase: stemReveal }));
         pushSideBoxes('south', hS, tS, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south'), yBase: stemReveal }));
-        // With a PARTIAL upper storey the raked side walls STEP: they reach
-        // the lifted eave only alongside the extent plate and stay at ground
-        // height elsewhere. One full-lift triangle across the whole house
-        // towered over the stepped roof.
-        const plateWalls = upperPlateRect(spec, 2);
-        const stepsWalls = storeyLift > 0 && plateWalls && plateWalls.w * plateWalls.d < width * depth - 1;
-        const buildRakedSide = (side, thickCenter, tSide) => {
-          const touchesPlate = stepsWalls && (side === 'west' ? plateWalls.x <= 0.05 : plateWalls.x + plateWalls.w >= width - 0.05);
-          const runs = [];
-          if (touchesPlate) {
-            const y0 = clamp(plateWalls.y, 0, depth);
-            const y1 = clamp(plateWalls.y + plateWalls.d, 0, depth);
-            if (y0 > 0.1) runs.push({ a0: 0, a1: y0, lift: storeyLift });
-            if (y1 - y0 > 0.1) runs.push({ a0: y0, a1: y1, lift: 0 });
-            if (depth - y1 > 0.1) runs.push({ a0: y1, a1: depth, lift: storeyLift });
-          } else {
-            runs.push({ a0: 0, a1: depth, lift: stepsWalls ? storeyLift : 0 });
+        // The raked side walls step TIER BY TIER: along each stretch of the
+        // side they rise exactly as high as the storeys that actually stand
+        // at that edge (every level's extent consulted — three set-back floors
+        // make three steps). The old builder only knew floor 2, so floor 3's
+        // east/west walls simply didn't exist, and a floor-2-at-the-edge wall
+        // could poke through the tier above.
+        const edgePlateInfo = (side) => {
+          const plates = [];
+          for (let lv = 2; lv <= Math.ceil(storeys); lv += 1) {
+            if (heightAt(lv) <= 0) continue;
+            const p = upperPlateRect(spec, lv);
+            if (!p) { plates.push({ lv, y0: 0, y1: depth, touches: true }); continue; }
+            const touches = side === 'west' ? p.x <= 0.05 : p.x + p.w >= width - 0.05;
+            plates.push({ lv, y0: clamp(p.y, 0, depth), y1: clamp(p.y + p.d, 0, depth), touches });
           }
-          const meshes = runs.flatMap((run) => wallRunMeshes({
-            horizontal: false, thickCenter, t: tSide, a0: run.a0, a1: run.a1,
-            hAt: (zz) => Math.max(1, eaveAtZ(zz) - run.lift),
-            mat: wallMatFor(side), gaps: gapsFor(side), yBase: stemReveal
-          }));
+          return plates;
+        };
+        const buildRakedSide = (side, thickCenter, tSide) => {
+          const plates = edgePlateInfo(side);
+          const bounds = [...new Set([0, depth, ...plates.flatMap((p) => [p.y0, p.y1])])].sort((a, b) => a - b);
+          const meshes = [];
+          for (let bi = 0; bi < bounds.length - 1; bi += 1) {
+            const a0 = bounds[bi]; const a1 = bounds[bi + 1];
+            if (a1 - a0 < 0.1) continue;
+            const mid = (a0 + a1) / 2;
+            // this stretch is missing the height of every storey NOT standing here
+            const missing = plates.reduce((sum, p) => sum
+              + ((p.touches && mid > p.y0 && mid < p.y1) ? 0 : heightAt(p.lv)), 0);
+            meshes.push(...wallRunMeshes({
+              horizontal: false, thickCenter, t: tSide, a0, a1,
+              hAt: (zz) => Math.max(1, eaveAtZ(zz) - missing),
+              mat: wallMatFor(side), gaps: gapsFor(side), yBase: stemReveal
+            }));
+          }
           wallMeshSpecs.push({ side, storey: 'ground', meshes });
         };
         buildRakedSide('west', tW / 2, tW);
         buildRakedSide('east', width - tE / 2, tE);
+        // Set-back storeys also need their own east/west walls standing ON the
+        // tier below (the sloped parallelogram bands) — floors 2 and 3 of a
+        // shed house had NO east/west walls at all ("missing from the upper
+        // floors"). North/south bands come from pushSideBoxes above; here the
+        // east/west bands, skipped where the storey touches the edge (the
+        // perimeter wall already covers those).
+        if (storeyLift > 0) {
+          const wingTopAtZ = (zz) => roofSpec.northWallHeightFt + (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) * clamp(depth > 0 ? zz / depth : 0, 0, 1);
+          const TUCK = 0.45;
+          for (let level = 2; level <= Math.ceil(storeys); level += 1) {
+            const uH = heightAt(level);
+            if (uH <= 0) continue;
+            const p = upperPlateRect(spec, level);
+            if (!p) continue;
+            ['west', 'east'].forEach((side) => {
+              if (omittedWalls.has(side) || wallResolved[side].omitted) return;
+              const touches = side === 'west' ? p.x <= 0.05 : p.x + p.w >= width - 0.05;
+              if (touches) return;
+              const u = resolveWallSide(spec, side, level);
+              const tU = u.thicknessFt;
+              const z0 = p.y; const z1 = p.y + p.d;
+              const y0 = wingTopAtZ(z0) - TUCK + (uH + TUCK) / 2 + upAbove(level);
+              const y1 = wingTopAtZ(z1) - TUCK + (uH + TUCK) / 2 + upAbove(level);
+              const len = Math.hypot(z1 - z0, y1 - y0);
+              const xAt = side === 'west' ? p.x + tU / 2 : p.x + p.w - tU / 2;
+              const band = box(tU, uH + TUCK, len, xAt, (y0 + y1) / 2, (z0 + z1) / 2, wallMatOf(u));
+              band.rotation.x = -Math.atan2(y1 - y0, z1 - z0);
+              wallMeshSpecs.push({ side, storey: 'upper', level, meshes: [band] });
+            });
+          }
+        }
       } else {
         // Cap each wall at the roof underside so a wall taller than the eave
         // can't stab up through the roof. This happens when a per-wall height
