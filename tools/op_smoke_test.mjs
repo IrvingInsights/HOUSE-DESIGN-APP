@@ -285,7 +285,7 @@ ok(WALL_ASSEMBLIES['straw-bale'].green === true && !WALL_ASSEMBLIES.sips.green, 
 ok(WALL_ASSEMBLIES.glazed && WALL_ASSEMBLIES.glazed.rValue === 2, 'glazed glass-wall assembly present');
 ok(Object.keys(FRAME_TYPES).length === 6, 'FRAME_TYPES table');
 ok(Object.keys(FLOORING_TYPES).length === 6 && Object.keys(SUBFLOOR_TYPES).length === 4, 'floor tables');
-ok(Object.keys(OPENING_TYPES).length === 11, 'OPENING_TYPES table');
+ok(Object.keys(OPENING_TYPES).length === 13, 'OPENING_TYPES table');
 
 // --- transaction truth (UX review 2026-07-10) --------------------------------
 // All-sides assembly batch: one plan, four ops, every side ends up resolved to
