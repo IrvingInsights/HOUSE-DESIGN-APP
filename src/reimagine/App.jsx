@@ -36,7 +36,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 51 · Jul 16';
+const UPDATE_STAMP = 'update 52 · Jul 16';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -321,6 +321,7 @@ export default function App() {
   // clears back to a plain rectangle; corners land on half-foot marks.
   const setShape = (kind) => {
     if (kind === 'rect') { applyOps([{ type: 'set_footprint', value: 'rect' }]); return; }
+    if (kind === 'round') { applyOps([{ type: 'set_footprint', value: 'round' }]); return; }
     const W = Number(spec.shell.widthFt) || 36;
     const D = Number(spec.shell.depthFt) || 28;
     const s = (v) => Math.round(v * 2) / 2;
@@ -1391,6 +1392,7 @@ function BudgetSheet({ derived, onClose }) {
 // the outline presets (Rectangle / L / T / U) and its size; a room or element
 // gets its own width × depth. One general control instead of building-only.
 function ShapeControls({ spec, floors, onShapeBuilding, onSizeBuilding, onAddFloor, onRemoveFloor, onResizeFloor, onFloorHeight }) {
+  const isRound = spec.shell.footprint === 'round';
   const isRect = !spec.shell.footprint;
   const corners = Array.isArray(spec.shell.footprint) ? spec.shell.footprint.length : 4;
   const bW = Math.round((Number(spec.shell.widthFt) || 36) * 10) / 10;
@@ -1399,23 +1401,22 @@ function ShapeControls({ spec, floors, onShapeBuilding, onSizeBuilding, onAddFlo
     <div className="rz-shape">
       <div className="rz-found-head">Outline</div>
       <div className="rz-shape-presets">
-        {[['rect', 'Rectangle'], ['l', 'L'], ['t', 'T'], ['u', 'U']].map(([kind, label]) => (
+        {[['rect', 'Rectangle'], ['l', 'L'], ['t', 'T'], ['u', 'U'], ['round', 'Round']].map(([kind, label]) => (
           <button
             key={kind}
             type="button"
-            className={kind === 'rect' && isRect ? 'on' : ''}
+            className={(kind === 'rect' && isRect) || (kind === 'round' && isRound) ? 'on' : ''}
             onClick={() => onShapeBuilding(kind)}
-            title={kind === 'rect' ? 'Plain rectangle' : `${label}-shaped outline — a starting point you can drag`}
+            title={kind === 'rect' ? 'Plain rectangle' : kind === 'round' ? 'A round house — an ellipse as wide × deep as the size below' : `${label}-shaped outline — a starting point you can drag`}
           >{label}</button>
         ))}
       </div>
-      {!isRect && <div className="rz-shape-note">custom outline · {corners} corners — drag any edge on the plan</div>}
+      {isRound && <div className="rz-shape-note">round outline · an ellipse — set how wide & deep in the Floors sizes below</div>}
+      {!isRect && !isRound && <div className="rz-shape-note">custom outline · {corners} corners — drag any edge on the plan</div>}
 
       {/* Every floor — ground included — sizes the same way in the Floors list
           below (the ground floor's width & depth ARE the building footprint). */}
       <StoreysControl spec={spec} floors={floors} onAddFloor={onAddFloor} onRemoveFloor={onRemoveFloor} onResizeFloor={onResizeFloor} onFloorHeight={onFloorHeight} />
-
-      <div className="rz-shape-note">To size one room, tap it in the Rooms chapter. To size an element, tap it or use its own chapter.</div>
     </div>
   );
 }
@@ -1518,11 +1519,6 @@ function StoreysControl({ spec, floors, onAddFloor, onRemoveFloor, onResizeFloor
           </div>
         );
       })}
-      <div className="rz-shape-note">
-        {floors > 1
-          ? 'Each floor has its own width, depth, and height — an upper storey can set back and the roof steps down over the rest. Or open a floor in Rooms and drag its outline to move it.'
-          : 'Add a floor and it gets its own outline and height; set it back from the ground floor here, or drag it on the plan in Rooms.'}
-      </div>
     </div>
   );
 }

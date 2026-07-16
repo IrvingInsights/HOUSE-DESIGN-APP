@@ -24,6 +24,21 @@
    reimagine (it crowded the workspace); the classic app keeps its own. */
 .rz-model .planHint { display: none; }
 
+/* The plan gets the CLEAR workspace — right of the always-on Trail, below the
+   status strip, above the Ask bar. Before this the plan spanned the whole
+   window and centered the house under the left bar, so west-side rooms sat
+   beneath it and couldn't be clicked or dragged. */
+.rz-model { background: var(--canvas, #F4F3EC); }
+.rz-model .planWrap {
+  inset: 60px 16px 76px 364px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 60%, transparent);
+}
+/* narrow windows: the trail overlays regardless — let the plan use the width */
+@media (max-width: 860px) {
+  .rz-model .planWrap { inset: 60px 8px 76px 8px; border: none; border-radius: 0; }
+}
+
 /* floating chrome shares one soft, papery language */
 .rz-status, .rz-trail, .rz-card, .rz-ask, .rz-views {
   position: absolute;
