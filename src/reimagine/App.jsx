@@ -36,7 +36,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 42 · Jul 15';
+const UPDATE_STAMP = 'update 43 · Jul 15';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -308,19 +308,23 @@ export default function App() {
   };
   // Openings: drop a door/window on a wall (centered on that wall to start),
   // or pull one out. Position and width are then tuned by dragging on the plan.
-  const addOpening = (wall, type, level = 1) => {
+  const addOpening = (wall, type, level = 1, extras = {}) => {
     const profile = OPENING_TYPES[type] || OPENING_TYPES.window;
     const isRoof = wall === 'roof' || profile.roof;
     const wallLen = wall === 'north' || wall === 'south' ? Number(spec.shell.widthFt) : Number(spec.shell.depthFt);
     const widthFt = profile.defaultW || 3;
     const positionFt = isRoof ? Number(spec.shell.widthFt) / 2 : Math.max(0.5, wallLen / 2 - widthFt / 2);
-    applyOps([{ type: 'add_opening', wall: isRoof ? 'roof' : wall, openingType: type, widthFt, positionFt, level: isRoof ? 1 : level }]);
+    applyOps([{ type: 'add_opening', wall: isRoof ? 'roof' : wall, openingType: type, widthFt, positionFt, level: isRoof ? 1 : level, ...extras }]);
   };
+  // A dormer is a 2nd-floor+ window carried by a dormer of the chosen style.
+  const addDormer = (wall, style, level) => addOpening(wall, 'window', Math.max(2, level), { dormerStyle: style });
   const removeOpening = (index) => applyOps([{ type: 'remove_object', targetId: `opening-${index}` }]);
   const sizeOpening = (index, widthFt) => {
     const op = spec.openings?.[index]; if (!op) return;
     applyOps([{ type: 'update_object', targetId: `opening-${index}`, field: 'widthFt', value: clamp(Number(widthFt), 1, 24) }]);
   };
+  // Set any single field on a placed opening (shade eyebrow depth, tilt, dormer).
+  const setOpeningField = (index, field, value) => applyOps([{ type: 'update_object', targetId: `opening-${index}`, field, value }]);
   // Size any single object (room or element) — width × depth, position kept.
   const sizeObject = (obj, w, d) => applyOps([{ type: 'resize_object', targetId: obj.id, name: obj.name, w, d, h: Number(obj.h) || 0.22 }]);
 
@@ -817,8 +821,10 @@ export default function App() {
                 selectedId={selectedId}
                 level={activeFloor}
                 onAdd={addOpening}
+                onAddDormer={addDormer}
                 onRemove={removeOpening}
                 onSize={sizeOpening}
+                onSetField={setOpeningField}
                 onSelect={(index) => setSelectedId(`opening-${index}`)}
               />
             )}
@@ -1451,11 +1457,12 @@ function StoreysControl({ spec, floors, onAddFloor, onRemoveFloor, onResizeFloor
 // roof. Openings carry the floor picked in the Floor selector — a 2nd-floor
 // window goes in the upper wall, and a dormer opens the roof to meet it.
 const OPENING_GROUPS = [
-  { head: 'Windows', keys: ['window', 'picture', 'awning', 'clerestory', 'bay'] },
+  { head: 'Windows', keys: ['window', 'picture', 'awning', 'clerestory', 'bay', 'raked', 'tilted'] },
   { head: 'Doors', keys: ['door', 'french', 'slider', 'dutch', 'barn'] },
   { head: 'Roof', keys: ['skylight'] }
 ];
-function OpeningsControls({ spec, selectedId, level = 1, onAdd, onRemove, onSize, onSelect }) {
+const DORMER_STYLES = [['gable', 'Gable dormer', 'peaked doghouse'], ['shed', 'Shed dormer', 'single slope']];
+function OpeningsControls({ spec, selectedId, level = 1, onAdd, onAddDormer, onRemove, onSize, onSetField, onSelect }) {
   const [wall, setWall] = useState('south');
   const openings = spec.openings || [];
   const onThisFloor = (o) => o.wall === 'roof' ? level === 1 : Number(o.level || 1) === level;
@@ -1482,27 +1489,67 @@ function OpeningsControls({ spec, selectedId, level = 1, onAdd, onRemove, onSize
           </div>
         </div>
       ))}
+      {level > 1 && (
+        <div className="rz-open-group">
+          <div className="rz-found-head">Dormers</div>
+          <div className="rz-found-palette rz-open-palette">
+            {DORMER_STYLES.map(([style, lab, note]) => (
+              <button key={style} type="button" title={`A ${style} dormer with a window, on the ${WALL_SIDE_LABELS[wall].toLowerCase()} wall`} onClick={() => onAddDormer(wall, style, level)}>
+                <b>{lab}</b>
+                <small>{note} · {floorWord}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {openings.some(onThisFloor) && (
         <div className="rz-open-list">
           <div className="rz-found-head">On the {floorWord}</div>
           {openings.map((o, i) => ({ o, i })).filter(({ o }) => onThisFloor(o)).map(({ o, i }) => {
             const prof = OPENING_TYPES[o.type] || OPENING_TYPES.window;
             const sel = String(selectedId || '') === `opening-${i}`;
+            const isUpperWall = o.wall !== 'roof' && Number(o.level || 1) > 1;
             return (
-              <div key={i} className={`rz-run-row${sel ? ' on' : ''}`}>
-                <button type="button" className="rz-run-name" onClick={() => onSelect(i)}>
-                  {o.label || prof.label} <small>{o.wall}</small>
-                </button>
-                <label className="rz-field rz-field-num rz-run-size">
-                  <NumInput value={Math.round((Number(o.widthFt) || prof.defaultW) * 10) / 10} min={1} max={24} step={0.5} onCommit={(v) => onSize(i, v)} />
-                </label>
-                <button type="button" className="rz-remove" title="Remove this opening" onClick={() => onRemove(i)}>✕</button>
+              <div key={i}>
+                <div className={`rz-run-row${sel ? ' on' : ''}`}>
+                  <button type="button" className="rz-run-name" onClick={() => onSelect(sel ? -1 : i)}>
+                    {o.label || prof.label} <small>{o.wall}</small>
+                  </button>
+                  <label className="rz-field rz-field-num rz-run-size">
+                    <NumInput value={Math.round((Number(o.widthFt) || prof.defaultW) * 10) / 10} min={1} max={24} step={0.5} unit="" onCommit={(v) => onSize(i, v)} />
+                  </label>
+                  <button type="button" className="rz-remove" title="Remove this opening" onClick={() => onRemove(i)}>✕</button>
+                </div>
+                {sel && o.wall !== 'roof' && (
+                  <div className="rz-open-detail">
+                    <label className="rz-field rz-field-num">
+                      <span>Shade eyebrow (overhang)</span>
+                      <NumInput value={Number(o.shadeFt) || 0} min={0} max={6} step={0.5} unit="ft" onCommit={(v) => onSetField(i, 'shadeFt', v)} />
+                    </label>
+                    {isUpperWall && (
+                      <label className="rz-field">
+                        <span>Dormer</span>
+                        <select value={o.dormerStyle || ''} onChange={(e) => onSetField(i, 'dormerStyle', e.target.value)}>
+                          <option value="">Auto — only if the roof buries it</option>
+                          <option value="gable">Gable dormer (peaked)</option>
+                          <option value="shed">Shed dormer (single slope)</option>
+                        </select>
+                      </label>
+                    )}
+                    {(o.type === 'tilted' || Number(o.tiltDeg) > 0) && (
+                      <label className="rz-field rz-field-num">
+                        <span>Glass tilt</span>
+                        <NumInput value={Number(o.tiltDeg) || 25} min={5} max={60} step={5} unit="°" onCommit={(v) => onSetField(i, 'tiltDeg', v)} />
+                      </label>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       )}
-      <div className="rz-shape-note">Slide any opening along its wall by dragging it on the plan. Switch floors with the Floor selector to place windows upstairs.</div>
+      <div className="rz-shape-note">Tap an opening to size it, add a shade eyebrow, or turn it into a dormer. Slide it along its wall by dragging on the plan.</div>
     </div>
   );
 }

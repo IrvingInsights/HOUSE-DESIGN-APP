@@ -1017,6 +1017,8 @@ export const OPENING_TYPES = {
   dutch: { label: 'Dutch door', h: 6.8, sill: 0, glazed: false, defaultW: 3, entry: true },
   barn: { label: 'Barn / equipment door', h: 8, sill: 0, glazed: false, defaultW: 8, entry: true },
   bay: { label: 'Bay window / window seat', h: 4.5, sill: 1.5, glazed: true, defaultW: 6, bay: true },
+  raked: { label: 'Raked gable window', h: 4, sill: 3, glazed: true, defaultW: 5, raked: true },
+  tilted: { label: 'Tilted glazing pane', h: 4.5, sill: 1.5, glazed: true, defaultW: 4, tilted: true },
   skylight: { label: 'Skylight / roof window', h: 0, sill: 0, glazed: true, defaultW: 2.5, roof: true }
 };
 
@@ -1745,9 +1747,16 @@ export function applyBimOperations(currentSpec, plan) {
             if (!overlapsAt(candidate)) { along = candidate; break; }
           }
         }
+        // Optional extras: a tilt angle (tilted glazing), a shade eyebrow depth
+        // (window overhang), and an explicit dormer style (gable / shed). Only
+        // stored when meaningfully set, so plain windows stay clean.
+        const extras = {};
+        if (OPENING_TYPES[openingType].tilted || Number(operation.tiltDeg) > 0) extras.tiltDeg = clamp(Number(operation.tiltDeg || 25), 5, 60);
+        if (Number(operation.shadeFt) > 0) extras.shadeFt = clamp(Number(operation.shadeFt), 0, 6);
+        if (operation.dormerStyle === 'gable' || operation.dormerStyle === 'shed') extras.dormerStyle = operation.dormerStyle;
         const incoming = wall === 'north' || wall === 'south'
-          ? { type: openingType, wall, x: along, widthFt, label, level }
-          : { type: openingType, wall, y: along, widthFt, label, level };
+          ? { type: openingType, wall, x: along, widthFt, label, level, ...extras }
+          : { type: openingType, wall, y: along, widthFt, label, level, ...extras };
         // Openings have no ids, so a re-trace lands the same window again a
         // foot to the left — forever. An EXPLICITLY placed opening that
         // overlaps an existing one REPLACES it instead of stacking (two doors
@@ -2037,8 +2046,13 @@ export function applyBimOperations(currentSpec, plan) {
       if (target.__kind === 'opening' && operation.field) {
         const opening = next.openings[target.__openingIndex];
         if (opening) {
-          if (operation.field === 'name') opening.label = operation.value;
-          else opening[operation.field] = operation.value;
+          const f = operation.field;
+          if (f === 'name') opening.label = operation.value;
+          else if (f === 'widthFt') opening.widthFt = clamp(Number(operation.value), 1, 24);
+          else if (f === 'shadeFt') { const v = clamp(Number(operation.value) || 0, 0, 6); if (v > 0) opening.shadeFt = v; else delete opening.shadeFt; }
+          else if (f === 'tiltDeg') opening.tiltDeg = clamp(Number(operation.value) || 0, 0, 60);
+          else if (f === 'dormerStyle') { if (operation.value === 'gable' || operation.value === 'shed') opening.dormerStyle = operation.value; else delete opening.dormerStyle; }
+          else opening[f] = operation.value;
         }
       } else if (operation.field === 'level') {
         // A level change is STRUCTURAL, not a string write: numeric, clamped,

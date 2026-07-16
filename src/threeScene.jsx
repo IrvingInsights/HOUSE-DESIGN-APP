@@ -1591,12 +1591,26 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       if (layers.openings) spec.openings.forEach((opening, index) => {
         const size = opening.widthFt;
         const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
-        const openH = profile.h;
         // Which storey the opening lives on lifts the whole assembly: a
         // 2nd-floor window sits at that storey's floor elevation, not the ground.
         const oLevel = opening.wall === 'roof' ? 1 : Number(opening.level || 1);
         const baseY = storeyElevationFt(spec.shell, oLevel);
         const sill = baseY + profile.sill;
+        // Plan position of the opening centre — used by raked height, the shade
+        // eyebrow, and the dormer.
+        const oHoriz = opening.wall === 'north' || opening.wall === 'south';
+        const oPx = oHoriz ? (Number(opening.x) || 0) + size / 2 : (opening.wall === 'east' ? width : 0);
+        const oPz = oHoriz ? (opening.wall === 'south' ? depth : 0) : (Number(opening.y) || 0) + size / 2;
+        // A raked gable window climbs to just under the roof, so it fills the
+        // gable peak instead of stopping square. Sample the roof at both ends of
+        // the window and take the LOWER, so the square top never pokes through
+        // the slope (the sloped cap frame follows the rake above it).
+        let openH = profile.h;
+        if (profile.raked && opening.wall !== 'roof') {
+          const r0 = oHoriz ? roofUnderAt((Number(opening.x) || 0), oPz) : roofUnderAt(oPx, (Number(opening.y) || 0));
+          const r1 = oHoriz ? roofUnderAt((Number(opening.x) || 0) + size, oPz) : roofUnderAt(oPx, (Number(opening.y) || 0) + size);
+          openH = clamp(Math.min(r0, r1) - sill - 0.4, profile.h, 16);
+        }
         const centerY = sill + openH / 2;
         const mat = profile.glazed ? glassMat : doorMat;
         let mesh;
@@ -1703,6 +1717,37 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               // projecting exterior sill ledge under windows
               part(size + 0.5, 0.13, 0.5, mid, sill - fw - 0.04, 0.22, frameMat);
             }
+            // Tilted glazing pane — lean the glass on its angle (top toward the
+            // house, the greenhouse face), around the wall's own axis.
+            if (Number(opening.tiltDeg) > 0 && mesh) {
+              const tr = clamp(Number(opening.tiltDeg), 5, 60) * Math.PI / 180;
+              if (horizontalWall) mesh.rotation.x = dirOut * tr; else mesh.rotation.z = -dirOut * tr;
+            }
+            // Raked gable window — a sloped head frame (an inverted V) following
+            // the roof pitch over the tall glass.
+            if (profile.raked) {
+              const headY = sill + openH;
+              const pitch = Number(spec.shell.roofPitch) || 0.32;
+              const halfW = size / 2 + fw;
+              const rise = Math.min(halfW * pitch + 0.4, 2.4);
+              for (const sgn of [-1, 1]) {
+                const len = Math.hypot(halfW, rise) + 0.12;
+                const ang = Math.atan2(rise, halfW);
+                const m = part(len, 0.16, 0.34, mid + sgn * halfW / 2, headY + rise / 2 - 0.08, 0.14, frameMat);
+                if (horizontalWall) m.rotation.z = -sgn * ang; else m.rotation.x = sgn * ang;
+              }
+            }
+            // Shade eyebrow (window overhang) — a hood over the window that
+            // blocks high summer sun while low winter sun still reaches in.
+            if (Number(opening.shadeFt) > 0) {
+              const proj = clamp(Number(opening.shadeFt), 0.3, 6);
+              const hoodY = sill + openH + 0.28;
+              part(size + 0.9, 0.16, proj, mid, hoodY, proj / 2 + 0.12, frameMat);
+              for (const sgn of [-1, 1]) {
+                const m = part(0.5, 0.12, 0.12, mid + sgn * (size / 2 + 0.05), hoodY - 0.32, 0.14, frameMat);
+                if (horizontalWall) m.rotation.x = -0.7; else m.rotation.z = 0.7;
+              }
+            }
           }
         }
         if (mesh) {
@@ -1712,23 +1757,24 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           group.add(mesh);
         }
 
-        // DORMER — an upper-floor window the main roof would bury gets a little
-        // gabled dormer projecting from the roof, so the glass meets daylight
-        // instead of roof deck. Built only when the window top rises above the
-        // roof underside at its plan spot (a window that already sits inside a
-        // tall wall or a gable end needs none).
+        // DORMER — projects from the roof so an upstairs window meets daylight
+        // instead of roof deck. Built when the window would otherwise be buried
+        // (auto) OR when the opening explicitly asks for one, and shaped to the
+        // chosen style: SHED (one low slope) or GABLE (a peaked doghouse).
         if (layers.roof && oLevel > 1 && opening.wall !== 'roof' && profile.glazed) {
           const horiz = opening.wall === 'north' || opening.wall === 'south';
           const px = horiz ? (Number(opening.x) || 0) + size / 2 : (opening.wall === 'east' ? width : 0);
           const pz = horiz ? (opening.wall === 'south' ? depth : 0) : (Number(opening.y) || 0) + size / 2;
           const windowTop = sill + openH;
           const roofHere = roofUnderAt(px, pz);
-          if (windowTop > roofHere + 0.3) {
+          const explicit = opening.dormerStyle === 'gable' || opening.dormerStyle === 'shed';
+          if (explicit || windowTop > roofHere + 0.3) {
+            const style = opening.dormerStyle || 'gable';
             const inw = (opening.wall === 'south' || opening.wall === 'east') ? -1 : 1; // inward (toward ridge)
             const dW = size + 1.3;                 // dormer width along the wall
-            const dTop = windowTop + 0.55;         // dormer ridge height
+            const dTop = windowTop + 0.55;         // dormer ridge / high point
             const wallLine = horiz ? pz : px;      // the eave line coord the front sits on
-            // Walk inward until the main roof rises to the dormer ridge (capped).
+            // Walk inward until the main roof rises to the dormer top (capped).
             let back = 1;
             for (let s = 1; s <= 16; s += 0.5) {
               const qx = horiz ? px : px + inw * s;
@@ -1745,19 +1791,30 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               : box(deep, h, wAlong, inC, y, alongC, mat));
             const inMid = wallLine + inw * (back / 2);
             const frontBase = Math.min(sill - 0.2, roofHere);
-            // Front gable wall: from the window head up to the ridge, full dormer width.
-            at(px, (windowTop + dTop) / 2, wallLine + inw * 0.05, dW, Math.max(0.3, dTop - windowTop), 0.4, cheekMat);
-            // Cheeks: a wall each side running inward, tall at the front, meeting the roof at the back.
+            // Cheeks: a side wall each side running inward (both styles).
             for (const sgn of [-1, 1]) {
               const cAlong = px + sgn * dW / 2;
               const midH = (dTop + roofHere) / 2;
               at(cAlong, (frontBase + midH) / 2, inMid, 0.18, Math.max(0.5, midH - frontBase), back, cheekMat);
             }
-            // Two little roof planes from the front ridge sloping back down to the main roof.
+            // Front wall from the window head up to the dormer top (both styles).
+            at(px, (windowTop + dTop) / 2, wallLine + inw * 0.05, dW, Math.max(0.3, dTop - windowTop), 0.4, cheekMat);
+            const backAng = Math.atan2(dTop - roofHere, Math.max(0.5, back));
             const planeLen = Math.hypot(back, dTop - roofHere) + 0.3;
-            const ang = Math.atan2(dTop - roofHere, Math.max(0.5, back));
-            const roofPlane = at(px, (dTop + roofHere) / 2 + 0.15, inMid, dW + 0.3, 0.14, planeLen, dMat);
-            if (horiz) roofPlane.rotation.x = inw * ang; else roofPlane.rotation.z = -inw * ang;
+            if (style === 'shed') {
+              // one flat plane sloping from the high front back down to the roof
+              const rp = at(px, (dTop + roofHere) / 2 + 0.15, inMid, dW + 0.3, 0.14, planeLen, dMat);
+              if (horiz) rp.rotation.x = inw * backAng; else rp.rotation.z = -inw * backAng;
+            } else {
+              // GABLE: a peak over the window — two planes sloping to each side
+              // from a centre ridge, each also raking back to the main roof.
+              const sideAng = Math.atan2(Math.max(0.6, dTop - roofHere), dW / 2);
+              for (const sgn of [-1, 1]) {
+                const rp = at(px + sgn * dW / 4, (dTop + roofHere) / 2 + 0.2, inMid, dW / 2 + 0.25, 0.13, planeLen, dMat);
+                if (horiz) { rp.rotation.x = inw * backAng; rp.rotation.z = sgn * sideAng; }
+                else { rp.rotation.z = -inw * backAng; rp.rotation.x = -sgn * sideAng; }
+              }
+            }
           }
         }
       });
