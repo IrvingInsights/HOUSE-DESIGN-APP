@@ -748,7 +748,13 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             : [[width, 0], [width, depth / 2], [width, depth]];
           return Math.min(...pts.map(([px, pz]) => roofUnderAt(px, pz)));
         };
-        const capped = (side, h) => Math.max(1, Math.min(h, roofCapForSide(side)));
+        // The cap only applies to a SINGLE-storey design — its whole job is to
+        // stop a per-wall height raised above the eave from poking through the
+        // roof. With upper storeys, `h` is the full lifted total that
+        // pushSideBoxes decomposes into ground + per-storey pieces, and the
+        // perimeter roof of a stepped storey reads LOW (outside the plate), so
+        // capping there would clamp the total and collapse the ground wall.
+        const capped = (side, h) => storeyLift > 0 ? Math.max(1, h) : Math.max(1, Math.min(h, roofCapForSide(side)));
         pushSideBoxes('north', capped('north', hN), tN, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north') }));
         pushSideBoxes('south', capped('south', hS), tS, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south') }));
         pushSideBoxes('west', capped('west', hW), tW, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('west'), gaps: gapsFor('west') }));
