@@ -36,7 +36,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 47 · Jul 15';
+const UPDATE_STAMP = 'update 48 · Jul 15';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -735,11 +735,6 @@ export default function App() {
           : <span className="rz-status-item rz-flag">{flags.length} to look at</span>}
       </div>
 
-      {/* the foreman's guidance for this chapter — its own card, so the left
-          surface stays controls-only */}
-      {!timelineOpen && trailOpen && (
-        <div className="rz-greet-card">{chapter.greet(derived)}</div>
-      )}
 
       {/* undo / redo — top-left, always available (Ctrl+Z / Ctrl+Y) */}
       {!timelineOpen && (
@@ -783,12 +778,9 @@ export default function App() {
             {activeChapter === 'shape' && (
               <ShapeControls
                 spec={spec}
-                selectedId={selectedId}
                 floors={floors}
-                onSelectTarget={setSelectedId}
                 onShapeBuilding={setShape}
                 onSizeBuilding={resizeShell}
-                onSizeObject={sizeObject}
                 onAddFloor={addFloor}
                 onRemoveFloor={removeFloor}
                 onResizeFloor={resizeFloor}
@@ -910,6 +902,7 @@ export default function App() {
           room={selectedRoom}
           derived={derived}
           onRename={(name) => renameObject(selectedRoom, name)}
+          onResize={(w, d) => resizeObject(selectedRoom.id, Number(selectedRoom.x) || 0, Number(selectedRoom.y) || 0, w, d)}
           onRemove={() => removeObject(selectedRoom)}
           onClose={() => setSelectedId(null)}
         />
@@ -1161,8 +1154,10 @@ function PhaseCard({ row, derived, onClose }) {
   );
 }
 
-function RoomCard({ room, derived, onRename, onRemove, onClose }) {
+function RoomCard({ room, derived, onRename, onResize, onRemove, onClose }) {
   const [expanded, setExpanded] = useState(false);
+  const w = Math.round((Number(room.w) || 0) * 10) / 10;
+  const d = Math.round((Number(room.d) || 0) * 10) / 10;
   const area = Math.round((Number(room.w) || 0) * (Number(room.d) || 0));
   const sharePct = derived.floor > 0 ? Math.round((area / derived.floor) * 100) : 0;
   return (
@@ -1172,11 +1167,17 @@ function RoomCard({ room, derived, onRename, onRemove, onClose }) {
         <button className="rz-x" onClick={onClose}>×</button>
       </div>
 
+      {/* size it right here — the number way; or drag a corner on the plan */}
+      <div className="rz-run-size rz-card-size">
+        <label>Width<NumInput value={w} min={2} max={96} step={0.5} unit="" onCommit={(v) => onResize(v, d)} /></label>
+        <span className="rz-run-x">×</span>
+        <label>Depth<NumInput value={d} min={2} max={80} step={0.5} unit="ft" onCommit={(v) => onResize(w, v)} /></label>
+        <span className="rz-run-area">{fmtNum(area)} sf</span>
+      </div>
+
       <div className="rz-vitals">
-        <Vital label="Size" value={`${round1(room.w)} × ${round1(room.d)} ft`} />
-        <Vital label="Area" value={`${fmtNum(area)} sq ft`} />
         <Vital label="Use" value={TYPE_LABEL[room.type] || room.type || '—'} />
-        <Vital label="Floor" value={room.floor || '—'} />
+        <Vital label="Area" value={`${fmtNum(area)} sq ft`} />
       </div>
 
       {/* a first receipt: where this area sits in the whole house */}
@@ -1318,68 +1319,35 @@ function BudgetSheet({ derived, onClose }) {
 // building or any single room/element — from the dropdown. The building gets
 // the outline presets (Rectangle / L / T / U) and its size; a room or element
 // gets its own width × depth. One general control instead of building-only.
-function ShapeControls({ spec, selectedId, floors, onSelectTarget, onShapeBuilding, onSizeBuilding, onSizeObject, onAddFloor, onRemoveFloor, onResizeFloor, onFloorHeight }) {
-  const rooms = spec.rooms || [];
-  const elements = (spec.elements || []).filter((e) => e.category !== 'floor');
-  const target = selectedId
-    ? (rooms.find((r) => r.id === selectedId) || elements.find((e) => e.id === selectedId) || null)
-    : null;
-  const isBuilding = !target;
+function ShapeControls({ spec, floors, onShapeBuilding, onSizeBuilding, onAddFloor, onRemoveFloor, onResizeFloor, onFloorHeight }) {
   const isRect = !spec.shell.footprint;
   const corners = Array.isArray(spec.shell.footprint) ? spec.shell.footprint.length : 4;
   const bW = Math.round((Number(spec.shell.widthFt) || 36) * 10) / 10;
   const bD = Math.round((Number(spec.shell.depthFt) || 28) * 10) / 10;
   return (
     <div className="rz-shape">
-      <label className="rz-field">
-        <span>Shape what?</span>
-        <select value={isBuilding ? 'building' : target.id} onChange={(e) => onSelectTarget(e.target.value === 'building' ? null : e.target.value)}>
-          <option value="building">Whole building</option>
-          {rooms.length > 0 && (
-            <optgroup label="Rooms">
-              {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </optgroup>
-          )}
-          {elements.length > 0 && (
-            <optgroup label="Other elements">
-              {elements.map((el) => <option key={el.id} value={el.id}>{el.name}</option>)}
-            </optgroup>
-          )}
-        </select>
-      </label>
+      <div className="rz-found-head">Outline</div>
+      <div className="rz-shape-presets">
+        {[['rect', 'Rectangle'], ['l', 'L'], ['t', 'T'], ['u', 'U']].map(([kind, label]) => (
+          <button
+            key={kind}
+            type="button"
+            className={kind === 'rect' && isRect ? 'on' : ''}
+            onClick={() => onShapeBuilding(kind)}
+            title={kind === 'rect' ? 'Plain rectangle' : `${label}-shaped outline — a starting point you can drag`}
+          >{label}</button>
+        ))}
+      </div>
+      {!isRect && <div className="rz-shape-note">custom outline · {corners} corners — drag any edge on the plan</div>}
+      <div className="rz-run-size">
+        <label>Width<NumInput value={bW} min={12} max={96} step={1} unit="ft" onCommit={(v) => onSizeBuilding(v, bD)} /></label>
+        <span className="rz-run-x">×</span>
+        <label>Depth<NumInput value={bD} min={12} max={80} step={1} unit="ft" onCommit={(v) => onSizeBuilding(bW, v)} /></label>
+      </div>
 
-      {isBuilding ? (
-        <>
-          <div className="rz-shape-presets">
-            {[['rect', 'Rectangle'], ['l', 'L'], ['t', 'T'], ['u', 'U']].map(([kind, label]) => (
-              <button
-                key={kind}
-                type="button"
-                className={kind === 'rect' && isRect ? 'on' : ''}
-                onClick={() => onShapeBuilding(kind)}
-                title={kind === 'rect' ? 'Plain rectangle' : `${label}-shaped outline — a starting point you can drag`}
-              >{label}</button>
-            ))}
-          </div>
-          {!isRect && <div className="rz-shape-note">custom outline · {corners} corners — drag any edge on the plan</div>}
-          <div className="rz-run-size">
-            <label>Width<NumInput value={bW} min={12} max={96} step={1} unit="ft" onCommit={(v) => onSizeBuilding(v, bD)} /></label>
-            <span className="rz-run-x">×</span>
-            <label>Depth<NumInput value={bD} min={12} max={80} step={1} unit="ft" onCommit={(v) => onSizeBuilding(bW, v)} /></label>
-          </div>
-          <StoreysControl spec={spec} floors={floors} onAddFloor={onAddFloor} onRemoveFloor={onRemoveFloor} onResizeFloor={onResizeFloor} onFloorHeight={onFloorHeight} />
-        </>
-      ) : (
-        <>
-          <div className="rz-run-size">
-            <label>Width<NumInput value={Math.round(Number(target.w) * 10) / 10} min={2} max={96} step={0.5} unit="ft" onCommit={(v) => onSizeObject(target, v, Number(target.d))} /></label>
-            <span className="rz-run-x">×</span>
-            <label>Depth<NumInput value={Math.round(Number(target.d) * 10) / 10} min={2} max={80} step={0.5} unit="ft" onCommit={(v) => onSizeObject(target, Number(target.w), v)} /></label>
-            <span className="rz-run-area">{Math.round(Number(target.w) * Number(target.d))} sf</span>
-          </div>
-          <div className="rz-shape-note">Sizing “{target.name}”. Drag it on the plan (Rooms chapter) to move it. The L / T / U outlines shape the whole building — pick “Whole building” above for those.</div>
-        </>
-      )}
+      <StoreysControl spec={spec} floors={floors} onAddFloor={onAddFloor} onRemoveFloor={onRemoveFloor} onResizeFloor={onResizeFloor} onFloorHeight={onFloorHeight} />
+
+      <div className="rz-shape-note">To size one room, tap it in the Rooms chapter. To size an element, tap it or use its own chapter.</div>
     </div>
   );
 }
@@ -1443,7 +1411,7 @@ function StoreysControl({ spec, floors, onAddFloor, onRemoveFloor, onResizeFloor
   for (let lvl = 2; lvl <= floors; lvl += 1) uppers.push(lvl);
   return (
     <div className="rz-storeys-block">
-      <div className="rz-found-head" style={{ marginTop: 10 }}>Storeys</div>
+      <div className="rz-found-head" style={{ marginTop: 10 }}>Floors</div>
       <div className="rz-field">
         <div className="rz-storeys">
           <button type="button" disabled={floors <= 1} onClick={onRemoveFloor} title="Remove the top floor — its rooms come down a floor">−</button>
