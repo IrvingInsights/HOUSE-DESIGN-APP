@@ -12,7 +12,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
   OPENING_TYPES, resolveFrameType, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, decomposeFootprint, subtractRect,
   subtractRectFromFootprint, pointInFootprint, edgeForOpening, gradeElevationAt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, storeyElevationFt, storeyHeightFt,
-  isRoundFootprint
+  isRoundFootprint, clipRectToRoundShell
 } from '../backend/bim-core.mjs';
 import {
   DEFAULT_OUTDOOR_GRID_SIZE_FT, clamp, padExtension, sitePadRect, objectBounds, titleCase, roofProfile, storeyInfo,
@@ -1301,7 +1301,31 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // through the seam where the wall bands seat (ground slabs sit well
         // inside the thicker ground walls already).
         const slabInset = roomLevel > 1 ? Math.min(0.4, room.w / 4, room.d / 4) : 0;
-        const mesh = box(room.w - slabInset * 2, 0.22, room.d - slabInset * 2, room.x + room.w / 2, 0.05 + roomLift, room.y + room.d / 2, material);
+        // Round house: the curved wall CLIPS the room — a room slid into the
+        // "corner" renders as the rect-∩-ellipse shape, meeting the ring wall
+        // instead of poking through it. Falls back to the plain box whenever
+        // the clip isn't needed (not round, outdoor space, no overlap).
+        let mesh = null;
+        const roundClip = isRoundFootprint(spec)
+          && !['outdoor', 'site', 'garden', 'animal', 'paddock', 'run', 'landscape', 'homestead', 'plant', 'water', 'earthwork'].includes(room.type)
+          && roomLevel !== BASEMENT_LEVEL
+          ? clipRectToRoundShell(spec, room) : null;
+        if (roundClip && roundClip.length >= 3) {
+          const fullyInside = Math.abs(polygonArea(roundClip) - room.w * room.d) < 0.05;
+          if (!fullyInside) {
+            const shape = new THREE.Shape(roundClip.map(([px, py]) => new THREE.Vector2(px, py)));
+            const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.22, bevelEnabled: false });
+            mesh = new THREE.Mesh(geo, material);
+            // Shape XY → world XZ (plan y becomes world z); extrusion points
+            // down after the rotation, so lift by the slab thickness.
+            mesh.rotation.x = Math.PI / 2;
+            mesh.position.y = 0.16 + roomLift;
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.userData.generated = true;
+          }
+        }
+        if (!mesh) mesh = box(room.w - slabInset * 2, 0.22, room.d - slabInset * 2, room.x + room.w / 2, 0.05 + roomLift, room.y + room.d / 2, material);
         mesh.name = room.name;
         mesh.userData.roomId = room.id;
         mesh.userData.footprint = { w: room.w, d: room.d };

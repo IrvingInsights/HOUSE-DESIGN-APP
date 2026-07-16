@@ -2,7 +2,7 @@
 import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES,
   resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint,
-  isRoundFootprint, ellipseArea, ellipsePerimeter,
+  isRoundFootprint, ellipseArea, ellipsePerimeter, rectRoundOverlapArea,
   basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt, storeyHeightFt,
   scoreTraceSpecChecks,
   // Single source of truth for the per-wall assembly model — no longer duplicated here.
@@ -3139,7 +3139,9 @@ export function detectIssues(spec) {
   const enclosedRooms = spec.rooms.filter((room) => (customFpCheck
     ? rectInFootprint(fpPolyCheck, { x: room.x, y: room.y, w: room.w, d: room.d })
     : room.x >= 0 && room.y >= 0 && room.x + room.w <= spec.shell.widthFt && room.y + room.d <= spec.shell.depthFt));
-  const conditionedArea = enclosedRooms.reduce((sum, room) => sum + room.w * room.d, 0);
+  // Round house: a room overhanging the curve only counts what's INSIDE it.
+  const conditionedArea = enclosedRooms.reduce((sum, room) => sum
+    + (isRoundFootprint(spec) ? rectRoundOverlapArea(spec, room) : room.w * room.d), 0);
   const shellArea = isRoundFootprint(spec) ? ellipseArea(spec.shell.widthFt, spec.shell.depthFt)
     : customFpCheck ? polygonArea(fpPolyCheck) : spec.shell.widthFt * spec.shell.depthFt;
   // A room hanging outside the walls of an L/U footprint is a real flag —
