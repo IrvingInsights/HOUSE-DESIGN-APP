@@ -38,7 +38,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 63 · Jul 16';
+const UPDATE_STAMP = 'update 64 · Jul 16';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1005,6 +1005,7 @@ export default function App() {
           room={selectedRoom}
           derived={derived}
           onRename={(name) => renameObject(selectedRoom, name)}
+          onMove={(x, y) => moveObject(selectedRoom.id, x, y)}
           onResize={(w, d) => resizeObject(selectedRoom.id, Number(selectedRoom.x) || 0, Number(selectedRoom.y) || 0, w, d)}
           onRemove={() => removeObject(selectedRoom)}
           onClose={() => setSelectedId(null)}
@@ -1024,6 +1025,13 @@ export default function App() {
                 : <h2>{prettyId(selectedId)}</h2>}
               <button className="rz-x" onClick={() => setSelectedId(null)}>×</button>
             </div>
+            {el && (
+              <PlaceSizeRows
+                obj={el}
+                onMove={(x, y) => moveObject(el.id, x, y)}
+                onResize={(w, d) => resizeObject(el.id, Number(el.x) || 0, Number(el.y) || 0, w, d)}
+              />
+            )}
             <p className="rz-muted">Drag it in the plan to move it; grab a corner to resize.</p>
             {el && (
               <button className="rz-remove" onClick={() => removeObject(el)}>Remove {el.name}</button>
@@ -1269,10 +1277,39 @@ function PhaseCard({ row, derived, onClose }) {
   );
 }
 
-function RoomCard({ room, derived, onRename, onResize, onRemove, onClose }) {
+// The UNIVERSAL rows every placeable thing's card carries: Place (distance
+// from the west and north walls, in feet — the numeric twin of dragging) and
+// Size (the numeric twin of the corner drag). One anatomy for rooms and
+// elements alike, so "how do I adjust this?" always has the same answer.
+function PlaceSizeRows({ obj, onMove, onResize }) {
+  const x = Math.round((Number(obj.x) || 0) * 10) / 10;
+  const y = Math.round((Number(obj.y) || 0) * 10) / 10;
+  const w = Math.round((Number(obj.w) || 0) * 10) / 10;
+  const d = Math.round((Number(obj.d) || 0) * 10) / 10;
+  const area = Math.round((Number(obj.w) || 0) * (Number(obj.d) || 0));
+  return (
+    <>
+      {onMove && (
+        <div className="rz-run-size rz-card-size">
+          <label>From west<NumInput value={x} min={-48} max={96} step={0.5} unit="" onCommit={(v) => onMove(v, y)} /></label>
+          <span className="rz-run-x">·</span>
+          <label>From north<NumInput value={y} min={-48} max={80} step={0.5} unit="ft" onCommit={(v) => onMove(x, v)} /></label>
+        </div>
+      )}
+      {onResize && (
+        <div className="rz-run-size rz-card-size">
+          <label>Width<NumInput value={w} min={1} max={96} step={0.5} unit="" onCommit={(v) => onResize(v, d)} /></label>
+          <span className="rz-run-x">×</span>
+          <label>Depth<NumInput value={d} min={1} max={80} step={0.5} unit="ft" onCommit={(v) => onResize(w, v)} /></label>
+          <span className="rz-run-area">{fmtNum(area)} sf</span>
+        </div>
+      )}
+    </>
+  );
+}
+
+function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose }) {
   const [expanded, setExpanded] = useState(false);
-  const w = Math.round((Number(room.w) || 0) * 10) / 10;
-  const d = Math.round((Number(room.d) || 0) * 10) / 10;
   const area = Math.round((Number(room.w) || 0) * (Number(room.d) || 0));
   const sharePct = derived.floor > 0 ? Math.round((area / derived.floor) * 100) : 0;
   return (
@@ -1282,13 +1319,8 @@ function RoomCard({ room, derived, onRename, onResize, onRemove, onClose }) {
         <button className="rz-x" onClick={onClose}>×</button>
       </div>
 
-      {/* size it right here — the number way; or drag a corner on the plan */}
-      <div className="rz-run-size rz-card-size">
-        <label>Width<NumInput value={w} min={2} max={96} step={0.5} unit="" onCommit={(v) => onResize(v, d)} /></label>
-        <span className="rz-run-x">×</span>
-        <label>Depth<NumInput value={d} min={2} max={80} step={0.5} unit="ft" onCommit={(v) => onResize(w, v)} /></label>
-        <span className="rz-run-area">{fmtNum(area)} sf</span>
-      </div>
+      {/* place + size by the numbers — the same edits as dragging on the plan */}
+      <PlaceSizeRows obj={room} onMove={onMove} onResize={onResize} />
 
       <div className="rz-vitals">
         <Vital label="Use" value={TYPE_LABEL[room.type] || room.type || '—'} />
