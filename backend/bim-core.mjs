@@ -1173,17 +1173,31 @@ export const parseWxD = (value) => {
   return m ? { w: Number(m[1]), d: Number(m[2]) } : null;
 };
 
-// Where a storey's floor sits. The ground storey's height is the LOW wall on
-// a shed (the plate rides the general ceiling, not the tall south face);
-// upper storeys use upperStoreyHeightFt when set, else the same base.
-export function storeyElevationFt(shell, lvl) {
+// The FLOOR-TO-FLOOR height of one storey. The ground storey's height is the
+// LOW wall on a shed (the plate rides the general ceiling, not the tall south
+// face). Each upper storey can carry its OWN height — shell.storeyHeights[lv]
+// wins, else the shared shell.upperStoreyHeightFt, else the ground base. So a
+// 10' ground floor under a 9' second and an 8' third is one design.
+export function storeyHeightFt(shell, lvl) {
   const level = Number(lvl) || 1;
-  if (level <= 1) return 0;
   const south = Number(shell?.southWallHeightFt || shell?.wallHeightFt || 10);
   const north = Number(shell?.northWallHeightFt || shell?.wallHeightFt || 10);
   const base = Math.max(6, Math.min(south, north, Number(shell?.wallHeightFt || 10)));
-  const upper = Number(shell?.upperStoreyHeightFt) > 0 ? Number(shell.upperStoreyHeightFt) : base;
-  return base + (level - 2) * upper;
+  if (level <= 1) return base;
+  const per = shell?.storeyHeights || {};
+  const raw = per[level] ?? per[String(level)] ?? shell?.upperStoreyHeightFt ?? base;
+  const h = Number(raw);
+  return Math.min(16, Math.max(3, Number.isFinite(h) && h > 0 ? h : base));
+}
+
+// Where a storey's floor sits — the cumulative sum of every storey height
+// below it. Uniform heights reduce to the old `base + (lv−2)·upper`.
+export function storeyElevationFt(shell, lvl) {
+  const level = Number(lvl) || 1;
+  if (level <= 1) return 0;
+  let y = 0;
+  for (let k = 1; k < level; k += 1) y += storeyHeightFt(shell, k);
+  return y;
 }
 
 // True when a set_shell op is dimension shorthand the w/d path must honor:
@@ -1625,6 +1639,20 @@ export function applyBimOperations(currentSpec, plan) {
       else if (field === 'gradeFt') next.site.gradeFt = clamp(Number(operation.value) || 0, 0, 12);
       else if (field === 'contourInterval') next.site.contourInterval = clamp(Number(operation.value) || 2, 1, 10);
       actions.push(`Set site ${field} to ${operation.value}.`);
+      continue;
+    }
+
+    if (operation.type === 'set_storey_height') {
+      // One upper storey's own floor-to-floor height (level 2+). Level 1 is the
+      // wall height (set_shell wallHeightFt). Clearing it falls back to the
+      // shared upperStoreyHeightFt / the ground height.
+      const lvl = Math.max(2, Math.min(3, Math.round(Number(operation.level) || 2)));
+      const v = Number(operation.value);
+      next.shell.storeyHeights = { ...(next.shell.storeyHeights || {}) };
+      if (Number.isFinite(v) && v > 0) next.shell.storeyHeights[lvl] = clamp(v, 3, 16);
+      else delete next.shell.storeyHeights[lvl];
+      if (Object.keys(next.shell.storeyHeights).length === 0) delete next.shell.storeyHeights;
+      actions.push(`Set ${lvl === 2 ? '2nd' : '3rd'}-floor height to ${clamp(v, 3, 16)}'.`);
       continue;
     }
 

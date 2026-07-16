@@ -442,8 +442,11 @@
 .rz-storeys-block { margin-top: 4px; }
 .rz-storey-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .rz-storey-name { flex: 0 0 66px; font-size: 12px; color: var(--moss, #868a7c); }
-.rz-storey-row .rz-run-size { flex: 1; padding: 0; }
-.rz-storey-row .rz-num { width: 58px; }
+.rz-storey-row .rz-run-size { flex: 1; padding: 0; gap: 3px; }
+.rz-storey-row .rz-num { width: 46px; }
+.rz-storey-row .rz-run-size label { font-size: 11px; color: var(--moss, #868a7c); display: flex; align-items: center; gap: 2px; }
+.rz-storey-h { margin-left: auto; }
+.rz-storey-sub { font-size: 11px; color: var(--moss, #868a7c); }
 
 /* shared Trail-block field styles (Foundation + Shell chapters) */
 .rz-found { display: flex; flex-direction: column; gap: 9px; margin: 0 4px 14px; }

@@ -9,7 +9,7 @@ import {
   applyBimOperations, footprintPolygon, polygonArea, hasCustomFootprint, hasSegmentedFootprint,
   WALL_ASSEMBLIES, FRAME_TYPES, FLOORING_TYPES, SUBFLOOR_TYPES, OPENING_TYPES,
   gradeElevationAt, maxFoundationExposureFt, resolveWallSide, footprintEdges,
-  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES
+  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, storeyElevationFt, storeyHeightFt
 } from '../backend/bim-core.mjs';
 
 function near(a, b, eps = 0.01) { return Math.abs(a - b) <= eps; }
@@ -45,6 +45,12 @@ r = apply(freshSpec(), [{ type: 'set_shell', field: 'wallHeightFt', value: '12' 
 ok(r.spec.shell.wallHeightFt === 12 && r.spec.shell.southWallHeightFt === 12, 'set_shell wallHeightFt mirrors S/N');
 r = apply(freshSpec(), [{ type: 'set_shell', field: 'storeys', value: '2' }]);
 ok(r.spec.shell.storeys === 2, 'set_shell storeys');
+// per-floor heights: each upper storey its own; elevations stack cumulatively
+r = apply(freshSpec(), [{ type: 'set_shell', field: 'storeys', value: '3' }, { type: 'set_storey_height', level: 2, value: 9 }, { type: 'set_storey_height', level: 3, value: 7 }]);
+ok(r.spec.shell.storeyHeights && r.spec.shell.storeyHeights[2] === 9 && r.spec.shell.storeyHeights[3] === 7, 'set_storey_height per level');
+ok(near(storeyElevationFt(r.spec.shell, 3), 19) && near(storeyElevationFt(r.spec.shell, 4), 26), 'storeys stack 10/9/7 → floors at 19 and 26');
+r = apply(r.spec, [{ type: 'set_storey_height', level: 3, value: 0 }]);
+ok(!r.spec.shell.storeyHeights?.[3] && storeyHeightFt(r.spec.shell, 3) === 10, 'clearing a floor height falls back to base');
 r = apply(freshSpec(), [{ type: 'set_shell', field: 'overhangFt', value: '3' }]);
 ok(r.spec.shell.overhangFt === 3, 'set_shell overhangFt');
 r = apply(freshSpec(), [{ type: 'set_shell', field: 'roofType', value: 'hip' }]);
