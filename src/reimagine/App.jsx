@@ -37,7 +37,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 59 · Jul 16';
+const UPDATE_STAMP = 'update 60 · Jul 16';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -261,6 +261,39 @@ export default function App() {
     setUndoStack((u) => [...u, spec].slice(-80));
     setSpec(nxt);
   };
+  // Grow the house toward the WEST/NORTH so a room dropped past those walls
+  // ends up enclosed. The shell is origin-pinned, so the trick is: widen the
+  // shell AND shift every placed thing (rooms, elements — including foundation
+  // runs and pads — and openings) east/south by the growth; in world terms the
+  // west/north wall moves out and everything else stays where it was. Plain
+  // rectangles only — a stored polygon or round outline rescales under
+  // set_shell instead of extending, which would warp the plan.
+  const westNorthGrowth = (targetX, targetY) => {
+    if (spec.shell.footprint) return null;
+    const W = Number(spec.shell.widthFt) || 36;
+    const D = Number(spec.shell.depthFt) || 28;
+    let dx = targetX < -0.01 ? Math.ceil(-targetX) : 0;
+    let dy = targetY < -0.01 ? Math.ceil(-targetY) : 0;
+    dx = clamp(dx, 0, Math.max(0, 96 - W));
+    dy = clamp(dy, 0, Math.max(0, 80 - D));
+    if (!dx && !dy) return null;
+    const ops = [];
+    if (dx) ops.push({ type: 'set_shell', field: 'widthFt', value: String(W + dx) });
+    if (dy) ops.push({ type: 'set_shell', field: 'depthFt', value: String(D + dy) });
+    (spec.rooms || []).forEach((r) => ops.push({ type: 'move_object', targetId: r.id, name: r.name, x: (Number(r.x) || 0) + dx, y: (Number(r.y) || 0) + dy }));
+    (spec.elements || []).forEach((e) => ops.push({ type: 'move_object', targetId: e.id, name: e.name, x: (Number(e.x) || 0) + dx, y: (Number(e.y) || 0) + dy }));
+    (spec.openings || []).forEach((op, i) => {
+      if (op.wall === 'roof') {
+        if (dx) ops.push({ type: 'update_object', targetId: `opening-${i}`, field: 'x', value: (Number(op.x) || 0) + dx });
+        if (dy) ops.push({ type: 'update_object', targetId: `opening-${i}`, field: 'y', value: (Number(op.y) || 0) + dy });
+      } else if ((op.wall === 'north' || op.wall === 'south') && dx) {
+        ops.push({ type: 'update_object', targetId: `opening-${i}`, field: 'x', value: (Number(op.x) || 0) + dx });
+      } else if ((op.wall === 'east' || op.wall === 'west') && dy) {
+        ops.push({ type: 'update_object', targetId: `opening-${i}`, field: 'y', value: (Number(op.y) || 0) + dy });
+      }
+    });
+    return { ops, dx, dy };
+  };
   const moveObject = (id, x, y) => {
     const o = findObj(id); if (!o) return;
     // Moving a storey's extent plate carries its rooms along by the same delta,
@@ -277,17 +310,27 @@ export default function App() {
       return;
     }
     // Moving an INDOOR room past the walls grows the house to keep it enclosed
-    // — the same grammar as resizing one past the walls (update 47). Without
-    // this the room lands outside the shell and its slab floats beside the
-    // house. Outdoor rooms and non-room elements roam free.
+    // — the same grammar as resizing one past the walls (update 47). East and
+    // south grow by widening/deepening in place. WEST and NORTH are different:
+    // the shell is pinned to the origin, so the house grows by shifting every
+    // placed thing east/south by the overhang while the shell widens — in
+    // world terms the west/north wall walks out to meet the drop and nothing
+    // else appears to move. (This is how a room finally reaches a foundation
+    // laid out west of the original walls.) Outdoor rooms and non-room
+    // elements roam free.
     const isRoomMv = (spec.rooms || []).some((r) => r.id === id);
     const outdoorMv = ['outdoor', 'site', 'garden', 'animal', 'landscape', 'plant', 'water', 'earthwork'].includes(o.type);
-    const mvOps = [{ type: 'move_object', targetId: id, name: o.name, x, y }];
+    const grow = isRoomMv && !outdoorMv ? westNorthGrowth(Number(x), Number(y)) : null;
+    const fx = Number(x) + (grow ? grow.dx : 0);
+    const fy = Number(y) + (grow ? grow.dy : 0);
+    const mvOps = [...(grow ? grow.ops : []), { type: 'move_object', targetId: id, name: o.name, x: fx, y: fy }];
     if (isRoomMv && !outdoorMv) {
-      const needW = Math.ceil(Number(x) + (Number(o.w) || 0));
-      const needD = Math.ceil(Number(y) + (Number(o.d) || 0));
-      if (needW > Number(spec.shell.widthFt)) mvOps.unshift({ type: 'set_shell', field: 'widthFt', value: String(clamp(needW, 12, 96)) });
-      if (needD > Number(spec.shell.depthFt)) mvOps.unshift({ type: 'set_shell', field: 'depthFt', value: String(clamp(needD, 12, 80)) });
+      const shellW = Number(spec.shell.widthFt) + (grow ? grow.dx : 0);
+      const shellD = Number(spec.shell.depthFt) + (grow ? grow.dy : 0);
+      const needW = Math.ceil(fx + (Number(o.w) || 0));
+      const needD = Math.ceil(fy + (Number(o.d) || 0));
+      if (needW > shellW) mvOps.unshift({ type: 'set_shell', field: 'widthFt', value: String(clamp(needW, 12, 96)) });
+      if (needD > shellD) mvOps.unshift({ type: 'set_shell', field: 'depthFt', value: String(clamp(needD, 12, 80)) });
     }
     // Apply directly (not via applyOps) so the landing spot can be compared
     // with the drop spot — when they differ the app SAYS so instead of the
@@ -298,8 +341,8 @@ export default function App() {
     commitSpec(report.spec);
     const landed = (report.spec.rooms || []).find((r) => r.id === id) || (report.spec.elements || []).find((e) => e.id === id);
     if (landed) {
-      const ddx = Math.round((Number(landed.x) - Number(x)) * 10) / 10;
-      const ddy = Math.round((Number(landed.y) - Number(y)) * 10) / 10;
+      const ddx = Math.round((Number(landed.x) - fx) * 10) / 10;
+      const ddy = Math.round((Number(landed.y) - fy) * 10) / 10;
       if (Math.abs(ddx) > 0.05 || Math.abs(ddy) > 0.05) {
         const dir = [];
         if (Math.abs(ddx) > 0.05) dir.push(`${Math.abs(ddx)} ft ${ddx > 0 ? 'east' : 'west'}`);
@@ -308,7 +351,12 @@ export default function App() {
         const why = fp === 'round' ? 'the curved wall trims where a room can sit'
           : Array.isArray(fp) ? `this outline is not a plain rectangle (${fp.length} corners) — rooms stop at its real walls`
           : (report.warnings || [])[0] || 'the engine adjusted it';
-        setMoveNote(`“${landed.name || id}” settled ${dir.join(' and ')} from the drop — ${why}. Dropped at ${Math.round(Number(x) * 10) / 10}, ${Math.round(Number(y) * 10) / 10}; landed at ${landed.x}, ${landed.y}.`);
+        setMoveNote(`“${landed.name || id}” settled ${dir.join(' and ')} from the drop — ${why}. Dropped at ${Math.round(fx * 10) / 10}, ${Math.round(fy * 10) / 10}; landed at ${landed.x}, ${landed.y}.`);
+      } else if (grow && (grow.dx || grow.dy)) {
+        const grewDir = [];
+        if (grow.dx) grewDir.push(`${grow.dx} ft west`);
+        if (grow.dy) grewDir.push(`${grow.dy} ft north`);
+        setMoveNote(`The house grew ${grewDir.join(' and ')} so “${landed.name || id}” could sit there — the wall came out to meet it. Ctrl+Z undoes it.`);
       } else {
         setMoveNote(null);
       }
@@ -341,15 +389,23 @@ export default function App() {
     // the footprint; other elements aren't shell-bound.)
     const isRoom = (spec.rooms || []).some((r) => r.id === id);
     const outdoor = ['outdoor', 'site', 'garden', 'animal', 'landscape', 'plant', 'water', 'earthwork'].includes(o.type);
+    // Stretching a room past the WEST/NORTH wall grows the house that way too
+    // (same shift-the-origin trick as moving one there).
+    const growRz = isRoom && !outdoor ? westNorthGrowth(Number(x), Number(y)) : null;
+    const rx = Number(x) + (growRz ? growRz.dx : 0);
+    const ry = Number(y) + (growRz ? growRz.dy : 0);
     const ops = [
+      ...(growRz ? growRz.ops : []),
       { type: 'resize_object', targetId: id, name: o.name, w, d, h: Number(o.h) || 0.22 },
-      { type: 'move_object', targetId: id, name: o.name, x, y }
+      { type: 'move_object', targetId: id, name: o.name, x: rx, y: ry }
     ];
     if (isRoom && !outdoor) {
-      const needW = Math.ceil(Number(x) + Number(w));
-      const needD = Math.ceil(Number(y) + Number(d));
-      if (needW > Number(spec.shell.widthFt)) ops.unshift({ type: 'set_shell', field: 'widthFt', value: String(clamp(needW, 12, 96)) });
-      if (needD > Number(spec.shell.depthFt)) ops.unshift({ type: 'set_shell', field: 'depthFt', value: String(clamp(needD, 12, 80)) });
+      const shellW = Number(spec.shell.widthFt) + (growRz ? growRz.dx : 0);
+      const shellD = Number(spec.shell.depthFt) + (growRz ? growRz.dy : 0);
+      const needW = Math.ceil(rx + Number(w));
+      const needD = Math.ceil(ry + Number(d));
+      if (needW > shellW) ops.unshift({ type: 'set_shell', field: 'widthFt', value: String(clamp(needW, 12, 96)) });
+      if (needD > shellD) ops.unshift({ type: 'set_shell', field: 'depthFt', value: String(clamp(needD, 12, 80)) });
     }
     applyOps(ops);
   };
