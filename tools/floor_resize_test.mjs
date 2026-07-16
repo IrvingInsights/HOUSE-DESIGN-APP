@@ -51,5 +51,27 @@ ok(fixedRoom.x + fixedRoom.w <= W + 0.1 && fixedRoom.y + fixedRoom.d <= D + 0.1,
 const tall = apply(spec, [{ type: 'set_shell', field: 'upperStoreyHeightFt', value: '9' }]);
 ok(Number(tall.shell.upperStoreyHeightFt) === 9, `upper storey height set to 9 (got ${tall.shell.upperStoreyHeightFt})`);
 
+// --- MOVING a plate carries its rooms (moveObject emits move_object for the
+// plate AND each room by the same delta) so the plate keeps its new spot.
+// First give the storey a real setback so there's room to move it.
+const setback = apply(spec, [
+  { type: 'resize_object', targetId: plateOf(spec, 2).id, name: 'Storey 2 extent', w: 20, d: 14, h: 0.4 },
+  { type: 'resize_object', targetId: (spec.rooms.find((r) => Number(r.level || 1) === 2)).id, name: 'Loft', w: 12, d: 10, h: 0.22 },
+  { type: 'move_object', targetId: (spec.rooms.find((r) => Number(r.level || 1) === 2)).id, name: 'Loft', x: 1, y: 1 }
+]);
+const dx = 8, dy = 6;
+const room2 = setback.rooms.find((r) => Number(r.level || 1) === 2);
+const p2 = plateOf(setback, 2);
+const moved = apply(setback, [
+  { type: 'move_object', targetId: p2.id, name: 'Storey 2 extent', x: (Number(p2.x) || 0) + dx, y: (Number(p2.y) || 0) + dy },
+  { type: 'move_object', targetId: room2.id, name: room2.name, x: (Number(room2.x) || 0) + dx, y: (Number(room2.y) || 0) + dy }
+]);
+const movedPlate = plateOf(moved, 2);
+ok(Math.abs(movedPlate.x - (Number(p2.x) + dx)) < 0.6 && Math.abs(movedPlate.y - (Number(p2.y) + dy)) < 0.6,
+  `moved plate keeps its new position ${movedPlate.x},${movedPlate.y} (rooms moved with it, no snap-back)`);
+const movedRoom = moved.rooms.find((r) => Number(r.level || 1) === 2);
+ok(movedRoom.x + movedRoom.w <= movedPlate.x + movedPlate.w + 0.1 && movedRoom.y + movedRoom.d <= movedPlate.y + movedPlate.d + 0.1,
+  `room stayed inside the moved floor (${movedRoom.x},${movedRoom.y})`);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

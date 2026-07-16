@@ -94,7 +94,7 @@
    inside, so the greeting and the build button never slide off the top/bottom. */
 .rz-trail {
   top: 50%; left: 16px; transform: translateY(-50%);
-  border-radius: 18px; padding: 14px; width: 236px;
+  border-radius: 18px; padding: 14px; width: 304px;
   max-height: calc(100vh - 32px); display: flex; flex-direction: column; overflow: hidden;
 }
 .rz-trail.closed { width: 44px; min-width: 44px; padding: 8px; }
@@ -458,18 +458,17 @@
 /* display:flex is what makes flex-direction take effect — needed for bare
    .rz-field-num divs (the single "all" overhang) that lack the .rz-field class */
 .rz-field-num { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
-.rz-num { position: relative; width: 96px; }
+/* input + unit sit SIDE BY SIDE (not the unit over the input), so the native
+   up/down spinners stay visible and never hide under the "ft" label. */
+.rz-num { display: inline-flex; align-items: center; gap: 5px; width: 96px; }
 .rz-num input {
-  width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; font-weight: 600;
+  flex: 1 1 auto; min-width: 0; box-sizing: border-box; font: inherit; font-size: 14px; font-weight: 600;
   color: var(--ink, #22251f); background: var(--raise, #fff);
-  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 5px 24px 5px 9px;
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 5px 6px 5px 9px;
 }
 .rz-num input:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; }
-/* hide the native number spinners — they crowd the digit in narrow fields and
-   clash with the absolutely-positioned unit label */
-.rz-num input::-webkit-outer-spin-button,
-.rz-num input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.rz-num input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+.rz-num em { flex: 0 0 auto; font-style: normal; font-size: 11px; color: var(--moss, #868a7c); }
+.rz-num em:empty { display: none; }
 .rz-num em { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-style: normal; font-size: 11px; color: var(--moss, #868a7c); }
 .rz-found-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); margin-top: 4px; }
 .rz-pad-btn {

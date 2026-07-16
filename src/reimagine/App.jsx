@@ -36,7 +36,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 41 · Jul 15';
+const UPDATE_STAMP = 'update 42 · Jul 15';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -239,7 +239,23 @@ export default function App() {
     setUndoStack((u) => [...u, spec].slice(-80));
     setSpec(nxt);
   };
-  const moveObject = (id, x, y) => { const o = findObj(id); if (o) applyOps([{ type: 'move_object', targetId: id, name: o.name, x, y }]); };
+  const moveObject = (id, x, y) => {
+    const o = findObj(id); if (!o) return;
+    // Moving a storey's extent plate carries its rooms along by the same delta,
+    // so the whole floor shifts as one (and the covers-rooms rule doesn't snap
+    // the plate back to where the rooms were left behind).
+    if (o.category === 'floor' && Number(o.level || 1) >= 2) {
+      const dx = Number(x) - (Number(o.x) || 0);
+      const dy = Number(y) - (Number(o.y) || 0);
+      const ops = [{ type: 'move_object', targetId: id, name: o.name, x, y }];
+      (spec.rooms || []).filter((r) => Number(r.level || 1) === Number(o.level || 1)).forEach((r) => {
+        ops.push({ type: 'move_object', targetId: r.id, name: r.name, x: (Number(r.x) || 0) + dx, y: (Number(r.y) || 0) + dy });
+      });
+      applyOps(ops);
+      return;
+    }
+    applyOps([{ type: 'move_object', targetId: id, name: o.name, x, y }]);
+  };
   const resizeObject = (id, x, y, w, d) => {
     const o = findObj(id); if (!o) return;
     // Dragging an upper storey's extent plate smaller: pull its rooms in to fit
@@ -1423,8 +1439,8 @@ function StoreysControl({ spec, floors, onAddFloor, onRemoveFloor, onResizeFloor
       })}
       <div className="rz-shape-note">
         {floors > 1
-          ? 'An upper storey can set back — a smaller extent than the floor below, and the roof steps down over the rest. Lay out each floor’s rooms in the Rooms chapter.'
-          : 'Add a floor and it gets its own outline; you can set it back from the ground floor and lay out its rooms in Rooms.'}
+          ? 'Set the size here, or open that floor in the Rooms chapter and drag its outline to move it (grab a corner to resize). An upper storey can set back — smaller than the floor below — and the roof steps down over the rest.'
+          : 'Add a floor and it gets its own outline; set it back from the ground floor here, or drag it on the plan in Rooms.'}
       </div>
     </div>
   );
