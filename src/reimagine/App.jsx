@@ -38,7 +38,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 65 · Jul 16';
+const UPDATE_STAMP = 'update 66 · Jul 16';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -870,6 +870,18 @@ export default function App() {
                   ))}
                 </div>
                 <CustomRoomAdd onAdd={(preset) => addRoomPreset(preset)} />
+                {(floors > 1 || hasBasement) && (
+                  <button
+                    type="button"
+                    className="rz-floorbar-outline"
+                    title="A 3½ × 10 ft stair on this floor — drag it where the climb should start; the checks make sure it's long enough for the rise"
+                    onClick={() => {
+                      const W = Number(spec.shell.widthFt) || 36;
+                      const D = Number(spec.shell.depthFt) || 28;
+                      applyOps([{ type: 'add_element', name: 'Stairs', category: 'structure', x: Math.round(W / 2 - 1.5), y: Math.round(D / 2 - 5), w: 3.5, d: 10, h: 8, level: activeFloor }]);
+                    }}
+                  >＋ Stairs — connect the floors (3½ × 10 ft)</button>
+                )}
                 {roomNote && <div className="rz-shape-note">{roomNote}</div>}
                 <div className="rz-shape-note">Tap a room on the plan to rename or remove it (or press Delete). Right-click for more.</div>
               </div>
