@@ -94,10 +94,9 @@
    inside, so the greeting and the build button never slide off the top/bottom. */
 .rz-trail {
   top: 50%; left: 16px; transform: translateY(-50%);
-  border-radius: 18px; padding: 14px; width: 304px;
+  border-radius: 18px; padding: 16px; width: 336px;
   max-height: calc(100vh - 32px); display: flex; flex-direction: column; overflow: hidden;
 }
-.rz-trail.closed { width: 44px; min-width: 44px; padding: 8px; }
 /* only the content scrolls, so the collapse toggle stays pinned at the top */
 .rz-trail-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: -2px -4px 0; padding: 2px 4px 0; }
 .rz-trail-toggle {
@@ -119,18 +118,18 @@
 .rz-chapter {
   display: flex; align-items: center; gap: 12px;
   border: none; background: transparent; cursor: pointer;
-  padding: 9px 10px; border-radius: 11px; text-align: left; font: inherit;
+  padding: 10px 11px; border-radius: 11px; text-align: left; font: inherit;
   color: var(--earth, #565a4f); width: 100%;
 }
 .rz-chapter:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 60%, transparent); }
 .rz-chapter.active { background: var(--evergreen, #3c6472); color: #fff; }
 .rz-chapter.active .rz-chapter-num { background: rgba(255,255,255,0.22); color: #fff; }
 .rz-chapter-num {
-  flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%;
-  display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  flex: 0 0 auto; width: 25px; height: 25px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 13px; font-weight: 700;
   background: color-mix(in srgb, var(--sage, #e2ecee) 80%, transparent); color: var(--evergreen, #3c6472);
 }
-.rz-chapter-label { font-size: 14px; font-weight: 500; }
+.rz-chapter-label { font-size: 15.5px; font-weight: 500; }
 .rz-stamp { margin: 12px 4px 0; font-size: 11px; color: var(--moss, #868a7c); text-align: right; display: flex; justify-content: space-between; align-items: baseline; }
 .rz-fresh {
   border: none; background: transparent; cursor: pointer; padding: 0;
@@ -159,21 +158,21 @@
 .rz-shape { display: flex; flex-direction: column; gap: 8px; margin: 0 4px 14px; }
 .rz-shape-presets { display: flex; gap: 4px; }
 .rz-shape-presets button {
-  flex: 1; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  flex: 1; font: inherit; font-size: 14.5px; font-weight: 600; cursor: pointer;
   color: var(--earth, #565a4f); background: var(--raise, #fff);
-  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 6px 0;
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 8px 0;
 }
 .rz-shape-presets button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 60%, transparent); }
 .rz-shape-presets button.on { background: var(--evergreen, #3c6472); border-color: var(--evergreen, #3c6472); color: #fff; }
-.rz-shape-note { font-size: 11px; color: var(--moss, #868a7c); }
+.rz-shape-note { font-size: 12.5px; line-height: 1.45; color: var(--moss, #868a7c); }
 .rz-shape-size { display: flex; align-items: end; gap: 8px; }
 .rz-shape-field { display: flex; flex-direction: column; gap: 3px; flex: 1; }
-.rz-shape-field span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); }
+.rz-shape-field span { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); }
 .rz-shape-field { position: relative; }
 .rz-shape-field input {
-  width: 100%; box-sizing: border-box; font: inherit; font-size: 15px; font-weight: 600;
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 16.5px; font-weight: 600;
   color: var(--ink, #22251f); background: var(--raise, #fff);
-  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 6px 26px 6px 10px;
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 8px 26px 8px 10px;
 }
 .rz-shape-field input:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; }
 .rz-shape-field em { position: absolute; right: 9px; bottom: 8px; font-style: normal; font-size: 12px; color: var(--moss, #868a7c); }
@@ -217,8 +216,8 @@
 
 /* per-wall heights disclosure (Shell chapter) */
 .rz-perwall summary {
-  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--evergreen, #3c6472);
-  list-style: none; padding: 2px 0;
+  cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--evergreen, #3c6472);
+  list-style: none; padding: 3px 0;
 }
 .rz-perwall summary::-webkit-details-marker { display: none; }
 .rz-perwall[open] summary { margin-bottom: 6px; }
@@ -431,7 +430,7 @@
 .rz-floorbar-btns { display: flex; flex-wrap: wrap; gap: 4px; }
 .rz-floorbar-btns button {
   border: 1px solid var(--line, #dbd9ce); background: var(--raise, #fff); color: var(--earth, #565a4f);
-  font: inherit; font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 9px; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 600; padding: 6px 11px; border-radius: 9px; cursor: pointer;
 }
 .rz-floorbar-btns button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 70%, transparent); color: var(--ink); }
 .rz-floorbar-btns button.on { background: var(--evergreen, #3c6472); color: #fff; border-color: var(--evergreen, #3c6472); }
@@ -465,12 +464,12 @@
 
 /* shared Trail-block field styles (Foundation + Shell chapters) */
 .rz-found { display: flex; flex-direction: column; gap: 9px; margin: 0 4px 14px; }
-.rz-field { display: flex; flex-direction: column; gap: 3px; }
-.rz-field > span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); }
+.rz-field { display: flex; flex-direction: column; gap: 4px; }
+.rz-field > span { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); }
 .rz-field select {
-  width: 100%; box-sizing: border-box; font: inherit; font-size: 13px;
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 14.5px;
   color: var(--ink, #22251f); background: var(--raise, #fff);
-  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 6px 8px;
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 8px 9px;
 }
 .rz-field select:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; }
 /* display:flex is what makes flex-direction take effect — needed for bare
@@ -478,17 +477,17 @@
 .rz-field-num { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
 /* input + unit sit SIDE BY SIDE (not the unit over the input), so the native
    up/down spinners stay visible and never hide under the "ft" label. */
-.rz-num { display: inline-flex; align-items: center; gap: 5px; width: 96px; }
+.rz-num { display: inline-flex; align-items: center; gap: 5px; width: 104px; }
 .rz-num input {
-  flex: 1 1 auto; min-width: 0; box-sizing: border-box; font: inherit; font-size: 14px; font-weight: 600;
+  flex: 1 1 auto; min-width: 0; box-sizing: border-box; font: inherit; font-size: 15.5px; font-weight: 600;
   color: var(--ink, #22251f); background: var(--raise, #fff);
-  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 5px 6px 5px 9px;
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 7px 6px 7px 9px;
 }
 .rz-num input:focus { outline: 2px solid var(--evergreen, #3c6472); outline-offset: -1px; }
 .rz-num em { flex: 0 0 auto; font-style: normal; font-size: 11px; color: var(--moss, #868a7c); }
 .rz-num em:empty { display: none; }
 .rz-num em { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-style: normal; font-size: 11px; color: var(--moss, #868a7c); }
-.rz-found-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); margin-top: 4px; }
+.rz-found-head { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); margin-top: 4px; }
 .rz-pad-btn {
   display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
   font: inherit; font-size: 12.5px; cursor: pointer; text-align: left;
@@ -500,11 +499,12 @@
 .rz-pad-btn small { color: var(--moss, #868a7c); }
 .rz-found-palette { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .rz-found-palette button {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
-  font: inherit; font-size: 12px; cursor: pointer; text-align: left;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  font: inherit; font-size: 13.5px; cursor: pointer; text-align: left;
   color: var(--ink, #22251f); background: var(--raise, #fff);
-  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 6px 8px;
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px; padding: 8px 9px;
 }
+.rz-found-palette small, .rz-pad-btn small { font-size: 11.5px; }
 .rz-found-palette button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 60%, transparent); }
 .rz-found-palette small { color: var(--moss, #868a7c); }
 .rz-found-list { display: flex; flex-direction: column; gap: 2px; }
@@ -558,6 +558,42 @@
   border: none; border-radius: 11px; padding: 9px 0;
 }
 .rz-build-btn:hover { filter: brightness(1.08); }
+
+/* Saved designs — the keepsake shelf at the foot of the Trail */
+.rz-designs { margin: 12px 4px 0; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 60%, transparent); }
+.rz-designs-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rz-designs-toggle {
+  border: none; background: transparent; cursor: pointer; padding: 4px 2px; text-align: left;
+  font: inherit; font-size: 13.5px; font-weight: 600; color: var(--earth, #565a4f);
+}
+.rz-designs-toggle:hover { color: var(--ink, #22251f); }
+.rz-designs-new {
+  flex: 0 0 auto; border: 1px solid color-mix(in srgb, var(--evergreen, #3c6472) 40%, transparent);
+  background: var(--raise, #fff); cursor: pointer; font: inherit; font-size: 13px; font-weight: 700;
+  color: var(--evergreen, #3c6472); border-radius: 9px; padding: 6px 12px;
+}
+.rz-designs-new:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 60%, transparent); }
+.rz-designs-panel { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+.rz-designs-save {
+  border: none; cursor: pointer; font: inherit; font-size: 13.5px; font-weight: 700;
+  color: #fff; background: var(--evergreen, #3c6472); border-radius: 9px; padding: 8px 0;
+}
+.rz-designs-save:hover { filter: brightness(1.08); }
+.rz-designs-flash { font-size: 12.5px; color: var(--good, #3e7b53); padding: 2px; }
+.rz-designs-item { display: flex; align-items: stretch; gap: 4px; }
+.rz-designs-open {
+  flex: 1; min-width: 0; display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  border: 1px solid var(--line, #dbd9ce); background: var(--raise, #fff); cursor: pointer;
+  font: inherit; text-align: left; color: var(--ink, #22251f); border-radius: 9px; padding: 7px 10px;
+}
+.rz-designs-open:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 55%, transparent); border-color: color-mix(in srgb, var(--evergreen, #3c6472) 45%, transparent); }
+.rz-designs-open b { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rz-designs-open small { flex: 0 0 auto; font-size: 11.5px; color: var(--moss, #868a7c); }
+.rz-designs-del {
+  flex: 0 0 auto; width: 32px; border: 1px solid color-mix(in srgb, var(--bad, #ae452f) 30%, transparent);
+  background: transparent; cursor: pointer; font-size: 18px; line-height: 1; color: var(--bad, #ae452f); border-radius: 9px;
+}
+.rz-designs-del:hover { background: color-mix(in srgb, #ae452f 9%, transparent); }
 
 /* SURFACE 4 — the Time Machine strip, bottom center */
 .rz-timeline {

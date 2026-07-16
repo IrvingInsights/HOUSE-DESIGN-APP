@@ -770,6 +770,58 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         pushSideBoxes('south', capped('south', hS), tS, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south') }));
         pushSideBoxes('west', capped('west', hW), tW, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('west'), gaps: gapsFor('west') }));
         pushSideBoxes('east', capped('east', hE), tE, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: width - t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('east'), gaps: gapsFor('east') }));
+
+        // GABLE-END INFILL — a gable roof leaves an open triangle above the
+        // eave on its two gable ends (the walls under the slopes stay flat at
+        // the eave). Left open, the top half of each end is bare sky — and any
+        // structural frame shows its timber poking up through it ("half a
+        // building with frames poking out"). Fill each gable end from its wall
+        // top up to the roof rake so the shell reads as one enclosed form, the
+        // frame carried INSIDE the wall the way it really is.
+        //
+        // makeRoof always extrudes the gable profile along Z: the ridge runs
+        // north↔south at x = width/2 and stands at eave + depth*pitch, so the
+        // two vertical triangular ends are ALWAYS the north and south walls
+        // (verified against the roof mesh — NOT the longer axis). East/west sit
+        // under the slopes at the eave and need no infill. Single-storey rect
+        // footprints; a lowered kneewall gets a trapezoid (base at the wall
+        // top, sloped top peaking at the ridge over x = width/2).
+        if (roofSpec.roofType === 'gable' && storeyLift === 0) {
+          const pitchG = Number(spec.shell.roofPitch) || 0.32;
+          const eaveG = roofSpec.highWallHeightFt;
+          const ridgeH = eaveG + depth * pitchG; // matches makeRoof rise = depth*pitch
+          const midX = width / 2; // the ridge crosses each end wall here
+          // a solid prism running along X at fixed Z=thickCenter, sloped top
+          // h0→h1; double-sided so it reads from inside and out.
+          const gablePrism = (thickCenter, tG, x0, x1, yBot, h0, h1, mat) => {
+            const geometry = new THREE.BufferGeometry();
+            const z0 = thickCenter - tG / 2, z1 = thickCenter + tG / 2;
+            geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+              x0, yBot, z0, x0, yBot, z1, x0, h0, z1, x0, h0, z0,
+              x1, yBot, z0, x1, yBot, z1, x1, h1, z1, x1, h1, z0
+            ]), 3));
+            geometry.setIndex([0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 0, 4, 5, 0, 5, 1, 3, 2, 6, 3, 6, 7, 0, 3, 7, 0, 7, 4, 1, 5, 6, 1, 6, 2]);
+            geometry.computeVertexNormals();
+            const m = new THREE.Mesh(geometry, mat);
+            m.castShadow = true; m.receiveShadow = true; m.userData.generated = true;
+            return m;
+          };
+          if (ridgeH > eaveG + 0.1) {
+            ['north', 'south'].forEach((side) => {
+              const rG = wallResolved[side];
+              if (rG.omitted || omittedWalls.has(side) || rG.sunGlazing) return;
+              const yBot = Math.max(1, Math.min(rG.heightFt, eaveG));
+              const tG = rG.thicknessFt;
+              const thickCenter = side === 'north' ? tG / 2 : depth - tG / 2;
+              const mat = wallMatFor(side).clone();
+              mat.side = THREE.DoubleSide;
+              wallMeshSpecs.push({ side, storey: 'ground', meshes: [
+                gablePrism(thickCenter, tG, 0, midX, yBot, eaveG, ridgeH, mat),
+                gablePrism(thickCenter, tG, midX, width, yBot, ridgeH, eaveG, mat)
+              ] });
+            });
+          }
+        }
       }
       wallMeshSpecs.forEach(({ side, storey, level, meshes, edgeKey }) => {
         if (omittedWalls.has(side) || wallResolved[side].omitted) return;
