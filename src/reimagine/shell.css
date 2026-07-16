@@ -82,9 +82,10 @@
 
 /* view angle chips, bottom-left of the model (clear of the Ask bar) */
 .rz-views {
-  /* right of the always-on Trail (16px + 336px + 12px) — at left:20 the
-     full-height bar covered these buttons entirely (no visible 3D toggle) */
-  bottom: 20px; left: 364px;
+  /* right of the always-on Trail (at left:20 the bar covered these buttons),
+     and ABOVE the Ask bar's row (at bottom:20 the centered Ask overlapped
+     them on ordinary window widths and stole the click) */
+  bottom: 84px; left: 364px;
   display: flex; gap: 2px; padding: 4px; border-radius: 12px;
 }
 .rz-views button {
@@ -136,7 +137,9 @@
   background: color-mix(in srgb, var(--sage, #e2ecee) 80%, transparent); color: var(--evergreen, #3c6472);
 }
 .rz-chapter-label { font-size: 15.5px; font-weight: 500; }
-.rz-stamp { margin: 12px 4px 0; font-size: 11px; color: var(--moss, #868a7c); text-align: right; display: flex; justify-content: space-between; align-items: baseline; }
+/* pinned footer of the Trail (outside the scrolling body) — the version must
+   be readable without scrolling; darker ink for AA contrast at this size */
+.rz-stamp { flex: 0 0 auto; margin: 8px 4px 0; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 60%, transparent); font-size: 11.5px; color: var(--earth, #565a4f); text-align: right; display: flex; justify-content: space-between; align-items: baseline; }
 .rz-fresh {
   border: none; background: transparent; cursor: pointer; padding: 0;
   font: inherit; font-size: 11px; color: var(--moss, #868a7c); text-decoration: underline dotted;

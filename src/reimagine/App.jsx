@@ -37,7 +37,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 57 · Jul 16';
+const UPDATE_STAMP = 'update 58 · Jul 16';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -972,8 +972,9 @@ export default function App() {
               )}
             </div>
 
-            <div className="rz-stamp">{UPDATE_STAMP}</div>
           </div>
+          {/* pinned OUTSIDE the scrolling body so the version is always visible */}
+          <div className="rz-stamp">{UPDATE_STAMP}</div>
       </aside>
 
       {/* SURFACE 4a — the Budget sheet: the first live Sheet. Every line opens
