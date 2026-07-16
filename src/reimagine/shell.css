@@ -437,6 +437,9 @@
 .rz-floorbar-btns button.on { background: var(--evergreen, #3c6472); color: #fff; border-color: var(--evergreen, #3c6472); }
 .rz-floorbar-btns .rz-floorbar-add { color: var(--evergreen, #3c6472); border-style: dashed; }
 .rz-floorbar-btns .rz-floorbar-del { color: var(--bad, #ae452f); }
+/* editable size row on the room card */
+.rz-card-size { padding: 4px 0 8px; gap: 6px; }
+.rz-card-size .rz-num { width: 62px; }
 /* sit to the right of the undo/redo cluster */
 .rz-floors-shifted { left: 96px; }
 
