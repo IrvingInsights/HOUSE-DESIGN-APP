@@ -2,7 +2,7 @@
 import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES,
   resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint,
-  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt,
+  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt, storeyHeightFt,
   scoreTraceSpecChecks,
   // Single source of truth for the per-wall assembly model — no longer duplicated here.
   WALL_SIDES, WALL_ASSEMBLIES, wallAssemblyKeyFromText, resolveWallSide
@@ -602,11 +602,17 @@ export function roofRunoffGallons(roofAreaSf, inches) {
 export function storeyInfo(shell = {}) {
   const storeys = Math.min(3, Math.max(1, Number(shell.storeys || 1)));
   const baseWallFt = Number(shell.wallHeightFt || 10);
-  // Upper storeys carry their OWN height (shell.upperStoreyHeightFt) — a 10'
-  // ground floor under an 8' second storey is normal construction. Absent =
-  // same as the ground (legacy designs unchanged).
-  const upperFt = Math.min(14, Math.max(3, Number(shell.upperStoreyHeightFt || baseWallFt)));
-  return { storeys, baseWallFt, upperFt, extraFt: (storeys - 1) * upperFt };
+  // Each upper storey carries its OWN height (shell.storeyHeights[lv], else the
+  // shared shell.upperStoreyHeightFt) — a 10' ground under a 9' second and 8'
+  // third is one design. `upperFt` stays the level-2 height for controls that
+  // still show a single number; `extraFt` is the true cumulative lift so the
+  // roof and walls stack correctly with differing heights. 1.5 = a half loft.
+  const upperFt = storeyHeightFt(shell, 2);
+  const whole = Math.floor(storeys);
+  let extraFt = 0;
+  for (let k = 2; k <= whole; k += 1) extraFt += storeyHeightFt(shell, k);
+  if (storeys > whole) extraFt += (storeys - whole) * storeyHeightFt(shell, whole + 1);
+  return { storeys, baseWallFt, upperFt, extraFt };
 }
 
 // The extent of an upper storey: a 'floor' plate element at that level defines

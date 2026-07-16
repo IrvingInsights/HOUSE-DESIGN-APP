@@ -4,7 +4,7 @@ import { PlanView } from '../planView.jsx';
 import {
   applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
   INSULATION_TYPES, resolveInsulation, OPENING_TYPES,
-  FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS
+  FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS, storeyHeightFt
 } from '../../backend/bim-core.mjs';
 import {
   seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS,
@@ -36,7 +36,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 45 · Jul 15';
+const UPDATE_STAMP = 'update 46 · Jul 15';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -382,11 +382,12 @@ export default function App() {
     applyOps(ops);
   };
   // One height knob per floor. The ground floor's height is the wall height
-  // (drives the roof); upper storeys carry their own upperStoreyHeightFt.
+  // (drives the roof); each upper storey carries its OWN height so a 10' ground
+  // under a 9' second and an 8' third all stack correctly.
   const setFloorHeight = (level, ft) => {
     const v = clamp(Number(ft), 7, 16);
     if (level === 1) setShellField('wallHeightFt', v);
-    else setShellField('upperStoreyHeightFt', v);
+    else applyOps([{ type: 'set_storey_height', level, value: v }]);
   };
 
   // --- foundation: the main type + free-roaming footing runs ----------------
@@ -1422,31 +1423,34 @@ function StoreysControl({ spec, floors, onAddFloor, onRemoveFloor, onResizeFloor
           <button type="button" disabled={floors >= 3} onClick={onAddFloor} title="Add a floor on top">+</button>
         </div>
       </div>
-      {uppers.length > 0 && (
-        <label className="rz-field rz-field-num">
-          <span>Upper floor height</span>
-          <NumInput value={Math.round(upperFt * 10) / 10} min={7} max={16} step={0.5} onCommit={(v) => onFloorHeight(2, v)} />
-        </label>
-      )}
+      <div className="rz-storey-row">
+        <span className="rz-storey-name">Ground</span>
+        <div className="rz-run-size">
+          <span className="rz-storey-sub">whole footprint</span>
+          <label className="rz-storey-h">H<NumInput value={Math.round(storeyHeightFt(spec.shell, 1) * 10) / 10} min={7} max={16} step={0.5} unit="ft" onCommit={(v) => onFloorHeight(1, v)} /></label>
+        </div>
+      </div>
       {uppers.map((lvl) => {
         const plate = (spec.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === lvl);
         const w = Math.round((Number(plate?.w) || Number(spec.shell.widthFt)) * 10) / 10;
         const d = Math.round((Number(plate?.d) || Number(spec.shell.depthFt)) * 10) / 10;
+        const h = Math.round(storeyHeightFt(spec.shell, lvl) * 10) / 10;
         return (
           <div key={lvl} className="rz-storey-row">
             <span className="rz-storey-name">{floorLabel(spec, lvl)}</span>
             <div className="rz-run-size">
               <label>W<NumInput value={w} min={8} max={96} step={0.5} unit="" onCommit={(v) => onResizeFloor(lvl, v, d)} /></label>
               <span className="rz-run-x">×</span>
-              <label>D<NumInput value={d} min={8} max={80} step={0.5} unit="ft" onCommit={(v) => onResizeFloor(lvl, w, v)} /></label>
+              <label>D<NumInput value={d} min={8} max={80} step={0.5} unit="" onCommit={(v) => onResizeFloor(lvl, w, v)} /></label>
+              <label className="rz-storey-h">H<NumInput value={h} min={7} max={16} step={0.5} unit="ft" onCommit={(v) => onFloorHeight(lvl, v)} /></label>
             </div>
           </div>
         );
       })}
       <div className="rz-shape-note">
         {floors > 1
-          ? 'Set the size here, or open that floor in the Rooms chapter and drag its outline to move it (grab a corner to resize). An upper storey can set back — smaller than the floor below — and the roof steps down over the rest.'
-          : 'Add a floor and it gets its own outline; set it back from the ground floor here, or drag it on the plan in Rooms.'}
+          ? 'Each floor has its own width, depth, and height — an upper storey can set back and the roof steps down over the rest. Or open a floor in Rooms and drag its outline to move it.'
+          : 'Add a floor and it gets its own outline and height; set it back from the ground floor here, or drag it on the plan in Rooms.'}
       </div>
     </div>
   );
