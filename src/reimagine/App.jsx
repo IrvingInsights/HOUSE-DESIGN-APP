@@ -36,7 +36,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 52 · Jul 16';
+const UPDATE_STAMP = 'update 53 · Jul 16';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -271,7 +271,20 @@ export default function App() {
       applyOps(ops);
       return;
     }
-    applyOps([{ type: 'move_object', targetId: id, name: o.name, x, y }]);
+    // Moving an INDOOR room past the walls grows the house to keep it enclosed
+    // — the same grammar as resizing one past the walls (update 47). Without
+    // this the room lands outside the shell and its slab floats beside the
+    // house. Outdoor rooms and non-room elements roam free.
+    const isRoomMv = (spec.rooms || []).some((r) => r.id === id);
+    const outdoorMv = ['outdoor', 'site', 'garden', 'animal', 'landscape', 'plant', 'water', 'earthwork'].includes(o.type);
+    const mvOps = [{ type: 'move_object', targetId: id, name: o.name, x, y }];
+    if (isRoomMv && !outdoorMv) {
+      const needW = Math.ceil(Number(x) + (Number(o.w) || 0));
+      const needD = Math.ceil(Number(y) + (Number(o.d) || 0));
+      if (needW > Number(spec.shell.widthFt)) mvOps.unshift({ type: 'set_shell', field: 'widthFt', value: String(clamp(needW, 12, 96)) });
+      if (needD > Number(spec.shell.depthFt)) mvOps.unshift({ type: 'set_shell', field: 'depthFt', value: String(clamp(needD, 12, 80)) });
+    }
+    applyOps(mvOps);
   };
   const resizeObject = (id, x, y, w, d) => {
     const o = findObj(id); if (!o) return;
