@@ -1071,7 +1071,16 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // rafters up there, low wing rafters over the remainder. (Mirrors the
         // stepped-roof logic below; a full-footprint storey lifts everything.)
         const plateF = upperPlateRect(spec, 2);
-        const stepsF = storeyLift > 0 && plateF && plateF.w * plateF.d < width * depth - 1;
+        // Stepped when ANY storey stands on a smaller extent — a full floor 2
+        // with a set-back floor 3 steps just the same (the old check only saw
+        // floor 2, so floor 3's frame towered over the whole footprint).
+        const stepsF = storeyLift > 0 && (() => {
+          for (let lv = 2; lv <= Math.ceil(storeys); lv += 1) {
+            const pp = upperPlateRect(spec, lv);
+            if (pp && pp.w * pp.d < width * depth - 1) return true;
+          }
+          return false;
+        })();
         const liftPerim = stepsF ? 0 : storeyLift;
         const hLead = (spanIsZ ? roofSpec.northWallHeightFt : roofSpec.highWallHeightFt) + liftPerim;
         const hTail = (spanIsZ ? roofSpec.southWallHeightFt : roofSpec.highWallHeightFt) + liftPerim;
@@ -1177,94 +1186,111 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             }
           }
         } else {
-          // STEPPED: loft floor + upper bents over the plate, wing rafters
-          // over the remainder — the same segment split the roof uses.
-          const plateEl = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === 2);
-          const plateZ = Number(plateEl?.z) || baseWallFt;
-          const pSpan0 = (spanIsZ ? plateF.y : plateF.x) + fm.postW / 2;
-          const pSpan1 = (spanIsZ ? plateF.y + plateF.d : plateF.x + plateF.w) - fm.postW / 2;
-          const pBay0 = (spanIsZ ? plateF.x : plateF.y) + fm.postW / 2;
-          const pBay1 = (spanIsZ ? plateF.x + plateF.w : plateF.y + plateF.d) - fm.postW / 2;
-          // Loft rim + joists at the plate's own elevation, over the plate only.
-          straight(pBay0, pBay1, plateZ + 0.28, pSpan0, 0.34, 0.55);
-          straight(pBay0, pBay1, plateZ + 0.28, pSpan1, 0.34, 0.55);
-          const jCount = Math.max(2, Math.floor((pSpan1 - pSpan0) / 4));
-          for (let j = 1; j < jCount; j += 1) {
-            straight(pBay0, pBay1, plateZ + 0.28, pSpan0 + ((pSpan1 - pSpan0) * j) / jCount, 0.34, 0.55);
+          // STEPPED, TIER BY TIER: every set-back storey gets its own deck
+          // (rim + joists at its floor), posts and plate beams rising to ITS
+          // tier top, and roof rafters over each tier's EXPOSED ring — three
+          // set-back floors make three frame steps, mirroring the stepped
+          // roof and the tier-aware walls. (The old code knew only floor 2:
+          // its posts ran to the FULL lifted eave over the whole plate, a
+          // phantom roof plane over the 2nd storey.)
+          const frameTiers = [{ lv: 1, p: { x: 0, y: 0, w: width, d: depth } }];
+          for (let lv = 2; lv <= Math.ceil(storeys); lv += 1) {
+            if (heightAt(lv) <= 0) continue;
+            frameTiers.push({ lv, p: upperPlateRect(spec, lv) || { x: 0, y: 0, w: width, d: depth } });
           }
-          // The lifted plane the upper roof rides (shed slope or level eave).
-          const upperEaveAt = (spanPos) => {
+          const eaveLiftAt = (spanPos, lift) => {
             if (roofSpec.roofType === 'shed') {
-              const z0 = -oAllF.north, z1 = depth + oAllF.south;
-              const nH = roofSpec.northWallHeightFt + storeyLift;
-              const sH = roofSpec.southWallHeightFt + storeyLift;
+              const z0 = -oAllF.north; const z1 = depth + oAllF.south;
+              const nH = roofSpec.northWallHeightFt + lift; const sH = roofSpec.southWallHeightFt + lift;
               return nH + (sH - nH) * clamp((spanPos - z0) / Math.max(0.01, z1 - z0), 0, 1);
             }
-            return roofSpec.highWallHeightFt + storeyLift;
+            return roofSpec.highWallHeightFt + lift;
           };
-          // Upper posts + plates on the plate's two span-end edges.
-          const upBays = Math.max(1, Math.ceil((pBay1 - pBay0) / bay));
-          for (let i = 0; i <= upBays; i += 1) {
-            const at = pBay0 + ((pBay1 - pBay0) * i) / upBays;
-            postAt(pSpan0, at, Math.max(1, upperEaveAt(pSpan0) - fm.plateH - plateZ), fm.postW, plateZ);
-            postAt(pSpan1, at, Math.max(1, upperEaveAt(pSpan1) - fm.plateH - plateZ), fm.postW, plateZ);
-          }
-          straight(pBay0, pBay1, upperEaveAt(pSpan0) - fm.plateH / 2, pSpan0, fm.postW + 0.1, fm.plateH);
-          straight(pBay0, pBay1, upperEaveAt(pSpan1) - fm.plateH / 2, pSpan1, fm.postW + 0.1, fm.plateH);
-          // Upper roof rafters over the plate.
-          if (roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat') {
-            rafterRun(pBay0, pBay1, (zz) => upperEaveAt(zz) + 0.12, spanIsZ, pSpan0 - 0.35, pSpan1 + 0.35);
-          } else {
-            gableRafters(plateF.x, plateF.x + plateF.w, plateF.y, plateF.y + plateF.d, roofSpec.highWallHeightFt + storeyLift);
-          }
-          // Wing rafters over the remainder rects, on the SAME falling planes
-          // as the roof's makeStepRoofPlane (high against the upper block).
-          const groundEave = roofSpec.highWallHeightFt;
-          const inPlateF = (px, py) => px > plateF.x + 0.01 && px < plateF.x + plateF.w - 0.01 && py > plateF.y + 0.01 && py < plateF.y + plateF.d - 0.01;
-          const insideRect = (px, py) => px > 0.01 && px < width - 0.01 && py > 0.01 && py < depth - 0.01;
-          subtractRect({ x: 0, y: 0, w: width, d: depth }, plateF).forEach((rect) => {
-            const overlapX = rect.x < plateF.x + plateF.w && rect.x + rect.w > plateF.x;
-            const overlapY = rect.y < plateF.y + plateF.d && rect.y + rect.d > plateF.y;
-            const touch = Math.abs(rect.y + rect.d - plateF.y) < 0.05 && overlapX ? 'south'
-              : Math.abs(rect.y - (plateF.y + plateF.d)) < 0.05 && overlapX ? 'north'
-              : Math.abs(rect.x + rect.w - plateF.x) < 0.05 && overlapY ? 'east'
-              : Math.abs(rect.x - (plateF.x + plateF.w)) < 0.05 && overlapY ? 'west'
-              : (Math.abs((rect.x + rect.w / 2) - (plateF.x + plateF.w / 2)) > Math.abs((rect.y + rect.d / 2) - (plateF.y + plateF.d / 2))
-                ? ((rect.x + rect.w / 2) < (plateF.x + plateF.w / 2) ? 'east' : 'west')
-                : ((rect.y + rect.d / 2) < (plateF.y + plateF.d / 2) ? 'south' : 'north'));
-            const probe = 0.4;
-            const oSide = {};
-            for (const side of ['north', 'south', 'east', 'west']) {
-              const [px, py] = side === 'north' ? [rect.x + rect.w / 2, rect.y - probe]
-                : side === 'south' ? [rect.x + rect.w / 2, rect.y + rect.d + probe]
-                : side === 'west' ? [rect.x - probe, rect.y + rect.d / 2]
-                : [rect.x + rect.w + probe, rect.y + rect.d / 2];
-              if (inPlateF(px, py)) oSide[side] = 0.35;
-              else if (insideRect(px, py)) oSide[side] = 0.05;
-              else oSide[side] = oAllF[side];
+          frameTiers.forEach((tier, ti) => {
+            const { lv, p } = tier;
+            const above = frameTiers[ti + 1] ? frameTiers[ti + 1].p : null;
+            const tierLift = lv === 1 ? 0 : upThru(lv);
+            if (lv >= 2) {
+              const floorY = baseWallFt + upAbove(lv);
+              const pS0 = (spanIsZ ? p.y : p.x) + fm.postW / 2;
+              const pS1 = (spanIsZ ? p.y + p.d : p.x + p.w) - fm.postW / 2;
+              const pB0 = (spanIsZ ? p.x : p.y) + fm.postW / 2;
+              const pB1 = (spanIsZ ? p.x + p.w : p.y + p.d) - fm.postW / 2;
+              // deck rim + joists at this storey's floor, over its plate only
+              straight(pB0, pB1, floorY + 0.28, pS0, 0.34, 0.55);
+              straight(pB0, pB1, floorY + 0.28, pS1, 0.34, 0.55);
+              const jCount = Math.max(2, Math.floor((pS1 - pS0) / 4));
+              for (let j = 1; j < jCount; j += 1) {
+                straight(pB0, pB1, floorY + 0.28, pS0 + ((pS1 - pS0) * j) / jCount, 0.34, 0.55);
+              }
+              // posts + plate beams to THIS tier's own top
+              const upBays = Math.max(1, Math.ceil((pB1 - pB0) / bay));
+              for (let i = 0; i <= upBays; i += 1) {
+                const at = pB0 + ((pB1 - pB0) * i) / upBays;
+                postAt(pS0, at, Math.max(1, eaveLiftAt(pS0, tierLift) - fm.plateH - floorY), fm.postW, floorY);
+                postAt(pS1, at, Math.max(1, eaveLiftAt(pS1, tierLift) - fm.plateH - floorY), fm.postW, floorY);
+              }
+              straight(pB0, pB1, eaveLiftAt(pS0, tierLift) - fm.plateH / 2, pS0, fm.postW + 0.1, fm.plateH);
+              straight(pB0, pB1, eaveLiftAt(pS1, tierLift) - fm.plateH / 2, pS1, fm.postW + 0.1, fm.plateH);
             }
-            const x0 = rect.x - oSide.west, x1 = rect.x + rect.w + oSide.east;
-            const z0 = rect.y - oSide.north, z1 = rect.y + rect.d + oSide.south;
-            if (roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat') {
-              // Shed wings ride the GROUND shed plane — same as the roof.
-              const groundAt = (zz) => upperEaveAt(zz) - storeyLift + 0.12;
-              rafterRun(rect.x, rect.x + rect.w, groundAt, true, z0, z1);
+            if (!above) {
+              // top tier: the full roof rides over its plate
+              if (roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat') {
+                const b0 = spanIsZ ? p.x : p.y; const b1 = spanIsZ ? p.x + p.w : p.y + p.d;
+                const s0 = (spanIsZ ? p.y : p.x) - 0.35; const s1 = (spanIsZ ? p.y + p.d : p.x + p.w) + 0.35;
+                rafterRun(b0, b1, (zz) => eaveLiftAt(zz, tierLift) + 0.12, spanIsZ, s0, s1);
+              } else {
+                gableRafters(p.x, p.x + p.w, p.y, p.y + p.d, roofSpec.highWallHeightFt + tierLift);
+              }
               return;
             }
-            const topY = groundEave + 0.25;
-            if (touch === 'north' || touch === 'south') {
-              const drop = Math.max(0.1, (z1 - z0) * pitchF);
-              const planeAt = (zz) => (touch === 'north'
-                ? topY - ((zz - z0) / Math.max(0.01, z1 - z0)) * drop
-                : topY - ((z1 - zz) / Math.max(0.01, z1 - z0)) * drop);
-              rafterRun(rect.x, rect.x + rect.w, planeAt, true, z0, z1);
-            } else {
-              const drop = Math.max(0.1, (x1 - x0) * pitchF);
-              const planeAt = (xx) => (touch === 'west'
-                ? topY - ((xx - x0) / Math.max(0.01, x1 - x0)) * drop
-                : topY - ((x1 - xx) / Math.max(0.01, x1 - x0)) * drop);
-              rafterRun(rect.y, rect.y + rect.d, planeAt, false, x0, x1);
-            }
+            // lower tier: rafter the ring its storey exposes, at ITS tier top
+            const inAbove = (px, py) => px > above.x + 0.01 && px < above.x + above.w - 0.01 && py > above.y + 0.01 && py < above.y + above.d - 0.01;
+            const insideBelow = (px, py) => px > p.x + 0.01 && px < p.x + p.w - 0.01 && py > p.y + 0.01 && py < p.y + p.d - 0.01;
+            subtractRect(p, above).forEach((rect) => {
+              const overlapX = rect.x < above.x + above.w && rect.x + rect.w > above.x;
+              const overlapY = rect.y < above.y + above.d && rect.y + rect.d > above.y;
+              const touch = Math.abs(rect.y + rect.d - above.y) < 0.05 && overlapX ? 'south'
+                : Math.abs(rect.y - (above.y + above.d)) < 0.05 && overlapX ? 'north'
+                : Math.abs(rect.x + rect.w - above.x) < 0.05 && overlapY ? 'east'
+                : Math.abs(rect.x - (above.x + above.w)) < 0.05 && overlapY ? 'west'
+                : (Math.abs((rect.x + rect.w / 2) - (above.x + above.w / 2)) > Math.abs((rect.y + rect.d / 2) - (above.y + above.d / 2))
+                  ? ((rect.x + rect.w / 2) < (above.x + above.w / 2) ? 'east' : 'west')
+                  : ((rect.y + rect.d / 2) < (above.y + above.d / 2) ? 'south' : 'north'));
+              const probe = 0.4;
+              const oSide = {};
+              for (const side of ['north', 'south', 'east', 'west']) {
+                const [px, py] = side === 'north' ? [rect.x + rect.w / 2, rect.y - probe]
+                  : side === 'south' ? [rect.x + rect.w / 2, rect.y + rect.d + probe]
+                  : side === 'west' ? [rect.x - probe, rect.y + rect.d / 2]
+                  : [rect.x + rect.w + probe, rect.y + rect.d / 2];
+                if (inAbove(px, py)) oSide[side] = 0.35;
+                else if (insideBelow(px, py)) oSide[side] = 0.05;
+                else oSide[side] = oAllF[side];
+              }
+              const x0 = rect.x - oSide.west; const x1 = rect.x + rect.w + oSide.east;
+              const z0 = rect.y - oSide.north; const z1 = rect.y + rect.d + oSide.south;
+              if (roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat') {
+                // wings ride this tier's shed plane — same as the roof tiers
+                const tierPlane = (zz) => eaveLiftAt(zz, tierLift) + 0.12;
+                rafterRun(rect.x, rect.x + rect.w, tierPlane, true, z0, z1);
+                return;
+              }
+              const topY = roofSpec.highWallHeightFt + tierLift + 0.25;
+              if (touch === 'north' || touch === 'south') {
+                const drop = Math.max(0.1, (z1 - z0) * pitchF);
+                const planeAt = (zz) => (touch === 'north'
+                  ? topY - ((zz - z0) / Math.max(0.01, z1 - z0)) * drop
+                  : topY - ((z1 - zz) / Math.max(0.01, z1 - z0)) * drop);
+                rafterRun(rect.x, rect.x + rect.w, planeAt, true, z0, z1);
+              } else {
+                const drop = Math.max(0.1, (x1 - x0) * pitchF);
+                const planeAt = (xx) => (touch === 'west'
+                  ? topY - ((xx - x0) / Math.max(0.01, x1 - x0)) * drop
+                  : topY - ((x1 - xx) / Math.max(0.01, x1 - x0)) * drop);
+                rafterRun(rect.y, rect.y + rect.d, planeAt, false, x0, x1);
+              }
+            });
           });
         }
       }
