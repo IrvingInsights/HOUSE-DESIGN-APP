@@ -4,7 +4,8 @@ import { PlanView } from '../planView.jsx';
 import {
   applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
   INSULATION_TYPES, resolveInsulation, OPENING_TYPES,
-  FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS, storeyHeightFt
+  FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS, storeyHeightFt,
+  footprintPolygon, polygonArea, footprintBounds
 } from '../../backend/bim-core.mjs';
 import {
   seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS,
@@ -36,7 +37,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 56 · Jul 16';
+const UPDATE_STAMP = 'update 57 · Jul 16';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1408,6 +1409,16 @@ function ShapeControls({ spec, floors, onShapeBuilding, onSizeBuilding, onAddFlo
   const isRound = spec.shell.footprint === 'round';
   const isRect = !spec.shell.footprint;
   const corners = Array.isArray(spec.shell.footprint) ? spec.shell.footprint.length : 4;
+  // A stored outline that is ALMOST a rectangle (a small accidental jog from a
+  // wall-edge drag) is nearly invisible on the plan — but rooms honestly stop
+  // at the jog, which reads as "rooms snap back leaving a gap". Call it out.
+  const nearRect = (() => {
+    if (isRect || isRound || !Array.isArray(spec.shell.footprint)) return false;
+    const poly = footprintPolygon(spec);
+    const b = footprintBounds(poly);
+    const missing = b.w * b.d - polygonArea(poly);
+    return missing > 0.1 && missing < b.w * b.d * 0.08;
+  })();
   const bW = Math.round((Number(spec.shell.widthFt) || 36) * 10) / 10;
   const bD = Math.round((Number(spec.shell.depthFt) || 28) * 10) / 10;
   return (
@@ -1425,7 +1436,11 @@ function ShapeControls({ spec, floors, onShapeBuilding, onSizeBuilding, onAddFlo
         ))}
       </div>
       {isRound && <div className="rz-shape-note">round outline · an ellipse — set how wide & deep in the Floors sizes below</div>}
-      {!isRect && !isRound && <div className="rz-shape-note">custom outline · {corners} corners — drag any edge on the plan</div>}
+      {!isRect && !isRound && (
+        nearRect
+          ? <div className="rz-shape-note rz-shape-warn">⚠ this outline is almost — but not quite — a rectangle (a small jog in a wall). Rooms stop at the jog, which can look like a stuck gap. Tap <b>Rectangle</b> to straighten it.</div>
+          : <div className="rz-shape-note">custom outline · {corners} corners — drag any edge on the plan</div>
+      )}
 
       {/* Every floor — ground included — sizes the same way in the Floors list
           below (the ground floor's width & depth ARE the building footprint). */}
