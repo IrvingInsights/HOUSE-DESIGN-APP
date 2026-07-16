@@ -526,6 +526,36 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // start at the reveal height, never running down through the concrete.
       const stemReveal = utilitiesOf(spec).foundationType === 'stemwall'
         ? Math.min(6, Math.max(0.5, Number(utilitiesOf(spec).stemwallHeightFt) || 1.5)) : 0;
+      // …and the same rule for stem walls built as PLACED FOUNDATION RUNS
+      // (the Foundation chapter's draggable pieces): a wall whose line has a
+      // stem run under it sits on THAT stem's top — per side, so a house can
+      // mix a stem-walled north side with an at-grade south.
+      const sideReveal = (() => {
+        const out = {};
+        WALL_SIDES.forEach((side) => {
+          let r = stemReveal;
+          const tSide = (wallResolved[side].thicknessFt || 1) + 0.6;
+          for (const el of (spec.elements || [])) {
+            if (el.category !== 'foundation') continue;
+            if (el.construction !== 'stemwall' && el.construction !== 'rubble-stem') continue;
+            const ex = Number(el.x) || 0; const ey = Number(el.y) || 0;
+            const ew = Number(el.w) || 0; const ed = Number(el.d) || 0;
+            // must lie against the wall line AND actually run along it — a
+            // run's corner clipping a neighboring wall doesn't lift that wall
+            const nearLine = side === 'north' ? (ey <= tSide && ey + ed >= -0.6)
+              : side === 'south' ? (ey + ed >= depth - tSide && ey <= depth + 0.6)
+              : side === 'west' ? (ex <= tSide && ex + ew >= -0.6)
+              : (ex + ew >= width - tSide && ex <= width + 0.6);
+            const runLenAlong = (side === 'north' || side === 'south')
+              ? Math.min(ex + ew, width) - Math.max(ex, 0)
+              : Math.min(ey + ed, depth) - Math.max(ey, 0);
+            if (nearLine && runLenAlong >= 3) r = Math.max(r, Math.max(0.25, Number(el.h) || 0.3) + 0.05);
+          }
+          out[side] = r;
+        });
+        return out;
+      })();
+      const maxReveal = Math.max(sideReveal.north, sideReveal.south, sideReveal.east, sideReveal.west);
       const tN = wallResolved.north.thicknessFt;
       const tS = wallResolved.south.thicknessFt;
       const tE = wallResolved.east.thicknessFt;
@@ -580,7 +610,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           along = clamp(along, 0.2, Math.max(0.2, wallLen - w - 0.2));
         }
         // on a stem wall the whole wall (and its holes) sits on the stem top
-        const gap = { from: along, to: along + w, sill: profile.sill + stemReveal, top: profile.sill + profile.h + stemReveal };
+        const revealHere = sideReveal[opening.wall] || 0;
+        const gap = { from: along, to: along + w, sill: profile.sill + revealHere, top: profile.sill + profile.h + revealHere };
         gapByOpening[openingIdx] = gap;
         const list = openingGapsByWall.get(key) || [];
         list.push(gap);
@@ -647,8 +678,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const midX = (p0[0] + p1[0]) / 2; const midZ = (p0[1] + p1[1]) / 2;
             const dxs = p1[0] - p0[0]; const dzs = p1[1] - p0[1];
             const segLen = Math.hypot(dxs, dzs) + 0.15; // slight overlap, no gaps
-            const segH = Math.max(1, groundH - stemReveal);
-            const seg = box(segLen, segH, t, midX, stemReveal + segH / 2, midZ, mat);
+            const segH = Math.max(1, groundH - sideReveal[side]);
+            const seg = box(segLen, segH, t, midX, sideReveal[side] + segH / 2, midZ, mat);
             seg.rotation.y = Math.atan2(-dzs, dxs);
             meshes.push(seg);
           }
@@ -686,14 +717,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             meshes = wallRunMeshes({
               horizontal: false, thickCenter: cx, t, a0: z0, a1: z1,
               hAt: (zz) => Math.max(1, eaveAt(zz) - (hasPlate ? storeyLift : 0)),
-              mat: matG, gaps: gapsFor(edge.key), yBase: stemReveal
+              mat: matG, gaps: gapsFor(edge.key), yBase: sideReveal[edge.facing]
             });
           } else if (edge.horizontal) {
             const a0 = Math.min(edge.x0, edge.x1);
-            meshes = wallRunMeshes({ horizontal: true, thickCenter: cy, t, a0, a1: a0 + len, hAt: () => groundH, mat: matG, gaps: gapsFor(edge.key), yBase: stemReveal });
+            meshes = wallRunMeshes({ horizontal: true, thickCenter: cy, t, a0, a1: a0 + len, hAt: () => groundH, mat: matG, gaps: gapsFor(edge.key), yBase: sideReveal[edge.facing] });
           } else {
             const a0 = Math.min(edge.y0, edge.y1);
-            meshes = wallRunMeshes({ horizontal: false, thickCenter: cx, t, a0, a1: a0 + len, hAt: () => groundH, mat: matG, gaps: gapsFor(edge.key), yBase: stemReveal });
+            meshes = wallRunMeshes({ horizontal: false, thickCenter: cx, t, a0, a1: a0 + len, hAt: () => groundH, mat: matG, gaps: gapsFor(edge.key), yBase: sideReveal[edge.facing] });
           }
           wallMeshSpecs.push({ side: edge.facing, storey: 'ground', edgeKey: edge.key, meshes });
           // No extent plate: the upper band rides this same edge.
@@ -764,8 +795,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         }
       } else if (roofSpec.roofType === 'shed') {
         const eaveAtZ = (zz) => northWallHeight + (southWallHeight - northWallHeight) * clamp(depth > 0 ? zz / depth : 0, 0, 1);
-        pushSideBoxes('north', hN, tN, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north'), yBase: stemReveal }));
-        pushSideBoxes('south', hS, tS, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south'), yBase: stemReveal }));
+        pushSideBoxes('north', hN, tN, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north'), yBase: sideReveal.north }));
+        pushSideBoxes('south', hS, tS, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south'), yBase: sideReveal.south }));
         // The raked side walls step TIER BY TIER: along each stretch of the
         // side they rise exactly as high as the storeys that actually stand
         // at that edge (every level's extent consulted — three set-back floors
@@ -797,7 +828,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             meshes.push(...wallRunMeshes({
               horizontal: false, thickCenter, t: tSide, a0, a1,
               hAt: (zz) => Math.max(1, eaveAtZ(zz) - missing),
-              mat: wallMatFor(side), gaps: gapsFor(side), yBase: stemReveal
+              mat: wallMatFor(side), gaps: gapsFor(side), yBase: sideReveal[side]
             }));
           }
           wallMeshSpecs.push({ side, storey: 'ground', meshes });
@@ -858,10 +889,10 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // perimeter roof of a stepped storey reads LOW (outside the plate), so
         // capping there would clamp the total and collapse the ground wall.
         const capped = (side, h) => storeyLift > 0 ? Math.max(1, h) : Math.max(1, Math.min(h, roofCapForSide(side)));
-        pushSideBoxes('north', capped('north', hN), tN, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north'), yBase: stemReveal }));
-        pushSideBoxes('south', capped('south', hS), tS, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south'), yBase: stemReveal }));
-        pushSideBoxes('west', capped('west', hW), tW, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('west'), gaps: gapsFor('west'), yBase: stemReveal }));
-        pushSideBoxes('east', capped('east', hE), tE, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: width - t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('east'), gaps: gapsFor('east'), yBase: stemReveal }));
+        pushSideBoxes('north', capped('north', hN), tN, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north'), yBase: sideReveal.north }));
+        pushSideBoxes('south', capped('south', hS), tS, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south'), yBase: sideReveal.south }));
+        pushSideBoxes('west', capped('west', hW), tW, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('west'), gaps: gapsFor('west'), yBase: sideReveal.west }));
+        pushSideBoxes('east', capped('east', hE), tE, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: width - t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('east'), gaps: gapsFor('east'), yBase: sideReveal.east }));
 
         // GABLE-END INFILL — a gable roof leaves an open triangle above the
         // eave on its two gable ends (the walls under the slopes stay flat at
@@ -1400,7 +1431,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         const roomLevel = Number(room.level || 1);
         const roomLift = roomLevel === BASEMENT_LEVEL
           ? -basementH + 0.12
-          : (Math.max(1, roomLevel) - 1) * baseStoreyFt + (roomLevel > 1 ? 0.42 : stemReveal);
+          : (Math.max(1, roomLevel) - 1) * baseStoreyFt + (roomLevel > 1 ? 0.42 : maxReveal);
         const material = new THREE.MeshStandardMaterial({
           color: zonePalette[room.type] || 0x86a0a8,
           transparent: true,
@@ -1834,7 +1865,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // Which storey the opening lives on lifts the whole assembly: a
         // 2nd-floor window sits at that storey's floor elevation, not the ground.
         const oLevel = opening.wall === 'roof' ? 1 : Number(opening.level || 1);
-        const baseY = storeyElevationFt(spec.shell, oLevel) + (oLevel === 1 && opening.wall !== 'roof' ? stemReveal : 0);
+        const baseY = storeyElevationFt(spec.shell, oLevel) + (oLevel === 1 && opening.wall !== 'roof' ? (sideReveal[opening.wall] || 0) : 0);
         const sill = baseY + profile.sill;
         // Plan position of the opening centre — used by raked height, the shade
         // eyebrow, and the dormer.
