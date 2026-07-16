@@ -629,15 +629,37 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
           const isSel = raw.id === selectedRoom;
           const w = Number(el.w) || 4;
           const d = Number(el.d) || 4;
-          // A storey's extent plate is a NON-interactive backdrop — it shows this
-          // floor's outline for context, but never intercepts a room click or
-          // drags. The storey's size is set by the numbers in the Shape chapter,
-          // so the plate stays out of the way while you lay out rooms.
+          // A storey's extent plate. Its BODY is a non-interactive dashed
+          // outline (so a room click hits the room, never the plate). But you
+          // can still work the floor directly: drag its BORDER to move it, or a
+          // CORNER dot to resize — those thin handles are the only interactive
+          // parts, so rooms underneath stay clickable. (Numbers in Shape do the
+          // same job.) Only the upper floors are grabbable this way.
           if (raw.category === 'floor') {
+            const isSel = raw.id === selectedRoom;
+            const grabbable = Number(raw.level || 1) > 1 && !buildingContext && !siteContext && Boolean(onResize);
             return (
-              <rect key={raw.id} x={el.x} y={el.y} width={w} height={d}
-                fill="none" stroke="var(--line)" strokeWidth={0.3} strokeDasharray="1.2 0.8"
-                opacity={0.55} pointerEvents="none" />
+              <g key={raw.id}>
+                <rect x={el.x} y={el.y} width={w} height={d} fill="none"
+                  stroke={isSel ? 'var(--active-line)' : 'var(--line)'} strokeWidth={isSel ? 0.5 : 0.3}
+                  strokeDasharray="1.2 0.8" opacity={0.7} pointerEvents="none" />
+                {grabbable && (
+                  <>
+                    {/* the border is the move handle — only the stroke is live,
+                        so clicks inside (on rooms) pass straight through */}
+                    <rect x={el.x} y={el.y} width={w} height={d} fill="none"
+                      stroke="transparent" strokeWidth={1.6} pointerEvents="stroke"
+                      style={{ cursor: drag ? 'grabbing' : 'grab' }}
+                      onPointerDown={(event) => startDrag(event, raw, 'move')} />
+                    {['nw', 'ne', 'sw', 'se'].map((corner) => {
+                      const cx = el.x + (corner.includes('e') ? w : 0);
+                      const cy = el.y + (corner.includes('s') ? d : 0);
+                      return <circle key={corner} cx={cx} cy={cy} r={1} fill="var(--active-line)" stroke="#fff" strokeWidth={0.18}
+                        style={{ cursor: `${corner}-resize` }} onPointerDown={(event) => startDrag(event, raw, corner)} />;
+                    })}
+                  </>
+                )}
+              </g>
             );
           }
           // In a building context most elements are backdrop — EXCEPT the ones
