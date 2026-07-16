@@ -521,6 +521,12 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
         {/* shell / exterior wall — the footprint (editable in a building context) */}
         {fpRound ? (
           <>
+            {/* rooms clip to this — the curved wall trims a room that reaches it */}
+            <defs>
+              <clipPath id="rzRoundShellClip">
+                <ellipse cx={shellW / 2} cy={shellD / 2} rx={shellW / 2} ry={shellD / 2} />
+              </clipPath>
+            </defs>
             <ellipse cx={shellW / 2} cy={shellD / 2} rx={shellW / 2} ry={shellD / 2} fill={buildingContext ? 'var(--active-line)' : 'none'} fillOpacity={buildingContext ? 0.08 : 0} stroke={buildingContext ? 'var(--active-line)' : 'var(--ink3)'} strokeWidth={buildingContext ? 0.5 : 1} />
             <ellipse cx={shellW / 2} cy={shellD / 2} rx={Math.max(0, shellW / 2 - 0.7)} ry={Math.max(0, shellD / 2 - 0.7)} fill="none" stroke="var(--line2)" strokeWidth={0.12} />
           </>
@@ -590,6 +596,10 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
           }
           const room = roomAt(raw);
           const isSel = raw.id === selectedRoom;
+          // On a round house an indoor room clips to the curve: it can slide
+          // all the way into the "corner" and the wall trims what pokes past.
+          const clipToShell = fpRound && Number(raw.level || 1) === 1
+            && !['outdoor', 'site', 'garden', 'animal', 'paddock', 'run', 'landscape', 'homestead', 'plant', 'water', 'earthwork'].includes(raw.type);
           return (
             <g key={raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
               <rect
@@ -598,6 +608,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                 fillOpacity={(isSel ? 0.9 : 0.66) * roomsDim}
                 stroke={isSel ? 'var(--active-line)' : 'var(--line)'}
                 strokeWidth={isSel ? 0.4 : 0.18}
+                clipPath={clipToShell ? 'url(#rzRoundShellClip)' : undefined}
                 pointerEvents={buildingContext || siteContext ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
                 onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}

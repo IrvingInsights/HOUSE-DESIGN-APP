@@ -273,12 +273,72 @@ export function ellipsePerimeter(w, d) {
   return Math.PI * (a + b) * (1 + (3 * h) / (10 + Math.sqrt(4 - 3 * h)));
 }
 
-// Fit a room rect inside a SHAPED outline (round ellipse or custom polygon).
-// Returns the adjusted {x,y,w,d} when the rect falls outside the built shape,
-// or null when no adjustment is needed (already inside, plain rectangle, or
-// nothing valid found). Shared by normalizeRooms (the commit path) and the
-// plan's live drag ghost (so the wall visibly stops the room mid-drag instead
-// of snapping it back on release).
+// The round shell as a dense polygon (plan-coordinate ellipse) — used to clip
+// room rects against the curved wall.
+export function roundShellPolygon(spec, segments = 48) {
+  const a = (Number(spec?.shell?.widthFt) || 0) / 2;
+  const b = (Number(spec?.shell?.depthFt) || 0) / 2;
+  const pts = [];
+  for (let i = 0; i < segments; i += 1) {
+    const th = (i / segments) * Math.PI * 2;
+    pts.push([a + a * Math.cos(th), b + b * Math.sin(th)]);
+  }
+  return pts;
+}
+
+// A room rect clipped by the round shell — the wall CUTS the room, the way a
+// rectangular room really meets a curved wall. Sutherland–Hodgman against the
+// (convex) ellipse polygon; returns the clipped polygon ([] = no overlap),
+// or null when the house isn't round.
+export function clipRectToRoundShell(spec, rect, segments = 48) {
+  if (!isRoundFootprint(spec)) return null;
+  const x = Number(rect.x) || 0; const y = Number(rect.y) || 0;
+  const w = Number(rect.w) || 0; const d = Number(rect.d) || 0;
+  let subject = [[x, y], [x + w, y], [x + w, y + d], [x, y + d]];
+  const clipPoly = roundShellPolygon(spec, segments);
+  const n = clipPoly.length;
+  for (let i = 0; i < n && subject.length; i += 1) {
+    const [ax, ay] = clipPoly[i];
+    const [bx, by] = clipPoly[(i + 1) % n];
+    // inside = left of edge a→b (the ellipse polygon is counter-clockwise)
+    const inside = ([px, py]) => (bx - ax) * (py - ay) - (by - ay) * (px - ax) >= -1e-9;
+    const cross = (p, q) => {
+      const t = ((ax - p[0]) * (by - ay) - (ay - p[1]) * (bx - ax))
+        / ((q[0] - p[0]) * (by - ay) - (q[1] - p[1]) * (bx - ax));
+      return [p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])];
+    };
+    const out = [];
+    for (let j = 0; j < subject.length; j += 1) {
+      const cur = subject[j];
+      const prev = subject[(j + subject.length - 1) % subject.length];
+      if (inside(cur)) {
+        if (!inside(prev)) out.push(cross(prev, cur));
+        out.push(cur);
+      } else if (inside(prev)) {
+        out.push(cross(prev, cur));
+      }
+    }
+    subject = out;
+  }
+  return subject;
+}
+
+// How much of a room rect actually lies inside the round shell (sf).
+export function rectRoundOverlapArea(spec, rect) {
+  const poly = clipRectToRoundShell(spec, rect);
+  if (poly === null) return (Number(rect.w) || 0) * (Number(rect.d) || 0);
+  return poly.length >= 3 ? polygonArea(poly) : 0;
+}
+
+// Fit a room rect against a SHAPED outline (round ellipse or custom polygon).
+// Returns the adjusted {x,y,w,d} when the placement isn't usable, or null when
+// no adjustment is needed (already fine, or plain rectangle). Shared by
+// normalizeRooms (the commit path) and the plan's live drag ghost.
+//
+// ROUND rule: the room's CENTER must stay inside the curve; the wall then
+// CLIPS whatever pokes past it (plan + 3D render the clipped shape). That is
+// what lets a room slide ALL the way into the "corner" — the curved wall
+// trims the room instead of repelling it.
 export function fitRoomInsideOutline(spec, rect) {
   const roundNow = isRoundFootprint(spec);
   const customNow = !roundNow && hasCustomFootprint(spec);
@@ -289,36 +349,14 @@ export function fitRoomInsideOutline(spec, rect) {
     const a = Number(spec.shell.widthFt) / 2;
     const b = Number(spec.shell.depthFt) / 2;
     if (a <= 0 || b <= 0) return null;
-    // Too big to fit even centered → shrink to the inscribed fit first.
-    let shrunk = false;
-    const centerFit = (w * w) / (4 * a * a) + (d * d) / (4 * b * b);
-    if (centerFit > 1) {
-      const s = 0.98 / Math.sqrt(centerFit);
-      w = Math.max(2, Math.round(w * s * 10) / 10);
-      d = Math.max(2, Math.round(d * s * 10) / 10);
-      shrunk = true;
-    }
-    const hw = w / 2; const hd = d / 2;
-    const cx = x + hw; const cy = y + hd;
-    const ux = Math.abs(cx - a); const uy = Math.abs(cy - b);
-    // All four corners inside ⇔ the worst corner (center offset + half size,
-    // both axes) satisfies the ellipse equation.
-    const worst = ((ux + hw) / a) ** 2 + ((uy + hd) / b) ** 2;
-    if (worst <= 1.002) return shrunk ? { x, y, w, d } : null;
-    // Slide the center toward the middle along its own ray: largest
-    // t ∈ [0,1] with ((t·ux+hw)/a)² + ((t·uy+hd)/b)² = 1.
-    const A = (ux * ux) / (a * a) + (uy * uy) / (b * b);
-    const B = (ux * hw) / (a * a) + (uy * hd) / (b * b);
-    const C = (hw * hw) / (a * a) + (hd * hd) / (b * b) - 1;
-    let t = 0;
-    if (A > 1e-9) {
-      const disc = B * B - A * C;
-      t = disc > 0 ? (-B + Math.sqrt(disc)) / A : 0;
-    }
-    t = clamp(t, 0, 1);
+    const cx = x + w / 2; const cy = y + d / 2;
+    const v = ((cx - a) / a) ** 2 + ((cy - b) / b) ** 2;
+    if (v <= 0.94) return null; // center comfortably inside — the wall clips the rest
+    // Slide the center back to just inside the curve along its own ray.
+    const s = 0.97 / Math.sqrt(v);
     return {
-      x: Math.round((a + Math.sign(cx - a) * t * ux - hw) * 10) / 10,
-      y: Math.round((b + Math.sign(cy - b) * t * uy - hd) * 10) / 10,
+      x: Math.round((a + (cx - a) * s - w / 2) * 10) / 10,
+      y: Math.round((b + (cy - b) * s - d / 2) * 10) / 10,
       w, d
     };
   }
@@ -1003,7 +1041,9 @@ function detectIssues(spec) {
   const enclosedRooms = spec.rooms.filter((room) => (custom
     ? rectInFootprint(poly, { x: room.x, y: room.y, w: room.w, d: room.d })
     : room.x >= 0 && room.y >= 0 && room.x + room.w <= spec.shell.widthFt && room.y + room.d <= spec.shell.depthFt));
-  const conditionedArea = enclosedRooms.reduce((sum, room) => sum + room.w * room.d, 0);
+  // Round house: a room overhanging the curve only counts what's INSIDE it.
+  const conditionedArea = enclosedRooms.reduce((sum, room) => sum
+    + (isRoundFootprint(spec) ? rectRoundOverlapArea(spec, room) : room.w * room.d), 0);
   const shellArea = isRoundFootprint(spec) ? ellipseArea(spec.shell.widthFt, spec.shell.depthFt) : polygonArea(poly);
 
   // The passive-solar / homestead checks are the NATURAL approach's opinions —
