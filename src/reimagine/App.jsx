@@ -36,7 +36,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 49 · Jul 15';
+const UPDATE_STAMP = 'update 50 · Jul 15';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1410,12 +1410,9 @@ function ShapeControls({ spec, floors, onShapeBuilding, onSizeBuilding, onAddFlo
         ))}
       </div>
       {!isRect && <div className="rz-shape-note">custom outline · {corners} corners — drag any edge on the plan</div>}
-      <div className="rz-run-size">
-        <label>Width<NumInput value={bW} min={12} max={96} step={1} unit="ft" onCommit={(v) => onSizeBuilding(v, bD)} /></label>
-        <span className="rz-run-x">×</span>
-        <label>Depth<NumInput value={bD} min={12} max={80} step={1} unit="ft" onCommit={(v) => onSizeBuilding(bW, v)} /></label>
-      </div>
 
+      {/* Every floor — ground included — sizes the same way in the Floors list
+          below (the ground floor's width & depth ARE the building footprint). */}
       <StoreysControl spec={spec} floors={floors} onAddFloor={onAddFloor} onRemoveFloor={onRemoveFloor} onResizeFloor={onResizeFloor} onFloorHeight={onFloorHeight} />
 
       <div className="rz-shape-note">To size one room, tap it in the Rooms chapter. To size an element, tap it or use its own chapter.</div>
@@ -1477,9 +1474,12 @@ function NumInput({ value, min, max, step = 1, unit = 'ft', onCommit }) {
 // laying out rooms (the extent plate is a non-interactive outline there), so
 // storey-sizing and room-work never fight over the same drag.
 function StoreysControl({ spec, floors, onAddFloor, onRemoveFloor, onResizeFloor, onFloorHeight }) {
-  const { upperFt } = storeyInfo(spec.shell);
   const uppers = [];
   for (let lvl = 2; lvl <= floors; lvl += 1) uppers.push(lvl);
+  // ground floor W×D is the building footprint (resizeFloor(1) → resizeShell)
+  const gW = Math.round((Number(spec.shell.widthFt) || 36) * 10) / 10;
+  const gD = Math.round((Number(spec.shell.depthFt) || 28) * 10) / 10;
+  const gH = Math.round(storeyHeightFt(spec.shell, 1) * 10) / 10;
   return (
     <div className="rz-storeys-block">
       <div className="rz-found-head" style={{ marginTop: 10 }}>Floors</div>
@@ -1490,11 +1490,15 @@ function StoreysControl({ spec, floors, onAddFloor, onRemoveFloor, onResizeFloor
           <button type="button" disabled={floors >= 3} onClick={onAddFloor} title="Add a floor on top">+</button>
         </div>
       </div>
+      {/* Ground floor — the same width / depth / height row as every other
+          floor (its W×D is the building footprint). */}
       <div className="rz-storey-row">
         <span className="rz-storey-name">Ground</span>
         <div className="rz-run-size">
-          <span className="rz-storey-sub">whole footprint</span>
-          <label className="rz-storey-h">H<NumInput value={Math.round(storeyHeightFt(spec.shell, 1) * 10) / 10} min={7} max={16} step={0.5} unit="ft" onCommit={(v) => onFloorHeight(1, v)} /></label>
+          <label>W<NumInput value={gW} min={12} max={96} step={0.5} unit="" onCommit={(v) => onResizeFloor(1, v, gD)} /></label>
+          <span className="rz-run-x">×</span>
+          <label>D<NumInput value={gD} min={12} max={80} step={0.5} unit="" onCommit={(v) => onResizeFloor(1, gW, v)} /></label>
+          <label className="rz-storey-h">H<NumInput value={gH} min={7} max={16} step={0.5} unit="ft" onCommit={(v) => onFloorHeight(1, v)} /></label>
         </div>
       </div>
       {uppers.map((lvl) => {
