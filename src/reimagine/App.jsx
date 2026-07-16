@@ -36,7 +36,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 48 · Jul 15';
+const UPDATE_STAMP = 'update 49 · Jul 15';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -106,6 +106,22 @@ function loadStoredSpec() {
   return null;
 }
 
+// Saved designs — a keepsake shelf so "start fresh" never has to throw work
+// away. Each entry is a named snapshot kept in this browser; the design you're
+// actively editing stays live in STORE_KEY. All local, no server — same as the
+// working design.
+const DESIGNS_KEY = 'rz.designs.v1';
+function loadDesigns() {
+  try {
+    const raw = localStorage.getItem(DESIGNS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.filter((d) => d && d.spec && d.spec.shell) : [];
+  } catch { return []; }
+}
+function persistDesigns(list) {
+  try { localStorage.setItem(DESIGNS_KEY, JSON.stringify(list)); } catch { /* storage full/blocked — in-memory still works */ }
+}
+
 // Keep a custom order valid as the phase list itself changes (the heater
 // phase comes and goes with the heat source): drop ids that no longer exist,
 // slot new phases in at their default position.
@@ -128,8 +144,9 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [activeChapter, setActiveChapter] = useState('shape');
   const [viewMode, setViewMode] = useState('plan'); // 'plan' (top-down) | '3d'
-  const [trailOpen, setTrailOpen] = useState(true);
   const [viewRequest, setViewRequest] = useState({ mode: 'iso', n: 1 });
+  const [designs, setDesigns] = useState(loadDesigns); // the keepsake shelf
+  const [designsOpen, setDesignsOpen] = useState(false);
   const [heading, setHeading] = useState(0); // camera compass heading (radians) for the overlay compass
   const [askText, setAskText] = useState('');
   const [askEcho, setAskEcho] = useState(null);
@@ -533,8 +550,42 @@ export default function App() {
     }, 400);
     return () => clearTimeout(timer);
   }, [spec]);
+  // Save the design you're editing to the keepsake shelf — a new entry, or an
+  // update to the one with the same name. Returns the saved snapshot.
+  const saveCurrentDesign = (rawName) => {
+    const name = (rawName || spec.projectName || 'My design').trim() || 'My design';
+    const snapshot = { id: `d${Date.now()}`, name, spec: structuredClone(spec), savedAt: Date.now() };
+    setDesigns((prev) => {
+      const next = [snapshot, ...prev.filter((d) => d.name !== name)];
+      persistDesigns(next);
+      return next;
+    });
+    return snapshot;
+  };
+  const handleSaveDesign = () => {
+    const name = window.prompt('Name this design so you can find it again:', spec.projectName || 'My design');
+    if (name === null) return; // backed out
+    const saved = saveCurrentDesign(name);
+    setDesignsOpen(true);
+    setSaveFlash(saved.name);
+    setTimeout(() => setSaveFlash(null), 2200);
+  };
+  const openDesign = (id) => {
+    const d = designs.find((x) => x.id === id);
+    if (!d) return;
+    commitSpec(structuredClone(d.spec)); // undoable — Ctrl+Z returns to what you had
+    setSelectedId(null);
+    setPhaseOrder(null);
+  };
+  const deleteDesign = (id) => {
+    if (!window.confirm('Delete this saved design? This can’t be undone.')) return;
+    setDesigns((prev) => { const next = prev.filter((d) => d.id !== id); persistDesigns(next); return next; });
+  };
+  const [saveFlash, setSaveFlash] = useState(null);
+  // "Start a new design" — the current one is safe: save it to the shelf first
+  // if you want it, and either way Ctrl+Z brings it right back.
   const startFresh = () => {
-    if (!window.confirm('Start over with the sample design? Your current design will be cleared.')) return;
+    if (!window.confirm('Start a new design?\n\nTip: click “Save this design” first if you want to keep this one. (You can also press Ctrl+Z to bring it back.)')) return;
     try { localStorage.removeItem(STORE_KEY); } catch { /* fine */ }
     commitSpec(structuredClone(seedSpec)); // undoable — Ctrl+Z brings the design back
     setSelectedId(null);
@@ -757,11 +808,7 @@ export default function App() {
       </div>}
 
       {/* SURFACE 2 — the Trail (chapters + foreman greeting) */}
-      <aside className={`rz-trail ${trailOpen ? 'open' : 'closed'}`}>
-        <button className="rz-trail-toggle" onClick={() => setTrailOpen((v) => !v)} title={trailOpen ? 'Collapse' : 'Expand'}>
-          {trailOpen ? '‹' : '›'}
-        </button>
-        {trailOpen && (
+      <aside className="rz-trail">
           <div className="rz-trail-body">
             <nav className="rz-chapters rz-chapters-top">
               {CHAPTERS.map((c, i) => (
@@ -882,12 +929,36 @@ export default function App() {
             <button className="rz-build-btn" onClick={timelineOpen ? closeTimeline : openTimeline}>
               {timelineOpen ? '× Back to designing' : '▶ Watch it build'}
             </button>
-            <div className="rz-stamp">
-              <button className="rz-fresh" title="Clear this design and start from the sample" onClick={startFresh}>start fresh</button>
-              {UPDATE_STAMP}
+
+            {/* Saved designs — keep the current model even when starting new */}
+            <div className="rz-designs">
+              <div className="rz-designs-bar">
+                <button className="rz-designs-toggle" onClick={() => setDesignsOpen((v) => !v)} title="Your saved designs">
+                  {designsOpen ? '▾' : '▸'} My designs{designs.length ? ` (${designs.length})` : ''}
+                </button>
+                <button className="rz-designs-new" title="Start a brand-new design (your current one is safe — save it first or press Ctrl+Z)" onClick={startFresh}>+ New</button>
+              </div>
+              {designsOpen && (
+                <div className="rz-designs-panel">
+                  <button className="rz-designs-save" onClick={handleSaveDesign}>💾 Save this design</button>
+                  {saveFlash && <div className="rz-designs-flash">Saved “{saveFlash}” — it’s on the shelf below.</div>}
+                  {designs.length === 0
+                    ? <div className="rz-shape-note">Nothing saved yet. “Save this design” keeps a copy here, so you can start a new one and come back to this whenever you like.</div>
+                    : designs.map((d) => (
+                      <div key={d.id} className="rz-designs-item">
+                        <button className="rz-designs-open" title="Open this design" onClick={() => openDesign(d.id)}>
+                          <b>{d.name}</b>
+                          <small>{new Date(d.savedAt).toLocaleDateString()}</small>
+                        </button>
+                        <button className="rz-designs-del" title="Delete this saved design" onClick={() => deleteDesign(d.id)}>×</button>
+                      </div>
+                    ))}
+                </div>
+              )}
             </div>
+
+            <div className="rz-stamp">{UPDATE_STAMP}</div>
           </div>
-        )}
       </aside>
 
       {/* SURFACE 4a — the Budget sheet: the first live Sheet. Every line opens
@@ -1820,13 +1891,18 @@ function StructureControls({ spec, floors, onAllWalls, onFrame, onShell, onWallS
         </select>
       </label>
       <label className="rz-field">
-        <span>Frame — what carries the roof</span>
+        <span>Frame — what holds the roof up</span>
         <select value={frameVal} onChange={(e) => onFrame(e.target.value)}>
           {Object.entries(FRAME_TYPES).map(([key, f]) => (
             <option key={key} value={key}>{f.green ? '🌿 ' : ''}{f.label}</option>
           ))}
         </select>
       </label>
+      <div className="rz-shape-note">
+        {frameVal === 'load-bearing'
+          ? 'Load-bearing: the walls themselves hold up the roof — no separate posts. The usual choice for straw bale, cob, and cordwood.'
+          : `${FRAME_TYPES[frameVal]?.note || ''} The timber posts and beams stand inside the walls, which wrap around them.`}
+      </div>
       <label className="rz-field rz-field-num">
         <span>Wall height (all){heights.size > 1 ? ' · sides differ' : ''}</span>
         <NumInput value={Number(spec.shell.wallHeightFt) || 10} min={7} max={40} step={0.5} onCommit={(v) => onShell('wallHeightFt', v)} />
