@@ -1831,11 +1831,23 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           roofMat.opacity = layers.xray ? 0.4 : 0.55;
         }
         const oAll = resolveOverhangs(spec.shell);
-        const plateReal = upperPlateRect(spec, 2);
         const fpAreaNow = customFp ? polygonArea(fpPoly) : width * depth;
-        // The roof STEPS when an upper storey covers only part of the plan:
-        // an upper roof over the extent plate, low wings over the remainder.
-        const steps = storeyLift > 0 && plateReal && plateReal.w * plateReal.d < fpAreaNow - 1;
+        const groundEave = roofSpec.highWallHeightFt;
+        const fullRect = { x: 0, y: 0, w: width, d: depth };
+        // Storey extents bottom→top: level 1 is the whole footprint; each upper
+        // level is its extent plate (or the full footprint when it isn't set
+        // back). topEave = the elevation at the TOP of that storey's walls, so
+        // the roof steps down at every setback — one tier per storey, not one.
+        const storeyTiers = [];
+        for (let lv = 1; lv <= Math.max(1, Math.ceil(storeys)); lv += 1) {
+          const plate = lv === 1 ? fullRect : (upperPlateRect(spec, lv) || fullRect);
+          storeyTiers.push({ rect: plate, topEave: groundEave + (lv - 1) * upperFt, level: lv });
+        }
+        const rectHas = (r, px, py) => px > r.x + 0.01 && px < r.x + r.w - 0.01 && py > r.y + 0.01 && py < r.y + r.d - 0.01;
+        // Is (px,py) under a storey ABOVE `lv`? — a wing there tucks under that wall.
+        const coveredAbove = (px, py, lv) => storeyTiers.some((t) => t.level > lv && rectHas(t.rect, px, py));
+        // Stepped when any upper storey is a real setback (smaller than the one below).
+        const steps = storeyLift > 0 && storeyTiers.some((t, i) => i > 0 && t.rect.w * t.rect.d < storeyTiers[i - 1].rect.w * storeyTiers[i - 1].rect.d - 1);
         if (!customFp && !steps) {
           // Legacy path, byte-for-byte: one roof over the whole rectangle.
           const roof = makeRoof(width, depth, wallHeight, spec.shell.roofPitch, roofMat, roofSpec, oAll);
@@ -1844,18 +1856,15 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           group.add(addEdges(roof));
         } else {
           // Roof as SEGMENTS — per rectangle of an L/T/U footprint and/or the
-          // stepped upper-block + wings. Valleys are not modeled; segments meet.
+          // stepped storey tiers + wings. Valleys are not modeled; segments meet.
           const pitchNow = Number(spec.shell.roofPitch || 0.32);
           const insideFp = (px, py) => (customFp
             ? pointInFootprint(fpPoly, px, py)
             : px > 0.01 && px < width - 0.01 && py > 0.01 && py < depth - 0.01);
-          const inPlate = (px, py) => Boolean(steps && plateReal
-            && px > plateReal.x + 0.01 && px < plateReal.x + plateReal.w - 0.01
-            && py > plateReal.y + 0.01 && py < plateReal.y + plateReal.d - 0.01);
           // A segment side is a true eave only when nothing lies beyond it:
-          // probe just outside — upper wall → tuck under it; neighbor segment
+          // probe just outside — storey above → tuck under it; neighbor segment
           // → hairline lap; open air → the shell overhang for that facing.
-          const segOverhangs = (rect, isUpper) => {
+          const segOverhangs = (rect, isUpper, segLevel) => {
             const probe = 0.4;
             const probes = {
               north: [rect.x + rect.w / 2, rect.y - probe],
@@ -1866,33 +1875,41 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const out = {};
             for (const side of WALL_SIDES) {
               const [px, py] = probes[side];
-              if (!isUpper && inPlate(px, py)) out[side] = 0.35;
+              if (!isUpper && coveredAbove(px, py, segLevel)) out[side] = 0.35;
               else if (insideFp(px, py)) out[side] = 0.05;
               else out[side] = oAll[side];
             }
             return out;
           };
+          // Which side of a wing rect butts against the storey above (its high side).
+          const touchSide = (rect, above) => {
+            const overlapX = rect.x < above.x + above.w && rect.x + rect.w > above.x;
+            const overlapY = rect.y < above.y + above.d && rect.y + rect.d > above.y;
+            return Math.abs(rect.y + rect.d - above.y) < 0.05 && overlapX ? 'south'
+              : Math.abs(rect.y - (above.y + above.d)) < 0.05 && overlapX ? 'north'
+              : Math.abs(rect.x + rect.w - above.x) < 0.05 && overlapY ? 'east'
+              : Math.abs(rect.x - (above.x + above.w)) < 0.05 && overlapY ? 'west'
+              : (Math.abs((rect.x + rect.w / 2) - (above.x + above.w / 2)) > Math.abs((rect.y + rect.d / 2) - (above.y + above.d / 2))
+                ? ((rect.x + rect.w / 2) < (above.x + above.w / 2) ? 'east' : 'west')
+                : ((rect.y + rect.d / 2) < (above.y + above.d / 2) ? 'south' : 'north'));
+          };
           const segments = [];
           if (steps) {
-            segments.push({ rect: { x: plateReal.x, y: plateReal.y, w: plateReal.w, d: plateReal.d }, eave: wallHeight, kind: 'full', upper: true });
-            const lowers = customFp
-              ? subtractRectFromFootprint(fpPoly, plateReal)
-              : subtractRect({ x: 0, y: 0, w: width, d: depth }, plateReal);
-            const groundEave = roofSpec.highWallHeightFt;
-            lowers.forEach((rect) => {
-              const overlapX = rect.x < plateReal.x + plateReal.w && rect.x + rect.w > plateReal.x;
-              const overlapY = rect.y < plateReal.y + plateReal.d && rect.y + rect.d > plateReal.y;
-              const touch = Math.abs(rect.y + rect.d - plateReal.y) < 0.05 && overlapX ? 'south'
-                : Math.abs(rect.y - (plateReal.y + plateReal.d)) < 0.05 && overlapX ? 'north'
-                : Math.abs(rect.x + rect.w - plateReal.x) < 0.05 && overlapY ? 'east'
-                : Math.abs(rect.x - (plateReal.x + plateReal.w)) < 0.05 && overlapY ? 'west'
-                : (Math.abs((rect.x + rect.w / 2) - (plateReal.x + plateReal.w / 2)) > Math.abs((rect.y + rect.d / 2) - (plateReal.y + plateReal.d / 2))
-                  ? ((rect.x + rect.w / 2) < (plateReal.x + plateReal.w / 2) ? 'east' : 'west')
-                  : ((rect.y + rect.d / 2) < (plateReal.y + plateReal.d / 2) ? 'south' : 'north'));
-              segments.push({ rect, eave: groundEave, kind: 'wing', highSide: touch });
-            });
+            // Top storey gets the pitched roof; every setback below it gets a
+            // wing ring (its extent minus the storey above) at its own eave.
+            const top = storeyTiers[storeyTiers.length - 1];
+            segments.push({ rect: top.rect, eave: top.topEave, kind: 'full', upper: true, level: top.level });
+            for (let i = storeyTiers.length - 2; i >= 0; i -= 1) {
+              const below = storeyTiers[i];
+              const above = storeyTiers[i + 1];
+              if (below.rect.w * below.rect.d <= above.rect.w * above.rect.d + 1) continue; // same extent — no ring
+              const ring = (customFp && below.level === 1)
+                ? subtractRectFromFootprint(fpPoly, above.rect)
+                : subtractRect(below.rect, above.rect);
+              ring.forEach((rect) => segments.push({ rect, eave: below.topEave, kind: 'wing', highSide: touchSide(rect, above.rect), level: below.level, tierDrop: storeyLift - (below.level - 1) * upperFt }));
+            }
           } else {
-            decomposeFootprint(fpPoly).forEach((rect) => segments.push({ rect, eave: wallHeight, kind: 'full', upper: true }));
+            decomposeFootprint(fpPoly).forEach((rect) => segments.push({ rect, eave: wallHeight, kind: 'full', upper: true, level: storeyTiers.length }));
           }
           // The global shed plane (eave line north→south across the whole
           // house) — 'full' shed segments are coplanar pieces of it.
@@ -1903,14 +1920,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             return nH + (sH - nH) * clamp((zz - z0) / Math.max(0.01, z1 - z0), 0, 1);
           };
           segments.forEach((seg) => {
-            const o = segOverhangs(seg.rect, Boolean(seg.upper));
+            const o = segOverhangs(seg.rect, Boolean(seg.upper), seg.level || 1);
             let mesh = null;
             if (seg.kind === 'wing') {
-              // A shed's wings are pieces of the GROUND shed plane (the roof
-              // the house would have without the upper storey) — a level
-              // "falling away" plane left them floating above the low wall.
+              // A shed's wings are pieces of the shed plane dropped to THIS
+              // tier's top; a pitched roof's wings are lean-to planes tucking
+              // under the storey above.
               mesh = roofSpec.roofType === 'shed'
-                ? makeShedPiece(seg.rect, o, (zz) => shedYAt(zz) - storeyLift, roofMat)
+                ? makeShedPiece(seg.rect, o, (zz) => shedYAt(zz) - (seg.tierDrop ?? storeyLift), roofMat)
                 : makeStepRoofPlane(seg.rect, seg.highSide, seg.eave + 0.25, pitchNow, o, roofMat);
             } else if (roofSpec.roofType === 'shed') {
               mesh = makeShedPiece(seg.rect, o, shedYAt, roofMat);
