@@ -37,7 +37,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 58 · Jul 16';
+const UPDATE_STAMP = 'update 59 · Jul 16';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -148,6 +148,10 @@ export default function App() {
   const [viewRequest, setViewRequest] = useState({ mode: 'iso', n: 1 });
   const [designs, setDesigns] = useState(loadDesigns); // the keepsake shelf
   const [designsOpen, setDesignsOpen] = useState(false);
+  // When a dropped room settles somewhere OTHER than where it was dropped,
+  // this note says so and why — the app explains its refusals instead of
+  // silently snapping (and the numbers double as a diagnostic to report).
+  const [moveNote, setMoveNote] = useState(null);
   const [heading, setHeading] = useState(0); // camera compass heading (radians) for the overlay compass
   const [askText, setAskText] = useState('');
   const [askEcho, setAskEcho] = useState(null);
@@ -285,7 +289,30 @@ export default function App() {
       if (needW > Number(spec.shell.widthFt)) mvOps.unshift({ type: 'set_shell', field: 'widthFt', value: String(clamp(needW, 12, 96)) });
       if (needD > Number(spec.shell.depthFt)) mvOps.unshift({ type: 'set_shell', field: 'depthFt', value: String(clamp(needD, 12, 80)) });
     }
-    applyOps(mvOps);
+    // Apply directly (not via applyOps) so the landing spot can be compared
+    // with the drop spot — when they differ the app SAYS so instead of the
+    // room silently snapping. The note carries the numbers, so "it moved on
+    // me" is diagnosable from the screen.
+    const report = applyBimOperations(spec, { operations: mvOps });
+    if (!report?.spec) return;
+    commitSpec(report.spec);
+    const landed = (report.spec.rooms || []).find((r) => r.id === id) || (report.spec.elements || []).find((e) => e.id === id);
+    if (landed) {
+      const ddx = Math.round((Number(landed.x) - Number(x)) * 10) / 10;
+      const ddy = Math.round((Number(landed.y) - Number(y)) * 10) / 10;
+      if (Math.abs(ddx) > 0.05 || Math.abs(ddy) > 0.05) {
+        const dir = [];
+        if (Math.abs(ddx) > 0.05) dir.push(`${Math.abs(ddx)} ft ${ddx > 0 ? 'east' : 'west'}`);
+        if (Math.abs(ddy) > 0.05) dir.push(`${Math.abs(ddy)} ft ${ddy > 0 ? 'south' : 'north'}`);
+        const fp = report.spec.shell.footprint;
+        const why = fp === 'round' ? 'the curved wall trims where a room can sit'
+          : Array.isArray(fp) ? `this outline is not a plain rectangle (${fp.length} corners) — rooms stop at its real walls`
+          : (report.warnings || [])[0] || 'the engine adjusted it';
+        setMoveNote(`“${landed.name || id}” settled ${dir.join(' and ')} from the drop — ${why}. Dropped at ${Math.round(Number(x) * 10) / 10}, ${Math.round(Number(y) * 10) / 10}; landed at ${landed.x}, ${landed.y}.`);
+      } else {
+        setMoveNote(null);
+      }
+    }
   };
   const resizeObject = (id, x, y, w, d) => {
     const o = findObj(id); if (!o) return;
@@ -582,7 +609,7 @@ export default function App() {
     if (name === null) return; // backed out
     const saved = saveCurrentDesign(name);
     setDesignsOpen(true);
-    setSaveFlash(saved.name);
+    setSaveFlash(`Saved “${saved.name}” — it’s on the shelf below.`);
     setTimeout(() => setSaveFlash(null), 2200);
   };
   const openDesign = (id) => {
@@ -956,7 +983,24 @@ export default function App() {
               {designsOpen && (
                 <div className="rz-designs-panel">
                   <button className="rz-designs-save" onClick={handleSaveDesign}>💾 Save this design</button>
-                  {saveFlash && <div className="rz-designs-flash">Saved “{saveFlash}” — it’s on the shelf below.</div>}
+                  <button
+                    className="rz-designs-save"
+                    title="Copies this design as text — paste it in the chat so Claude can look at exactly what you have"
+                    onClick={async () => {
+                      const text = JSON.stringify({ homesteadDesign: UPDATE_STAMP, spec }, null, 1);
+                      try {
+                        await navigator.clipboard.writeText(text);
+                        setSaveFlash('design code copied — paste it to Claude');
+                      } catch {
+                        // clipboard blocked: fall back to a selectable box
+                        const ta = document.createElement('textarea');
+                        ta.value = text; document.body.appendChild(ta); ta.select();
+                        try { document.execCommand('copy'); setSaveFlash('design code copied — paste it to Claude'); } catch { setSaveFlash('could not copy automatically'); }
+                        ta.remove();
+                      }
+                    }}
+                  >📋 Copy design code (for Claude)</button>
+                  {saveFlash && <div className="rz-designs-flash">{saveFlash}</div>}
                   {designs.length === 0
                     ? <div className="rz-shape-note">Nothing saved yet. “Save this design” keeps a copy here, so you can start a new one and come back to this whenever you like.</div>
                     : designs.map((d) => (
@@ -1030,6 +1074,14 @@ export default function App() {
               <button className="rz-update-later" onClick={() => setUpdate(null)}>Later</button>
             </>
           )}
+        </div>
+      )}
+
+      {/* a room settled away from its drop — say so, with the numbers */}
+      {moveNote && (
+        <div className="rz-move-note">
+          <span>{moveNote}</span>
+          <button onClick={() => setMoveNote(null)} title="Dismiss">×</button>
         </div>
       )}
 
