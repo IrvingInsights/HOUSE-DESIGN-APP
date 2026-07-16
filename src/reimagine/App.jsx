@@ -38,7 +38,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 64 · Jul 16';
+const UPDATE_STAMP = 'update 65 · Jul 16';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -851,7 +851,14 @@ export default function App() {
             {activeChapter === 'rooms' && (
               <div className="rz-found">
                 {floors > 1 && (
-                  <FloorBar spec={spec} floors={floors} activeFloor={activeFloor} hasBasement={hasBasement} onSelect={setActiveFloor} onAdd={addFloor} onRemove={removeFloor} />
+                  <FloorBar
+                    spec={spec} floors={floors} activeFloor={activeFloor} hasBasement={hasBasement}
+                    onSelect={setActiveFloor} onAdd={addFloor} onRemove={removeFloor}
+                    onSelectOutline={(() => {
+                      const plate = (spec.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === activeFloor);
+                      return plate ? () => setSelectedId(plate.id) : null;
+                    })()}
+                  />
                 )}
                 <div className="rz-found-head">Add a room{activeFloor !== 1 ? ` — ${floorLabel(spec, activeFloor).toLowerCase()}` : ''}</div>
                 <div className="rz-found-palette rz-rooms-palette">
@@ -1519,7 +1526,7 @@ function ShapeControls({ spec, floors, onShapeBuilding, onSizeBuilding, onAddFlo
 // Floor selector — lives INSIDE the left bar (at the top of the Rooms and
 // Openings chapters), so the wide bar never covers it. Pick a floor to lay it
 // out; add or remove the top one right here.
-function FloorBar({ spec, floors, activeFloor, hasBasement, onSelect, onAdd, onRemove }) {
+function FloorBar({ spec, floors, activeFloor, hasBasement, onSelect, onAdd, onRemove, onSelectOutline = null }) {
   return (
     <div className="rz-floorbar">
       <span className="rz-floorbar-lead">Floor</span>
@@ -1537,6 +1544,15 @@ function FloorBar({ spec, floors, activeFloor, hasBasement, onSelect, onAdd, onR
           <button type="button" className="rz-floorbar-del" title="Remove this floor — its rooms come down a floor" onClick={onRemove}>− floor</button>
         )}
       </div>
+      {/* an upper floor's OUTLINE is a thing you can select and move like
+          anything else — this button is the discoverable way in (the dashed
+          border and its corner dots on the plan do the same by hand) */}
+      {onSelectOutline && (
+        <button type="button" className="rz-floorbar-outline" onClick={onSelectOutline}
+          title="Select this floor's outline — move it (From west / From north) and size it on its card, or drag its dashed border on the plan">
+          ✥ this floor's outline
+        </button>
+      )}
     </div>
   );
 }
