@@ -36,7 +36,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 46 · Jul 15';
+const UPDATE_STAMP = 'update 47 · Jul 15';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -277,10 +277,23 @@ export default function App() {
       applyOps(ops);
       return;
     }
-    applyOps([
+    // Resizing an INDOOR room past the walls grows the house to fit instead of
+    // snapping the room back to the footprint — stretching a room enlarges the
+    // building, the same as adding one does. (Outdoor rooms can already exceed
+    // the footprint; other elements aren't shell-bound.)
+    const isRoom = (spec.rooms || []).some((r) => r.id === id);
+    const outdoor = ['outdoor', 'site', 'garden', 'animal', 'landscape', 'plant', 'water', 'earthwork'].includes(o.type);
+    const ops = [
       { type: 'resize_object', targetId: id, name: o.name, w, d, h: Number(o.h) || 0.22 },
       { type: 'move_object', targetId: id, name: o.name, x, y }
-    ]);
+    ];
+    if (isRoom && !outdoor) {
+      const needW = Math.ceil(Number(x) + Number(w));
+      const needD = Math.ceil(Number(y) + Number(d));
+      if (needW > Number(spec.shell.widthFt)) ops.unshift({ type: 'set_shell', field: 'widthFt', value: String(clamp(needW, 12, 96)) });
+      if (needD > Number(spec.shell.depthFt)) ops.unshift({ type: 'set_shell', field: 'depthFt', value: String(clamp(needD, 12, 80)) });
+    }
+    applyOps(ops);
   };
   const resizeShell = (w, d) => applyOps([
     { type: 'set_shell', field: 'widthFt', value: String(clamp(Number(w), 12, 96)) },
@@ -736,24 +749,6 @@ export default function App() {
         </div>
       )}
 
-      {/* floor selector — the layout controller works one level at a time */}
-      {!timelineOpen && viewMode === 'plan' && (activeChapter === 'rooms' || activeChapter === 'openings') && (
-        <div className="rz-floors rz-floors-shifted">
-          <span className="rz-floors-lead">Floor</span>
-          {hasBasement && (
-            <button className={activeFloor === BASEMENT_LEVEL ? 'on' : ''} onClick={() => setActiveFloor(BASEMENT_LEVEL)}>Basement</button>
-          )}
-          {Array.from({ length: floors }, (_, i) => i + 1).map((f) => (
-            <button key={f} className={activeFloor === f ? 'on' : ''} onClick={() => setActiveFloor(f)}>{floorLabel(spec, f)}</button>
-          ))}
-          {floors < 3 && (
-            <button className="rz-floors-add" title="Add a floor on top — it gets its own outline and room layout" onClick={addFloor}>+ add floor</button>
-          )}
-          {floors > 1 && activeFloor === floors && activeFloor !== BASEMENT_LEVEL && (
-            <button className="rz-floors-del" title="Remove this floor — its rooms move to the ground floor, nothing is deleted" onClick={removeFloor}>remove</button>
-          )}
-        </div>
-      )}
 
       {/* Plan / 3D toggle + (3D only) view angles — the Time Machine owns the
           view while it's open */}
@@ -802,6 +797,9 @@ export default function App() {
             )}
             {activeChapter === 'rooms' && (
               <div className="rz-found">
+                {floors > 1 && (
+                  <FloorBar spec={spec} floors={floors} activeFloor={activeFloor} hasBasement={hasBasement} onSelect={setActiveFloor} onAdd={addFloor} onRemove={removeFloor} />
+                )}
                 <div className="rz-found-head">Add a room{activeFloor !== 1 ? ` — ${floorLabel(spec, activeFloor).toLowerCase()}` : ''}</div>
                 <div className="rz-found-palette rz-rooms-palette">
                   {ROOM_PRESETS.map((preset) => (
@@ -817,17 +815,22 @@ export default function App() {
               </div>
             )}
             {activeChapter === 'openings' && (
-              <OpeningsControls
-                spec={spec}
-                selectedId={selectedId}
-                level={activeFloor}
-                onAdd={addOpening}
-                onAddDormer={addDormer}
-                onRemove={removeOpening}
-                onSize={sizeOpening}
-                onSetField={setOpeningField}
-                onSelect={(index) => setSelectedId(`opening-${index}`)}
-              />
+              <>
+                {floors > 1 && (
+                  <FloorBar spec={spec} floors={floors} activeFloor={activeFloor} hasBasement={hasBasement} onSelect={setActiveFloor} onAdd={addFloor} onRemove={removeFloor} />
+                )}
+                <OpeningsControls
+                  spec={spec}
+                  selectedId={selectedId}
+                  level={activeFloor}
+                  onAdd={addOpening}
+                  onAddDormer={addDormer}
+                  onRemove={removeOpening}
+                  onSize={sizeOpening}
+                  onSetField={setOpeningField}
+                  onSelect={(index) => setSelectedId(`opening-${index}`)}
+                />
+              </>
             )}
             {activeChapter === 'systems' && (
               <SystemsControls spec={spec} derived={derived} onUtility={setUtilityField} />
@@ -1377,6 +1380,31 @@ function ShapeControls({ spec, selectedId, floors, onSelectTarget, onShapeBuildi
           <div className="rz-shape-note">Sizing “{target.name}”. Drag it on the plan (Rooms chapter) to move it. The L / T / U outlines shape the whole building — pick “Whole building” above for those.</div>
         </>
       )}
+    </div>
+  );
+}
+
+// Floor selector — lives INSIDE the left bar (at the top of the Rooms and
+// Openings chapters), so the wide bar never covers it. Pick a floor to lay it
+// out; add or remove the top one right here.
+function FloorBar({ spec, floors, activeFloor, hasBasement, onSelect, onAdd, onRemove }) {
+  return (
+    <div className="rz-floorbar">
+      <span className="rz-floorbar-lead">Floor</span>
+      <div className="rz-floorbar-btns">
+        {hasBasement && (
+          <button type="button" className={activeFloor === BASEMENT_LEVEL ? 'on' : ''} onClick={() => onSelect(BASEMENT_LEVEL)}>Basement</button>
+        )}
+        {Array.from({ length: floors }, (_, i) => i + 1).map((f) => (
+          <button type="button" key={f} className={activeFloor === f ? 'on' : ''} onClick={() => onSelect(f)}>{floorLabel(spec, f)}</button>
+        ))}
+        {floors < 3 && (
+          <button type="button" className="rz-floorbar-add" title="Add a floor on top" onClick={onAdd}>+ floor</button>
+        )}
+        {floors > 1 && activeFloor === floors && activeFloor !== BASEMENT_LEVEL && (
+          <button type="button" className="rz-floorbar-del" title="Remove this floor — its rooms come down a floor" onClick={onRemove}>− floor</button>
+        )}
+      </div>
     </div>
   );
 }

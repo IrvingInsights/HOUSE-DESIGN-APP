@@ -1,6 +1,10 @@
 const DEFAULT_SITE_PAD_EXTENSION_FT = 64;
 const DEFAULT_OUTDOOR_GRID_SIZE_FT = 240;
-const OUTDOOR_SPACE_TYPES = new Set(['outdoor', 'site', 'garden', 'animal', 'paddock', 'run', 'landscape', 'homestead']);
+// Spaces that live OUT on the land, not inside the conditioned shell — they can
+// be bigger than the house and sit well outside its footprint. Includes the
+// greenhouse/sunroom (plant), a pond/cistern (water) and a root cellar / berm
+// (earthwork). NOT 'storage' — a pantry is an indoor storage room.
+const OUTDOOR_SPACE_TYPES = new Set(['outdoor', 'site', 'garden', 'animal', 'paddock', 'run', 'landscape', 'homestead', 'plant', 'water', 'earthwork']);
 
 export function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -836,18 +840,24 @@ function normalizeRooms(spec) {
   }
 
   const roomMargin = Math.max(16, padExtension(spec.shell));
-  spec.rooms = spec.rooms.map((room) => ({
-    ...room,
-    ...(OUTDOOR_SPACE_TYPES.has(room.type)
-      ? clampObjectPosition(spec, room, room.x, room.y)
-      : {
-        x: clamp(room.x, -roomMargin * 0.25, spec.shell.widthFt + 8),
-        y: clamp(room.y, -roomMargin * 0.25, spec.shell.depthFt + 8)
-      }),
-    // 2-ft floor, not 4: a reach-in closet is a legitimate 2-ft-deep room.
-    w: clamp(room.w, 2, spec.shell.widthFt),
-    d: clamp(room.d, 2, spec.shell.depthFt)
-  }));
+  spec.rooms = spec.rooms.map((room) => {
+    // An outdoor space (a greenhouse, a pond) can be BIGGER than the house and
+    // sit well outside it — don't cap its size to the footprint or it snaps
+    // back when you stretch it. Indoor rooms stay bounded by the shell.
+    const outdoor = OUTDOOR_SPACE_TYPES.has(room.type);
+    return {
+      ...room,
+      ...(outdoor
+        ? clampObjectPosition(spec, room, room.x, room.y)
+        : {
+          x: clamp(room.x, -roomMargin * 0.25, spec.shell.widthFt + 8),
+          y: clamp(room.y, -roomMargin * 0.25, spec.shell.depthFt + 8)
+        }),
+      // 2-ft floor, not 4: a reach-in closet is a legitimate 2-ft-deep room.
+      w: clamp(room.w, 2, outdoor ? spec.shell.widthFt + 48 : spec.shell.widthFt),
+      d: clamp(room.d, 2, outdoor ? spec.shell.depthFt + 48 : spec.shell.depthFt)
+    };
+  });
   if (Array.isArray(spec.elements)) {
     spec.elements = spec.elements.map((element) => {
       // Partitions are legitimately thin — don't fatten a 0.45' stud wall to 1'.
