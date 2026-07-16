@@ -308,12 +308,34 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
   function onPointerMove(event) {
     if (!drag) return;
     const { fx, fy } = clientToFeet(event);
+    // When ZOOMED IN, a drag toward somewhere off-screen used to jam at the
+    // view edge (the ghost was clamped to the visible viewBox) — "can't move
+    // it all the way". Now the view PANS along when the pointer pushes past
+    // its edge, and the ghost clamps to the full fit frame instead.
+    const vbNow = vbRef.current;
+    const edge = Math.min(2, vbNow.w * 0.03);
+    let panX = 0; let panY = 0;
+    if (fx > vbNow.x + vbNow.w - edge) panX = fx - (vbNow.x + vbNow.w - edge);
+    else if (fx < vbNow.x + edge) panX = fx - (vbNow.x + edge);
+    if (fy > vbNow.y + vbNow.h - edge) panY = fy - (vbNow.y + vbNow.h - edge);
+    else if (fy < vbNow.y + edge) panY = fy - (vbNow.y + edge);
+    if (panX || panY) {
+      // never pan beyond the fit frame — the drag can reach everything without
+      // wandering off into empty paper
+      const fbP = fitBoxRef.current;
+      setViewOverride({
+        ...vbNow,
+        x: clamp(vbNow.x + panX, Math.min(fbP.x, vbNow.x), Math.max(fbP.x + fbP.w - vbNow.w, vbNow.x)),
+        y: clamp(vbNow.y + panY, Math.min(fbP.y, vbNow.y), Math.max(fbP.y + fbP.h - vbNow.h, vbNow.y))
+      });
+    }
     const dx = fx - drag.startFx;
     const dy = fy - drag.startFy;
     const o = drag.orig;
+    const fb = fitBoxRef.current;
     let ghost;
     if (drag.mode === 'move') {
-      ghost = { x: clamp(snap(o.x + dx), vbRef.current.x, vbRef.current.x + vbRef.current.w - o.w), y: clamp(snap(o.y + dy), vbRef.current.y, vbRef.current.y + vbRef.current.h - o.d), w: o.w, d: o.d };
+      ghost = { x: clamp(snap(o.x + dx), fb.x, fb.x + fb.w - o.w), y: clamp(snap(o.y + dy), fb.y, fb.y + fb.h - o.d), w: o.w, d: o.d };
       if (drag.hugOutline) {
         const fitted = fitRoomInsideOutline(spec, ghost);
         if (fitted) ghost = { ...ghost, x: fitted.x, y: fitted.y };
