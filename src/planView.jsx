@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   OPENING_TYPES, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES, resolveInsulation, footprintPolygon,
-  footprintEdges, hasSegmentedFootprint, edgeForOpening, basementInfo, BASEMENT_LEVEL, isRoundFootprint
+  footprintEdges, hasSegmentedFootprint, edgeForOpening, basementInfo, BASEMENT_LEVEL, isRoundFootprint, fitRoomInsideOutline
 } from '../backend/bim-core.mjs';
 import { Grid3X3, Plus } from 'lucide-react';
 import {
@@ -295,7 +295,13 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
     // outruns the small handle or leaves a room rect mid-drag.
     try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
     const { fx, fy } = clientToFeet(event);
-    setDrag({ id: room.id, mode, startFx: fx, startFy: fy, orig: { x: Number(room.x), y: Number(room.y), w: Number(room.w), d: Number(room.d) }, ghost: { x: Number(room.x), y: Number(room.y), w: Number(room.w), d: Number(room.d) } });
+    // A ground-floor indoor ROOM being MOVED inside a shaped outline (round or
+    // L/T/U) hugs the built shape live: the wall stops the room mid-drag
+    // instead of the room snapping back on release ("still can't move it").
+    const isIndoorRoom = (spec.rooms || []).some((r) => r.id === room.id)
+      && !['outdoor', 'site', 'garden', 'animal', 'paddock', 'run', 'landscape', 'homestead', 'plant', 'water', 'earthwork'].includes(room.type)
+      && Number(room.level || 1) === 1;
+    setDrag({ id: room.id, mode, startFx: fx, startFy: fy, hugOutline: isIndoorRoom, orig: { x: Number(room.x), y: Number(room.y), w: Number(room.w), d: Number(room.d) }, ghost: { x: Number(room.x), y: Number(room.y), w: Number(room.w), d: Number(room.d) } });
     onSelect(room.id);
   }
 
@@ -308,6 +314,10 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
     let ghost;
     if (drag.mode === 'move') {
       ghost = { x: clamp(snap(o.x + dx), vbRef.current.x, vbRef.current.x + vbRef.current.w - o.w), y: clamp(snap(o.y + dy), vbRef.current.y, vbRef.current.y + vbRef.current.h - o.d), w: o.w, d: o.d };
+      if (drag.hugOutline) {
+        const fitted = fitRoomInsideOutline(spec, ghost);
+        if (fitted) ghost = { ...ghost, x: fitted.x, y: fitted.y };
+      }
     } else {
       // corner resize keeps the opposite corner fixed
       let { x, y, w, d } = o;

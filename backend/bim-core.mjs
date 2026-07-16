@@ -273,6 +273,81 @@ export function ellipsePerimeter(w, d) {
   return Math.PI * (a + b) * (1 + (3 * h) / (10 + Math.sqrt(4 - 3 * h)));
 }
 
+// Fit a room rect inside a SHAPED outline (round ellipse or custom polygon).
+// Returns the adjusted {x,y,w,d} when the rect falls outside the built shape,
+// or null when no adjustment is needed (already inside, plain rectangle, or
+// nothing valid found). Shared by normalizeRooms (the commit path) and the
+// plan's live drag ghost (so the wall visibly stops the room mid-drag instead
+// of snapping it back on release).
+export function fitRoomInsideOutline(spec, rect) {
+  const roundNow = isRoundFootprint(spec);
+  const customNow = !roundNow && hasCustomFootprint(spec);
+  if (!roundNow && !customNow) return null;
+  let x = Number(rect.x) || 0; let y = Number(rect.y) || 0;
+  let w = Number(rect.w) || 2; let d = Number(rect.d) || 2;
+  if (roundNow) {
+    const a = Number(spec.shell.widthFt) / 2;
+    const b = Number(spec.shell.depthFt) / 2;
+    if (a <= 0 || b <= 0) return null;
+    // Too big to fit even centered → shrink to the inscribed fit first.
+    let shrunk = false;
+    const centerFit = (w * w) / (4 * a * a) + (d * d) / (4 * b * b);
+    if (centerFit > 1) {
+      const s = 0.98 / Math.sqrt(centerFit);
+      w = Math.max(2, Math.round(w * s * 10) / 10);
+      d = Math.max(2, Math.round(d * s * 10) / 10);
+      shrunk = true;
+    }
+    const hw = w / 2; const hd = d / 2;
+    const cx = x + hw; const cy = y + hd;
+    const ux = Math.abs(cx - a); const uy = Math.abs(cy - b);
+    // All four corners inside ⇔ the worst corner (center offset + half size,
+    // both axes) satisfies the ellipse equation.
+    const worst = ((ux + hw) / a) ** 2 + ((uy + hd) / b) ** 2;
+    if (worst <= 1.002) return shrunk ? { x, y, w, d } : null;
+    // Slide the center toward the middle along its own ray: largest
+    // t ∈ [0,1] with ((t·ux+hw)/a)² + ((t·uy+hd)/b)² = 1.
+    const A = (ux * ux) / (a * a) + (uy * uy) / (b * b);
+    const B = (ux * hw) / (a * a) + (uy * hd) / (b * b);
+    const C = (hw * hw) / (a * a) + (hd * hd) / (b * b) - 1;
+    let t = 0;
+    if (A > 1e-9) {
+      const disc = B * B - A * C;
+      t = disc > 0 ? (-B + Math.sqrt(disc)) / A : 0;
+    }
+    t = clamp(t, 0, 1);
+    return {
+      x: Math.round((a + Math.sign(cx - a) * t * ux - hw) * 10) / 10,
+      y: Math.round((b + Math.sign(cy - b) * t * uy - hd) * 10) / 10,
+      w, d
+    };
+  }
+  // Custom polygon: already inside (including positions spanning arms) —
+  // nothing to do. Otherwise search candidate positions built from the
+  // outline's own grid lines (every vertex coordinate, and vertex − room
+  // size), which covers every tightest-fit placement — including ones
+  // spanning arms (rectInFootprint accepts those; the slab decomposition
+  // can't represent them). Nearest valid placement wins; a room too big to
+  // fit anywhere is left alone for the checks to flag honestly.
+  const polyIn = footprintPolygon(spec);
+  if (rectInFootprint(polyIn, { x, y, w, d })) return null;
+  const xsSet = new Set([x]); const ysSet = new Set([y]);
+  for (const [vx, vy] of polyIn) {
+    xsSet.add(vx); xsSet.add(Math.round((vx - w) * 10) / 10);
+    ysSet.add(vy); ysSet.add(Math.round((vy - d) * 10) / 10);
+  }
+  let best = null;
+  for (const nx of xsSet) {
+    for (const ny of ysSet) {
+      if (!rectInFootprint(polyIn, { x: nx, y: ny, w, d })) continue;
+      const dist = (nx - x) ** 2 + (ny - y) ** 2;
+      if (!best || dist < best.dist) best = { nx, ny, dist };
+    }
+  }
+  if (!best) return null;
+  return { x: Math.round(best.nx * 10) / 10, y: Math.round(best.ny * 10) / 10, w, d };
+}
+
 export function footprintBounds(vertices) {
   const xs = (vertices || []).map((v) => v[0]);
   const ys = (vertices || []).map((v) => v[1]);
@@ -884,72 +959,14 @@ function normalizeRooms(spec) {
   // room in the notch of an L or the corner of a round house sat outside the
   // walls — floor slab poking through the shell ("the shell is not respecting
   // the shape of the first floor"). Pull each level-1 indoor room to the
-  // nearest spot fully INSIDE the outline. Grow-the-house stays the UI's move:
-  // this only runs when the room genuinely falls outside the built shape.
+  // nearest spot fully INSIDE the outline (fitRoomInsideOutline — shared with
+  // the plan drag ghost). Grow-the-house stays the UI's move: this only runs
+  // when the room genuinely falls outside the built shape.
   if (isRoundFootprint(spec) || hasCustomFootprint(spec)) {
-    const roundNow = isRoundFootprint(spec);
-    const polyIn = roundNow ? null : footprintPolygon(spec);
     spec.rooms = spec.rooms.map((room) => {
       if (Number(room.level || 1) !== 1 || OUTDOOR_SPACE_TYPES.has(room.type)) return room;
-      let x = Number(room.x) || 0; let y = Number(room.y) || 0;
-      let w = Number(room.w) || 2; let d = Number(room.d) || 2;
-      if (roundNow) {
-        const a = Number(spec.shell.widthFt) / 2;
-        const b = Number(spec.shell.depthFt) / 2;
-        if (a <= 0 || b <= 0) return room;
-        // Too big to fit even centered → shrink to the inscribed fit first.
-        const centerFit = (w * w) / (4 * a * a) + (d * d) / (4 * b * b);
-        if (centerFit > 1) {
-          const s = 0.98 / Math.sqrt(centerFit);
-          w = Math.max(2, Math.round(w * s * 10) / 10);
-          d = Math.max(2, Math.round(d * s * 10) / 10);
-        }
-        const hw = w / 2; const hd = d / 2;
-        const cx = x + hw; const cy = y + hd;
-        const ux = Math.abs(cx - a); const uy = Math.abs(cy - b);
-        // All four corners inside ⇔ the worst corner (center offset + half
-        // size, both axes) satisfies the ellipse equation.
-        const worst = ((ux + hw) / a) ** 2 + ((uy + hd) / b) ** 2;
-        if (worst > 1.002) {
-          // Slide the center toward the middle along its own ray: largest
-          // t ∈ [0,1] with ((t·ux+hw)/a)² + ((t·uy+hd)/b)² = 1.
-          const A = (ux * ux) / (a * a) + (uy * uy) / (b * b);
-          const B = (ux * hw) / (a * a) + (uy * hd) / (b * b);
-          const C = (hw * hw) / (a * a) + (hd * hd) / (b * b) - 1;
-          let t = 0;
-          if (A > 1e-9) {
-            const disc = B * B - A * C;
-            t = disc > 0 ? (-B + Math.sqrt(disc)) / A : 0;
-          }
-          t = clamp(t, 0, 1);
-          x = Math.round((a + Math.sign(cx - a) * t * ux - hw) * 10) / 10;
-          y = Math.round((b + Math.sign(cy - b) * t * uy - hd) * 10) / 10;
-        }
-        return { ...room, x, y, w, d };
-      }
-      // Custom polygon: already inside (including positions spanning arms) —
-      // leave it. Otherwise search candidate positions built from the
-      // outline's own grid lines (every vertex coordinate, and vertex − room
-      // size), which covers every tightest-fit placement — including ones
-      // spanning arms (rectInFootprint accepts those; the slab decomposition
-      // can't represent them). Nearest valid placement wins; a room too big
-      // to fit anywhere is left for the checks to flag honestly.
-      if (rectInFootprint(polyIn, { x, y, w, d })) return room;
-      const xsSet = new Set([x]); const ysSet = new Set([y]);
-      for (const [vx, vy] of polyIn) {
-        xsSet.add(vx); xsSet.add(Math.round((vx - w) * 10) / 10);
-        ysSet.add(vy); ysSet.add(Math.round((vy - d) * 10) / 10);
-      }
-      let best = null;
-      for (const nx of xsSet) {
-        for (const ny of ysSet) {
-          if (!rectInFootprint(polyIn, { x: nx, y: ny, w, d })) continue;
-          const dist = (nx - x) ** 2 + (ny - y) ** 2;
-          if (!best || dist < best.dist) best = { nx, ny, dist };
-        }
-      }
-      if (!best) return room;
-      return { ...room, x: Math.round(best.nx * 10) / 10, y: Math.round(best.ny * 10) / 10 };
+      const fitted = fitRoomInsideOutline(spec, room);
+      return fitted ? { ...room, ...fitted } : room;
     });
   }
   if (Array.isArray(spec.elements)) {
