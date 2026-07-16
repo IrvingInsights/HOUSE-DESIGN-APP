@@ -15,7 +15,7 @@ import {
   ROOM_PRESETS, planNewRoomPlacements, roomPresetFromName,
   resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons
 } from '../engine.js';
-import { planObjectMove, planObjectResize } from '../placement.js';
+import { planObjectMove, planObjectResize, fitShellToRooms } from '../placement.js';
 import '../styles.css';
 import './shell.css';
 
@@ -38,7 +38,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 61 · Jul 16';
+const UPDATE_STAMP = 'update 62 · Jul 16';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -288,14 +288,20 @@ export default function App() {
         const why = fp === 'round' ? 'the curved wall trims where a room can sit'
           : Array.isArray(fp) ? `this outline is not a plain rectangle (${fp.length} corners) — rooms stop at its real walls`
           : (report.warnings || [])[0] || 'the engine adjusted it';
-        setMoveNote(`“${landed.name || id}” settled ${dir.join(' and ')} from the drop — ${why}. Dropped at ${Math.round(fx * 10) / 10}, ${Math.round(fy * 10) / 10}; landed at ${landed.x}, ${landed.y}.`);
+        setMoveNote({ text: `“${landed.name || id}” settled ${dir.join(' and ')} from the drop — ${why}. Dropped at ${Math.round(fx * 10) / 10}, ${Math.round(fy * 10) / 10}; landed at ${landed.x}, ${landed.y}.` });
       } else if (grow && (grow.dx || grow.dy)) {
         const grewDir = [];
         if (grow.dx) grewDir.push(`${grow.dx} ft west`);
         if (grow.dy) grewDir.push(`${grow.dy} ft north`);
-        setMoveNote(`The house grew ${grewDir.join(' and ')} so “${landed.name || id}” could sit there — the wall came out to meet it. Ctrl+Z undoes it.`);
+        setMoveNote({ text: `The house grew ${grewDir.join(' and ')} so “${landed.name || id}” could sit there — the wall came out to meet it. Ctrl+Z undoes it.` });
       } else {
-        setMoveNote(null);
+        // the drop was honored — but if the walls now stand well past the
+        // rooms (a floor rearranged toward one side), offer the fit right here
+        const fitAfter = fitShellToRooms(report.spec);
+        const slacky = fitAfter && (fitAfter.slackW >= 2 || fitAfter.slackD >= 2 || Math.abs(fitAfter.dx) >= 2 || Math.abs(fitAfter.dy) >= 2);
+        setMoveNote(slacky
+          ? { text: 'The walls now stand well past the rooms — the roof and frame cover empty floor.', offerFit: true }
+          : null);
       }
     }
   };
@@ -304,6 +310,19 @@ export default function App() {
     const plan = planObjectResize(spec, id, x, y, w, d);
     if (plan) applyOps(plan.ops);
   };
+  // One tap: walls retreat to hug the ground-floor rooms — the roof and frame
+  // follow the shell, so patios/carports and vacated floor end up OUTSIDE the
+  // building instead of under its roof.
+  const fitWalls = () => {
+    const plan = fitShellToRooms(spec);
+    if (!plan) return;
+    applyOps(plan.ops);
+    setMoveNote({ text: `Walls now hug the rooms — the house is ${plan.W}′ × ${plan.D}′ and the roof and frame follow. Ctrl+Z undoes it.` });
+  };
+  // Standing offer: whenever the shell is 2ft+ bigger than its rooms, the
+  // Shape chapter (and the settle note after a drag) offers the one-tap fit.
+  const fitPreview = fitShellToRooms(spec);
+  const fitWorthIt = fitPreview && (fitPreview.slackW >= 2 || fitPreview.slackD >= 2 || Math.abs(fitPreview.dx) >= 2 || Math.abs(fitPreview.dy) >= 2);
   const resizeShell = (w, d) => applyOps([
     { type: 'set_shell', field: 'widthFt', value: String(clamp(Number(w), 12, 96)) },
     { type: 'set_shell', field: 'depthFt', value: String(clamp(Number(d), 12, 80)) }
@@ -825,6 +844,8 @@ export default function App() {
                 onRemoveFloor={removeFloor}
                 onResizeFloor={resizeFloor}
                 onFloorHeight={setFloorHeight}
+                fitInfo={fitWorthIt ? fitPreview : null}
+                onFitWalls={fitWalls}
               />
             )}
             {activeChapter === 'rooms' && (
@@ -1028,10 +1049,14 @@ export default function App() {
         </div>
       )}
 
-      {/* a room settled away from its drop — say so, with the numbers */}
+      {/* a room settled away from its drop — say so, with the numbers; when
+          the walls outgrow the rooms, the one-tap fit rides along */}
       {moveNote && (
         <div className="rz-move-note">
-          <span>{moveNote}</span>
+          <span>{moveNote.text || moveNote}</span>
+          {moveNote.offerFit && (
+            <button className="rz-move-fit" onClick={() => { fitWalls(); }}>Fit the walls to the rooms</button>
+          )}
           <button onClick={() => setMoveNote(null)} title="Dismiss">×</button>
         </div>
       )}
@@ -1409,7 +1434,7 @@ function BudgetSheet({ derived, onClose }) {
 // building or any single room/element — from the dropdown. The building gets
 // the outline presets (Rectangle / L / T / U) and its size; a room or element
 // gets its own width × depth. One general control instead of building-only.
-function ShapeControls({ spec, floors, onShapeBuilding, onSizeBuilding, onAddFloor, onRemoveFloor, onResizeFloor, onFloorHeight }) {
+function ShapeControls({ spec, floors, onShapeBuilding, onSizeBuilding, onAddFloor, onRemoveFloor, onResizeFloor, onFloorHeight, fitInfo = null, onFitWalls = null }) {
   const isRound = spec.shell.footprint === 'round';
   const isRect = !spec.shell.footprint;
   const corners = Array.isArray(spec.shell.footprint) ? spec.shell.footprint.length : 4;
@@ -1444,6 +1469,12 @@ function ShapeControls({ spec, floors, onShapeBuilding, onSizeBuilding, onAddFlo
         nearRect
           ? <div className="rz-shape-note rz-shape-warn">⚠ this outline is almost — but not quite — a rectangle (a small jog in a wall). Rooms stop at the jog, which can look like a stuck gap. Tap <b>Rectangle</b> to straighten it.</div>
           : <div className="rz-shape-note">custom outline · {corners} corners — drag any edge on the plan</div>
+      )}
+      {fitInfo && onFitWalls && (
+        <div className="rz-shape-note rz-shape-warn">
+          The walls stand past the rooms — the roof and frame cover empty floor (and any patio or carport pads under it).
+          <button type="button" className="rz-fit-walls" onClick={onFitWalls}>Fit the walls to the rooms ({fitInfo.W}′ × {fitInfo.D}′)</button>
+        </div>
       )}
 
       {/* Every floor — ground included — sizes the same way in the Floors list

@@ -58,6 +58,66 @@ export function westNorthGrowth(spec, targetX, targetY) {
 
 const findObj = (spec, id) => (spec.rooms || []).find((r) => r.id === id) || (spec.elements || []).find((e) => e.id === id);
 
+// Shift every placed thing by (dx, dy) — rooms, elements (foundation runs and
+// pads included), and openings along their walls — as absolute-target ops.
+// This is how the origin-pinned shell "moves" relative to the world.
+export function shiftWorldOps(spec, dx, dy) {
+  const ops = [];
+  if (!dx && !dy) return ops;
+  (spec.rooms || []).forEach((r) => ops.push({ type: 'move_object', targetId: r.id, name: r.name, x: (Number(r.x) || 0) + dx, y: (Number(r.y) || 0) + dy }));
+  (spec.elements || []).forEach((e) => ops.push({ type: 'move_object', targetId: e.id, name: e.name, x: (Number(e.x) || 0) + dx, y: (Number(e.y) || 0) + dy }));
+  (spec.openings || []).forEach((op, i) => {
+    if (op.wall === 'roof') {
+      if (dx) ops.push({ type: 'update_object', targetId: `opening-${i}`, field: 'x', value: (Number(op.x) || 0) + dx });
+      if (dy) ops.push({ type: 'update_object', targetId: `opening-${i}`, field: 'y', value: (Number(op.y) || 0) + dy });
+    } else if ((op.wall === 'north' || op.wall === 'south') && dx) {
+      ops.push({ type: 'update_object', targetId: `opening-${i}`, field: 'x', value: (Number(op.x) || 0) + dx });
+    } else if ((op.wall === 'east' || op.wall === 'west') && dy) {
+      ops.push({ type: 'update_object', targetId: `opening-${i}`, field: 'y', value: (Number(op.y) || 0) + dy });
+    }
+  });
+  return ops;
+}
+
+// FIT THE WALLS TO THE ROOMS — the other half of "the shell respects the
+// first floor." Growth (update 60) walks a wall OUT to honor a drop; this
+// walks the walls back IN so the shell is exactly the bounding box of the
+// ground-floor indoor rooms — the frame and roof follow the shell, so the
+// whole building matches what the rooms describe. Returns null when nothing
+// would change, there are no indoor ground rooms, or the outline isn't a
+// plain rectangle (shaped outlines are their own law).
+export function fitShellToRooms(spec) {
+  if (spec.shell.footprint) return null;
+  const rooms = (spec.rooms || []).filter((r) => Number(r.level || 1) === 1 && !OUTDOOR_TYPES.has(r.type));
+  if (!rooms.length) return null;
+  let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
+  rooms.forEach((r) => {
+    minX = Math.min(minX, Number(r.x) || 0);
+    minY = Math.min(minY, Number(r.y) || 0);
+    maxX = Math.max(maxX, (Number(r.x) || 0) + (Number(r.w) || 0));
+    maxY = Math.max(maxY, (Number(r.y) || 0) + (Number(r.d) || 0));
+  });
+  const W0 = Number(spec.shell.widthFt) || 36;
+  const D0 = Number(spec.shell.depthFt) || 28;
+  const W = clamp(Math.ceil((maxX - minX) * 2) / 2, 12, SHELL_W_MAX);
+  const D = clamp(Math.ceil((maxY - minY) * 2) / 2, 12, SHELL_D_MAX);
+  const dx = Math.round(-minX * 10) / 10;
+  const dy = Math.round(-minY * 10) / 10;
+  if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05 && Math.abs(W - W0) < 0.55 && Math.abs(D - D0) < 0.55) return null;
+  // Three phases so the engine's clamps never bite mid-flight: widen to the
+  // larger of old/new first, shift the world so the rooms start at the
+  // origin, then settle the shell on the exact fit.
+  const ops = [];
+  const bigW = Math.max(W0, W); const bigD = Math.max(D0, D);
+  if (bigW > W0) ops.push({ type: 'set_shell', field: 'widthFt', value: String(bigW) });
+  if (bigD > D0) ops.push({ type: 'set_shell', field: 'depthFt', value: String(bigD) });
+  ops.push(...shiftWorldOps(spec, dx, dy));
+  if (W !== bigW) ops.push({ type: 'set_shell', field: 'widthFt', value: String(W) });
+  if (D !== bigD) ops.push({ type: 'set_shell', field: 'depthFt', value: String(D) });
+  if (!ops.length) return null;
+  return { ops, W, D, dx, dy, slackW: Math.round((W0 - W) * 10) / 10, slackD: Math.round((D0 - D) * 10) / 10 };
+}
+
 // Plan a MOVE of any object to (x, y). Returns { ops, fx, fy, grow } — fx/fy
 // are the target in post-growth coordinates (what "honored" means), grow is
 // the west/north growth taken (or null). Null when the id is unknown.

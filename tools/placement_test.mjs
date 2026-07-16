@@ -17,7 +17,7 @@ import {
   rectInFootprint, fitRoomInsideOutline
 } from '../backend/bim-core.mjs';
 import { seedSpec } from '../src/engine.js';
-import { planObjectMove, planObjectResize, SHELL_W_MAX, SHELL_D_MAX } from '../src/placement.js';
+import { planObjectMove, planObjectResize, fitShellToRooms, OUTDOOR_TYPES, SHELL_W_MAX, SHELL_D_MAX } from '../src/placement.js';
 
 let seed = 42;
 const rnd = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32);
@@ -166,7 +166,61 @@ for (let i = 0; i < CASES; i += 1) {
   }
 }
 
-console.log(`placement corpus: ${pass} checks passed, ${fail} failed (${CASES} generated cases)`);
+// --- the FIT law: walls hug the rooms; the world (pads included) holds -------
+//   F1 after fit, shell == bounding box of ground indoor rooms (caps aside)
+//   F2 the world is preserved: rooms, elements (patio/carport pads!), openings
+//      all shift by exactly the re-anchor delta — a pad WEST of the rooms ends
+//      up OUTSIDE the shell (no roof or wall over it)
+//   F3 idempotent: fitting a fitted house is a no-op
+for (let i = 0; i < 90; i += 1) {
+  let s = makeDesign('rect');
+  const W0 = Number(s.shell.widthFt); const D0 = Number(s.shell.depthFt);
+  // manufacture Daniel's situation: grow the shell by dropping a room far
+  // out, so the vacated side leaves slack; sprinkle an outdoor pad nearby
+  const rooms = s.rooms.filter((r) => Number(r.level || 1) === 1);
+  const mover = pick(rooms);
+  ({ spec: s } = apply(s, [{ type: 'add_element', name: 'Patio pad', category: 'foundation', construction: 'slabpad', x: range(-28, -12), y: range(0, D0 - 8), w: 10, d: 10, h: 0.6 }]));
+  const plan1 = planObjectMove(s, mover.id, range(-24, -10), range(0, D0 - Number(mover.d)));
+  ({ spec: s } = apply(s, plan1.ops));
+  const fit = fitShellToRooms(s);
+  const label = `fit case ${i}`;
+  if (!fit) { // nothing to fit is legal only if the shell already hugs the rooms
+    const ground = s.rooms.filter((r) => Number(r.level || 1) === 1 && !OUTDOOR_TYPES.has(r.type));
+    const maxX = Math.max(...ground.map((r) => Number(r.x) + Number(r.w)));
+    const maxY = Math.max(...ground.map((r) => Number(r.y) + Number(r.d)));
+    check(Math.abs(Number(s.shell.widthFt) - maxX) < 1.1 && Math.abs(Number(s.shell.depthFt) - maxY) < 1.1, label, `fit refused but slack exists (shell ${s.shell.widthFt}x${s.shell.depthFt}, rooms to ${maxX}x${maxY})`);
+    continue;
+  }
+  const before = s;
+  const { spec: after } = apply(s, fit.ops);
+  const nan = noNaN(after);
+  check(!nan, label, `NaN at ${nan}`);
+  // F1 — shell hugs the rooms
+  const ground = after.rooms.filter((r) => Number(r.level || 1) === 1 && !OUTDOOR_TYPES.has(r.type));
+  const minX = Math.min(...ground.map((r) => Number(r.x)));
+  const minY = Math.min(...ground.map((r) => Number(r.y)));
+  const maxX = Math.max(...ground.map((r) => Number(r.x) + Number(r.w)));
+  const maxY = Math.max(...ground.map((r) => Number(r.y) + Number(r.d)));
+  check(Math.abs(minX) <= 0.1 && Math.abs(minY) <= 0.1, label, `rooms not re-anchored: min ${minX},${minY}`);
+  const W1 = Number(after.shell.widthFt); const D1 = Number(after.shell.depthFt);
+  check(W1 >= maxX - 0.1 && W1 <= Math.max(12, maxX + 1.1), label, `shell width ${W1} vs rooms ${maxX}`);
+  check(D1 >= maxY - 0.1 && D1 <= Math.max(12, maxY + 1.1), label, `shell depth ${D1} vs rooms ${maxY}`);
+  // F2 — the pad kept its place in the world (same offset relative to rooms)
+  const pad0 = (before.elements || []).find((e) => e.name === 'Patio pad');
+  const pad1 = (after.elements || []).find((e) => e.name === 'Patio pad');
+  const m0 = before.rooms.find((r) => r.id === mover.id);
+  const m1 = after.rooms.find((r) => r.id === mover.id);
+  if (pad0 && pad1 && m0 && m1) {
+    const rel0 = [Number(pad0.x) - Number(m0.x), Number(pad0.y) - Number(m0.y)];
+    const rel1 = [Number(pad1.x) - Number(m1.x), Number(pad1.y) - Number(m1.y)];
+    check(Math.abs(rel0[0] - rel1[0]) <= 0.1 && Math.abs(rel0[1] - rel1[1]) <= 0.1, label, `pad drifted relative to its room: ${rel0} -> ${rel1}`);
+  }
+  // F3 — idempotent
+  const again = fitShellToRooms(after);
+  check(!again || (Math.abs(again.dx) < 0.6 && Math.abs(again.dy) < 0.6 && again.slackW < 1.1 && again.slackD < 1.1), label, `fit not idempotent: ${JSON.stringify(again && { dx: again.dx, dy: again.dy, slackW: again.slackW, slackD: again.slackD })}`);
+}
+
+console.log(`placement corpus: ${pass} checks passed, ${fail} failed (${CASES} move/resize + 90 fit cases)`);
 if (problems.length) {
   console.log('first failures:');
   problems.forEach((p) => console.log('  ' + p));
