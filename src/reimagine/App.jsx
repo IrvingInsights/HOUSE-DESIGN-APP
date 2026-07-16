@@ -38,7 +38,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 69 · Jul 16';
+const UPDATE_STAMP = 'update 70 · Jul 16';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1050,6 +1050,18 @@ export default function App() {
                 onMove={(x, y) => moveObject(el.id, x, y)}
                 onResize={(w, d) => resizeObject(el.id, Number(el.x) || 0, Number(el.y) || 0, w, d)}
               />
+            )}
+            {el && el.category === 'floor' && Number(el.level || 1) >= 2 && floors > Number(el.level || 1) && (
+              <label className="rz-field">
+                <span>Top of this floor, where the floor above steps back</span>
+                <select
+                  value={el.topTreatment === 'porch' ? 'porch' : 'roof'}
+                  onChange={(e2) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'topTreatment', value: e2.target.value === 'porch' ? 'porch' : 'roof' }])}
+                >
+                  <option value="roof">Roofed — a sloped roof covers the step</option>
+                  <option value="porch">Open porch — a walkable deck with a railing</option>
+                </select>
+              </label>
             )}
             <p className="rz-muted">Drag it in the plan to move it; grab a corner to resize.</p>
             {el && (

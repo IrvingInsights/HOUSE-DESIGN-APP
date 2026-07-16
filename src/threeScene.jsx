@@ -1276,6 +1276,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               return;
             }
             // lower tier: rafter the ring its storey exposes, at ITS tier top
+            // — unless that storey's setback is an OPEN PORCH (deck, no roof)
+            if (lv >= 2) {
+              const plateElF = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === lv);
+              if (plateElF && plateElF.topTreatment === 'porch') return;
+            }
             const inAbove = (px, py) => px > above.x + 0.01 && px < above.x + above.w - 0.01 && py > above.y + 0.01 && py < above.y + above.d - 0.01;
             const insideBelow = (px, py) => px > p.x + 0.01 && px < p.x + p.w - 0.01 && py > p.y + 0.01 && py < p.y + p.d - 0.01;
             subtractRect(p, above).forEach((rect) => {
@@ -2234,6 +2239,52 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               const ring = (customFp && below.level === 1)
                 ? subtractRectFromFootprint(fpPoly, above.rect)
                 : subtractRect(below.rect, above.rect);
+              // The storey can choose what its setback carries: a roof wing
+              // (default) or an OPEN PORCH — a walkable deck with a railing,
+              // wrapping the storey above (set on the floor outline's card).
+              const plateEl = below.level >= 2
+                ? (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === below.level)
+                : null;
+              if (plateEl && plateEl.topTreatment === 'porch') {
+                const deckMat = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.8, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
+                ring.forEach((rect) => {
+                  const deckY = below.topEave + 0.18;
+                  const deck = box(rect.w, 0.35, rect.d, rect.x + rect.w / 2, deckY, rect.y + rect.d / 2, deckMat);
+                  deck.name = 'Porch deck';
+                  deck.userData.roomId = 'roof-main';
+                  deck.userData.generated = true;
+                  roomMeshes.push(deck);
+                  group.add(addEdges(deck));
+                  // railing along the porch's OUTER edges (the ones on the
+                  // storey's own boundary — seams between ring pieces and the
+                  // face against the storey above stay open)
+                  const railTop = deckY + 3.1;
+                  const railEdges = [];
+                  if (Math.abs(rect.y - below.rect.y) < 0.05) railEdges.push(['h', rect.x, rect.x + rect.w, rect.y]);
+                  if (Math.abs(rect.y + rect.d - (below.rect.y + below.rect.d)) < 0.05) railEdges.push(['h', rect.x, rect.x + rect.w, rect.y + rect.d]);
+                  if (Math.abs(rect.x - below.rect.x) < 0.05) railEdges.push(['v', rect.y, rect.y + rect.d, rect.x]);
+                  if (Math.abs(rect.x + rect.w - (below.rect.x + below.rect.w)) < 0.05) railEdges.push(['v', rect.y, rect.y + rect.d, rect.x + rect.w]);
+                  railEdges.forEach(([dir, a0, a1, at]) => {
+                    const len = a1 - a0;
+                    if (len < 0.5) return;
+                    const rail = dir === 'h'
+                      ? box(len, 0.18, 0.18, (a0 + a1) / 2, railTop, at, deckMat)
+                      : box(0.18, 0.18, len, at, railTop, (a0 + a1) / 2, deckMat);
+                    rail.userData.roomId = 'roof-main'; rail.userData.generated = true;
+                    group.add(rail);
+                    const posts = Math.max(1, Math.round(len / 4));
+                    for (let pi = 0; pi <= posts; pi += 1) {
+                      const pa = a0 + (len * pi) / posts;
+                      const post = dir === 'h'
+                        ? box(0.15, railTop - deckY, 0.15, pa, deckY + (railTop - deckY) / 2, at, deckMat)
+                        : box(0.15, railTop - deckY, 0.15, at, deckY + (railTop - deckY) / 2, pa, deckMat);
+                      post.userData.roomId = 'roof-main'; post.userData.generated = true;
+                      group.add(post);
+                    }
+                  });
+                });
+                continue;
+              }
               ring.forEach((rect) => segments.push({ rect, eave: below.topEave, kind: 'wing', highSide: touchSide(rect, above.rect), level: below.level, tierDrop: storeyLift - upThru(below.level) }));
             }
           } else {
