@@ -2,6 +2,7 @@
 import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES,
   resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint,
+  isRoundFootprint, ellipseArea, ellipsePerimeter,
   basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt, storeyHeightFt,
   scoreTraceSpecChecks,
   // Single source of truth for the per-wall assembly model — no longer duplicated here.
@@ -1717,20 +1718,27 @@ export function getWallSections(spec) {
     }
     return sections;
   }
+  // Round house: the four cardinal "walls" are the four quarter-arcs of the
+  // ellipse — each a true quarter of the curved perimeter, so wall areas and
+  // costs measure the curve, not the bounding rectangle.
+  const roundFp = isRoundFootprint(spec);
+  const quarterArcFt = roundFp ? Math.round(ellipsePerimeter(spec.shell.widthFt, spec.shell.depthFt) / 4 * 10) / 10 : 0;
   const buildSection = (side, level) => {
     const r = resolveWallSide(spec, side, level);
     if (r.omitted) return null;
     const upper = level > 1;
     const heightFt = upper ? upperFt : r.heightFt;
     const plate = upper ? upperPlateRect(spec, level) : null;
-    const base = upper && plate
-      ? {
-        name: layout[side].name,
-        lengthFt: side === 'north' || side === 'south' ? plate.w : plate.d,
-        x: side === 'east' ? plate.x + plate.w : plate.x,
-        y: side === 'south' ? plate.y + plate.d : plate.y
-      }
-      : layout[side];
+    const base = roundFp
+      ? { ...layout[side], lengthFt: quarterArcFt }
+      : upper && plate
+        ? {
+          name: layout[side].name,
+          lengthFt: side === 'north' || side === 'south' ? plate.w : plate.d,
+          x: side === 'east' ? plate.x + plate.w : plate.x,
+          y: side === 'south' ? plate.y + plate.d : plate.y
+        }
+        : layout[side];
     return {
       id: upper ? `wall-${side}-u${level === 2 ? '' : level}` : `wall-${side}`,
       name: upper ? `${base.name} (level ${level})` : base.name,
@@ -2033,6 +2041,7 @@ export function wallAssemblyProfile(envelopeText = '') {
 // live ONCE in backend/bim-core.mjs (imported above) — no more hand-synced dual
 // copies. Re-exported here so existing importers of './engine.js' are unaffected.
 export { WALL_SIDES, WALL_ASSEMBLIES, wallAssemblyKeyFromText, resolveWallSide };
+export { isRoundFootprint, ellipseArea, ellipsePerimeter };
 export const WALL_SIDE_LABELS = { north: 'North', south: 'South', east: 'East', west: 'West' };
 
 
@@ -3131,7 +3140,8 @@ export function detectIssues(spec) {
     ? rectInFootprint(fpPolyCheck, { x: room.x, y: room.y, w: room.w, d: room.d })
     : room.x >= 0 && room.y >= 0 && room.x + room.w <= spec.shell.widthFt && room.y + room.d <= spec.shell.depthFt));
   const conditionedArea = enclosedRooms.reduce((sum, room) => sum + room.w * room.d, 0);
-  const shellArea = customFpCheck ? polygonArea(fpPolyCheck) : spec.shell.widthFt * spec.shell.depthFt;
+  const shellArea = isRoundFootprint(spec) ? ellipseArea(spec.shell.widthFt, spec.shell.depthFt)
+    : customFpCheck ? polygonArea(fpPolyCheck) : spec.shell.widthFt * spec.shell.depthFt;
   // A room hanging outside the walls of an L/U footprint is a real flag —
   // on a rectangle it just reads as "outside the shell" in the plan.
   if (customFpCheck) {
@@ -3370,7 +3380,10 @@ export function deriveDesign(spec, wallSections) {
   // exact w*d / 2(w+d) formulas so existing designs don't shift by a cent.
   const customFp = hasCustomFootprint(spec);
   const fpPoly = customFp ? footprintPolygon(spec) : null;
-  const floor = customFp ? polygonArea(fpPoly) : w * d;
+  // A round house measures as its true ellipse (area ≈ 79% of the bounding
+  // rectangle) — floor, roof, and wall lengths all follow the curve.
+  const roundFp = isRoundFootprint(spec);
+  const floor = roundFp ? ellipseArea(w, d) : customFp ? polygonArea(fpPoly) : w * d;
   const { storeys, extraFt: storeyExtraFt, baseWallFt } = storeyInfo(spec.shell);
   // Upper storeys cover their extent PLATE (a storey can sit over only one
   // side of the building); no plate = the full footprint. Lofts and towers
@@ -3396,9 +3409,11 @@ export function deriveDesign(spec, wallSections) {
   const heatedFloor = floor + upperFloorArea + loftTowerArea + (basementHeated ? basementRoomArea : 0);
   const pitch = Number(spec.shell.roofPitch || 0.32);
   const overhangs = resolveOverhangs(spec.shell);
-  const roofFootprint = customFp
-    ? polygonArea(expandFootprint(fpPoly, overhangs))
-    : (w + overhangs.east + overhangs.west) * (d + overhangs.north + overhangs.south);
+  const roofFootprint = roundFp
+    ? ellipseArea(w + overhangs.east + overhangs.west, d + overhangs.north + overhangs.south)
+    : customFp
+      ? polygonArea(expandFootprint(fpPoly, overhangs))
+      : (w + overhangs.east + overhangs.west) * (d + overhangs.north + overhangs.south);
   const roofArea = roofFootprint / Math.cos(Math.atan(pitch));
   // True face area per wall, roof-shape aware:
   // - shed: east/west walls are RAKED — a trapezoid from the north eave to
@@ -3408,7 +3423,8 @@ export function deriveDesign(spec, wallSections) {
   const roofTypeNow = spec.shell.roofType || 'gable';
   const northEaveFt = resolveWallSide(spec, 'north').heightFt;
   const southEaveFt = resolveWallSide(spec, 'south').heightFt;
-  const gableRiseFt = roofTypeNow === 'gable' ? Math.max(0, d * pitch - 0.25) : 0;
+  // A round house wears a cone — no gable peaks, no raked shed ends.
+  const gableRiseFt = roofTypeNow === 'gable' && !roundFp ? Math.max(0, d * pitch - 0.25) : 0;
   // Sections come per storey now (each with its own height slice + assembly),
   // so no storeyExtraFt here. The gable triangle rides the TOPMOST section;
   // shed east/west walls are raked — ground slice uses the eave average, the
@@ -3416,7 +3432,7 @@ export function deriveDesign(spec, wallSections) {
   const hasUpperSections = wallSections.some((wall) => wall.storey === 'upper');
   const wallFaceArea = (wall) => {
     const topmost = wall.storey === 'upper' || !hasUpperSections;
-    if (roofTypeNow === 'shed' && (wall.side === 'east' || wall.side === 'west')) {
+    if (roofTypeNow === 'shed' && !roundFp && (wall.side === 'east' || wall.side === 'west')) {
       return wall.storey === 'upper'
         ? wall.lengthFt * storeyExtraFt
         : wall.lengthFt * ((northEaveFt + southEaveFt) / 2);
@@ -3561,7 +3577,7 @@ export function deriveDesign(spec, wallSections) {
   const waterCostBySource = { well: 7500, spring: 2500, catchment: 3500, town: 1500 };
   const wasteCostByMethod = { septic: 8500, composting: 1500, reedbed: 1200 };
   const foundationCostPsf = { rubble: 8, stemwall: 12, slab: 15 };
-  const perimeterFt = customFp ? polygonPerimeter(fpPoly) : 2 * (w + d);
+  const perimeterFt = roundFp ? ellipsePerimeter(w, d) : customFp ? polygonPerimeter(fpPoly) : 2 * (w + d);
   const stemwallHeightFt = Math.min(6, Math.max(0.5, Number(utilities.stemwallHeightFt) || 1.5));
   // Stem wall cost scales with the wall itself: base prep + footing by floor
   // area, plus the perimeter wall by face area (calibrated so the default

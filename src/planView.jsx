@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   OPENING_TYPES, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES, resolveInsulation, footprintPolygon,
-  footprintEdges, hasSegmentedFootprint, edgeForOpening, basementInfo, BASEMENT_LEVEL
+  footprintEdges, hasSegmentedFootprint, edgeForOpening, basementInfo, BASEMENT_LEVEL, isRoundFootprint
 } from '../backend/bim-core.mjs';
 import { Grid3X3, Plus } from 'lucide-react';
 import {
@@ -269,8 +269,11 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
   // Segmented = stored outline (a custom shape OR a split-but-still-rectangular
   // one): each wall piece draws and drags as its own edge with its own grip.
   const fpCustom = hasSegmentedFootprint(spec);
+  // Round house: the shell draws as an ellipse; there are no straight wall
+  // edges to grab, so the edge grips stay off and the corner dot does the sizing.
+  const fpRound = isRoundFootprint(spec);
   const fpPoly = footprintPolygon(spec);
-  const fpEdgesList = footprintEdges(spec);
+  const fpEdgesList = fpRound ? [] : footprintEdges(spec);
   // In a building context the footprint is the subject; dim the room fill so it
   // recedes. In a site context the outbuildings are the subject; dim the house.
   const roomsDim = buildingContext ? 0.18 : siteContext ? 0.28 : 1;
@@ -506,7 +509,12 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
         />
         {gridLines}
         {/* shell / exterior wall — the footprint (editable in a building context) */}
-        {fpCustom ? (
+        {fpRound ? (
+          <>
+            <ellipse cx={shellW / 2} cy={shellD / 2} rx={shellW / 2} ry={shellD / 2} fill={buildingContext ? 'var(--active-line)' : 'none'} fillOpacity={buildingContext ? 0.08 : 0} stroke={buildingContext ? 'var(--active-line)' : 'var(--ink3)'} strokeWidth={buildingContext ? 0.5 : 1} />
+            <ellipse cx={shellW / 2} cy={shellD / 2} rx={Math.max(0, shellW / 2 - 0.7)} ry={Math.max(0, shellD / 2 - 0.7)} fill="none" stroke="var(--line2)" strokeWidth={0.12} />
+          </>
+        ) : fpCustom ? (
           <>
             <polygon points={fpPoly.map(([px, py]) => `${px},${py}`).join(' ')} fill={buildingContext ? 'var(--active-line)' : 'none'} fillOpacity={buildingContext ? 0.08 : 0} stroke={buildingContext ? 'var(--active-line)' : 'var(--ink3)'} strokeWidth={buildingContext ? 0.5 : 1} />
             {shellGhost && <rect x={0} y={0} width={shellW} height={shellD} fill="none" stroke="var(--active-line)" strokeWidth={0.2} strokeDasharray="1 0.6" pointerEvents="none" />}
@@ -719,10 +727,27 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
           const isSel = String(selectedRoom || '') === `opening-${index}`;
           const stroke = dragging || isSel ? 'var(--active-line)' : '#e8e6dd';
           const sw = dragging || isSel ? 1.5 : 1.1;
-          const x1 = horizontal ? along : lineC;
-          const y1 = horizontal ? lineC : along;
-          const x2 = horizontal ? along + wide : lineC;
-          const y2 = horizontal ? lineC : along + wide;
+          let x1 = horizontal ? along : lineC;
+          let y1 = horizontal ? lineC : along;
+          let x2 = horizontal ? along + wide : lineC;
+          let y2 = horizontal ? lineC : along + wide;
+          if (fpRound && o.wall !== 'roof') {
+            // On a round house the opening sits ON the curve: its along-position
+            // maps to that wall's quarter-arc of the ellipse, and it draws as a
+            // chord hugging the arc (dragging still slides it along the arc).
+            const roundPt = (a) => {
+              const sideLen = horizontal ? W : D;
+              const f = clamp(sideLen > 0 ? a / sideLen : 0.5, 0, 1);
+              const deg = o.wall === 'south' ? 135 - 90 * f
+                : o.wall === 'north' ? 225 + 90 * f
+                : o.wall === 'east' ? -45 + 90 * f
+                : 225 - 90 * f;
+              const th = deg * Math.PI / 180;
+              return [W / 2 + (W / 2) * Math.cos(th), D / 2 + (D / 2) * Math.sin(th)];
+            };
+            [x1, y1] = roundPt(along);
+            [x2, y2] = roundPt(along + wide);
+          }
           const draggable = Boolean(onMoveOpening) && !buildingContext && !siteContext;
           return (
             <g key={index}>

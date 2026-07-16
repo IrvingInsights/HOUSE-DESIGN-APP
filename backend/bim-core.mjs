@@ -252,6 +252,27 @@ export function polygonPerimeter(vertices) {
   return length;
 }
 
+// A ROUND footprint is stored as the literal string 'round' — an ellipse as
+// wide × deep as the shell. It deliberately does NOT ride the polygon pipeline
+// (every polygon consumer treats a round house as its bounding rectangle),
+// and only explicitly round-aware code (areas, plan ellipse, 3D ring walls,
+// cone roof) branches on this check.
+export function isRoundFootprint(spec) {
+  return (spec?.shell?.footprint ?? spec?.footprint) === 'round';
+}
+
+export function ellipseArea(w, d) {
+  return Math.PI * (Number(w) || 0) * (Number(d) || 0) / 4;
+}
+
+// Ramanujan's approximation — within ~0.02% for building-shaped ellipses.
+export function ellipsePerimeter(w, d) {
+  const a = (Number(w) || 0) / 2;
+  const b = (Number(d) || 0) / 2;
+  const h = a + b === 0 ? 0 : ((a - b) ** 2) / ((a + b) ** 2);
+  return Math.PI * (a + b) * (1 + (3 * h) / (10 + Math.sqrt(4 - 3 * h)));
+}
+
 export function footprintBounds(vertices) {
   const xs = (vertices || []).map((v) => v[0]);
   const ys = (vertices || []).map((v) => v[1]);
@@ -893,7 +914,7 @@ function detectIssues(spec) {
     ? rectInFootprint(poly, { x: room.x, y: room.y, w: room.w, d: room.d })
     : room.x >= 0 && room.y >= 0 && room.x + room.w <= spec.shell.widthFt && room.y + room.d <= spec.shell.depthFt));
   const conditionedArea = enclosedRooms.reduce((sum, room) => sum + room.w * room.d, 0);
-  const shellArea = polygonArea(poly);
+  const shellArea = isRoundFootprint(spec) ? ellipseArea(spec.shell.widthFt, spec.shell.depthFt) : polygonArea(poly);
 
   // The passive-solar / homestead checks are the NATURAL approach's opinions —
   // valuable when chosen, noise when modeling a conventional house as-built.
@@ -1472,6 +1493,12 @@ export function applyBimOperations(currentSpec, plan) {
         actions.push('Reset the footprint to a plain rectangle.');
         continue;
       }
+      if (operation.value === 'round') {
+        next.shell.footprint = 'round';
+        if (next.wallSegments) { delete next.wallSegments; actions.push('Wall sections follow their sides (a round wall has no straight segments).'); }
+        actions.push(`Set a round footprint — an ellipse ${next.shell.widthFt}′ wide × ${next.shell.depthFt}′ deep (${Math.round(ellipseArea(next.shell.widthFt, next.shell.depthFt))} sf).`);
+        continue;
+      }
       const normalized = normalizeFootprint(raw);
       if (!normalized) {
         warnings.push('The footprint outline was not usable — it needs 4–24 corners, straight north/south/east/west walls, and a real enclosed area.');
@@ -1551,6 +1578,11 @@ export function applyBimOperations(currentSpec, plan) {
     }
 
     if (operation.type === 'move_wall_edge') {
+      if (isRoundFootprint(next)) {
+        warnings.push('A round house has no straight wall to slide — size the ellipse with Width and Depth, or pick a rectilinear outline first.');
+        rejectedOperations.push(operation);
+        continue;
+      }
       const poly = footprintPolygon(next);
       const edges = footprintEdges(next);
       let edgeIndex = -1;
@@ -1584,6 +1616,11 @@ export function applyBimOperations(currentSpec, plan) {
     }
 
     if (operation.type === 'split_wall_edge') {
+      if (isRoundFootprint(next)) {
+        warnings.push('A round wall cannot be split into straight sections — its construction is set per side (N/S/E/W quarter).');
+        rejectedOperations.push(operation);
+        continue;
+      }
       const poly = footprintPolygon(next);
       const edges = footprintEdges(next);
       let edgeIndex = -1;

@@ -11,7 +11,8 @@ import { FRAME_MEMBERS } from './frameDrawings.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
   OPENING_TYPES, resolveFrameType, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, decomposeFootprint, subtractRect,
-  subtractRectFromFootprint, pointInFootprint, edgeForOpening, gradeElevationAt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, storeyElevationFt, storeyHeightFt
+  subtractRectFromFootprint, pointInFootprint, edgeForOpening, gradeElevationAt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, storeyElevationFt, storeyHeightFt,
+  isRoundFootprint
 } from '../backend/bim-core.mjs';
 import {
   DEFAULT_OUTDOOR_GRID_SIZE_FT, clamp, padExtension, sitePadRect, objectBounds, titleCase, roofProfile, storeyInfo,
@@ -526,7 +527,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // over only one side of the building. No plate = the full footprint.
       const plate2 = upperPlateRect(spec, 2) || { x: 0, y: 0, w: width, d: depth };
       const wallMeshSpecs = [];
-      const customFp = hasCustomFootprint(spec);
+      const roundFp = isRoundFootprint(spec);
+      const customFp = hasCustomFootprint(spec) && !roundFp;
       // Walls branch on the SEGMENTED check (a just-split rectangle already
       // has separate wall runs); roofs/rings/frames keep customFp — a
       // rectangle-shaped outline uses the verbatim legacy shape math.
@@ -604,7 +606,42 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           }
         }
       };
-      if (segFp) {
+      if (roundFp) {
+        // ROUND house: the wall is a curved elliptical ring. It renders as four
+        // quarter-arc runs (N/S/E/W) so each keeps its own construction + is
+        // selectable, each built from short tangent boxes hugging the ellipse.
+        // Uniform height (a cone roof sits on top); openings render as panes on
+        // the arc below (they don't cut holes on a curved wall — v1).
+        const rx = width / 2;
+        const ry = depth / 2;
+        const cxE = rx; const czE = ry;
+        const QUARTERS = { east: [-45, 45], south: [45, 135], west: [135, 225], north: [225, 315] };
+        const SEGS = 20; // per quarter — smooth enough at building scale
+        WALL_SIDES.forEach((side) => {
+          const rG = resolveWallSide(spec, side, 1);
+          if (rG.omitted || omittedWalls.has(side)) return;
+          const t = rG.thicknessFt;
+          const totalH = rG.heightFt + storeyLift;
+          const groundH = Math.max(1, totalH);
+          const mat = wallMatOf(rG);
+          const [a0, a1] = QUARTERS[side];
+          const meshes = [];
+          for (let s = 0; s < SEGS; s += 1) {
+            const t0 = a0 + (a1 - a0) * (s / SEGS);
+            const t1 = a0 + (a1 - a0) * ((s + 1) / SEGS);
+            const th0 = t0 * Math.PI / 180; const th1 = t1 * Math.PI / 180;
+            const p0 = [cxE + rx * Math.cos(th0), czE + ry * Math.sin(th0)];
+            const p1 = [cxE + rx * Math.cos(th1), czE + ry * Math.sin(th1)];
+            const midX = (p0[0] + p1[0]) / 2; const midZ = (p0[1] + p1[1]) / 2;
+            const dxs = p1[0] - p0[0]; const dzs = p1[1] - p0[1];
+            const segLen = Math.hypot(dxs, dzs) + 0.15; // slight overlap, no gaps
+            const seg = box(segLen, groundH, t, midX, groundH / 2, midZ, mat);
+            seg.rotation.y = Math.atan2(-dzs, dxs);
+            meshes.push(seg);
+          }
+          wallMeshSpecs.push({ side, storey: 'ground', meshes });
+        });
+      } else if (segFp) {
         // Stored footprint: one wall per polygon edge, thickness inward.
         // Construction resolves by facing with per-segment overrides, so a
         // split wall can mix systems. Under a shed roof the eave line runs
@@ -845,7 +882,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // below, tilted glazing above, all carried by the frame. The tilt leans
       // the top INTO the house so the footprint stays honest. Rect footprints
       // v1 (custom outlines: set the side low and ask — noted in TESTING.md).
-      if (!customFp) {
+      if (!customFp && !roundFp) {
         WALL_SIDES.forEach((side) => {
           const rSg = wallResolved[side];
           if (!rSg.sunGlazing || rSg.omitted || omittedWalls.has(side)) return;
@@ -898,7 +935,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // the raising view). Load-bearing walls have no separate frame; custom
       // outlines come later (v1 rect).
       const frameKey3d = resolveFrameType(spec, 1);
-      if (layers.frame !== false && !customFp && frameKey3d !== 'load-bearing') {
+      if (layers.frame !== false && !customFp && !roundFp && frameKey3d !== 'load-bearing') {
         const fm = FRAME_MEMBERS[frameKey3d] || FRAME_MEMBERS['post-beam'];
         const framePart = (m) => {
           m.userData.roomId = 'frame-main';
@@ -1683,6 +1720,42 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         const centerY = sill + openH / 2;
         const mat = profile.glazed ? glassMat : doorMat;
         let mesh;
+        if (roundFp && opening.wall !== 'roof') {
+          // Round house: place a simple framed pane ON the ellipse arc, tangent
+          // to the curve (a curved wall can't take the flat rectilinear buck).
+          const rxE = width / 2; const ryE = depth / 2;
+          const sideLen = oHoriz ? width : depth;
+          const f = clamp(sideLen > 0 ? ((Number(oHoriz ? opening.x : opening.y) || 0) + size / 2) / sideLen : 0.5, 0, 1);
+          const deg = opening.wall === 'south' ? 135 - 90 * f
+            : opening.wall === 'north' ? 225 + 90 * f
+            : opening.wall === 'east' ? -45 + 90 * f
+            : 225 - 90 * f;
+          const th = deg * Math.PI / 180;
+          const cxP = rxE + rxE * Math.cos(th);
+          const czP = ryE + ryE * Math.sin(th);
+          const yaw = Math.atan2(-(ryE * Math.cos(th)), -(rxE * Math.sin(th)));
+          const tHere = resolveWallSide(spec, opening.wall, oLevel).thicknessFt;
+          const paneMat = profile.glazed ? glassMat : doorMatWood;
+          const fw = 0.22;
+          const frame = new THREE.Group();
+          const add = (m) => { m.userData.roomId = `opening-${index}`; frame.add(m); return m; };
+          // casing ring + pane, all built flat in local X (along wall) × Y, thin Z
+          add(box(size + fw * 2, fw, tHere + 0.3, 0, sill + openH + fw / 2, 0, frameMat));
+          add(box(size + fw * 2, fw, tHere + 0.3, 0, Math.max(baseY + fw / 2, sill - fw / 2), 0, frameMat));
+          add(box(fw, openH, tHere + 0.3, -size / 2 - fw / 2, centerY, 0, frameMat));
+          add(box(fw, openH, tHere + 0.3, size / 2 + fw / 2, centerY, 0, frameMat));
+          mesh = add(box(Math.max(0.6, size - 0.08), openH, 0.16, 0, centerY, 0, paneMat));
+          if (profile.glazed && size >= 2) {
+            add(box(0.09, openH, 0.2, 0, centerY, 0.1, frameMat));
+            add(box(size, 0.09, 0.2, 0, centerY, 0.1, frameMat));
+          }
+          frame.position.set(cxP, 0, czP);
+          frame.rotation.y = yaw;
+          frame.userData.generated = true;
+          group.add(frame);
+          roomMeshes.push(mesh);
+          return;
+        }
         if (opening.wall === 'roof') {
           // Skylight: a glass panel lying on the roof plane, tilted to the slope.
           const cx = (Number(opening.x) || 0) + size / 2;
@@ -1897,6 +1970,33 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         const fpAreaNow = customFp ? polygonArea(fpPoly) : width * depth;
         const groundEave = roofSpec.highWallHeightFt;
         const fullRect = { x: 0, y: 0, w: width, d: depth };
+        // ROUND house wears an elliptical CONE (a flat roof = a low disc). No
+        // gables, ridges, or valleys — one clean sweep matching the ring wall.
+        if (roundFp) {
+          const eave = groundEave + storeyLift;
+          const ov = (oAll.north + oAll.south + oAll.east + oAll.west) / 4;
+          const rx = width / 2 + ov;
+          const rz = depth / 2 + ov;
+          let roofMesh;
+          if (roofSpec.roofType === 'flat') {
+            const geo = new THREE.CylinderGeometry(1, 1, 0.4, 64);
+            roofMesh = new THREE.Mesh(geo, roofMat);
+            roofMesh.scale.set(rx, 1, rz);
+            roofMesh.position.set(width / 2, eave + 0.2, depth / 2);
+          } else {
+            const rise = Math.max(1.5, (Number(spec.shell.roofPitch) || 0.32) * Math.min(width, depth) / 2);
+            const geo = new THREE.ConeGeometry(1, rise, 64);
+            roofMesh = new THREE.Mesh(geo, roofMat);
+            roofMesh.scale.set(rx, 1, rz);
+            roofMesh.position.set(width / 2, eave + rise / 2, depth / 2);
+          }
+          roofMesh.castShadow = true; roofMesh.receiveShadow = true;
+          roofMesh.userData.roomId = 'roof-main';
+          roofMesh.userData.generated = true;
+          roomMeshes.push(roofMesh);
+          group.add(roofMesh);
+          group.add(addEdges(roofMesh));
+        } else {
         // Storey extents bottom→top: level 1 is the whole footprint; each upper
         // level is its extent plate (or the full footprint when it isn't set
         // back). topEave = the elevation at the TOP of that storey's walls, so
@@ -2011,6 +2111,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               group.add(addEdges(mesh));
             }
           });
+        }
         }
       }
 
