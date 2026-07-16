@@ -922,6 +922,33 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           for (let b = 0; b <= bays; b += 1) {
             place(0.24, true, runLen * (b / bays) - runLen / 2);
           }
+          // HEAVY greenhouse framing — with a structural frame chosen, the
+          // slanted glazing is CARRIED, not floating: principal slanted posts
+          // at each bay line (riding the same tilt as the glass), a sill beam
+          // on top of the kneewall, and a header beam where the slant meets
+          // the eave. The thin battens above are just glazing stops; these
+          // members join the frame-main skeleton (Frame layer, selectable).
+          const fkSg = resolveFrameType(spec, 1);
+          if (layers.frame !== false && fkSg !== 'load-bearing') {
+            const sgFrame = (m) => { m.userData.roomId = 'frame-main'; m.userData.generated = true; roomMeshes.push(m); group.add(addEdges(m)); return m; };
+            const horizNS = side === 'north' || side === 'south';
+            const beamAt = (yC, outPos) => sgFrame(horizNS
+              ? box(runLen + 0.5, 0.45, 0.5, width / 2, yC, outPos, frameMat)
+              : box(0.5, 0.45, runLen + 0.5, outPos, yC, depth / 2, frameMat));
+            if (side === 'south') { beamAt(kneeH + 0.1, depth - 0.3); beamAt(eaveH - 0.2, depth - inset + 0.15); }
+            else if (side === 'north') { beamAt(kneeH + 0.1, 0.3); beamAt(eaveH - 0.2, inset - 0.15); }
+            else if (side === 'east') { beamAt(kneeH + 0.1, width - 0.3); beamAt(eaveH - 0.2, width - inset + 0.15); }
+            else { beamAt(kneeH + 0.1, 0.3); beamAt(eaveH - 0.2, inset - 0.15); }
+            for (let b = 0; b <= bays; b += 1) {
+              const along = runLen * (b / bays) - runLen / 2;
+              let m;
+              if (side === 'south') { m = box(0.5, slantLen, 0.45, width / 2 + along, midY, depth - inset / 2, frameMat); m.rotation.x = -tiltRad; }
+              else if (side === 'north') { m = box(0.5, slantLen, 0.45, width / 2 + along, midY, inset / 2, frameMat); m.rotation.x = tiltRad; }
+              else if (side === 'east') { m = box(0.45, slantLen, 0.5, width - inset / 2, midY, depth / 2 + along, frameMat); m.rotation.z = tiltRad; }
+              else { m = box(0.45, slantLen, 0.5, inset / 2, midY, depth / 2 + along, frameMat); m.rotation.z = -tiltRad; }
+              sgFrame(m);
+            }
+          }
         });
       }
 
