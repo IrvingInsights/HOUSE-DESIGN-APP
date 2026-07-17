@@ -611,7 +611,10 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         }
         // on a stem wall the whole wall (and its holes) sits on the stem top
         const revealHere = sideReveal[opening.wall] || 0;
-        const gap = { from: along, to: along + w, sill: profile.sill + revealHere, top: profile.sill + profile.h + revealHere };
+        // per-opening sill override (dragged up/down on the wall view) beats
+        // the type's default sill
+        const sillHere = Number.isFinite(Number(opening.sillFt)) ? Number(opening.sillFt) : profile.sill;
+        const gap = { from: along, to: along + w, sill: sillHere + revealHere, top: sillHere + profile.h + revealHere };
         gapByOpening[openingIdx] = gap;
         const list = openingGapsByWall.get(key) || [];
         list.push(gap);
@@ -1871,7 +1874,9 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // 2nd-floor window sits at that storey's floor elevation, not the ground.
         const oLevel = opening.wall === 'roof' ? 1 : Number(opening.level || 1);
         const baseY = storeyElevationFt(spec.shell, oLevel) + (oLevel === 1 && opening.wall !== 'roof' ? (sideReveal[opening.wall] || 0) : 0);
-        const sill = baseY + profile.sill;
+        // per-opening sill override (set by dragging on the wall view)
+        const oSill = Number.isFinite(Number(opening.sillFt)) ? Number(opening.sillFt) : profile.sill;
+        const sill = baseY + oSill;
         // Plan position of the opening centre — used by raked height, the shade
         // eyebrow, and the dormer.
         const oHoriz = opening.wall === 'north' || opening.wall === 'south';
@@ -2025,7 +2030,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               // door hardware — a small knob at the latch side
               part(0.14, 0.14, 0.14, mid + size * 0.34, sill + Math.min(3.1, openH * 0.45), rIn + 0.16, frameMat);
             }
-            if (profile.sill > 0.6) {
+            if (oSill > 0.6) {
               // projecting exterior sill ledge under windows
               part(size + 0.5, 0.13, 0.5, mid, sill - fw - 0.04, 0.22, frameMat);
             }

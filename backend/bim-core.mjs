@@ -2254,6 +2254,9 @@ export function applyBimOperations(currentSpec, plan) {
           const f = operation.field;
           if (f === 'name') opening.label = operation.value;
           else if (f === 'widthFt') opening.widthFt = clamp(Number(operation.value), 1, 24);
+          // sillFt = how high above its floor the opening starts (overrides the
+          // type's default sill). Clearing it (blank/negative) returns to the default.
+          else if (f === 'sillFt') { const v = Number(operation.value); if (Number.isFinite(v) && v >= 0) opening.sillFt = clamp(v, 0, 24); else delete opening.sillFt; }
           else if (f === 'shadeFt') { const v = clamp(Number(operation.value) || 0, 0, 6); if (v > 0) opening.shadeFt = v; else delete opening.shadeFt; }
           else if (f === 'tiltDeg') opening.tiltDeg = clamp(Number(operation.value) || 0, 0, 60);
           else if (f === 'dormerStyle') { if (operation.value === 'gable' || operation.value === 'shed') opening.dormerStyle = operation.value; else delete opening.dormerStyle; }

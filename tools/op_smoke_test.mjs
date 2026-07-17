@@ -171,6 +171,13 @@ ok(r.spec.openings.length === 2 && r.spec.openings.some((o) => o.type === 'door'
 // opening slide via update_object (the Plan drag path)
 r = apply(freshSpec(), [{ type: 'update_object', targetId: 'opening-0', field: 'x', value: 12 }]);
 ok(r.spec.openings[0].x === 12, 'update_object slides an opening along its wall (numeric x)', String(r.spec.openings[0].x));
+// per-opening sill height (the Wall-view up/down drag): set, clamp, clear
+r = apply(freshSpec(), [{ type: 'update_object', targetId: 'opening-0', field: 'sillFt', value: 6 }]);
+ok(r.spec.openings[0].sillFt === 6, 'update_object sets a per-opening sill height', String(r.spec.openings[0].sillFt));
+r = apply(r.spec, [{ type: 'update_object', targetId: 'opening-0', field: 'sillFt', value: 99 }]);
+ok(r.spec.openings[0].sillFt === 24, 'sillFt clamps to a sane ceiling', String(r.spec.openings[0].sillFt));
+r = apply(r.spec, [{ type: 'update_object', targetId: 'opening-0', field: 'sillFt', value: -1 }]);
+ok(!('sillFt' in r.spec.openings[0]), 'a negative/blank sill clears the override (back to the type default)');
 // fixture on an upper floor keeps its level + elevation
 r = apply(freshSpec(), [{ type: 'add_element', name: 'Loft Tub', category: 'water', x: 4, y: 4, z: 10.45, w: 5, d: 3, h: 2, level: 2 }]);
 const tub = r.spec.elements.find((el) => el.name === 'Loft Tub');

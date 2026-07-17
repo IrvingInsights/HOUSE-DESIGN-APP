@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ThreeScene, webglAvailable } from '../threeScene.jsx';
 import { PlanView } from '../planView.jsx';
+import { ElevationView } from './elevationView.jsx';
 import {
   applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
   INSULATION_TYPES, resolveInsulation, OPENING_TYPES,
@@ -32,14 +33,14 @@ const CHAPTERS = [
   { id: 'foundation', label: 'Foundation', view: 'plan', planContext: 'foundation', greet: () => 'What the house sits on. Pick the main type below — and the foundation doesn’t have to match the rooms: drop extra footings and drag them under whatever they carry, even outside the walls.' },
   { id: 'shell', label: 'Shell', view: '3d', greet: (d) => `The shell stands ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'}. Pick the wall system and the frame that carries the roof — the timeline and every receipt follow along.` },
   { id: 'roof', label: 'Roof', view: '3d', greet: () => 'Choose how the roof sheds weather and sun. Pick the shape, how steep it runs, what insulates it, and how far it reaches past the walls.' },
-  { id: 'openings', label: 'Openings', view: 'plan', planContext: 'windows', greet: () => 'Place doors and windows where light and paths want them. Slide them along their wall.' },
+  { id: 'openings', label: 'Openings', view: 'wall', planContext: 'windows', greet: () => 'Place doors and windows where light and paths want them. Slide them along their wall.' },
   { id: 'systems', label: 'Systems', view: '3d', greet: () => 'Heat, water, power, waste — the working parts. Each shows its own receipts.' },
   { id: 'finishes', label: 'Finishes', view: '3d', greet: () => 'Materials and surfaces, inside and out — natural or conventional, wall by wall.' }
 ];
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 75 · Jul 16';
+const UPDATE_STAMP = 'update 76 · Jul 16';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -146,7 +147,8 @@ export default function App() {
   const [spec, setSpec] = useState(() => loadStoredSpec() || structuredClone(seedSpec));
   const [selectedId, setSelectedId] = useState(null);
   const [activeChapter, setActiveChapter] = useState('shape');
-  const [viewMode, setViewMode] = useState('plan'); // 'plan' (top-down) | '3d'
+  const [viewMode, setViewMode] = useState('plan'); // 'plan' (top-down) | '3d' | 'wall' (face-on elevation, Openings chapter)
+  const [openWall, setOpenWall] = useState('south'); // which wall the Openings chapter is working on
   const [viewRequest, setViewRequest] = useState({ mode: 'iso', n: 1 });
   const [designs, setDesigns] = useState(loadDesigns); // the keepsake shelf
   const [designsOpen, setDesignsOpen] = useState(false);
@@ -348,6 +350,26 @@ export default function App() {
     const op = spec.openings?.[index]; if (!op || op.wall === 'roof') return;
     const field = op.wall === 'north' || op.wall === 'south' ? 'x' : 'y';
     applyOps([{ type: 'update_object', targetId: `opening-${index}`, field, value: along }]);
+  };
+  // Wall-view (elevation) commits. Position along the wall + sill height land
+  // in ONE dispatch — never two racing calls on the same stale spec.
+  const placeOpening = (index, along, sill) => {
+    const op = spec.openings?.[index]; if (!op || op.wall === 'roof') return;
+    const field = op.wall === 'north' || op.wall === 'south' ? 'x' : 'y';
+    const prof = OPENING_TYPES[op.type] || OPENING_TYPES.window;
+    const curSill = Number.isFinite(Number(op.sillFt)) ? Number(op.sillFt) : prof.sill;
+    const ops = [];
+    if (Math.abs((Number(op[field]) || 0) - along) > 0.01) ops.push({ type: 'update_object', targetId: `opening-${index}`, field, value: along });
+    if (sill != null && Math.abs(sill - curSill) > 0.01) ops.push({ type: 'update_object', targetId: `opening-${index}`, field: 'sillFt', value: sill });
+    if (ops.length) applyOps(ops);
+  };
+  const sizeOpeningOnWall = (index, along, widthFt) => {
+    const op = spec.openings?.[index]; if (!op || op.wall === 'roof') return;
+    const field = op.wall === 'north' || op.wall === 'south' ? 'x' : 'y';
+    const ops = [];
+    if (Math.abs((Number(op[field]) || 0) - along) > 0.01) ops.push({ type: 'update_object', targetId: `opening-${index}`, field, value: along });
+    if (Math.abs((Number(op.widthFt) || 3) - widthFt) > 0.01) ops.push({ type: 'update_object', targetId: `opening-${index}`, field: 'widthFt', value: widthFt });
+    if (ops.length) applyOps(ops);
   };
   // Openings: drop a door/window on a wall (centered on that wall to start),
   // or pull one out. Position and width are then tuned by dragging on the plan.
@@ -750,7 +772,7 @@ export default function App() {
   const setDischarge = (value) => applyOps([{ type: 'set_shell', field: 'discharge', value }]);
 
   // switching chapters nudges you to the view that chapter is best done in
-  const goChapter = (c) => { setActiveChapter(c.id); if (c.view) setViewMode(c.view === 'plan' ? 'plan' : '3d'); };
+  const goChapter = (c) => { setActiveChapter(c.id); if (c.view) setViewMode(c.view); };
 
   // In the Shape chapter, if a room/element is the shape target, the plan lets
   // you see and drag it (rooms context); otherwise it edits the building
@@ -762,7 +784,16 @@ export default function App() {
     <div className="rz-root">
       {/* SURFACE 1 — the Model / Plan, center stage and full-bleed */}
       <div className="rz-model">
-        {viewMode === 'plan' ? (
+        {viewMode === 'wall' && activeChapter === 'openings' ? (
+          <ElevationView
+            spec={spec}
+            wall={openWall}
+            selectedId={selectedId}
+            onSelect={(index) => setSelectedId(index < 0 ? null : `opening-${index}`)}
+            onPlace={placeOpening}
+            onSizeAlong={sizeOpeningOnWall}
+          />
+        ) : viewMode === 'plan' || viewMode === 'wall' ? (
           <PlanView
             spec={spec}
             selectedRoom={selectedId}
@@ -829,6 +860,9 @@ export default function App() {
       {/* Plan / 3D toggle + (3D only) view angles — the Time Machine owns the
           view while it's open */}
       {!timelineOpen && <div className="rz-views">
+        {activeChapter === 'openings' && (
+          <button className={viewMode === 'wall' ? 'on' : ''} title="The chosen wall face-on — drag doors and windows right on it" onClick={() => setViewMode('wall')}>Wall</button>
+        )}
         <button className={viewMode === 'plan' ? 'on' : ''} onClick={() => setViewMode('plan')}>Plan</button>
         <button className={viewMode === '3d' ? 'on' : ''} onClick={() => setViewMode('3d')}>3D</button>
         {viewMode === '3d' && webglOK && <span className="rz-views-sep" />}
@@ -913,12 +947,19 @@ export default function App() {
                   spec={spec}
                   selectedId={selectedId}
                   level={activeFloor}
+                  wall={openWall}
+                  onWall={setOpenWall}
                   onAdd={addOpening}
                   onAddDormer={addDormer}
                   onRemove={removeOpening}
                   onSize={sizeOpening}
                   onSetField={setOpeningField}
-                  onSelect={(index) => setSelectedId(`opening-${index}`)}
+                  onSelect={(index) => {
+                    if (index < 0) { setSelectedId(null); return; }
+                    setSelectedId(`opening-${index}`);
+                    const o = spec.openings?.[index];
+                    if (o && o.wall !== 'roof') setOpenWall(o.wall); // the wall view follows the pick
+                  }}
                 />
               </>
             )}
@@ -1724,8 +1765,7 @@ const OPENING_GROUPS = [
   { head: 'Roof', keys: ['skylight'] }
 ];
 const DORMER_STYLES = [['gable', 'Gable dormer', 'peaked doghouse'], ['shed', 'Shed dormer', 'single slope']];
-function OpeningsControls({ spec, selectedId, level = 1, onAdd, onAddDormer, onRemove, onSize, onSetField, onSelect }) {
-  const [wall, setWall] = useState('south');
+function OpeningsControls({ spec, selectedId, level = 1, wall = 'south', onWall, onAdd, onAddDormer, onRemove, onSize, onSetField, onSelect }) {
   const openings = spec.openings || [];
   const onThisFloor = (o) => o.wall === 'roof' ? level === 1 : Number(o.level || 1) === level;
   const floorWord = level === 1 ? 'ground floor' : floorLabel(spec, level).toLowerCase();
@@ -1733,8 +1773,8 @@ function OpeningsControls({ spec, selectedId, level = 1, onAdd, onAddDormer, onR
     <div className="rz-found">
       {level > 1 && <div className="rz-shape-note" style={{ marginBottom: 6 }}>Placing on the <b>{floorWord}</b> — switch floors with the Floor selector (top left). A window here goes in the upper wall; if the roof covers that wall it opens a dormer to meet it.</div>}
       <label className="rz-field">
-        <span>Add to which wall</span>
-        <select value={wall} onChange={(e) => setWall(e.target.value)}>
+        <span>Which wall — shown face-on in the Wall view</span>
+        <select value={wall} onChange={(e) => onWall(e.target.value)}>
           {WALL_SIDES.map((side) => <option key={side} value={side}>{WALL_SIDE_LABELS[side]}{side === 'south' ? ' — the sunny face' : ''}</option>)}
         </select>
       </label>
@@ -1785,6 +1825,10 @@ function OpeningsControls({ spec, selectedId, level = 1, onAdd, onAddDormer, onR
                 {sel && o.wall !== 'roof' && (
                   <div className="rz-open-detail">
                     <label className="rz-field rz-field-num">
+                      <span>Bottom edge above the floor (sill)</span>
+                      <NumInput value={Math.round((Number.isFinite(Number(o.sillFt)) ? Number(o.sillFt) : prof.sill) * 10) / 10} min={0} max={20} step={0.5} unit="ft" onCommit={(v) => onSetField(i, 'sillFt', v)} />
+                    </label>
+                    <label className="rz-field rz-field-num">
                       <span>Shade eyebrow (overhang)</span>
                       <NumInput value={Number(o.shadeFt) || 0} min={0} max={6} step={0.5} unit="ft" onCommit={(v) => onSetField(i, 'shadeFt', v)} />
                     </label>
@@ -1811,7 +1855,7 @@ function OpeningsControls({ spec, selectedId, level = 1, onAdd, onAddDormer, onR
           })}
         </div>
       )}
-      <div className="rz-shape-note">Tap an opening to size it, add a shade eyebrow, or turn it into a dormer. Slide it along its wall by dragging on the plan.</div>
+      <div className="rz-shape-note">The Wall view shows this wall face-on: drag a door or window to slide it along or lift it up and down; drag its side handles to widen it. Tap one here for its numbers.</div>
     </div>
   );
 }
