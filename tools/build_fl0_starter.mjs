@@ -41,14 +41,13 @@ addRoom('kitchen', 'Kitchen', 'service', 14, 18, 10, 10);
 addRoom('great', 'Great Room', 'living', 0, 21, 14, 7);
 // tower studio (level 2) over the east kitchen/pantry bay
 apply([{ type: 'set_shell', field: 'storeys', value: '2' }]);
-spec.rooms.push({ id: 'tower-studio', name: 'Tower Studio', type: 'living', x: 14, y: 10, w: 10, d: 8, level: 2 });
+spec.rooms.push({ id: 'tower-studio', name: 'Tower Studio', type: 'living', x: 14, y: 0, w: 10, d: 8, level: 2 });
 // its extent plate = the tower footprint; tower storey ~9.8 ft to hit 19.8/21
 spec.elements = (spec.elements || []).filter((e) => e.category !== 'floor');
-spec.elements.push({ id: 'storey-2-extent', name: 'Tower extent', category: 'floor', level: 2, x: 14, y: 10, w: 10, d: 8, h: 0.4, z: 10 });
-// The app measures a tower storey from the sloping main roof at the tower's
-// spot (~12.5-14.5 ft there), not from the flat tower floor — 7 ft lands the
-// tower roof at ~19.5-21.5, matching the drawn EL 19'-9" / 21'-0".
-apply([{ type: 'set_storey_height', level: 2, value: 7 }]);
+spec.elements.push({ id: 'storey-2-extent', name: 'Tower extent', category: 'floor', level: 2, x: 14, y: 0, w: 10, d: 8, h: 0.4, z: 10 });
+// NE corner (Daniel's revision): the main roof is LOW there (10-12 ft), so a
+// 9 ft tower storey lands its roof at ~19-21 — the drawn EL 19'-9" / 21'-0".
+apply([{ type: 'set_storey_height', level: 2, value: 9 }]);
 
 // greenhouse band along the south, OUTSIDE the envelope (A-101/A-301)
 spec.rooms.push({ id: 'greenhouse', name: 'Greenhouse (isolated sunspace)', type: 'plant', x: 0, y: 28, w: 18, d: 8, level: 1 });
