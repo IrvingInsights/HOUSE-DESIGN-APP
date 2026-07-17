@@ -678,6 +678,30 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         }
         return Math.min(elevAt(level), (roofSpec.highWallHeightFt || 10) - 0.45);
       };
+      // A storey's wall rises TO ITS OWN ROOF wherever nothing stands above
+      // it — the tower's walls go to the roof plane and rake to match it
+      // (shed tiers; a flat wall top under a sloped roof left a wedge of open
+      // air). Where a storey above stands on the stretch, the wall stops at
+      // that storey's floor as before. A PORCH ring has no roof to meet.
+      const tierWallTop = (lv, zPos) => {
+        const base = elevAt(lv) + heightAt(lv);
+        if (roofSpec.roofType !== 'shed') return base;
+        const p = upperPlateRect(spec, lv) || { x: 0, y: 0, w: width, d: depth };
+        const slopeT = tierPitchOf(lv) ?? (depth > 0 ? (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) / depth : 0);
+        return base + slopeT * clamp(zPos - p.y, 0, Math.max(0, p.d));
+      };
+      const coveredJustAbove = (lv, px, pz) => {
+        for (let up = lv + 1; up <= Math.ceil(storeys); up += 1) {
+          if (heightAt(up) <= 0) continue;
+          const r = upperPlateRect(spec, up) || { x: 0, y: 0, w: width, d: depth };
+          if (px > r.x + 0.05 && px < r.x + r.w - 0.05 && pz > r.y + 0.05 && pz < r.y + r.d - 0.05) return true;
+        }
+        return false;
+      };
+      const ringIsPorch = (lv) => {
+        const elP = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === lv);
+        return elP?.topTreatment === 'porch';
+      };
       const pushSideBoxes = (side, totalH, thickness, place) => {
         const groundH = Math.max(1, totalH - storeyLift);
         // Where an upper storey stands ON this side (its extent touches the
@@ -719,9 +743,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const p = upperPlateRect(spec, level) || { x: 0, y: 0, w: width, d: depth };
             // whole-footprint storeys keep the classic stacked seat; set-back
             // designs put every storey at its ENGINE floor elevation
-            const yTop = anySetback ? elevAt(level) + uH : groundH + upAbove(level) + uH;
             const edgeZ = side === 'north' ? p.y : side === 'south' ? p.y + p.d : p.y + p.d / 2;
             const edgeX = side === 'west' ? p.x : side === 'east' ? p.x + p.w : p.x + p.w / 2;
+            const probeZ = side === 'north' ? p.y + 0.3 : side === 'south' ? p.y + p.d - 0.3 : edgeZ;
+            const exposedNS = anySetback && (side === 'north' || side === 'south')
+              && !coveredJustAbove(level, edgeX, probeZ) && !ringIsPorch(level);
+            const yTop = anySetback
+              ? (exposedNS ? tierWallTop(level, edgeZ) : elevAt(level) + uH)
+              : groundH + upAbove(level) + uH;
             const yBot = anySetback ? bandSeatY(level, edgeX, edgeZ) : groundH + upAbove(level);
             const bH = yTop - yBot;
             if (bH < 0.05) continue;
@@ -943,11 +972,20 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
                 : (side === 'west' ? p.x + tU / 2 : p.x + p.w - tU / 2);
               const z0 = clamp(p.y, 0, depth); const z1 = clamp(p.y + p.d, 0, depth);
               if (z1 - z0 < 0.1) return;
-              const yTop = elevAt(level) + uH;
               const yBot = Math.min(bandSeatY(level, xAt, z0), bandSeatY(level, xAt, z1));
-              if (yTop - yBot < 0.05) return;
-              const band = box(tU, yTop - yBot, z1 - z0, xAt, (yBot + yTop) / 2, (z0 + z1) / 2, wallMatOf(u));
-              wallMeshSpecs.push({ side, storey: 'upper', level, meshes: [band] });
+              const exposedEW = roofSpec.roofType === 'shed'
+                && !coveredJustAbove(level, xAt + (side === 'west' ? 0.3 : -0.3), (z0 + z1) / 2)
+                && !ringIsPorch(level);
+              // exposed side walls rake with the storey's own roof; covered
+              // ones stop flat at the floor of the storey above
+              const band = exposedEW
+                ? rakedPieceZ(xAt, tU, z0, z1, yBot, tierWallTop(level, z0), tierWallTop(level, z1), wallMatOf(u))
+                : (() => {
+                  const yTop = elevAt(level) + uH;
+                  if (yTop - yBot < 0.05) return null;
+                  return box(tU, yTop - yBot, z1 - z0, xAt, (yBot + yTop) / 2, (z0 + z1) / 2, wallMatOf(u));
+                })();
+              if (band) wallMeshSpecs.push({ side, storey: 'upper', level, meshes: [band] });
             });
           }
         }
