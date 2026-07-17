@@ -826,6 +826,13 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                   stroke="var(--active-line)" strokeWidth={2.4} strokeOpacity={0.001}
                   style={{ cursor: horizontal ? 'ew-resize' : 'ns-resize' }}
                   onPointerDown={(event) => startOpeningDrag(event, index, o)}
+                  onContextMenu={(event) => {
+                    if (!onContext) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onSelect?.(`opening-${index}`);
+                    onContext(`opening-${index}`, event.clientX, event.clientY);
+                  }}
                 />
               )}
             </g>

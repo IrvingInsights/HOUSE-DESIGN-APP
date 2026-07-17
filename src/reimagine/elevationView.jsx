@@ -16,7 +16,7 @@ import { resolveWallSide, upperPlateRect } from '../engine.js';
 const snapHalf = (v) => Math.round(v * 2) / 2;
 const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
-export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSizeAlong }) {
+export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSizeAlong, onContext = null }) {
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
   const shell = spec.shell || {};
@@ -221,6 +221,12 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
                 opacity={isGhost ? 0.8 : 1}
                 style={{ cursor: 'move' }}
                 onPointerDown={(e) => startDrag(e, i, 'move')}
+                onContextMenu={(e) => {
+                  if (!onContext) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onContext(i, e.clientX, e.clientY);
+                }}
               />
               {/* a center mullion so glazing reads as a window */}
               {prof.glazed && prof.h > 1.2 && (

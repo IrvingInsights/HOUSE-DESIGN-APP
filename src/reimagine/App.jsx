@@ -40,7 +40,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 82 · Jul 17';
+const UPDATE_STAMP = 'update 83 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -794,6 +794,7 @@ export default function App() {
             onSelect={(index) => setSelectedId(index < 0 ? null : `opening-${index}`)}
             onPlace={placeOpening}
             onSizeAlong={sizeOpeningOnWall}
+            onContext={timelineOpen ? null : (index, x, y) => openContext(`opening-${index}`, x, y)}
           />
         ) : viewMode === 'plan' || viewMode === 'wall' ? (
           <PlanView
@@ -962,6 +963,7 @@ export default function App() {
                     const o = spec.openings?.[index];
                     if (o && o.wall !== 'roof') setOpenWall(o.wall); // the wall view follows the pick
                   }}
+                  onContext={(index, x, y) => openContext(`opening-${index}`, x, y)}
                 />
               </>
             )}
@@ -1224,6 +1226,36 @@ export default function App() {
 
       {/* right-click menu — quick actions on whatever was tapped */}
       {ctxMenu && (() => {
+        // Openings get their own quick menu (right-click on the Wall view or
+        // the plan): rename, duplicate onto a free stretch, tune, remove.
+        if (String(ctxMenu.id).startsWith('opening-')) {
+          const oi = Number(String(ctxMenu.id).replace('opening-', ''));
+          const op = spec.openings?.[oi];
+          if (!op) return null;
+          const prof = OPENING_TYPES[op.type] || OPENING_TYPES.window;
+          const styleO = { left: Math.min(ctxMenu.x, window.innerWidth - 230), top: Math.min(ctxMenu.y, window.innerHeight - 190) };
+          return (
+            <div className="rz-ctx" style={styleO} onPointerDown={(e) => e.stopPropagation()}>
+              <div className="rz-ctx-title">{op.label || prof.label}</div>
+              <button onClick={() => {
+                setCtxMenu(null);
+                const name = window.prompt('Name this opening:', op.label || prof.label);
+                if (name && name.trim()) setOpeningField(oi, 'name', name.trim());
+              }}>Rename…</button>
+              <button onClick={() => {
+                addOpening(op.wall, op.type, Number(op.level || 1), {
+                  widthFt: Number(op.widthFt) || prof.defaultW,
+                  ...(Number(op.tiltDeg) > 0 ? { tiltDeg: op.tiltDeg } : {}),
+                  ...(Number(op.shadeFt) > 0 ? { shadeFt: op.shadeFt } : {}),
+                  ...(op.dormerStyle ? { dormerStyle: op.dormerStyle } : {})
+                });
+                setCtxMenu(null);
+              }}>Duplicate</button>
+              <button onClick={() => { setSelectedId(`opening-${oi}`); if (op.wall !== 'roof') setOpenWall(op.wall); setCtxMenu(null); }}>Size &amp; details…</button>
+              <button className="rz-ctx-danger" onClick={() => { removeOpening(oi); setSelectedId(null); setCtxMenu(null); }}>Remove opening</button>
+            </div>
+          );
+        }
         const room = spec.rooms.find((r) => r.id === ctxMenu.id);
         const el = room ? null : (spec.elements || []).find((e) => e.id === ctxMenu.id);
         const obj = room || el;
@@ -1785,7 +1817,7 @@ function StoreysControl({ spec, floors, onAddFloor, onRemoveFloor, onResizeFloor
 // roof. Openings carry the floor picked in the Floor selector — a 2nd-floor
 // window goes in the upper wall, and a dormer opens the roof to meet it.
 const DORMER_STYLES = [['gable', 'Gable dormer', 'peaked doghouse'], ['shed', 'Shed dormer', 'single slope']];
-function OpeningsControls({ spec, selectedId, level = 1, wall = 'south', onWall, onAdd, onAddDormer, onRemove, onSize, onSetField, onSelect }) {
+function OpeningsControls({ spec, selectedId, level = 1, wall = 'south', onWall, onAdd, onAddDormer, onRemove, onSize, onSetField, onSelect, onContext = null }) {
   const openings = spec.openings || [];
   const onThisFloor = (o) => o.wall === 'roof' ? level === 1 : Number(o.level || 1) === level;
   const floorWord = level === 1 ? 'ground floor' : floorLabel(spec, level).toLowerCase();
@@ -1851,7 +1883,10 @@ function OpeningsControls({ spec, selectedId, level = 1, wall = 'south', onWall,
             return (
               <div key={i}>
                 <div className={`rz-run-row${sel ? ' on' : ''}`}>
-                  <button type="button" className="rz-run-name" onClick={() => onSelect(sel ? -1 : i)}>
+                  <button
+                    type="button" className="rz-run-name" onClick={() => onSelect(sel ? -1 : i)}
+                    onContextMenu={(e) => { if (!onContext) return; e.preventDefault(); onContext(i, e.clientX, e.clientY); }}
+                  >
                     {o.label || prof.label} <small>{o.wall}</small>
                   </button>
                   <label className="rz-field rz-field-num rz-run-size">
