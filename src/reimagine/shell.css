@@ -733,3 +733,13 @@
 .rz-color-row { display: flex; align-items: center; gap: 8px; }
 .rz-color-row select { flex: 1; }
 .rz-swatch { flex: 0 0 auto; width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--line, #cac8bb); }
+
+/* per-room door/window adder on the room card */
+.rz-card-open { display: flex; align-items: center; gap: 6px; margin: 6px 0 2px; }
+.rz-card-open select { flex: 1; min-width: 0; }
+.rz-card-open-side { font-size: 12.5px; color: var(--earth, #565a4f); }
+.rz-card-open button {
+  padding: 7px 10px; font-size: 13px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--line, #dbd9ce); border-radius: 8px; background: var(--paper, #FBFAF6); color: inherit;
+}
+.rz-card-open button:hover { border-color: var(--active-line, #3C6472); }
