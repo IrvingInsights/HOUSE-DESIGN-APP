@@ -16,6 +16,7 @@ import {
   resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms } from '../placement.js';
+import { STARTER_DESIGNS } from './starters.js';
 import '../styles.css';
 import './shell.css';
 
@@ -38,7 +39,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 70 · Jul 16';
+const UPDATE_STAMP = 'update 71 · Jul 16';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -992,6 +993,23 @@ export default function App() {
                     }}
                   >📋 Copy design code (for Claude)</button>
                   {saveFlash && <div className="rz-designs-flash">{saveFlash}</div>}
+                  {STARTER_DESIGNS.map((st) => (
+                    <div key={st.id} className="rz-designs-item">
+                      <button
+                        className="rz-designs-open"
+                        title={st.blurb}
+                        onClick={() => {
+                          if (!window.confirm('Open the "' + st.name + '" starter? Your current design stays one Ctrl+Z away (or save it first).')) return;
+                          commitSpec(structuredClone(st.spec));
+                          setSelectedId(null);
+                          setDesignsOpen(false);
+                        }}
+                      >
+                        <b>★ {st.name}</b>
+                        <small>{st.blurb}</small>
+                      </button>
+                    </div>
+                  ))}
                   {designs.length === 0
                     ? <div className="rz-shape-note">Nothing saved yet. “Save this design” keeps a copy here, so you can start a new one and come back to this whenever you like.</div>
                     : designs.map((d) => (
