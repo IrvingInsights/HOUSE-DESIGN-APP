@@ -1633,7 +1633,34 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         }
       });
 
-      (spec.elements || []).forEach((element) => {
+      // A greenhouse ROOM that reaches past the conditioned walls IS the
+      // glazed annex — its framing and glazing materialize automatically over
+      // the outside portion (kneewall, timber posts and rafters, sloped glass
+      // roof off the house wall), no separate element needed. Tapping the
+      // glass selects the room. Skipped when a dedicated greenhouse element
+      // already covers it, or the room is fully interior (a conservatory zone).
+      const plantAnnexes = [];
+      (spec.rooms || []).forEach((room) => {
+        if (room.type !== 'plant' || Number(room.level || 1) !== 1) return;
+        const rx = Number(room.x) || 0; const ry = Number(room.y) || 0;
+        const rw = Number(room.w) || 0; const rd = Number(room.d) || 0;
+        const outs = [
+          { out: ry + rd - depth, rect: { x: Math.max(0, rx), y: Math.max(ry, depth), w: Math.min(rx + rw, width) - Math.max(0, rx), d: ry + rd - Math.max(ry, depth) } },
+          { out: -ry, rect: { x: Math.max(0, rx), y: ry, w: Math.min(rx + rw, width) - Math.max(0, rx), d: Math.min(ry + rd, 0) - ry } },
+          { out: rx + rw - width, rect: { x: Math.max(rx, width), y: Math.max(0, ry), w: rx + rw - Math.max(rx, width), d: Math.min(ry + rd, depth) - Math.max(0, ry) } },
+          { out: -rx, rect: { x: rx, y: Math.max(0, ry), w: Math.min(rx + rw, 0) - rx, d: Math.min(ry + rd, depth) - Math.max(0, ry) } }
+        ].filter((c) => c.out > 1.5 && c.rect.w > 2.5 && c.rect.d > 1.5);
+        if (!outs.length) return;
+        const best = outs.reduce((a, b) => (a.out >= b.out ? a : b));
+        const covered = (spec.elements || []).some((e) => e.category === 'greenhouse'
+          && e.x < rx + rw && e.x + e.w > rx && e.y < ry + rd && e.y + e.d > ry);
+        if (covered) return;
+        plantAnnexes.push({
+          id: room.id, name: room.name, category: 'greenhouse', level: 1, z: 0,
+          x: best.rect.x, y: best.rect.y, w: best.rect.w, d: best.rect.d, h: 0
+        });
+      });
+      [...(spec.elements || []), ...plantAnnexes].forEach((element) => {
         if (!layers.elements || (layers.hiddenCats || []).includes(element.category || 'custom')) return;
         let elementHeight = element.h || 1.2;
         let elevation = Number(element.z || 0);
