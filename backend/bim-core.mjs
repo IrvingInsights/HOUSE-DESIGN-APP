@@ -885,7 +885,7 @@ function objectBounds(spec, object) {
   // dropped and dragged well outside the footprint, not pinned to its edge.
   // (Checked by CATEGORY, so it holds at placement time too, before the object
   // is in spec.elements.)
-  const isSiteObject = object?.category === 'foundation' || object?.category === 'outbuilding';
+  const isSiteObject = object?.category === 'foundation' || object?.category === 'outbuilding' || object?.category === 'deck';
   const own = Math.max(Number(object?.w) || 0, Number(object?.d) || 0);
   const margin = (isPlacedElement || isOutdoorSpace || isSiteObject)
     ? Math.max(gridSize, pad + 24, own + 8)

@@ -3661,6 +3661,10 @@ export function deriveDesign(spec, wallSections) {
   // The greenhouse prices by its REAL footprint (a budget variable, $/sf) —
   // a stretched greenhouse shouldn't cost the same as the 12x8 default.
   const greenhouseCostSf = Number(spec.shell?.greenhouseCostSf ?? 62.5);
+  // Placed decks price by their real footprint: framing + boards + railing.
+  const deckCost = (spec.elements || [])
+    .filter((el) => el.category === 'deck')
+    .reduce((sum, el) => sum + Math.max(16, (Number(el.w) || 10) * (Number(el.d) || 8)) * 16, 0);
   const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => {
     if (!outdoorItemPresent(spec, item)) return sum;
     if (item.key === 'greenhouse') {
@@ -3669,7 +3673,7 @@ export function deriveDesign(spec, wallSections) {
         .reduce((s, element) => s + Math.max(24, (Number(element.w) || item.w) * (Number(element.d) || item.d)) * greenhouseCostSf, 0);
     }
     return sum + item.cost;
-  }, 0) + outbuildingCost + canopyCost;
+  }, 0) + outbuildingCost + canopyCost + deckCost;
 
   // Floor assembly = finished floor over the whole heated area + the structural
   // subfloor deck under the ground floor (a slab foundation is its own deck, so
@@ -3843,6 +3847,7 @@ export function deriveDesign(spec, wallSections) {
     }
     if (outbuildingCost > 0) lines.push(rline('Outbuildings', outbuildingCost, null, '', null, 'each footprint × its construction rate'));
     if (canopyCost > 0) lines.push(rline('Porch / deck canopies', canopyCost, canopyCost / 14, 'sf covered', 14, 'light roof on posts'));
+    if (deckCost > 0) lines.push(rline('Decks', deckCost, deckCost / 16, 'sf of deck', 16, 'framing + boards + railing'));
     costReceipts.outdoors = lines;
   }
   { // walls
