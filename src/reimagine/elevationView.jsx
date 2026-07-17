@@ -28,6 +28,11 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   const pitch = Number(shell.roofPitch || 0.32);
   const hS = Number(shell.southWallHeightFt) || Number(shell.wallHeightFt) || 10;
   const hN = Number(shell.northWallHeightFt) || Number(shell.wallHeightFt) || 10;
+  const hE = Number(shell.eastWallHeightFt) || Number(shell.wallHeightFt) || 10;
+  const hW = Number(shell.westWallHeightFt) || Number(shell.wallHeightFt) || 10;
+  // The shed's fall axis: a differing east/west pair means the roof falls
+  // east or west, so the NORTH/SOUTH faces rake instead of the east/west ones.
+  const shedEW = roofType === 'shed' && Math.abs(hE - hW) >= 0.05 && Math.abs(hS - hN) < 0.05;
   const groundH = Number(resolveWallSide(spec, wall).heightFt) || 10;
   const width = Number(shell.widthFt) || 24;
   const depth = Number(shell.depthFt) || 24;
@@ -51,6 +56,13 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
     (touches ? touching : setBack).push({ lv, s0, s1, y0: elevOf(lv), y1: elevOf(lv) + h });
   }
   const groundProfileAt = (t) => {
+    if (roofType === 'shed' && shedEW) {
+      if (wall === 'east') return hE;
+      if (wall === 'west') return hW;
+      // north/south walls rake from the west end to the east end; t runs in
+      // plan x here (flipX only mirrors the drawing, not the measurement)
+      return hW + (hE - hW) * (t / run);
+    }
     if (roofType === 'shed') {
       if (wall === 'south') return hS;
       if (wall === 'north') return hN;

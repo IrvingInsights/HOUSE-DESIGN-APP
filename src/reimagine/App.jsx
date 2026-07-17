@@ -6,7 +6,7 @@ import {
   applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
   INSULATION_TYPES, resolveInsulation, OPENING_TYPES,
   FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS, storeyHeightFt, storeyElevationFt,
-  footprintPolygon, polygonArea, footprintBounds, footprintEdges
+  footprintPolygon, polygonArea, footprintBounds, footprintEdges, roofProfile
 } from '../../backend/bim-core.mjs';
 import {
   seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS,
@@ -14,7 +14,7 @@ import {
   floorCount, floorLabel, storeyInfo, upperPlateRect, utilitiesOf, resolveOverhangs,
   WALL_SIDES, WALL_SIDE_LABELS, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS,
   ROOM_PRESETS, planNewRoomPlacements, roomPresetFromName,
-  resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons
+  resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons, downloadFile
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms } from '../placement.js';
 import { STARTER_DESIGNS } from './starters.js';
@@ -49,7 +49,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 97 · Jul 17';
+const UPDATE_STAMP = 'update 98 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -172,9 +172,9 @@ export default function App() {
   // silently snapping (and the numbers double as a diagnostic to report).
   const [moveNote, setMoveNote] = useState(null);
   const [heading, setHeading] = useState(0); // camera compass heading (radians) for the overlay compass
-  const [askText, setAskText] = useState('');
-  const [askEcho, setAskEcho] = useState(null);
+  // (the Ask bar's state lived here — parked with the bar, see SURFACE 4b)
   const [budgetOpen, setBudgetOpen] = useState(false);
+  const [flagsOpen, setFlagsOpen] = useState(false);
   const [activeFloor, setActiveFloor] = useState(1); // 1=ground, 2/3=upper, BASEMENT_LEVEL=basement
   // The Time Machine: open/closed, playhead in weeks, playing, Daniel's custom
   // phase order (null = the builder's order), the tapped phase, and the last
@@ -818,12 +818,27 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  // Typed numbers get the same honesty drags have: any NumInput anywhere that
+  // has to adjust what was typed announces it here, in the same note bar.
+  useEffect(() => {
+    const onAdjusted = (e) => {
+      const { asked, used, min, max, unit } = e.detail || {};
+      const u = unit === 'ft' ? ' ft' : unit ? ` ${unit}` : '';
+      setMoveNote({ text: `You typed ${asked}${u} — this control goes from ${min} to ${max}, so I used ${used}${u}.` });
+    };
+    window.addEventListener('rz-number-adjusted', onAdjusted);
+    return () => window.removeEventListener('rz-number-adjusted', onAdjusted);
+  }, []);
+
   // --- structure: whole-house wall system + frame ----------------------------
   // ONE dispatch for all four sides — four separate calls would race on the
   // same base spec and only the last would land (a bug this app has had).
   const setAllWalls = (value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, field: 'assembly', value })));
   // Direct shed wall heights — the two numbers that ARE the shed roof.
+  // One pair per fall axis: naming south/north keeps (or returns to) the
+  // north/south fall; naming east/west moves the fall to that axis.
   const setShedHeights = (southFt, northFt) => applyOps([{ type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: clamp(Number(southFt) || 10, 2, 40), northWallHeightFt: clamp(Number(northFt) || 10, 2, 40) }]);
+  const setShedHeightsEW = (eastFt, westFt) => applyOps([{ type: 'set_roof_profile', roofType: 'shed', eastWallHeightFt: clamp(Number(eastFt) || 10, 2, 40), westWallHeightFt: clamp(Number(westFt) || 10, 2, 40) }]);
   // Each upper floor gets its own construction (bale below, a framed +
   // charred 2nd floor, a cordwood tower). ONE batched dispatch per floor.
   const setUpperWalls = (level, field, value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, level, field, value })));
@@ -854,9 +869,18 @@ export default function App() {
   const setRoofInsulation = (value) => applyOps([{ type: 'set_utility', field: 'roofInsulation', value }]);
   const setOverhang = (wall, value) => applyOps([{ type: 'set_overhang', wall, value: String(clamp(Number(value) || 0, 0, 12)) }]);
   const setShedFall = (drainTo, fallFt) => {
+    // All four directions: the water runs TOWARD drainTo, so that side gets
+    // the LOW wall and the opposite side the high one. The high eave keeps
+    // the tallest height the shed already has.
     const wh = Number(spec.shell.wallHeightFt) || 10;
-    const hi = Math.max(7, Number(spec.shell.southWallHeightFt) || wh, Number(spec.shell.northWallHeightFt) || wh);
+    const hi = Math.max(7,
+      Number(spec.shell.southWallHeightFt) || wh, Number(spec.shell.northWallHeightFt) || wh,
+      Number(spec.shell.eastWallHeightFt) || 0, Number(spec.shell.westWallHeightFt) || 0);
     const lo = Math.max(2, hi - Math.max(0.5, Number(fallFt) || 2));
+    if (drainTo === 'east' || drainTo === 'west') {
+      applyOps([{ type: 'set_roof_profile', roofType: 'shed', eastWallHeightFt: drainTo === 'west' ? hi : lo, westWallHeightFt: drainTo === 'west' ? lo : hi }]);
+      return;
+    }
     applyOps([{ type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: drainTo === 'north' ? hi : lo, northWallHeightFt: drainTo === 'north' ? lo : hi }]);
   };
   const setGutters = (value) => applyOps([{ type: 'set_shell', field: 'gutters', value }]);
@@ -936,8 +960,37 @@ export default function App() {
         <span className="rz-dot" />
         {flags.length === 0
           ? <span className="rz-status-item rz-clear">all clear</span>
-          : <span className="rz-status-item rz-flag">{flags.length} to look at</span>}
+          : (
+            <button
+              type="button"
+              className="rz-status-item rz-flag rz-flag-btn"
+              title="Tap to see what to look at — and how to fix it"
+              onClick={() => setFlagsOpen((v) => !v)}
+            >{flags.length} to look at</button>
+          )}
       </div>
+
+      {/* The flags card — every "to look at" opens to its plain-language
+          reason AND its fix. Same honesty rule as the receipts: never show a
+          count the user can't open. Auto-closes when the design comes clean. */}
+      {flagsOpen && flags.length > 0 && (
+        <div className="rz-flags-card">
+          <div className="rz-flags-head">
+            <b>Worth a look</b>
+            <button className="rz-flags-close" title="Close" onClick={() => setFlagsOpen(false)}>×</button>
+          </div>
+          {[...flags].sort((a, b) => (a.severity === 'critical' ? -1 : 1) - (b.severity === 'critical' ? -1 : 1)).map((f, i) => (
+            <div key={i} className={`rz-flags-item ${f.severity === 'critical' ? 'rz-flags-critical' : ''}`}>
+              <div className="rz-flags-title">
+                <span className="rz-flags-dot" aria-hidden="true" />
+                {f.title}
+              </div>
+              {f.fix && <div className="rz-flags-fix">{f.fix}</div>}
+            </div>
+          ))}
+          <div className="rz-flags-foot">These are advice, not stop signs — the model keeps working either way.</div>
+        </div>
+      )}
 
 
       {/* undo / redo — top-left, always available (Ctrl+Z / Ctrl+Y) */}
@@ -1110,6 +1163,7 @@ export default function App() {
                 floors={floors}
                 onAllWalls={setAllWalls}
                 onShedHeights={setShedHeights}
+                onShedHeightsEW={setShedHeightsEW}
                 onUpperWalls={setUpperWalls}
                 onFrame={setFrame}
                 onShell={setShellField}
@@ -1197,6 +1251,50 @@ export default function App() {
                       setTimeout(() => setSaveFlash(null), 3500);
                     }}
                   >&#x2913; Paste design code</button>
+                  {/* Files leave the browser: a design saved only in this
+                      browser's storage dies with it (cleared data, another
+                      computer). A file survives — and opens on any machine. */}
+                  <button
+                    className="rz-designs-save"
+                    title="Saves this design as a file in your Downloads — it works on any computer, and survives clearing the browser"
+                    onClick={() => {
+                      const stamp = new Date().toISOString().slice(0, 10);
+                      const base = String(spec.projectName || 'my-house-design').replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '') || 'my-house-design';
+                      downloadFile(`${base}-${stamp}.json`, JSON.stringify({ homesteadDesign: UPDATE_STAMP, spec }, null, 1), 'application/json');
+                      setSaveFlash('Saved to your Downloads folder.');
+                      setTimeout(() => setSaveFlash(null), 3500);
+                    }}
+                  >⬇ Save to a file</button>
+                  <label className="rz-designs-save rz-designs-file" title="Open a design file saved with '⬇ Save to a file' — your current design is auto-saved to this shelf first">
+                    📂 Open a design file…
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const file = e.target.files && e.target.files[0];
+                        e.target.value = '';
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          try {
+                            const parsed = JSON.parse(String(reader.result || ''));
+                            const specIn = parsed.spec && parsed.spec.shell ? parsed.spec : (parsed.shell ? parsed : null);
+                            if (!specIn || !Array.isArray(specIn.rooms)) { setSaveFlash('That file did not look like a design.'); setTimeout(() => setSaveFlash(null), 3500); return; }
+                            if (!specIn.systems) specIn.systems = { structure: '', envelope: '', water: '', energy: '' };
+                            snapshotBeforeReplace();
+                            commitSpec(structuredClone(specIn));
+                            setSelectedId(null);
+                            setSaveFlash('Design opened - your old one is saved on the shelf.');
+                          } catch {
+                            setSaveFlash('Could not read that file.');
+                          }
+                          setTimeout(() => setSaveFlash(null), 3500);
+                        };
+                        reader.readAsText(file);
+                      }}
+                    />
+                  </label>
                   {saveFlash && <div className="rz-designs-flash">{saveFlash}</div>}
                   {STARTER_DESIGNS.map((st) => (
                     <div key={st.id} className="rz-designs-item">
@@ -1447,23 +1545,10 @@ export default function App() {
         />
       )}
 
-      {/* SURFACE 4b — the Ask bar (a shortcut, never the only way) */}
-      {!timelineOpen && <form
-        className="rz-ask"
-        onSubmit={(e) => { e.preventDefault(); if (askText.trim()) { setAskEcho(askText.trim()); setAskText(''); } }}
-      >
-        {askEcho && (
-          <div className="rz-ask-echo">
-            Heard: “{askEcho}”. Talking-to-change is coming — for now, drag rooms in Plan and grab their corners to resize.
-          </div>
-        )}
-        <input
-          value={askText}
-          onChange={(e) => setAskText(e.target.value)}
-          placeholder="Tell me what to change…  (or just drag it in the plan)"
-        />
-        <button type="submit" aria-label="Send">→</button>
-      </form>}
+      {/* SURFACE 4b — the Ask bar is PARKED until talking-to-change is real.
+          A promise in the app's most prominent spot must work the first time
+          it's tried; until the wire exists, the spot stays clean. The old
+          form lived here — bring it back WITH a working handler, not before. */}
     </div>
   );
 }
@@ -1898,12 +1983,22 @@ function FloorBar({ spec, floors, activeFloor, hasBasement, onSelect, onAdd, onR
 
 // A number field that commits ONCE on blur/Enter — typing digits must never
 // dispatch per keystroke (clamps would fight the digits).
+// SAME HONESTY RULE AS DRAGS: when the typed number lands outside the legal
+// range, say so instead of silently correcting it (the app-wide note bar
+// listens for this event — one wire, every number field covered).
 function NumInput({ value, min, max, step = 1, unit = 'ft', onCommit }) {
   const [draft, setDraft] = useState(String(value));
   useEffect(() => { setDraft(String(value)); }, [value]);
   const commit = () => {
     const n = Number(draft);
-    if (Number.isFinite(n) && n !== Number(value)) onCommit(clamp(n, min, max));
+    if (!Number.isFinite(n) || n === Number(value)) return;
+    const used = clamp(n, min, max);
+    if (used !== n) {
+      window.dispatchEvent(new CustomEvent('rz-number-adjusted', {
+        detail: { asked: n, used, min, max, unit }
+      }));
+    }
+    onCommit(used);
   };
   return (
     <span className="rz-num">
@@ -2365,7 +2460,7 @@ function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, on
 // Shell chapter: the structure in three plain choices — what the walls are,
 // what carries the roof, how tall the walls run. The timeline's build order
 // and every receipt follow these.
-function StructureControls({ spec, floors, onAllWalls, onShedHeights, onUpperWalls, onFrame, onShell, onWallSide, onSelectWall, onAddFloor, onRemoveFloor, onLayoutFloors }) {
+function StructureControls({ spec, floors, onAllWalls, onShedHeights, onShedHeightsEW, onUpperWalls, onFrame, onShell, onWallSide, onSelectWall, onAddFloor, onRemoveFloor, onLayoutFloors }) {
   const resolved = WALL_SIDES.map((side) => resolveWallSide(spec, side));
   const wallKeys = new Set(resolved.map((r) => r.assemblyKey));
   const wallVal = wallKeys.size === 1 ? [...wallKeys][0] : '__mixed';
@@ -2380,6 +2475,7 @@ function StructureControls({ spec, floors, onAllWalls, onShedHeights, onUpperWal
   const frameVal = resolveFrameType(spec, 1);
   const heights = new Set(resolved.map((r) => Math.round(r.heightFt * 10)));
   const shed = (spec.shell.roofType || 'gable') === 'shed';
+  const shedAxis = roofProfile(spec.shell).axis;
   return (
     <div className="rz-found">
       <div className="rz-shape-note" style={{ marginTop: 0 }}>
@@ -2387,8 +2483,23 @@ function StructureControls({ spec, floors, onAllWalls, onShedHeights, onUpperWal
       </div>
 
       {/* the plainest numbers FIRST: wall heights (on a shed, the two heights
-          that ARE the roof — one "height for all" would flatten it) */}
-      {shed ? (
+          that ARE the roof — one "height for all" would flatten it). The
+          boxes follow the fall axis: south/north when it falls north or
+          south, east/west when it falls east or west. */}
+      {shed && shedAxis === 'ew' ? (
+        <>
+          <label className="rz-field rz-field-num">
+            <span>East wall height{Number(spec.shell.eastWallHeightFt) >= Number(spec.shell.westWallHeightFt) ? ' — the high eave' : ''}</span>
+            <NumInput value={Number(spec.shell.eastWallHeightFt) || 10} min={2} max={40} step={0.5}
+              onCommit={(v) => onShedHeightsEW(v, Number(spec.shell.westWallHeightFt) || 10)} />
+          </label>
+          <label className="rz-field rz-field-num">
+            <span>West wall height{Number(spec.shell.westWallHeightFt) > Number(spec.shell.eastWallHeightFt) ? ' — the high eave' : ''}</span>
+            <NumInput value={Number(spec.shell.westWallHeightFt) || 10} min={2} max={40} step={0.5}
+              onCommit={(v) => onShedHeightsEW(Number(spec.shell.eastWallHeightFt) || 10, v)} />
+          </label>
+        </>
+      ) : shed ? (
         <>
           <label className="rz-field rz-field-num">
             <span>South wall height{Number(spec.shell.southWallHeightFt) >= Number(spec.shell.northWallHeightFt) ? ' — the high eave' : ''}</span>
@@ -2594,10 +2705,12 @@ function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOver
   const insulKey = resolveInsulation(utilitiesOf(spec).roofInsulation, 'cellulose');
   const overhangs = resolveOverhangs(spec.shell);
   const [perSide, setPerSide] = useState(overhangs.split);
-  const sH = Number(spec.shell.southWallHeightFt || spec.shell.wallHeightFt || 10);
-  const nH = Number(spec.shell.northWallHeightFt || spec.shell.wallHeightFt || 10);
-  const fallNow = Math.round(Math.abs(sH - nH) * 2) / 2;
-  const drainsNow = fallNow < 0.25 ? '' : (sH >= nH ? 'north' : 'south');
+  const shedProfile = roofProfile(spec.shell);
+  const fallNow = Math.round(shedProfile.riseFt * 2) / 2;
+  // Water runs off the LOW side — that IS the drain direction.
+  const drainsNow = fallNow < 0.25 ? '' : shedProfile.lowSide;
+  // The slope's run: the depth when it falls north/south, the width east/west.
+  const shedRunFt = Math.max(1, shedProfile.runFt || Number(spec.shell.depthFt) || 24);
   return (
     <div className="rz-found">
       <label className="rz-field">
@@ -2616,6 +2729,8 @@ function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOver
               {drainsNow === '' && <option value="">Level — pick a direction</option>}
               <option value="north">Falls north — high south wall (solar classic)</option>
               <option value="south">Falls south — high north wall</option>
+              <option value="east">Falls east — high west wall</option>
+              <option value="west">Falls west — high east wall</option>
             </select>
           </label>
           {/* pitch and fall are the same slope said two ways — builders use
@@ -2623,9 +2738,9 @@ function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOver
           <label className="rz-field rz-field-num">
             <span>Steepness (pitch)</span>
             <NumInput
-              value={Math.round(((fallNow / Math.max(1, Number(spec.shell.depthFt) || 24)) * 12) * 10) / 10}
+              value={Math.round(((fallNow / shedRunFt) * 12) * 10) / 10}
               min={0.25} max={8} step={0.25} unit="/12"
-              onCommit={(v) => onShedFall(drainsNow || 'north', clamp((v / 12) * (Number(spec.shell.depthFt) || 24), 0.5, 24))}
+              onCommit={(v) => onShedFall(drainsNow || 'north', clamp((v / 12) * shedRunFt, 0.5, 24))}
             />
           </label>
           <label className="rz-field rz-field-num">

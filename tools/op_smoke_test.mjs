@@ -9,7 +9,7 @@ import {
   applyBimOperations, footprintPolygon, polygonArea, hasCustomFootprint, hasSegmentedFootprint,
   WALL_ASSEMBLIES, FRAME_TYPES, FLOORING_TYPES, SUBFLOOR_TYPES, OPENING_TYPES,
   gradeElevationAt, maxFoundationExposureFt, resolveWallSide, footprintEdges,
-  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, storeyElevationFt, storeyHeightFt
+  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, storeyElevationFt, storeyHeightFt, roofProfile
 } from '../backend/bim-core.mjs';
 
 function near(a, b, eps = 0.01) { return Math.abs(a - b) <= eps; }
@@ -63,6 +63,19 @@ r = apply(freshSpec(), [{ type: 'set_roof', roofType: 'shed', southWallHeightFt:
 ok(r.spec.shell.roofType === 'shed' && r.spec.shell.wallHeightFt === 14, 'set_roof shed profile');
 r = apply(freshSpec(), [{ type: 'set_wall_height', wall: 'south', h: 13 }]);
 ok(r.spec.shell.southWallHeightFt === 13 && r.spec.shell.roofType === 'shed', 'set_wall_height south -> shed');
+// --- east/west shed fall (all four drain directions) --------------------------
+r = apply(freshSpec(), [{ type: 'set_roof_profile', roofType: 'shed', eastWallHeightFt: 14, westWallHeightFt: 10 }]);
+ok(roofProfile(r.spec.shell).axis === 'ew' && roofProfile(r.spec.shell).highSide === 'east' && roofProfile(r.spec.shell).lowSide === 'west', 'set_roof_profile east/west pair -> ew axis, drains west');
+ok(r.spec.shell.wallHeightFt === 14 && near(roofProfile(r.spec.shell).pitch, 4 / 36), 'ew shed: high wall wins, pitch = rise over WIDTH');
+ok(/east wall 14/.test(r.spec.shell.roofNote || ''), 'ew shed roofNote names the east/west walls');
+r = apply(r.spec, [{ type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: 13, northWallHeightFt: 9 }]);
+ok(roofProfile(r.spec.shell).axis === 'ns' && !r.spec.shell.eastWallHeightFt && !r.spec.shell.westWallHeightFt, 'naming south/north returns to ns and clears the east/west pair');
+r = apply(freshSpec(), [{ type: 'set_wall_height', wall: 'west', h: 15 }]);
+ok(r.spec.shell.roofType === 'shed' && roofProfile(r.spec.shell).axis === 'ew' && roofProfile(r.spec.shell).highSide === 'west', 'set_wall_height west -> ew shed, high west');
+r = apply(freshSpec(), [{ type: 'set_roof_profile', roofType: 'shed', eastWallHeightFt: 10, westWallHeightFt: 10 }]);
+ok(r.issues.some((issue) => /flat/i.test(issue.title) && /drain/i.test(issue.title)), 'level east/west shed still flags as flat');
+r = apply(freshSpec(), [{ type: 'set_roof_profile', roofType: 'shed', eastWallHeightFt: 13, westWallHeightFt: 9 }, { type: 'set_shell', field: 'wallHeightFt', value: '11' }]);
+ok(roofProfile(r.spec.shell).axis === 'ns' && !r.spec.shell.eastWallHeightFt, 'global wall height resets the shed to one height (ew pair cleared)');
 r = apply(freshSpec(), [{ type: 'set_overhang', wall: 'south', value: 4 }]);
 ok(r.spec.shell.overhangs?.south === 4, 'set_overhang per side');
 r = apply(freshSpec(), [{ type: 'set_overhang', wall: 'all', value: 2.5 }]);
