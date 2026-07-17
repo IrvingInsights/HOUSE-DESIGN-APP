@@ -119,13 +119,15 @@
   font-size: 14px; line-height: 1.5; color: var(--ink, #22251f);
   margin: 6px 30px 16px 4px;
 }
-.rz-chapters { display: flex; flex-direction: column; gap: 2px; }
+/* two columns: eight chapters in four short rows, so the chapter's actual
+   controls start high in the bar instead of a full screen down */
+.rz-chapters { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 6px; }
 /* the 1–8 selector pinned at the top of the bar, above the chapter's controls */
 .rz-chapters-top { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 60%, transparent); }
 .rz-chapter {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: 8px;
   border: none; background: transparent; cursor: pointer;
-  padding: 10px 11px; border-radius: 11px; text-align: left; font: inherit;
+  padding: 7px 9px; border-radius: 11px; text-align: left; font: inherit;
   color: var(--earth, #565a4f); width: 100%;
 }
 .rz-chapter:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 60%, transparent); }
@@ -136,7 +138,7 @@
   display: grid; place-items: center; font-size: 13px; font-weight: 700;
   background: color-mix(in srgb, var(--sage, #e2ecee) 80%, transparent); color: var(--evergreen, #3c6472);
 }
-.rz-chapter-label { font-size: 15.5px; font-weight: 500; }
+.rz-chapter-label { font-size: 14.5px; font-weight: 500; }
 /* pinned footer of the Trail (outside the scrolling body) — the version must
    be readable without scrolling; darker ink for AA contrast at this size */
 .rz-stamp { flex: 0 0 auto; margin: 8px 4px 0; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 60%, transparent); font-size: 11.5px; color: var(--earth, #565a4f); text-align: right; display: flex; justify-content: space-between; align-items: baseline; }
@@ -711,3 +713,12 @@
    Shares the plan's paper card; the svg scales to fit like the plan does. */
 .rz-elev { width: 100%; height: 100%; display: block; touch-action: none; user-select: none; -webkit-user-select: none; }
 .rz-elev text { font-family: inherit; }
+
+/* Openings: the one-tap add row (Window / Door / Skylight) */
+.rz-open-quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 4px 0 8px; }
+.rz-open-quick button {
+  padding: 10px 4px; font-size: 14px; font-weight: 600;
+  border: 1px solid var(--line, #dbd9ce); border-radius: 9px;
+  background: var(--paper, #FBFAF6); color: inherit; cursor: pointer;
+}
+.rz-open-quick button:hover { border-color: var(--active-line, #3C6472); }

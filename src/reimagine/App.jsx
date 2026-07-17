@@ -40,7 +40,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 77 · Jul 17';
+const UPDATE_STAMP = 'update 78 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -376,9 +376,11 @@ export default function App() {
   const addOpening = (wall, type, level = 1, extras = {}) => {
     const profile = OPENING_TYPES[type] || OPENING_TYPES.window;
     const isRoof = wall === 'roof' || profile.roof;
-    const wallLen = wall === 'north' || wall === 'south' ? Number(spec.shell.widthFt) : Number(spec.shell.depthFt);
     const widthFt = profile.defaultW || 3;
-    const positionFt = isRoof ? Number(spec.shell.widthFt) / 2 : Math.max(0.5, wallLen / 2 - widthFt / 2);
+    // Wall adds send NO position: the engine slides the new opening to the
+    // first free stretch. An explicit center position silently REPLACED any
+    // opening already sitting mid-wall (the add_opening clash rule).
+    const positionFt = isRoof ? Number(spec.shell.widthFt) / 2 : 0;
     applyOps([{ type: 'add_opening', wall: isRoof ? 'roof' : wall, openingType: type, widthFt, positionFt, level: isRoof ? 1 : level, ...extras }]);
   };
   // A dormer is a 2nd-floor+ window carried by a dormer of the chosen style.
@@ -1762,11 +1764,6 @@ function StoreysControl({ spec, floors, onAddFloor, onRemoveFloor, onResizeFloor
 // plan. Every opening type the engine knows is one tap; skylights land on the
 // roof. Openings carry the floor picked in the Floor selector — a 2nd-floor
 // window goes in the upper wall, and a dormer opens the roof to meet it.
-const OPENING_GROUPS = [
-  { head: 'Windows', keys: ['window', 'picture', 'awning', 'clerestory', 'bay', 'raked', 'tilted'] },
-  { head: 'Doors', keys: ['door', 'french', 'slider', 'dutch', 'barn'] },
-  { head: 'Roof', keys: ['skylight'] }
-];
 const DORMER_STYLES = [['gable', 'Gable dormer', 'peaked doghouse'], ['shed', 'Shed dormer', 'single slope']];
 function OpeningsControls({ spec, selectedId, level = 1, wall = 'south', onWall, onAdd, onAddDormer, onRemove, onSize, onSetField, onSelect }) {
   const openings = spec.openings || [];
@@ -1781,32 +1778,49 @@ function OpeningsControls({ spec, selectedId, level = 1, wall = 'south', onWall,
           {WALL_SIDES.map((side) => <option key={side} value={side}>{WALL_SIDE_LABELS[side]}{side === 'south' ? ' — the sunny face' : ''}</option>)}
         </select>
       </label>
-      {OPENING_GROUPS.map((group) => (
-        <div key={group.head} className="rz-open-group">
-          <div className="rz-found-head">{group.head}</div>
-          <div className="rz-found-palette rz-open-palette">
-            {group.keys.map((key) => (
-              <button key={key} type="button" title={`${OPENING_TYPES[key].defaultW}′ to start — drag it along the wall after`} onClick={() => onAdd(wall, key, level)}>
-                <b>{OPENING_TYPES[key].label}</b>
-                <small>{group.head === 'Roof' ? 'on the roof' : `${WALL_SIDE_LABELS[wall].toLowerCase()} wall · ${floorWord}`}</small>
-              </button>
+      {/* One simple add row: the three everyday things, one tap each. Every
+          specialty type lives in a single "something fancier" dropdown — the
+          old 13-button catalog buried the placed-openings list two screens
+          down. Chapter = where openings are born; the tap-a-row panel below
+          (and the Wall view) is where they live. */}
+      <div className="rz-open-quick">
+        {[['window', 'Window'], ['door', 'Door'], ['skylight', 'Skylight']].map(([key, lab]) => (
+          <button key={key} type="button" title={`${OPENING_TYPES[key].defaultW}′ to start — drag it on the Wall view after`} onClick={() => onAdd(wall, key, level)}>
+            + {lab}
+          </button>
+        ))}
+      </div>
+      <label className="rz-field">
+        <span>Something fancier</span>
+        <select
+          value=""
+          onChange={(e) => {
+            const v = e.target.value;
+            if (!v) return;
+            if (v === 'dormer-gable' || v === 'dormer-shed') onAddDormer(wall, v.replace('dormer-', ''), level);
+            else onAdd(wall, v, level);
+          }}
+        >
+          <option value="">Add a special window or door…</option>
+          <optgroup label="Windows">
+            {['picture', 'awning', 'clerestory', 'bay', 'raked', 'tilted'].map((key) => (
+              <option key={key} value={key}>{OPENING_TYPES[key].label}</option>
             ))}
-          </div>
-        </div>
-      ))}
-      {level > 1 && (
-        <div className="rz-open-group">
-          <div className="rz-found-head">Dormers</div>
-          <div className="rz-found-palette rz-open-palette">
-            {DORMER_STYLES.map(([style, lab, note]) => (
-              <button key={style} type="button" title={`A ${style} dormer with a window, on the ${WALL_SIDE_LABELS[wall].toLowerCase()} wall`} onClick={() => onAddDormer(wall, style, level)}>
-                <b>{lab}</b>
-                <small>{note} · {floorWord}</small>
-              </button>
+          </optgroup>
+          <optgroup label="Doors">
+            {['french', 'slider', 'dutch', 'barn'].map((key) => (
+              <option key={key} value={key}>{OPENING_TYPES[key].label}</option>
             ))}
-          </div>
-        </div>
-      )}
+          </optgroup>
+          {level > 1 && (
+            <optgroup label="Dormers">
+              {DORMER_STYLES.map(([style, lab, note]) => (
+                <option key={style} value={`dormer-${style}`}>{lab} — {note}</option>
+              ))}
+            </optgroup>
+          )}
+        </select>
+      </label>
       {openings.some(onThisFloor) && (
         <div className="rz-open-list">
           <div className="rz-found-head">On the {floorWord}</div>
