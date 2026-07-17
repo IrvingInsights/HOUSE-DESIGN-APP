@@ -6,7 +6,7 @@ import {
   applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
   INSULATION_TYPES, resolveInsulation, OPENING_TYPES,
   FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS, storeyHeightFt, storeyElevationFt,
-  footprintPolygon, polygonArea, footprintBounds
+  footprintPolygon, polygonArea, footprintBounds, footprintEdges
 } from '../../backend/bim-core.mjs';
 import {
   seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS,
@@ -49,7 +49,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 92 · Jul 17';
+const UPDATE_STAMP = 'update 93 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -407,6 +407,36 @@ export default function App() {
   };
   // Set any single field on a placed opening (shade eyebrow depth, tilt, dormer).
   const setOpeningField = (index, field, value) => applyOps([{ type: 'update_object', targetId: `opening-${index}`, field, value }]);
+  // Earthship move: the stretch of SOUTH wall behind a greenhouse becomes
+  // COB — thermal mass where the winter sun lands, insulation everywhere
+  // else. Splits the wall into sections (collinear outline points) and sets
+  // just that section's assembly. Plain-rectangle outlines only.
+  const makeMassWallBehind = (room) => {
+    const W = Number(spec.shell.widthFt) || 36;
+    const D = Number(spec.shell.depthFt) || 28;
+    if (Array.isArray(spec.shell.footprint) || spec.shell.footprint === 'round') {
+      setMoveNote({ text: 'The mass-wall shortcut needs a plain rectangular outline — split the south wall by hand in Shell → Wall by wall instead.' });
+      return;
+    }
+    const x0 = Math.round(clamp(Number(room.x) || 0, 0, W) * 2) / 2;
+    const x1 = Math.round(clamp((Number(room.x) || 0) + (Number(room.w) || 0), 0, W) * 2) / 2;
+    if (x1 - x0 < 3) return;
+    if (x1 - x0 >= W - 0.5) {
+      applyOps([{ type: 'set_wall_side', wall: 'south', field: 'assembly', value: 'cob' }]);
+      setMoveNote({ text: 'Earthship move made: the whole south wall is now cob — thermal mass where the sun lands. Ctrl+Z undoes it.' });
+      return;
+    }
+    const poly = [[0, 0], [W, 0], [W, D], ...(x1 < W - 0.1 ? [[x1, D]] : []), ...(x0 > 0.1 ? [[x0, D]] : []), [0, D]];
+    const r1 = applyBimOperations(spec, { operations: [{ type: 'set_footprint', value: JSON.stringify(poly) }] });
+    if (!r1?.spec) return;
+    const edge = footprintEdges(r1.spec).find((e) => e.facing === 'south'
+      && Math.min(e.x0, e.x1) >= x0 - 0.3 && Math.max(e.x0, e.x1) <= x1 + 0.3);
+    const r2 = edge
+      ? applyBimOperations(r1.spec, { operations: [{ type: 'set_wall_side', wall: edge.key, field: 'assembly', value: 'cob' }] })
+      : null;
+    commitSpec((r2 || r1).spec);
+    setMoveNote({ text: `Earthship move made: the ${Math.round((x1 - x0) * 10) / 10} ft of south wall behind “${room.name || 'the greenhouse'}” is now cob — thermal mass where the winter sun lands, insulation everywhere else. Ctrl+Z undoes it.` });
+  };
   // Size any single object (room or element) — width × depth, position kept.
   const sizeObject = (obj, w, d) => applyOps([{ type: 'resize_object', targetId: obj.id, name: obj.name, w, d, h: Number(obj.h) || 0.22 }]);
 
@@ -1049,17 +1079,26 @@ export default function App() {
               />
             )}
             {activeChapter === 'roof' && (
-              <RoofControls
-                spec={spec}
-                derived={derived}
-                onRoofType={setRoofType}
-                onPitch={setRoofPitch}
-                onInsulation={setRoofInsulation}
-                onOverhang={setOverhang}
-                onShedFall={setShedFall}
-                onGutters={setGutters}
-                onDischarge={setDischarge}
-              />
+              <>
+                {floors > 1 && (
+                  <FloorBar spec={spec} floors={floors} activeFloor={activeFloor} hasBasement={hasBasement} onSelect={setActiveFloor} onAdd={addFloor} onRemove={removeFloor} />
+                )}
+                {activeFloor <= 1 ? (
+                  <RoofControls
+                    spec={spec}
+                    derived={derived}
+                    onRoofType={setRoofType}
+                    onPitch={setRoofPitch}
+                    onInsulation={setRoofInsulation}
+                    onOverhang={setOverhang}
+                    onShedFall={setShedFall}
+                    onGutters={setGutters}
+                    onDischarge={setDischarge}
+                  />
+                ) : (
+                  <UpperRoofControls spec={spec} level={activeFloor} floors={floors} onOps={applyOps} />
+                )}
+              </>
             )}
             <button className="rz-build-btn" onClick={timelineOpen ? closeTimeline : openTimeline}>
               {timelineOpen ? '× Back to designing' : '▶ Watch it build'}
@@ -1171,6 +1210,9 @@ export default function App() {
           onResize={(w, d) => resizeObject(selectedRoom.id, Number(selectedRoom.x) || 0, Number(selectedRoom.y) || 0, w, d)}
           onRemove={() => removeObject(selectedRoom)}
           onClose={() => setSelectedId(null)}
+          onMassWall={selectedRoom.type === 'plant'
+            && (Number(selectedRoom.y) || 0) + (Number(selectedRoom.d) || 0) >= (Number(spec.shell.depthFt) || 28) - 1
+            ? () => makeMassWallBehind(selectedRoom) : null}
         />
       )}
       {selectedId && !selectedRoom && (() => {
@@ -1532,7 +1574,7 @@ function PlaceSizeRows({ obj, onMove, onResize }) {
   );
 }
 
-function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose }) {
+function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose, onMassWall = null }) {
   const [expanded, setExpanded] = useState(false);
   const area = Math.round((Number(room.w) || 0) * (Number(room.d) || 0));
   const sharePct = derived.floor > 0 ? Math.round((area / derived.floor) * 100) : 0;
@@ -1545,6 +1587,12 @@ function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose
 
       {/* place + size by the numbers — the same edits as dragging on the plan */}
       <PlaceSizeRows obj={room} onMove={onMove} onResize={onResize} />
+      {onMassWall && (
+        <button type="button" className="rz-move-fit" style={{ alignSelf: 'stretch' }} onClick={onMassWall}
+          title="Earthship trick for humid climates done right: mass where the sun lands, insulation everywhere else">
+          🌍 Make the wall behind this greenhouse cob (thermal mass)
+        </button>
+      )}
 
       <div className="rz-vitals">
         <Vital label="Use" value={TYPE_LABEL[room.type] || room.type || '—'} />
@@ -2407,6 +2455,48 @@ const ROOF_SHAPES = [
   { key: 'hip', label: 'Hip', note: 'Slopes on all four sides to a ridge.' },
   { key: 'flat', label: 'Flat', note: 'Near-level with a slight drainage fall.' }
 ];
+// Roof over ONE upper storey: its own steepness (the tower's flatter cap)
+// and, when a floor steps back above it, roofed-vs-porch for that step.
+function UpperRoofControls({ spec, level, floors, onOps }) {
+  const plate = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === level);
+  const lab = floorLabel(spec, level);
+  if (!plate) {
+    return <div className="rz-shape-note">The {lab.toLowerCase()} covers the whole footprint, so the main roof (Ground controls) covers it too. Give it its own outline in Shape to give it its own roof.</div>;
+  }
+  const mainPitch = Number(spec.shell.roofPitch || 0.32);
+  const ownPitch = Number(plate.roofPitch) > 0 ? Number(plate.roofPitch) : mainPitch;
+  return (
+    <div className="rz-found">
+      <div className="rz-shape-note" style={{ marginTop: 0 }}>The roof over the <b>{lab.toLowerCase()}</b>. The whole-house shape, insulation, overhangs, and gutters live under Ground.</div>
+      <label className="rz-field rz-field-num">
+        <span>Roof steepness over this floor</span>
+        <NumInput
+          value={Math.round(ownPitch * 12 * 10) / 10}
+          min={0.5} max={18} step={0.5} unit=":12"
+          onCommit={(v) => onOps([{ type: 'update_object', targetId: plate.id, name: plate.name, field: 'roofPitch', value: clamp(v / 12, 0.02, 1.5) }])}
+        />
+      </label>
+      {Number(plate.roofPitch) > 0 && (
+        <button type="button" className="rz-fresh" style={{ alignSelf: 'flex-start' }}
+          onClick={() => onOps([{ type: 'update_object', targetId: plate.id, name: plate.name, field: 'roofPitch', value: 0 }])}
+        >match the main roof ({Math.round(mainPitch * 12 * 10) / 10}:12)</button>
+      )}
+      {floors > level && (
+        <label className="rz-field">
+          <span>Top of this floor, where the floor above steps back</span>
+          <select
+            value={plate.topTreatment === 'porch' ? 'porch' : 'roof'}
+            onChange={(e) => onOps([{ type: 'update_object', targetId: plate.id, name: plate.name, field: 'topTreatment', value: e.target.value === 'porch' ? 'porch' : 'roof' }])}
+          >
+            <option value="roof">Roofed — a sloped roof covers the step</option>
+            <option value="porch">Open porch — a walkable deck with a railing</option>
+          </select>
+        </label>
+      )}
+    </div>
+  );
+}
+
 function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOverhang, onShedFall, onGutters, onDischarge }) {
   const roofType = spec.shell.roofType || 'gable';
   const pitch = Number(spec.shell.roofPitch || 0.32);
