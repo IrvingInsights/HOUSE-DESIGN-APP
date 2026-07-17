@@ -49,7 +49,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 95 · Jul 17';
+const UPDATE_STAMP = 'update 96 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -822,6 +822,8 @@ export default function App() {
   // ONE dispatch for all four sides — four separate calls would race on the
   // same base spec and only the last would land (a bug this app has had).
   const setAllWalls = (value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, field: 'assembly', value })));
+  // Direct shed wall heights — the two numbers that ARE the shed roof.
+  const setShedHeights = (southFt, northFt) => applyOps([{ type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: clamp(Number(southFt) || 10, 2, 40), northWallHeightFt: clamp(Number(northFt) || 10, 2, 40) }]);
   // Each upper floor gets its own construction (bale below, a framed +
   // charred 2nd floor, a cordwood tower). ONE batched dispatch per floor.
   const setUpperWalls = (level, field, value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, level, field, value })));
@@ -1107,6 +1109,7 @@ export default function App() {
                 spec={spec}
                 floors={floors}
                 onAllWalls={setAllWalls}
+                onShedHeights={setShedHeights}
                 onUpperWalls={setUpperWalls}
                 onFrame={setFrame}
                 onShell={setShellField}
@@ -2350,7 +2353,7 @@ function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, on
 // Shell chapter: the structure in three plain choices — what the walls are,
 // what carries the roof, how tall the walls run. The timeline's build order
 // and every receipt follow these.
-function StructureControls({ spec, floors, onAllWalls, onUpperWalls, onFrame, onShell, onWallSide, onSelectWall, onAddFloor, onRemoveFloor, onLayoutFloors }) {
+function StructureControls({ spec, floors, onAllWalls, onShedHeights, onUpperWalls, onFrame, onShell, onWallSide, onSelectWall, onAddFloor, onRemoveFloor, onLayoutFloors }) {
   const resolved = WALL_SIDES.map((side) => resolveWallSide(spec, side));
   const wallKeys = new Set(resolved.map((r) => r.assemblyKey));
   const wallVal = wallKeys.size === 1 ? [...wallKeys][0] : '__mixed';
@@ -2371,6 +2374,27 @@ function StructureControls({ spec, floors, onAllWalls, onUpperWalls, onFrame, on
         {floors > 1 ? `${floors} storeys` : 'One storey'} — storeys, their setbacks, and heights live in the <b>Shape</b> chapter. This page is the walls, frame, and roof structure.
       </div>
 
+      {/* the plainest numbers FIRST: wall heights (on a shed, the two heights
+          that ARE the roof — one "height for all" would flatten it) */}
+      {shed ? (
+        <>
+          <label className="rz-field rz-field-num">
+            <span>South wall height{Number(spec.shell.southWallHeightFt) >= Number(spec.shell.northWallHeightFt) ? ' — the high eave' : ''}</span>
+            <NumInput value={Number(spec.shell.southWallHeightFt) || 10} min={2} max={40} step={0.5}
+              onCommit={(v) => onShedHeights(v, Number(spec.shell.northWallHeightFt) || 10)} />
+          </label>
+          <label className="rz-field rz-field-num">
+            <span>North wall height{Number(spec.shell.northWallHeightFt) > Number(spec.shell.southWallHeightFt) ? ' — the high eave' : ''}</span>
+            <NumInput value={Number(spec.shell.northWallHeightFt) || 10} min={2} max={40} step={0.5}
+              onCommit={(v) => onShedHeights(Number(spec.shell.southWallHeightFt) || 10, v)} />
+          </label>
+        </>
+      ) : (
+        <label className="rz-field rz-field-num">
+          <span>Wall height (all){heights.size > 1 ? ' · sides differ' : ''}</span>
+          <NumInput value={Number(spec.shell.wallHeightFt) || 10} min={7} max={40} step={0.5} onCommit={(v) => onShell('wallHeightFt', v)} />
+        </label>
+      )}
       <label className="rz-field">
         <span>{floors > 1 ? 'Ground floor — wall system' : 'Walls (all sides)'}</span>
         <select value={wallVal} onChange={(e) => { if (e.target.value !== '__mixed') onAllWalls(e.target.value); }}>
@@ -2417,10 +2441,6 @@ function StructureControls({ spec, floors, onAllWalls, onUpperWalls, onFrame, on
           ? 'Load-bearing: the walls themselves hold up the roof — no separate posts. The usual choice for straw bale, cob, and cordwood.'
           : `${FRAME_TYPES[frameVal]?.note || ''} The timber posts and beams stand inside the walls, which wrap around them.`}
       </div>
-      <label className="rz-field rz-field-num">
-        <span>Wall height (all){heights.size > 1 ? ' · sides differ' : ''}</span>
-        <NumInput value={Number(spec.shell.wallHeightFt) || 10} min={7} max={40} step={0.5} onCommit={(v) => onShell('wallHeightFt', v)} />
-      </label>
       {/* not all walls are the same height: a 2-ft greenhouse kneewall on the
           south, a tall north wall a shed falls from — each side has its own */}
       <details className="rz-perwall">
