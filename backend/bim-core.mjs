@@ -1198,6 +1198,8 @@ export const OPENING_TYPES = {
   awning: { label: 'Awning / vent window', h: 1.8, sill: 6, glazed: true, defaultW: 3 },
   clerestory: { label: 'Clerestory window', h: 2, sill: 8, glazed: true, defaultW: 6 },
   door: { label: 'Door', h: 6.8, sill: 0, glazed: false, defaultW: 3, entry: true },
+  glassdoor: { label: 'Glass door (full glass)', h: 6.8, sill: 0, glazed: true, defaultW: 3, entry: true },
+  halflite: { label: 'Door with window (half-lite)', h: 6.8, sill: 0, glazed: true, liteFrac: 0.45, defaultW: 3, entry: true },
   french: { label: 'French doors', h: 6.8, sill: 0, glazed: true, defaultW: 5, entry: true },
   slider: { label: 'Sliding glass door', h: 6.8, sill: 0, glazed: true, defaultW: 6, entry: true },
   dutch: { label: 'Dutch door', h: 6.8, sill: 0, glazed: false, defaultW: 3, entry: true },

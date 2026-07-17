@@ -2281,7 +2281,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             if (opening.type === 'french' || opening.type === 'slider') {
               part(0.12, openH, 0.24, mid, centerY, rIn + 0.09, frameMat);
             }
-            if (profile.entry && !profile.glazed) {
+            if (profile.liteFrac) {
+              // half-lite: the lower part of the door is a solid wood panel;
+              // only the upper lite is glass
+              part(size - 0.2, openH * (1 - profile.liteFrac), 0.2, mid, sill + (openH * (1 - profile.liteFrac)) / 2, rIn + 0.08, doorMat);
+            }
+            if (profile.entry && (!profile.glazed || profile.liteFrac)) {
               // door hardware — a small knob at the latch side
               part(0.14, 0.14, 0.14, mid + size * 0.34, sill + Math.min(3.1, openH * 0.45), rIn + 0.16, frameMat);
             }

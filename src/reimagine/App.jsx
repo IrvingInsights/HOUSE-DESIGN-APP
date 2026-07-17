@@ -49,7 +49,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 90 · Jul 17';
+const UPDATE_STAMP = 'update 91 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1899,7 +1899,7 @@ function OpeningsControls({ spec, selectedId, level = 1, wall = 'south', onWall,
             ))}
           </optgroup>
           <optgroup label="Doors">
-            {['french', 'slider', 'dutch', 'barn'].map((key) => (
+            {['glassdoor', 'halflite', 'french', 'slider', 'dutch', 'barn'].map((key) => (
               <option key={key} value={key}>{OPENING_TYPES[key].label}</option>
             ))}
           </optgroup>
