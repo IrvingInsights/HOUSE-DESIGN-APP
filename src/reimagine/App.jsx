@@ -49,7 +49,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 87 · Jul 17';
+const UPDATE_STAMP = 'update 88 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1001,6 +1001,7 @@ export default function App() {
                 onSubfloor={setSubfloor}
                 onCladding={setAllCladding}
                 onReclaimed={setReclaimed}
+                onShell={setShellField}
               />
             )}
             {activeChapter === 'foundation' && (
@@ -2030,7 +2031,30 @@ const RECLAIMED_ITEMS = [
   { key: 'windows', label: 'Windows & doors', note: 'salvaged units' },
   { key: 'roof', label: 'Roofing', note: 'reclaimed metal / tile' }
 ];
-function FinishesControls({ spec, derived, onFlooring, onSubfloor, onCladding, onReclaimed }) {
+// Curated natural-finish colors — named the way a builder would say them.
+// '' = the material's own default (plaster shows its assembly color, the roof
+// its zinc, floors their room-type colors).
+const FINISH_COLOR_CHOICES = {
+  wallColorHex: [['', 'Natural — the wall system’s own plaster'], ['#e8e4da', 'Limewash white'], ['#c9a24b', 'Warm ochre'], ['#a0603a', 'Burnt sienna'], ['#b98a78', 'Clay rose'], ['#8a9a7c', 'Sage green'], ['#93a7b0', 'Blue-gray'], ['#4a4a46', 'Charcoal']],
+  roofColorHex: [['', 'Zinc gray (default)'], ['#3a3d40', 'Charcoal'], ['#3f5a44', 'Forest green'], ['#7d3b32', 'Barn red'], ['#6e8f7c', 'Weathered copper'], ['#b06a4a', 'Terracotta'], ['#5a6b7a', 'Slate blue'], ['#b8bcbc', 'Bright galvalume']],
+  floorColorHex: [['', 'By room type (the plan’s colors)'], ['#b98a5a', 'Earthen ochre'], ['#5a4633', 'Dark walnut'], ['#c49a62', 'Honey pine'], ['#6f7275', 'Slate gray'], ['#8a4f3d', 'Brick red'], ['#d9d2c2', 'Limewash pale']]
+};
+function FinishColorSelect({ spec, field, label, onShell }) {
+  const val = String(spec.shell[field] || '');
+  const choices = FINISH_COLOR_CHOICES[field];
+  return (
+    <label className="rz-field">
+      <span>{label}</span>
+      <div className="rz-color-row">
+        <span className="rz-swatch" style={{ background: val || 'transparent', borderStyle: val ? 'solid' : 'dashed' }} />
+        <select value={choices.some(([v]) => v === val) ? val : ''} onChange={(e) => onShell(field, e.target.value)}>
+          {choices.map(([v, lab]) => <option key={v || 'default'} value={v}>{lab}</option>)}
+        </select>
+      </div>
+    </label>
+  );
+}
+function FinishesControls({ spec, derived, onFlooring, onSubfloor, onCladding, onReclaimed, onShell }) {
   const flooringKey = resolveFlooring(spec);
   const subfloorKey = resolveSubfloor(spec);
   const claddingKey = spec.walls?.south?.cladding || 'render';
@@ -2039,6 +2063,12 @@ function FinishesControls({ spec, derived, onFlooring, onSubfloor, onCladding, o
   const claddingMixed = new Set(claddingVals).size > 1;
   return (
     <div className="rz-found">
+      <div className="rz-found-head">Colors</div>
+      <FinishColorSelect spec={spec} field="wallColorHex" label="Walls — plaster / limewash tint" onShell={onShell} />
+      <FinishColorSelect spec={spec} field="roofColorHex" label="Roof color" onShell={onShell} />
+      <FinishColorSelect spec={spec} field="floorColorHex" label="Floor color" onShell={onShell} />
+      <div className="rz-shape-note">The wall tint colors plastered faces; a chosen siding (wood, charred, stone…) keeps its own material color.</div>
+
       <div className="rz-found-head">The floor underfoot</div>
       <label className="rz-field">
         <span>Finished floor</span>

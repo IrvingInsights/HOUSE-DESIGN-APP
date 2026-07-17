@@ -438,7 +438,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
 
       const slabMat = new THREE.MeshStandardMaterial({ color: 0xc0b49b, roughness: 0.92, map: grainTexture('earth'), bumpMap: bumpTexture('earth'), bumpScale: 0.2 });
       const wallMat = new THREE.MeshStandardMaterial({ color: wallProfile.color, roughness: 0.88, map: grainTexture('plaster'), bumpMap: bumpTexture('plaster'), bumpScale: 0.12 });
-      const roofMat = new THREE.MeshStandardMaterial({ color: 0x8a938f, roughness: 0.5, metalness: 0.22, map: grainTexture('metal'), bumpMap: bumpTexture('metal'), bumpScale: 0.16, envMap: envTex, envMapIntensity: 0.35, side: THREE.DoubleSide });
+      // Chosen finish colors (Finishes chapter) — '' or bad hex = the default
+      const finishHex = (v) => (/^#[0-9a-fA-F]{6}$/.test(String(v || '')) ? new THREE.Color(v) : null);
+      const roofTint = finishHex(spec.shell.roofColorHex);
+      const wallTint = finishHex(spec.shell.wallColorHex);
+      const floorTint = finishHex(spec.shell.floorColorHex);
+      const roofMat = new THREE.MeshStandardMaterial({ color: roofTint || 0x8a938f, roughness: 0.5, metalness: 0.22, map: grainTexture('metal'), bumpMap: bumpTexture('metal'), bumpScale: 0.16, envMap: envTex, envMapIntensity: 0.35, side: THREE.DoubleSide });
       const glassMat = new THREE.MeshStandardMaterial({ color: 0x9cc3d8, transparent: true, opacity: 0.5, roughness: 0.06, metalness: 0.25, envMap: envTex, envMapIntensity: 0.85 });
       const frameMat = new THREE.MeshStandardMaterial({ color: 0x7a5c3e, roughness: 0.7, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
       const doorMatWood = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.72, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
@@ -550,7 +555,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // Hand-formed assemblies read LUMPY under their render — bale bulges,
         // cob curves; crisp systems keep the flat troweled plaster.
         const lumpy = ['straw-bale', 'cob', 'light-straw-clay'].includes(resolved.assemblyKey);
-        return new THREE.MeshStandardMaterial({ color: resolved.assembly.color, roughness: 0.88, map: grainTexture('plaster'), bumpMap: bumpTexture(lumpy ? 'lumpy' : 'plaster'), bumpScale: lumpy ? 0.45 : 0.12, transparent: layers.xray || layers.explode, opacity: layers.xray ? 0.34 : layers.explode ? 0.55 : 1 });
+        return new THREE.MeshStandardMaterial({ color: wallTint || resolved.assembly.color, roughness: 0.88, map: grainTexture('plaster'), bumpMap: bumpTexture(lumpy ? 'lumpy' : 'plaster'), bumpScale: lumpy ? 0.45 : 0.12, transparent: layers.xray || layers.explode, opacity: layers.xray ? 0.34 : layers.explode ? 0.55 : 1 });
       };
       const wallMatFor = (side) => wallMatOf(wallResolved[side]);
       // Stem wall foundation: the walls BEAR ON the stem's top — their bottoms
@@ -1609,7 +1614,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           ? -basementH + 0.12
           : (Math.max(1, roomLevel) - 1) * baseStoreyFt + (roomLevel > 1 ? 0.42 : maxReveal);
         const material = new THREE.MeshStandardMaterial({
-          color: zonePalette[room.type] || 0x86a0a8,
+          color: floorTint || zonePalette[room.type] || 0x86a0a8,
           transparent: true,
           opacity: room.id === selectedRoom ? 0.88 : 0.58,
           roughness: 0.7
