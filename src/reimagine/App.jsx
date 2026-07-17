@@ -38,9 +38,18 @@ const CHAPTERS = [
   { id: 'finishes', label: 'Finishes', view: '3d', greet: () => 'Materials and surfaces, inside and out — natural or conventional, wall by wall.' }
 ];
 
+// 3D "Show" presets — null = everything (ThreeScene's defaults). "Bones" is
+// the frame standing on its foundation: walls, roof, rooms, and openings off;
+// frame, foundation runs/pads, floor decks, and the ground stay.
+const MODEL_SHOW_PRESETS = {
+  all: null,
+  bones: { ...DEFAULT_MODEL_LAYERS, wallNorth: false, wallSouth: false, wallEast: false, wallWest: false, roof: false, rooms: false, openings: false, labels: false },
+  noroof: { ...DEFAULT_MODEL_LAYERS, roof: false }
+};
+
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 84 · Jul 17';
+const UPDATE_STAMP = 'update 85 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -149,6 +158,9 @@ export default function App() {
   const [activeChapter, setActiveChapter] = useState('shape');
   const [viewMode, setViewMode] = useState('plan'); // 'plan' (top-down) | '3d' | 'wall' (face-on elevation, Openings chapter)
   const [openWall, setOpenWall] = useState('south'); // which wall the Openings chapter is working on
+  // 3D "Show" filter: see just part of the build (frame on its foundation,
+  // the house without its roof) — the same layer system the Time Machine uses.
+  const [modelShow, setModelShow] = useState('all');
   const [viewRequest, setViewRequest] = useState({ mode: 'iso', n: 1 });
   const [designs, setDesigns] = useState(loadDesigns); // the keepsake shelf
   const [designsOpen, setDesignsOpen] = useState(false);
@@ -738,6 +750,9 @@ export default function App() {
   // ONE dispatch for all four sides — four separate calls would race on the
   // same base spec and only the last would land (a bug this app has had).
   const setAllWalls = (value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, field: 'assembly', value })));
+  // Upper floors get their own construction (bale below, framed + charred
+  // wood above). ONE batched dispatch — never four racing calls.
+  const setUpperWalls = (field, value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, level: 2, field, value })));
   const setFrame = (value) => applyOps([{ type: 'set_frame', value }]);
   const setWallSide = (side, field, value) => applyOps([{ type: 'set_wall_side', wall: side, field, value }]);
   // --- finishes: floor, exterior cladding, reclaimed materials ---------------
@@ -814,7 +829,7 @@ export default function App() {
           <ThreeScene
             spec={spec}
             selectedRoom={selectedId}
-            layers={timelineOpen ? timelineLayers : undefined}
+            layers={timelineOpen ? timelineLayers : (MODEL_SHOW_PRESETS[modelShow] || undefined)}
             viewRequest={viewRequest}
             onSelectRoom={timelineOpen ? () => {} : setSelectedId}
             onMoveEnd={(id, x, y) => {
@@ -872,6 +887,14 @@ export default function App() {
         {viewMode === '3d' && webglOK && [['iso', 'Corner'], ['top', 'Top'], ['front', 'Front'], ['side', 'Side']].map(([mode, label]) => (
           <button key={mode} onClick={() => setViewRequest({ mode, n: Date.now() })}>{label}</button>
         ))}
+        {viewMode === '3d' && <span className="rz-views-sep" />}
+        {viewMode === '3d' && (
+          <select className="rz-show" value={modelShow} title="See just part of the build" onChange={(e) => setModelShow(e.target.value)}>
+            <option value="all">Show all</option>
+            <option value="bones">Frame &amp; foundation</option>
+            <option value="noroof">No roof</option>
+          </select>
+        )}
       </div>}
 
       {/* SURFACE 2 — the Trail (chapters + foreman greeting) */}
@@ -1000,6 +1023,7 @@ export default function App() {
                 spec={spec}
                 floors={floors}
                 onAllWalls={setAllWalls}
+                onUpperWalls={setUpperWalls}
                 onFrame={setFrame}
                 onShell={setShellField}
                 onWallSide={setWallSide}
@@ -2175,10 +2199,15 @@ function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, on
 // Shell chapter: the structure in three plain choices — what the walls are,
 // what carries the roof, how tall the walls run. The timeline's build order
 // and every receipt follow these.
-function StructureControls({ spec, floors, onAllWalls, onFrame, onShell, onWallSide, onSelectWall, onAddFloor, onRemoveFloor, onLayoutFloors }) {
+function StructureControls({ spec, floors, onAllWalls, onUpperWalls, onFrame, onShell, onWallSide, onSelectWall, onAddFloor, onRemoveFloor, onLayoutFloors }) {
   const resolved = WALL_SIDES.map((side) => resolveWallSide(spec, side));
   const wallKeys = new Set(resolved.map((r) => r.assemblyKey));
   const wallVal = wallKeys.size === 1 ? [...wallKeys][0] : '__mixed';
+  const upperResolved = WALL_SIDES.map((side) => resolveWallSide(spec, side, 2));
+  const upperKeys = new Set(upperResolved.map((r) => r.assemblyKey));
+  const upperVal = upperKeys.size === 1 ? [...upperKeys][0] : '__mixed';
+  const upperCladKeys = new Set(upperResolved.map((r) => r.cladding));
+  const upperCladVal = upperCladKeys.size === 1 ? [...upperCladKeys][0] : '__mixed';
   const frameVal = resolveFrameType(spec, 1);
   const heights = new Set(resolved.map((r) => Math.round(r.heightFt * 10)));
   const shed = (spec.shell.roofType || 'gable') === 'shed';
@@ -2189,7 +2218,7 @@ function StructureControls({ spec, floors, onAllWalls, onFrame, onShell, onWallS
       </div>
 
       <label className="rz-field">
-        <span>Walls (all sides)</span>
+        <span>{floors > 1 ? 'Ground floor — wall system' : 'Walls (all sides)'}</span>
         <select value={wallVal} onChange={(e) => { if (e.target.value !== '__mixed') onAllWalls(e.target.value); }}>
           {wallVal === '__mixed' && <option value="__mixed">Mixed — sides differ</option>}
           {Object.values(WALL_ASSEMBLIES).map((a) => (
@@ -2197,6 +2226,31 @@ function StructureControls({ spec, floors, onAllWalls, onFrame, onShell, onWallS
           ))}
         </select>
       </label>
+      {floors > 1 && (
+        <>
+          {/* wall construction floor by floor: the ground setting above, the
+              upper floors here — bale below, framed + charred wood up top */}
+          <label className="rz-field">
+            <span>Upper floors — wall system</span>
+            <select value={upperVal} onChange={(e) => { if (e.target.value !== '__mixed') onUpperWalls('assembly', e.target.value); }}>
+              {upperVal === '__mixed' && <option value="__mixed">Mixed — sides differ</option>}
+              {Object.values(WALL_ASSEMBLIES).map((a) => (
+                <option key={a.key} value={a.key}>{a.green ? '🌿 ' : ''}{a.label} — R{a.rValue}</option>
+              ))}
+            </select>
+          </label>
+          <label className="rz-field">
+            <span>Upper floors — outside face</span>
+            <select value={upperCladVal} onChange={(e) => { if (e.target.value !== '__mixed') onUpperWalls('cladding', e.target.value); }}>
+              {upperCladVal === '__mixed' && <option value="__mixed">Mixed — sides differ</option>}
+              {Object.values(CLADDING_TYPES).map((c) => (
+                <option key={c.key} value={c.key}>{c.green ? '🌿 ' : ''}{c.label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="rz-shape-note">The 2nd and 3rd floors share this. “Walls (all sides)” above stays the ground floor.</div>
+        </>
+      )}
       <label className="rz-field">
         <span>Frame — what holds the roof up</span>
         <select value={frameVal} onChange={(e) => onFrame(e.target.value)}>
