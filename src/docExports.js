@@ -38,8 +38,11 @@ export function createIfcSummary(spec) {
       ifcClass: 'IfcRoof',
       type: modeledRoof.roofType,
       highSide: modeledRoof.highSide,
+      axis: modeledRoof.axis,
       southWallHeightFt: modeledRoof.southWallHeightFt,
       northWallHeightFt: modeledRoof.northWallHeightFt,
+      eastWallHeightFt: modeledRoof.eastWallHeightFt,
+      westWallHeightFt: modeledRoof.westWallHeightFt,
       pitch: modeledRoof.pitch
     },
     systems: spec.systems,

@@ -3146,16 +3146,17 @@ function App() {
                 </label>
               </div>
               {spec.shell.roofType === 'shed' && (() => {
-                const sH = Number(spec.shell.southWallHeightFt || spec.shell.wallHeightFt || 10);
-                const nH = Number(spec.shell.northWallHeightFt || spec.shell.wallHeightFt || 10);
-                const highSide = Math.max(sH, nH);
-                const fallNow = Math.round(Math.abs(sH - nH) * 2) / 2;
-                const drainsNow = fallNow < 0.25 ? '' : (sH >= nH ? 'north' : 'south');
+                const profileNow = roofProfile(spec.shell);
+                const fallNow = Math.round(profileNow.riseFt * 2) / 2;
+                const drainsNow = fallNow < 0.25 ? '' : profileNow.lowSide;
                 const setShedFall = (drainTo, fallFt) => {
-                  const hi = Math.max(7, highSide);
+                  const hi = Math.max(7, profileNow.highWallHeightFt);
                   const lo = Math.max(2, hi - Math.max(0.5, Number(fallFt) || 2));
+                  const heightOps = drainTo === 'east' || drainTo === 'west'
+                    ? { eastWallHeightFt: drainTo === 'west' ? hi : lo, westWallHeightFt: drainTo === 'west' ? lo : hi }
+                    : { southWallHeightFt: drainTo === 'north' ? hi : lo, northWallHeightFt: drainTo === 'north' ? lo : hi };
                   void applyBackendOperations({
-                    operations: [{ type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: drainTo === 'north' ? hi : lo, northWallHeightFt: drainTo === 'north' ? lo : hi }],
+                    operations: [{ type: 'set_roof_profile', roofType: 'shed', ...heightOps }],
                     promptText: `Shed roof drains ${drainTo}`,
                     logPrefix: 'Roof',
                     chatText: `Set the shed to drain ${drainTo}: high wall ${hi}′ falling to ${lo}′.`
@@ -3170,6 +3171,8 @@ function App() {
                           {drainsNow === '' && <option value="">Flat — pick a direction</option>}
                           <option value="north">North — high south wall (solar classic)</option>
                           <option value="south">South — high north wall</option>
+                          <option value="east">East — high west wall</option>
+                          <option value="west">West — high east wall</option>
                         </select>
                       </label>
                       <label>Fall, high eave to low (ft)<NumField step="0.5" min="0.5" max="12" value={fallNow} onChange={(event) => setShedFall(drainsNow || 'north', event.target.value)} /></label>

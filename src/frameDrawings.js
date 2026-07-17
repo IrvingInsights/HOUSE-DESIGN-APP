@@ -108,8 +108,14 @@ function frameView(spec, facing) {
   const extent = horizontalView ? width : depth;
   const A = (a) => (mirror ? extent - a : a);
 
-  // Eave height at a plan position (top of plate). Shed roofs rake north→south.
-  const eaveAt = (y) => {
+  // Eave height at a plan point (top of plate). Shed roofs rake along their
+  // fall axis: north→south when the fall is north/south, west→east when it
+  // is east/west.
+  const eaveAt = (x, y) => {
+    if (roof.roofType === 'shed' && roof.axis === 'ew') {
+      const t = width > 0 ? Math.min(1, Math.max(0, x / width)) : 0;
+      return roof.westWallHeightFt + (roof.eastWallHeightFt - roof.westWallHeightFt) * t + extraFt;
+    }
     if (roof.roofType === 'shed') {
       const t = depth > 0 ? Math.min(1, Math.max(0, y / depth)) : 0;
       return roof.northWallHeightFt + (roof.southWallHeightFt - roof.northWallHeightFt) * t + extraFt;
@@ -120,11 +126,13 @@ function frameView(spec, facing) {
   const runs = edges.map((edge) => {
     const a0 = Math.min(A(alongOf(edge.x0, edge.y0)), A(alongOf(edge.x1, edge.y1)));
     const a1 = Math.max(A(alongOf(edge.x0, edge.y0)), A(alongOf(edge.x1, edge.y1)));
-    // For E/W walls the eave can rake along the run; sample both ends.
-    const yStart = horizontalView ? edge.y0 : Math.min(edge.y0, edge.y1);
-    const yEnd = horizontalView ? edge.y0 : Math.max(edge.y0, edge.y1);
-    const h0 = eaveAt(mirror && !horizontalView ? yEnd : yStart);
-    const h1 = eaveAt(mirror && !horizontalView ? yStart : yEnd);
+    // The eave can rake along the run (either axis) — sample the run's two
+    // ENDPOINTS and assign them to the drawing's left/right ends.
+    const ends = [[edge.x0, edge.y0], [edge.x1, edge.y1]];
+    const drawA = ends.map(([px, py]) => A(alongOf(px, py)));
+    const left = drawA[0] <= drawA[1] ? 0 : 1;
+    const h0 = eaveAt(ends[left][0], ends[left][1]);
+    const h1 = eaveAt(ends[1 - left][0], ends[1 - left][1]);
     // Post positions: both ends + intermediates at ≤ spacing (timber types);
     // stud walls draw studs at their o.c. instead.
     const posts = [];
@@ -253,12 +261,14 @@ function elevationSvg(spec, facing) {
     });
   }
 
-  // Roof structure
-  if (shed && !v.horizontalView) {
+  // Roof structure — the sloped-rafter side view is whichever elevation looks
+  // ALONG the level eaves: east/west walls for a north/south fall, north/south
+  // walls for an east/west fall.
+  const shedAxisEW = shed && v.roof.axis === 'ew';
+  if (shed && (shedAxisEW ? v.horizontalView : !v.horizontalView)) {
     // Full sloped rafter with plumb-cut ends and overhangs (the side view).
-    const yLow = v.mirror ? v.depth : 0;   // plan position at the left of the drawing
-    const hL = v.eaveAt(v.mirror ? v.depth : 0);
-    const hR = v.eaveAt(v.mirror ? 0 : v.depth);
+    const hL = shedAxisEW ? v.eaveAt(v.mirror ? v.width : 0, 0) : v.eaveAt(0, v.mirror ? v.depth : 0);
+    const hR = shedAxisEW ? v.eaveAt(v.mirror ? 0 : v.width, 0) : v.eaveAt(0, v.mirror ? 0 : v.depth);
     const aL = -oLead, aR = v.extent + oTail;
     const slope = (hR - hL) / v.extent;
     const hAt = (a) => hL + slope * a;
@@ -396,12 +406,15 @@ function bentSectionSvg(spec) {
   const shed = roof.roofType === 'shed';
   const gable = roof.roofType === 'gable';
 
-  // Span axis + end heights (top of plate) and rafter-end overhangs.
-  const span = shed ? depth : width;
-  const hLeft = (shed ? roof.northWallHeightFt : roof.highWallHeightFt) + extraFt;
-  const hRight = (shed ? roof.southWallHeightFt : roof.highWallHeightFt) + extraFt;
-  const oLead = shed ? o.north : o.west;
-  const oTail = shed ? o.south : o.east;
+  // Span axis + end heights (top of plate) and rafter-end overhangs. The bent
+  // spans the shed's FALL axis: north-south for a north/south fall, east-west
+  // for an east/west fall (and for gables).
+  const shedEW = shed && roof.axis === 'ew';
+  const span = shed && !shedEW ? depth : width;
+  const hLeft = (shed ? (shedEW ? roof.westWallHeightFt : roof.northWallHeightFt) : roof.highWallHeightFt) + extraFt;
+  const hRight = (shed ? (shedEW ? roof.eastWallHeightFt : roof.southWallHeightFt) : roof.highWallHeightFt) + extraFt;
+  const oLead = shed && !shedEW ? o.north : o.west;
+  const oTail = shed && !shedEW ? o.south : o.east;
   const gableRise = gable ? Math.max(0, depth * pitchNow - 0.25) : 0;
   const peak = gable ? hLeft + gableRise : Math.max(hLeft, hRight);
 
@@ -439,7 +452,7 @@ function bentSectionSvg(spec) {
       rect(X(a - 0.3), Y(h), 0.6 * s, m.plateH * s);
     } else {
       // load-bearing wall in section: a thick wall band
-      const t = resolveWallSide(spec, shed ? (a === 0 ? 'north' : 'south') : (a === 0 ? 'west' : 'east')).thicknessFt;
+      const t = resolveWallSide(spec, shed && !shedEW ? (a === 0 ? 'north' : 'south') : (a === 0 ? 'west' : 'east')).thicknessFt;
       rect(X(a - t / 2), Y(h - m.plateH), t * s, (h - m.plateH - m.sillH) * s);
       rect(X(a - t / 2), Y(h), t * s, m.plateH * s);
     }
@@ -569,14 +582,20 @@ function memberSchedule(spec) {
   rows.push([m.sill, `${Math.ceil(perim)} LF`, 'On foundation, lapped at corners']);
   if (m.postW > 0 && !m.studs) rows.push([m.post, `${posts} pcs`, `Bays ≤ ${m.spacingFt}′-0″; height to plate`]);
   if (m.studs) rows.push([m.post, `≈ ${Math.ceil(perim / m.spacingFt)} pcs`, 'Plus corners, jacks, and cripples']);
-  rows.push([m.plate, `${Math.ceil(perim)} LF`, roof.roofType === 'shed' ? 'Raked N→S — confirm with actual slope' : 'Level at eave']);
+  rows.push([m.plate, `${Math.ceil(perim)} LF`, roof.roofType === 'shed' ? `Raked ${roof.axis === 'ew' ? 'W→E' : 'N→S'} — confirm with actual slope` : 'Level at eave']);
   if (m.braceW > 0 && !m.studs) rows.push([m.brace, `≈ ${posts * 2} pcs`, 'Outer walls; omit at openings']);
   if (storeys > 1) {
     rows.push([m.cross, `${Math.ceil(perim)} LF`, `At loft line ${ftIn(baseWallFt)}`]);
     rows.push([m.joist, `≈ ${Math.ceil(w / 2) + 1} pcs`, `Span ≈ ${ftIn(Math.min(12, d))} between beams`]);
   }
-  const run = roof.roofType === 'shed' ? Math.hypot(d + o.north + o.south, (roof.southWallHeightFt - roof.northWallHeightFt)) : (d / 2 + Math.max(o.east, o.west)) / Math.cos(Math.atan(Number(spec.shell.roofPitch || 0.32)));
-  const rafterCount = Math.ceil((w + o.east + o.west) / (FRAME_MEMBERS[resolveFrameType(spec, 1)]?.rafterOCFt || 2)) + 1;
+  const run = roof.roofType === 'shed'
+    ? (roof.axis === 'ew'
+      ? Math.hypot(w + o.west + o.east, roof.riseFt)
+      : Math.hypot(d + o.north + o.south, roof.riseFt))
+    : (d / 2 + Math.max(o.east, o.west)) / Math.cos(Math.atan(Number(spec.shell.roofPitch || 0.32)));
+  const rafterCount = roof.roofType === 'shed' && roof.axis === 'ew'
+    ? Math.ceil((d + o.north + o.south) / (FRAME_MEMBERS[resolveFrameType(spec, 1)]?.rafterOCFt || 2)) + 1
+    : Math.ceil((w + o.east + o.west) / (FRAME_MEMBERS[resolveFrameType(spec, 1)]?.rafterOCFt || 2)) + 1;
   rows.push([m.rafter, `≈ ${roof.roofType === 'gable' ? rafterCount * 2 : rafterCount} pcs`, `≈ ${ftIn(run)} long incl. overhangs; plumb cut ends`]);
   return rows;
 }

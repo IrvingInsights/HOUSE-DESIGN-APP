@@ -6,8 +6,12 @@ import {
   basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt, storeyHeightFt,
   scoreTraceSpecChecks,
   // Single source of truth for the per-wall assembly model — no longer duplicated here.
-  WALL_SIDES, WALL_ASSEMBLIES, wallAssemblyKeyFromText, resolveWallSide
+  WALL_SIDES, WALL_ASSEMBLIES, wallAssemblyKeyFromText, resolveWallSide,
+  // Single source of truth for the roof profile (incl. the shed's fall AXIS:
+  // north/south OR east/west) — the old engine copy is gone, re-exported below.
+  roofProfile
 } from '../backend/bim-core.mjs';
+export { roofProfile };
 import { Box, Building2, ClipboardCheck, Leaf, PenTool, Sparkles, Tractor, TreePine, Wrench } from 'lucide-react';
 
 export const MM_PER_FOOT = 304.8;
@@ -542,18 +546,8 @@ export function isRoofIntent(text) {
   return /\b(roof|shed roof|lean[-\s=]*to|single slope|mono[-\s]*pitch|roofline|rafter|pitch)\b/.test(text);
 }
 
-export function roofProfile(shell = {}) {
-  const roofType = shell.roofType || 'gable';
-  const southWallHeightFt = Number(shell.southWallHeightFt || shell.wallHeightFt || 10);
-  const northWallHeightFt = Number(shell.northWallHeightFt || shell.wallHeightFt || 10);
-  const highWallHeightFt = Math.max(southWallHeightFt, northWallHeightFt, Number(shell.wallHeightFt || 10));
-  const lowWallHeightFt = Math.min(southWallHeightFt, northWallHeightFt);
-  const riseFt = Math.abs(southWallHeightFt - northWallHeightFt);
-  const pitch = roofType === 'shed' && shell.depthFt ? riseFt / shell.depthFt : Number(shell.roofPitch || 0.32);
-  const highSide = southWallHeightFt >= northWallHeightFt ? 'south' : 'north';
-  const lowSide = highSide === 'south' ? 'north' : 'south';
-  return { roofType, southWallHeightFt, northWallHeightFt, highWallHeightFt, lowWallHeightFt, riseFt, pitch, highSide, lowSide };
-}
+// roofProfile now lives in bim-core.mjs (imported + re-exported at the top of
+// this file) — one copy serves the ops layer, this engine, and every view.
 
 // Roof drainage — where the water goes once it comes off the roof. A shed
 // sends its WHOLE roof to one low eave, so a gutter there and a plan for the
@@ -581,13 +575,15 @@ export function resolveDrainage(shell = {}) {
   const d = Number(shell.depthFt) || 0;
   const perim = 2 * (w + d);
   const roofType = shell.roofType || 'gable';
+  const profile = roofProfile(shell);
   let gutterLf = 0;
   if (gutters === 'all') gutterLf = perim;
   else if (gutters === 'eaves') {
-    gutterLf = roofType === 'shed' ? w : roofType === 'gable' ? 2 * w : perim;
+    // A shed's one draining edge runs the FULL length of its low eave — the
+    // width when it falls north/south, the depth when it falls east/west.
+    gutterLf = roofType === 'shed' ? (profile.axis === 'ew' ? d : w) : roofType === 'gable' ? 2 * w : perim;
   }
   const downspouts = gutterLf > 0 ? Math.max(2, Math.ceil(gutterLf / 40)) : 0;
-  const profile = roofProfile(shell);
   return { gutters, discharge, gutterLf, downspouts, lowEave: profile.lowSide, dischargeSpec: DRAINAGE_DISCHARGE[discharge] };
 }
 
@@ -1483,18 +1479,37 @@ export function applyRoofInstruction(spec, text) {
   const wantsShed = /\b(shed|lean[-\s=]*to|single slope|mono[-\s]*pitch)\b/.test(text);
   const southHeight = directionalHeightFromText(text, ['south', 's']);
   const northHeight = directionalHeightFromText(text, ['north', 'n']);
+  const eastHeight = directionalHeightFromText(text, ['east', 'e']);
+  const westHeight = directionalHeightFromText(text, ['west', 'w']);
   const genericHeights = [...text.matchAll(/(\d+(?:\.\d+)?)\s*(?:ft|feet|foot|')/g)].map((match) => Number(match[1]));
 
-  if (wantsShed || southHeight || northHeight) shell.roofType = 'shed';
+  if (wantsShed || southHeight || northHeight || eastHeight || westHeight) shell.roofType = 'shed';
+  // A named east/west pair moves the fall to that axis; naming north/south
+  // (or nothing) keeps the classic north/south shed. One axis at a time.
+  const namesEW = Boolean(eastHeight || westHeight) && !southHeight && !northHeight;
   if (southHeight) shell.southWallHeightFt = clamp(Number(southHeight), 2, 24);
   if (northHeight) shell.northWallHeightFt = clamp(Number(northHeight), 2, 24);
-  if (!southHeight && !northHeight && wantsShed && genericHeights.length >= 2) {
+  if (namesEW) {
+    const baseH = Number(shell.wallHeightFt || 10);
+    shell.southWallHeightFt = baseH;
+    shell.northWallHeightFt = baseH;
+    if (eastHeight) shell.eastWallHeightFt = clamp(Number(eastHeight), 2, 24);
+    if (westHeight) shell.westWallHeightFt = clamp(Number(westHeight), 2, 24);
+    if (!eastHeight) shell.eastWallHeightFt = baseH;
+    if (!westHeight) shell.westWallHeightFt = baseH;
+  } else if (southHeight || northHeight) {
+    delete shell.eastWallHeightFt;
+    delete shell.westWallHeightFt;
+  }
+  if (!southHeight && !northHeight && !namesEW && wantsShed && genericHeights.length >= 2) {
     shell.southWallHeightFt = clamp(Math.max(...genericHeights), 7, 24);
     shell.northWallHeightFt = clamp(Math.min(...genericHeights), 7, 24);
   }
-  if (wantsShed && (!shell.southWallHeightFt && !shell.northWallHeightFt || Number(shell.southWallHeightFt) === Number(shell.northWallHeightFt))) {
+  if (wantsShed && !namesEW && roofProfile(shell).riseFt < 0.05) {
     shell.southWallHeightFt = clamp(Number(shell.wallHeightFt || 10) + 2, 7, 24);
     shell.northWallHeightFt = clamp(Number(shell.wallHeightFt || 10), 7, 24);
+    delete shell.eastWallHeightFt;
+    delete shell.westWallHeightFt;
   }
   if (shell.roofType === 'shed') {
     if (!shell.southWallHeightFt) shell.southWallHeightFt = Number(shell.wallHeightFt || 10) + 2;
@@ -1502,9 +1517,13 @@ export function applyRoofInstruction(spec, text) {
     const profile = roofProfile(shell);
     shell.wallHeightFt = profile.highWallHeightFt;
     shell.roofPitch = Math.round(profile.pitch * 1000) / 1000;
-    shell.roofNote = `${profile.highSide} high shed roof; ${profile.southWallHeightFt}' south wall, ${profile.northWallHeightFt}' north wall; east/west walls follow the roof slope.`;
+    shell.roofNote = profile.axis === 'ew'
+      ? `${profile.highSide} high shed roof; ${profile.eastWallHeightFt}' east wall, ${profile.westWallHeightFt}' west wall; north/south walls follow the roof slope.`
+      : `${profile.highSide} high shed roof; ${profile.southWallHeightFt}' south wall, ${profile.northWallHeightFt}' north wall; east/west walls follow the roof slope.`;
     spec.systems.structure = `shed / lean-to roof over ${spec.systems.structure}; ${shell.roofNote} Rafters, diaphragm, uplift, and tall-wall bracing require structural sizing.`;
-    return `Changed roof to a shed / lean-to roof: south wall ${profile.southWallHeightFt}', north wall ${profile.northWallHeightFt}', roof pitch ${profile.pitch.toFixed(3)} rise/run across the ${shell.depthFt}' depth. East and west wall faces now follow the roof angle in the model.`;
+    return profile.axis === 'ew'
+      ? `Changed roof to a shed / lean-to roof: east wall ${profile.eastWallHeightFt}', west wall ${profile.westWallHeightFt}', roof pitch ${profile.pitch.toFixed(3)} rise/run across the ${shell.widthFt}' width. North and south wall faces now follow the roof angle in the model.`
+      : `Changed roof to a shed / lean-to roof: south wall ${profile.southWallHeightFt}', north wall ${profile.northWallHeightFt}', roof pitch ${profile.pitch.toFixed(3)} rise/run across the ${shell.depthFt}' depth. East and west wall faces now follow the roof angle in the model.`;
   }
   return null;
 }
@@ -1819,7 +1838,9 @@ export function getSpecialBimObjects(spec) {
       w: spec.shell.widthFt,
       d: spec.shell.depthFt,
       h: roof.highWallHeightFt,
-      note: `${roof.roofType} roof; south wall ${roof.southWallHeightFt}', north wall ${roof.northWallHeightFt}', pitch ${roof.pitch.toFixed(3)}.`
+      note: roof.axis === 'ew'
+        ? `${roof.roofType} roof; east wall ${roof.eastWallHeightFt}', west wall ${roof.westWallHeightFt}', pitch ${roof.pitch.toFixed(3)}.`
+        : `${roof.roofType} roof; south wall ${roof.southWallHeightFt}', north wall ${roof.northWallHeightFt}', pitch ${roof.pitch.toFixed(3)}.`
     },
     ...(resolveFrameType(spec, 1) !== 'load-bearing' ? [{
       id: 'frame-main',
@@ -2369,7 +2390,7 @@ export function buildStudioConversationResponse(promptText, spec, selected, issu
   }
 
   if (/\b(what do you see|describe|summarize|tell me what you see)\b/.test(text)) {
-    return `Here is the current model state in plain language: ${shell}, roof type ${roof.roofType}${roof.roofType === 'shed' ? ` with south wall ${roof.southWallHeightFt}' and north wall ${roof.northWallHeightFt}'` : ''}, ${spec.rooms.length} room zones, ${(spec.elements || []).length} placed elements, and ${spec.openings.length} openings. Selected object: ${selectedLabel}. Current review flags: ${issueSummary}`;
+    return `Here is the current model state in plain language: ${shell}, roof type ${roof.roofType}${roof.roofType === 'shed' ? (roof.axis === 'ew' ? ` with east wall ${roof.eastWallHeightFt}' and west wall ${roof.westWallHeightFt}'` : ` with south wall ${roof.southWallHeightFt}' and north wall ${roof.northWallHeightFt}'`) : ''}, ${spec.rooms.length} room zones, ${(spec.elements || []).length} placed elements, and ${spec.openings.length} openings. Selected object: ${selectedLabel}. Current review flags: ${issueSummary}`;
   }
 
   if (/\b(what differs|what's different|compare|critique|review)\b/.test(text)) {
@@ -2408,6 +2429,8 @@ export function emptyBimOperation(operation = {}) {
     pitch: 0,
     southWallHeightFt: 0,
     northWallHeightFt: 0,
+    eastWallHeightFt: 0,
+    westWallHeightFt: 0,
     reason: '',
     ...operation
   };
@@ -2448,7 +2471,7 @@ export function operationDescription(operation, spec) {
   if (op.type === 'add_room') return `Added ${op.name || 'room'} at ${op.w}' x ${op.d}'.`;
   if (op.type === 'add_element' || op.type === 'add_site_element' || op.type === 'add_loft' || op.type === 'add_tower' || op.type === 'add_floor') return `Added ${op.name || 'building element'} as ${op.category || 'custom BIM object'}.`;
   if (op.type === 'add_level' || op.type === 'edit_level') return `Added/edited ${op.name || `Level ${op.level || 2}`} in the BIM model.`;
-  if (op.type === 'set_roof' || op.type === 'set_roof_profile' || op.type === 'add_roof_plane') return `Set roof to ${op.roofType || spec.shell.roofType || 'roof'}${op.southWallHeightFt && op.northWallHeightFt ? ` with S ${op.southWallHeightFt}' / N ${op.northWallHeightFt}' wall heights` : ''}.`;
+  if (op.type === 'set_roof' || op.type === 'set_roof_profile' || op.type === 'add_roof_plane') return `Set roof to ${op.roofType || spec.shell.roofType || 'roof'}${op.southWallHeightFt && op.northWallHeightFt ? ` with S ${op.southWallHeightFt}' / N ${op.northWallHeightFt}' wall heights` : op.eastWallHeightFt && op.westWallHeightFt ? ` with E ${op.eastWallHeightFt}' / W ${op.westWallHeightFt}' wall heights` : ''}.`;
   if (op.type === 'set_assembly' || op.type === 'set_wall_assembly' || op.type === 'set_wall_segment_assembly') return `Updated ${op.field || op.wall || 'assembly'} to ${op.value}.`;
   if (op.type === 'set_wall_height') return `Set ${op.wall || 'wall'} height to ${op.h || op.value}'.`;
   if (op.type === 'set_shell' || op.type === 'add_pad_extension') return `Updated shell ${op.field || 'padExtensionFt'} to ${op.value || op.w}.`;
@@ -2572,24 +2595,57 @@ export function applyStructuredDesignPlan(currentSpec, plan) {
 
     if (operation.type === 'set_roof' || operation.type === 'set_roof_profile' || operation.type === 'add_roof_plane') {
       if (operation.roofType) next.shell.roofType = operation.roofType;
+      // Mirror of bim-core: naming a pair picks the shed's fall axis and
+      // resets the other pair, so the profile is never ambiguous.
+      const namesEW = Boolean(operation.eastWallHeightFt || operation.westWallHeightFt);
+      const namesNS = Boolean(operation.southWallHeightFt || operation.northWallHeightFt);
+      if (namesNS) { delete next.shell.eastWallHeightFt; delete next.shell.westWallHeightFt; }
+      if (namesEW && !namesNS) {
+        const baseH = Number(next.shell.wallHeightFt || 10);
+        next.shell.southWallHeightFt = baseH;
+        next.shell.northWallHeightFt = baseH;
+        // Pin BOTH east/west fields (mirror of bim-core): an unset side must
+        // hold today's base, not float on the raised wallHeightFt.
+        if (!next.shell.eastWallHeightFt) next.shell.eastWallHeightFt = baseH;
+        if (!next.shell.westWallHeightFt) next.shell.westWallHeightFt = baseH;
+      }
       if (operation.southWallHeightFt) next.shell.southWallHeightFt = clamp(operation.southWallHeightFt, 2, 40);
       if (operation.northWallHeightFt) next.shell.northWallHeightFt = clamp(operation.northWallHeightFt, 2, 40);
+      if (operation.eastWallHeightFt) next.shell.eastWallHeightFt = clamp(operation.eastWallHeightFt, 2, 40);
+      if (operation.westWallHeightFt) next.shell.westWallHeightFt = clamp(operation.westWallHeightFt, 2, 40);
       if (operation.pitch) next.shell.roofPitch = clamp(operation.pitch, 0.02, 1.5);
       const profile = roofProfile(next.shell);
       next.shell.wallHeightFt = profile.highWallHeightFt;
       next.shell.roofPitch = Math.round(profile.pitch * 1000) / 1000;
-      next.shell.roofNote = `${profile.roofType} roof; south wall ${profile.southWallHeightFt}', north wall ${profile.northWallHeightFt}'.`;
+      next.shell.roofNote = profile.axis === 'ew'
+        ? `${profile.roofType} roof; east wall ${profile.eastWallHeightFt}', west wall ${profile.westWallHeightFt}'.`
+        : `${profile.roofType} roof; south wall ${profile.southWallHeightFt}', north wall ${profile.northWallHeightFt}'.`;
       actions.push(operationDescription(operation, next));
       continue;
     }
 
     if (operation.type === 'set_wall_height') {
-      const heightMin = operation.wall === 'south' || operation.wall === 'north' ? 2 : 7;
+      const shedSides = ['south', 'north', 'east', 'west'];
+      const heightMin = shedSides.includes(operation.wall) ? 2 : 7;
       const height = clamp(Number(operation.h || operation.value || 10), heightMin, 40);
       if (operation.wall === 'south') next.shell.southWallHeightFt = height;
       else if (operation.wall === 'north') next.shell.northWallHeightFt = height;
+      else if (operation.wall === 'east') next.shell.eastWallHeightFt = height;
+      else if (operation.wall === 'west') next.shell.westWallHeightFt = height;
       else next.shell.wallHeightFt = height;
-      if (operation.wall === 'south' || operation.wall === 'north') next.shell.roofType = 'shed';
+      if (shedSides.includes(operation.wall)) {
+        next.shell.roofType = 'shed';
+        if (operation.wall === 'east' || operation.wall === 'west') {
+          const baseH = Number(next.shell.wallHeightFt || 10);
+          next.shell.southWallHeightFt = baseH;
+          next.shell.northWallHeightFt = baseH;
+          if (!next.shell.eastWallHeightFt) next.shell.eastWallHeightFt = baseH;
+          if (!next.shell.westWallHeightFt) next.shell.westWallHeightFt = baseH;
+        } else {
+          delete next.shell.eastWallHeightFt;
+          delete next.shell.westWallHeightFt;
+        }
+      }
       const profile = roofProfile(next.shell);
       next.shell.wallHeightFt = profile.highWallHeightFt;
       next.shell.roofPitch = Math.round(profile.pitch * 1000) / 1000;
@@ -2992,8 +3048,9 @@ export function normalizeRooms(spec) {
   // shell owns N/S wall heights — a disagreeing per-wall override is a
   // desync; storey plates always sit at the engine's floor elevation.
   if (spec.shell && spec.walls) {
-    for (const side of ['south', 'north']) {
-      const shellH = Number(side === 'south' ? spec.shell.southWallHeightFt : spec.shell.northWallHeightFt);
+    const shellHFor = { south: 'southWallHeightFt', north: 'northWallHeightFt', east: 'eastWallHeightFt', west: 'westWallHeightFt' };
+    for (const side of ['south', 'north', 'east', 'west']) {
+      const shellH = Number(spec.shell[shellHFor[side]]);
       const w = spec.walls[side];
       if (w && Number.isFinite(Number(w.heightFt)) && Number.isFinite(shellH) && shellH > 0
         && Math.abs(Number(w.heightFt) - shellH) > 0.05) delete w.heightFt;
@@ -3199,10 +3256,10 @@ export function detectIssues(spec) {
   if (spec.shell.wallHeightFt > 12) {
     issues.push({ severity: 'warning', title: 'Tall walls need explicit lateral strategy', owner: 'Engineer', system: 'walls', fix: 'Add shear wall schedule, hold-downs, and diaphragm notes.' });
   }
-  const shedFall = Math.abs(Number(spec.shell.southWallHeightFt || spec.shell.wallHeightFt || 10) - Number(spec.shell.northWallHeightFt || spec.shell.wallHeightFt || 10));
+  const shedFall = roofProfile(spec.shell).riseFt;
   const roofTypeForDrain = spec.shell.roofType || 'gable';
   if (roofTypeForDrain === 'shed' && shedFall < 0.5) {
-    issues.push({ severity: 'warning', title: "Shed roof is flat — it won't drain", owner: 'Engineer', system: 'roof', fixId: 'give-shed-fall', fix: 'A shed needs a high eave and a low one. Set "Drains to" on the Roof page — high south wall draining north is the solar classic.' });
+    issues.push({ severity: 'warning', title: "Shed roof is flat — it won't drain", owner: 'Engineer', system: 'roof', fixId: 'give-shed-fall', fix: 'A shed needs a high eave and a low one. Set "Which way it falls" on the Roof page (north, south, east, or west) — high south wall draining north is the solar classic.' });
   }
   // Drainage: a shed dumps its WHOLE roof at one low eave, so no gutter there
   // trenches the ground and splashes the wall — worse under plastered natural
