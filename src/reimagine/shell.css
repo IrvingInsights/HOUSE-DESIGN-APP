@@ -722,3 +722,9 @@
   background: var(--paper, #FBFAF6); color: inherit; cursor: pointer;
 }
 .rz-open-quick button:hover { border-color: var(--active-line, #3C6472); }
+
+/* the 3D "Show" filter select, riding in the views cluster */
+.rz-views .rz-show {
+  border: none; background: transparent; font: inherit; font-size: 13px;
+  color: inherit; cursor: pointer; padding: 4px 2px; max-width: 150px;
+}
