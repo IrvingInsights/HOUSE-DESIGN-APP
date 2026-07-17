@@ -366,7 +366,7 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
         {openings.length === 0 && (
           <text x={run / 2} y={Y(Math.max(2, groundProfileAt(run / 2) / 2))} textAnchor="middle" fontSize="1.3" fill="#8a8271" pointerEvents="none">
-            No doors or windows on this wall yet — add one from the list on the left.
+            No doors or windows on this wall yet — add them in the Openings chapter.
           </text>
         )}
       </svg>
