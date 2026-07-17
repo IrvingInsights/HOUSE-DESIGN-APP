@@ -49,7 +49,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 96 · Jul 17';
+const UPDATE_STAMP = 'update 97 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1819,6 +1819,18 @@ function ShapeControls({ spec, floors, onShapeBuilding, onSizeBuilding, onAddFlo
   return (
     <div className="rz-shape">
       <div className="rz-found-head">Outline</div>
+      {/* the whole building's plainest numbers, right where "shape" is —
+          the same size the Ground row in Floors edits (numeric twins) */}
+      <div className="rz-shape-size">
+        <label className="rz-field rz-field-num">
+          <span>Width (east–west)</span>
+          <NumInput value={bW} min={12} max={96} step={0.5} onCommit={(v) => onSizeBuilding(v, bD)} />
+        </label>
+        <label className="rz-field rz-field-num">
+          <span>Depth (north–south)</span>
+          <NumInput value={bD} min={12} max={80} step={0.5} onCommit={(v) => onSizeBuilding(bW, v)} />
+        </label>
+      </div>
       <div className="rz-shape-presets">
         {[['rect', 'Rectangle'], ['l', 'L'], ['t', 'T'], ['u', 'U'], ['round', 'Round']].map(([kind, label]) => (
           <button

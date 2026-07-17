@@ -743,3 +743,6 @@
   border: 1px solid var(--line, #dbd9ce); border-radius: 8px; background: var(--paper, #FBFAF6); color: inherit;
 }
 .rz-card-open button:hover { border-color: var(--active-line, #3C6472); }
+
+/* the Outline section's whole-building size row */
+.rz-shape-size { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
