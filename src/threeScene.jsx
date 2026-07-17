@@ -1908,6 +1908,55 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const ghHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
           mesh = box(element.w, hIn, element.d, element.x + element.w / 2, elevation + hIn / 2, element.y + element.d / 2, ghHandle);
           elementHeight = hIn;
+        } else if (element.category === 'deck') {
+          // A railed outdoor deck on its floor: wood platform at the storey's
+          // elevation, railing on every side that faces open air (sides against
+          // the house or its storey outline stay open for the doorway), short
+          // posts to grade on the ground floor.
+          const lvlD = Math.max(1, Number(element.level || 1));
+          const deckTopY = lvlD >= 2 ? storeyElevationFt(spec.shell, lvlD) + 0.18 : 0.8;
+          const deckMatD = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.8, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
+          const dparts = [];
+          const dp = (m) => { m.userData.roomId = element.id; m.userData.generated = true; group.add(m); dparts.push(m); return m; };
+          dp(box(element.w, 0.35, element.d, element.x + element.w / 2, deckTopY, element.y + element.d / 2, deckMatD));
+          // which sides face the building? probe just outside each edge
+          const insideMassAt = (px, pz) => {
+            if (lvlD === 1) return customFp ? pointInFootprint(fpPoly, px, pz) : (px > 0 && px < width && pz > 0 && pz < depth);
+            const pr = upperPlateRect(spec, lvlD) || { x: 0, y: 0, w: width, d: depth };
+            return px > pr.x && px < pr.x + pr.w && pz > pr.y && pz < pr.y + pr.d;
+          };
+          const railSides = {
+            north: !insideMassAt(element.x + element.w / 2, element.y - 0.4),
+            south: !insideMassAt(element.x + element.w / 2, element.y + element.d + 0.4),
+            west: !insideMassAt(element.x - 0.4, element.y + element.d / 2),
+            east: !insideMassAt(element.x + element.w + 0.4, element.y + element.d / 2)
+          };
+          const railTop = deckTopY + 3;
+          const railOn = (horizontal, fixedC, a0, a1) => {
+            dp(horizontal
+              ? box(a1 - a0, 0.18, 0.18, (a0 + a1) / 2, railTop, fixedC, deckMatD)
+              : box(0.18, 0.18, a1 - a0, fixedC, railTop, (a0 + a1) / 2, deckMatD));
+            const n = Math.max(1, Math.round((a1 - a0) / 4));
+            for (let i = 0; i <= n; i += 1) {
+              const at = a0 + ((a1 - a0) * i) / n;
+              dp(horizontal
+                ? box(0.15, railTop - deckTopY, 0.15, at, (deckTopY + railTop) / 2, fixedC, deckMatD)
+                : box(0.15, railTop - deckTopY, 0.15, fixedC, (deckTopY + railTop) / 2, at, deckMatD));
+            }
+          };
+          if (railSides.north) railOn(true, element.y + 0.1, element.x, element.x + element.w);
+          if (railSides.south) railOn(true, element.y + element.d - 0.1, element.x, element.x + element.w);
+          if (railSides.west) railOn(false, element.x + 0.1, element.y, element.y + element.d);
+          if (railSides.east) railOn(false, element.x + element.w - 0.1, element.y, element.y + element.d);
+          if (lvlD === 1) {
+            [[element.x + 0.3, element.y + 0.3], [element.x + element.w - 0.3, element.y + 0.3], [element.x + 0.3, element.y + element.d - 0.3], [element.x + element.w - 0.3, element.y + element.d - 0.3]].forEach(([px, pz]) => {
+              dp(box(0.35, deckTopY, 0.35, px, deckTopY / 2, pz, deckMatD));
+            });
+          }
+          // full-volume invisible handle = the select/drag target
+          const deckHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
+          mesh = box(element.w, Math.max(1, railTop - deckTopY), element.d, element.x + element.w / 2, (deckTopY + railTop) / 2, element.y + element.d / 2, deckHandle);
+          elementHeight = railTop - deckTopY;
         } else if (/stair/i.test(element.name || '') && !/ladder/i.test(element.name || '')) {
           // A real stair run: treads and risers climbing the storey (or out of
           // the basement), not a floating box. The invisible full-volume box

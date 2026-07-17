@@ -5,7 +5,7 @@ import { ElevationView } from './elevationView.jsx';
 import {
   applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
   INSULATION_TYPES, resolveInsulation, OPENING_TYPES,
-  FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS, storeyHeightFt,
+  FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS, storeyHeightFt, storeyElevationFt,
   footprintPolygon, polygonArea, footprintBounds
 } from '../../backend/bim-core.mjs';
 import {
@@ -49,7 +49,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 89 · Jul 17';
+const UPDATE_STAMP = 'update 90 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -963,6 +963,17 @@ export default function App() {
                     }}
                   >＋ Stairs — connect the floors (3½ × 10 ft)</button>
                 )}
+                <button
+                  type="button"
+                  className="rz-floorbar-outline"
+                  title="A railed outdoor deck on this floor — drops beside the south wall; drag it to any side, grab a corner to resize"
+                  onClick={() => {
+                    const W = Number(spec.shell.widthFt) || 36;
+                    const D = Number(spec.shell.depthFt) || 28;
+                    const lvl = activeFloor >= 1 ? activeFloor : 1;
+                    applyOps([{ type: 'add_element', name: lvl > 1 ? `${floorLabel(spec, lvl)} deck` : 'Deck', category: 'deck', x: Math.round(W / 2 - 5), y: D + 0.5, w: 10, d: 8, h: 0.35, level: lvl, z: lvl >= 2 ? storeyElevationFt(spec.shell, lvl) : 0 }]);
+                  }}
+                >＋ Deck — outdoor platform on this floor (10 × 8 ft)</button>
                 {roomNote && <div className="rz-shape-note">{roomNote}</div>}
                 <div className="rz-shape-note">Tap a room on the plan to rename or remove it (or press Delete). Right-click for more.</div>
               </div>
