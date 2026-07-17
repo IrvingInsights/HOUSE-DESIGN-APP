@@ -1316,9 +1316,10 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           }
           const eaveLiftAt = (spanPos, lift) => {
             if (roofSpec.roofType === 'shed') {
-              const z0 = -oAllF.north; const z1 = depth + oAllF.south;
+              // through the wall tops at the wall lines — same law as the
+              // roof planes, so posts meet the plate exactly at every span
               const nH = roofSpec.northWallHeightFt + lift; const sH = roofSpec.southWallHeightFt + lift;
-              return nH + (sH - nH) * clamp((spanPos - z0) / Math.max(0.01, z1 - z0), 0, 1);
+              return nH + (depth > 0 ? (sH - nH) / depth : 0) * spanPos;
             }
             return roofSpec.highWallHeightFt + lift;
           };
@@ -2405,10 +2406,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // The global shed plane (eave line north→south across the whole
           // house) — 'full' shed segments are coplanar pieces of it.
           const shedYAt = (zz) => {
-            const z0 = -oAll.north, z1 = depth + oAll.south;
+            // through the wall tops at the wall lines; overhangs continue the
+            // slope (the stretched 0..overhang-tip mapping diluted it and let
+            // a tall south wall pierce its own roof)
             const nH = roofSpec.northWallHeightFt + storeyLift + 0.28;
             const sH = roofSpec.southWallHeightFt + storeyLift + 0.28;
-            return nH + (sH - nH) * clamp((zz - z0) / Math.max(0.01, z1 - z0), 0, 1);
+            return nH + (depth > 0 ? (sH - nH) / depth : 0) * zz;
           };
           // In a set-back design each tier's shed piece rides its OWN storey:
           // low (north) edge at the tier's global wall top, rising south at
@@ -2888,11 +2891,16 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         const lift = Math.max(0, wallHeight - Math.max(roofSpec.southWallHeightFt, roofSpec.northWallHeightFt));
         const southHeight = roofSpec.southWallHeightFt + lift + 0.28;
         const northHeight = roofSpec.northWallHeightFt + lift + 0.28;
+        // The plane passes THROUGH the wall tops AT THE WALL LINES and keeps
+        // the same slope over the overhangs. Reaching the wall heights only
+        // at the overhang tips diluted the slope, so a tall south wall stood
+        // ~a foot proud of its own roof ("why does the S wall pierce?").
+        const slopeShed = depth > 0 ? (southHeight - northHeight) / depth : 0;
         const mesh = meshFromTris(slabTris([
-          [-o.west, northHeight, -o.north],
-          [width + o.east, northHeight, -o.north],
-          [width + o.east, southHeight, depth + o.south],
-          [-o.west, southHeight, depth + o.south]
+          [-o.west, northHeight - slopeShed * o.north, -o.north],
+          [width + o.east, northHeight - slopeShed * o.north, -o.north],
+          [width + o.east, southHeight + slopeShed * o.south, depth + o.south],
+          [-o.west, southHeight + slopeShed * o.south, depth + o.south]
         ], ROOF_THK), material);
         mesh.name = 'Shed / lean-to roof plane';
         return mesh;
