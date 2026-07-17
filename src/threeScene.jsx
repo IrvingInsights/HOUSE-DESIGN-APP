@@ -1563,7 +1563,9 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       if (layers.foundation !== false && wholeHouseStem) {
         const stemH = Math.min(6, Math.max(0.5, Number(utilitiesOf(spec).stemwallHeightFt) || 1.5));
         const stemMat = new THREE.MeshStandardMaterial({ color: 0xaaa79b, roughness: 0.95, map: grainTexture('concrete'), bumpMap: bumpTexture('concrete'), bumpScale: 0.15 });
-        const lip = 0.25;
+        // The stem sits DIRECTLY under the wall above — same footprint, dead
+        // flush (the old 3″ proud lip read as the stem standing outside the
+        // bales; real bale walls bear on a stem of their own width).
         const ring = customFp
           // Custom footprint: the plinth follows every polygon edge.
           ? fpEdges.map((edge) => {
@@ -1571,14 +1573,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const cx = (edge.x0 + edge.x1) / 2 - edge.nx * (t / 2);
             const cy = (edge.y0 + edge.y1) / 2 - edge.ny * (t / 2);
             return edge.horizontal
-              ? box(edge.lengthFt + lip * 2, stemH, t + lip, cx, stemH / 2, cy, stemMat)
-              : box(t + lip, stemH, edge.lengthFt + lip * 2, cx, stemH / 2, cy, stemMat);
+              ? box(edge.lengthFt, stemH, t, cx, stemH / 2, cy, stemMat)
+              : box(t, stemH, edge.lengthFt, cx, stemH / 2, cy, stemMat);
           })
           : [
-            box(width + lip * 2, stemH, tN + lip, width / 2, stemH / 2, tN / 2, stemMat),
-            box(width + lip * 2, stemH, tS + lip, width / 2, stemH / 2, depth - tS / 2, stemMat),
-            box(tW + lip, stemH, depth + lip * 2, tW / 2, stemH / 2, depth / 2, stemMat),
-            box(tE + lip, stemH, depth + lip * 2, width - tE / 2, stemH / 2, depth / 2, stemMat)
+            box(width, stemH, tN, width / 2, stemH / 2, tN / 2, stemMat),
+            box(width, stemH, tS, width / 2, stemH / 2, depth - tS / 2, stemMat),
+            box(tW, stemH, depth, tW / 2, stemH / 2, depth / 2, stemMat),
+            box(tE, stemH, depth, width - tE / 2, stemH / 2, depth / 2, stemMat)
           ];
         ring.forEach((segment) => { segment.name = 'Stem wall foundation'; group.add(addEdges(segment)); });
       }

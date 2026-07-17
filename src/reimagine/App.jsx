@@ -49,7 +49,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 93 · Jul 17';
+const UPDATE_STAMP = 'update 94 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -436,6 +436,45 @@ export default function App() {
       : null;
     commitSpec((r2 || r1).spec);
     setMoveNote({ text: `Earthship move made: the ${Math.round((x1 - x0) * 10) / 10} ft of south wall behind “${room.name || 'the greenhouse'}” is now cob — thermal mass where the winter sun lands, insulation everywhere else. Ctrl+Z undoes it.` });
+  };
+  // Which outside walls a room touches (its own storey's outline for upper
+  // rooms) — the sides its card can put a door or window on.
+  const roomDoorSides = (room) => {
+    const lvl = Math.max(1, Number(room.level || 1));
+    const rect = (lvl >= 2 ? upperPlateRect(spec, lvl) : null)
+      || { x: 0, y: 0, w: Number(spec.shell.widthFt) || 36, d: Number(spec.shell.depthFt) || 28 };
+    const t = 2.2;
+    const sides = [];
+    if (Math.abs((Number(room.y) || 0) - rect.y) < t) sides.push('north');
+    if (Math.abs(((Number(room.y) || 0) + (Number(room.d) || 0)) - (rect.y + rect.d)) < t) sides.push('south');
+    if (Math.abs((Number(room.x) || 0) - rect.x) < t) sides.push('west');
+    if (Math.abs(((Number(room.x) || 0) + (Number(room.w) || 0)) - (rect.x + rect.w)) < t) sides.push('east');
+    return sides;
+  };
+  // A door/window FOR A ROOM: lands on the wall the room touches, centered on
+  // the room's stretch of it — nudged along that stretch to a free spot so it
+  // never silently replaces an opening already there.
+  const addRoomOpening = (room, side, type) => {
+    const W = Number(spec.shell.widthFt) || 36; const D = Number(spec.shell.depthFt) || 28;
+    const profile = OPENING_TYPES[type] || OPENING_TYPES.door;
+    const widthFt = profile.defaultW || 3;
+    const lvl = Math.max(1, Number(room.level || 1));
+    const horiz = side === 'north' || side === 'south';
+    const lo = Math.max(0, horiz ? Number(room.x) || 0 : Number(room.y) || 0);
+    const hi = Math.min(horiz ? W : D, (horiz ? (Number(room.x) || 0) + (Number(room.w) || 0) : (Number(room.y) || 0) + (Number(room.d) || 0)));
+    let along = Math.max(0.5, (lo + hi) / 2 - widthFt / 2);
+    const clash = (start) => (spec.openings || []).some((o) => {
+      if (o.wall !== side || Number(o.level || 1) !== lvl) return false;
+      const e0 = Number(o.x ?? o.y ?? 0); const e1 = e0 + (Number(o.widthFt) || 3);
+      return start < e1 + 0.3 && start + widthFt > e0 - 0.3;
+    });
+    if (clash(along)) {
+      let found = null;
+      for (let c = lo + 0.5; c + widthFt <= hi - 0.4; c += 0.5) { if (!clash(c)) { found = c; break; } }
+      along = found ?? 0; // 0 = the engine finds a free stretch anywhere on the wall
+    }
+    applyOps([{ type: 'add_opening', wall: side, openingType: type, widthFt, positionFt: along, level: lvl }]);
+    setOpenWall(side); // the Wall view follows, ready to fine-tune
   };
   // Size any single object (room or element) — width × depth, position kept.
   const sizeObject = (obj, w, d) => applyOps([{ type: 'resize_object', targetId: obj.id, name: obj.name, w, d, h: Number(obj.h) || 0.22 }]);
@@ -1213,6 +1252,8 @@ export default function App() {
           onMassWall={selectedRoom.type === 'plant'
             && (Number(selectedRoom.y) || 0) + (Number(selectedRoom.d) || 0) >= (Number(spec.shell.depthFt) || 28) - 1
             ? () => makeMassWallBehind(selectedRoom) : null}
+          doorSides={roomDoorSides(selectedRoom)}
+          onAddOpening={(side, type) => addRoomOpening(selectedRoom, side, type)}
         />
       )}
       {selectedId && !selectedRoom && (() => {
@@ -1574,7 +1615,9 @@ function PlaceSizeRows({ obj, onMove, onResize }) {
   );
 }
 
-function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose, onMassWall = null }) {
+function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose, onMassWall = null, doorSides = [], onAddOpening = null }) {
+  const [doorSideRaw, setDoorSide] = useState('');
+  const doorSide = doorSides.includes(doorSideRaw) ? doorSideRaw : doorSides[0];
   const [expanded, setExpanded] = useState(false);
   const area = Math.round((Number(room.w) || 0) * (Number(room.d) || 0));
   const sharePct = derived.floor > 0 ? Math.round((area / derived.floor) * 100) : 0;
@@ -1593,6 +1636,22 @@ function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose
           🌍 Make the wall behind this greenhouse cob (thermal mass)
         </button>
       )}
+      {/* doors & windows for THIS room, on the outside walls it touches */}
+      {onAddOpening && (doorSides.length > 0 ? (
+        <div className="rz-card-open">
+          {doorSides.length > 1 ? (
+            <select value={doorSide} onChange={(e) => setDoorSide(e.target.value)}>
+              {doorSides.map((sd) => <option key={sd} value={sd}>{WALL_SIDE_LABELS[sd]} wall</option>)}
+            </select>
+          ) : (
+            <span className="rz-card-open-side">{WALL_SIDE_LABELS[doorSide]} wall:</span>
+          )}
+          <button type="button" onClick={() => onAddOpening(doorSide, 'door')}>+ Door</button>
+          <button type="button" onClick={() => onAddOpening(doorSide, 'window')}>+ Window</button>
+        </div>
+      ) : (
+        <div className="rz-muted">This room doesn’t touch an outside wall — doorways between rooms aren’t drawn yet.</div>
+      ))}
 
       <div className="rz-vitals">
         <Vital label="Use" value={TYPE_LABEL[room.type] || room.type || '—'} />
