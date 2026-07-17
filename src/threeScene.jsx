@@ -17,7 +17,7 @@ import {
 import {
   DEFAULT_OUTDOOR_GRID_SIZE_FT, clamp, padExtension, sitePadRect, objectBounds, titleCase, roofProfile, storeyInfo,
   upperPlateRect, resolveOverhangs, FOUNDATION_RUN_TYPES, DEFAULT_MODEL_LAYERS, siteOf, utilitiesOf, getSpecialBimObjects, wallAssemblyProfile,
-  WALL_SIDES, resolveWallSide
+  WALL_SIDES, resolveWallSide, resolveDeck
 } from './engine.js';
 
 // Some browsers run with graphics acceleration (WebGL) turned off — locked-
@@ -66,12 +66,12 @@ export const JOINTS = {
   RAFTER_DROP: 0.34,   // rafter tops sit this far below the roof deck surface
 };
 
-export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, viewRequest = null, sectionCut = 1, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview, onFallbackNav, showCompass = false, context = null }) {
+export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, viewRequest = null, sectionCut = 1, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview, onFallbackNav, showCompass = false, context = null, onContext = null }) {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraStateRef = useRef(null);
   const selectedRoomRef = useRef(selectedRoom);
-  const callbacksRef = useRef({ onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview });
+  const callbacksRef = useRef({ onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview, onContext });
   // Camera flights (view buttons, orbit-around-selection) and the section cut
   // ride REFS, not effect deps — the scene must never rebuild for a camera move.
   const tweenRef = useRef(null);
@@ -83,8 +83,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
   }, [selectedRoom]);
 
   useEffect(() => {
-    callbacksRef.current = { onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview };
-  }, [onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview]);
+    callbacksRef.current = { onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview, onContext };
+  }, [onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview, onContext]);
 
   // View preset buttons: fly the camera to top / front (south) / side (east) /
   // iso at the CURRENT orbit distance, keeping the current target.
@@ -460,6 +460,53 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const roofPlan = (() => {
         const pieces = [];
         const porchRings = []; // open decks — NO roof over them
+        // ── COVERED DECKS join the plan first (the one-roof law: a roofed
+        // deck's canopy is a PLAN PIECE like any other roof — its mesh is
+        // built FROM these functions and its posts rise to meet them, never
+        // freehand geometry). They don't depend on the footprint, so round
+        // houses get them too.
+        (spec.elements || []).forEach((el) => {
+          if (el.category !== 'deck') return;
+          const dk = resolveDeck(spec, el);
+          if (!dk.roofKey) return;
+          const rect = { x: Number(el.x) || 0, y: Number(el.y) || 0, w: Math.max(1, Number(el.w) || 10), d: Math.max(1, Number(el.d) || 8) };
+          const o = { north: 0.75, south: 0.75, west: 0.75, east: 0.75 };
+          const X0 = rect.x - o.west; const X1 = rect.x + rect.w + o.east;
+          const Z0 = rect.y - o.north; const Z1 = rect.y + rect.d + o.south;
+          const eaveY = dk.topFt + 6.8; // headroom over the boards, like the porch canopies
+          const seg = { rect, o, kind: dk.roofKey === 'gable' ? 'deckGable' : 'deckShed', level: dk.level, deckId: el.id, eave: eaveY };
+          seg.covers = (px, pz) => px >= X0 - 0.01 && px <= X1 + 0.01 && pz >= Z0 - 0.01 && pz <= Z1 + 0.01;
+          if (seg.kind === 'deckGable') {
+            // same law as makeGableSegment: ridge along the LONGER axis
+            seg.deckPitch = 0.3;
+            const base = eaveY + JOINTS.EAVE_BEARING;
+            const spanX = X1 - X0; const spanZ = Z1 - Z0;
+            const ridgeY = base + (Math.min(spanX, spanZ) / 2) * seg.deckPitch;
+            if (spanX >= spanZ) {
+              const cz = (Z0 + Z1) / 2;
+              seg.topAt = (px, pz) => base + (ridgeY - base) * Math.max(0, 1 - Math.abs(pz - cz) / Math.max(0.01, spanZ / 2));
+            } else {
+              const cxs = (X0 + X1) / 2;
+              seg.topAt = (px) => base + (ridgeY - base) * Math.max(0, 1 - Math.abs(px - cxs) / Math.max(0.01, spanX / 2));
+            }
+          } else {
+            // shed: high edge toward the house, falling away from it
+            const dxH = (width / 2) - (rect.x + rect.w / 2);
+            const dzH = (depth / 2) - (rect.y + rect.d / 2);
+            const highSide = Math.abs(dxH) > Math.abs(dzH) ? (dxH > 0 ? 'east' : 'west') : (dzH > 0 ? 'south' : 'north');
+            const run = (highSide === 'north' || highSide === 'south') ? (Z1 - Z0) : (X1 - X0);
+            const rise = Math.max(0.8, run * 0.14);
+            const low = eaveY + JOINTS.EAVE_BEARING;
+            seg.highSide = highSide;
+            seg.topAt = (px, pz) => (
+              highSide === 'south' ? low + ((pz - Z0) / (Z1 - Z0)) * rise
+              : highSide === 'north' ? low + ((Z1 - pz) / (Z1 - Z0)) * rise
+              : highSide === 'east' ? low + ((px - X0) / (X1 - X0)) * rise
+              : low + ((X1 - px) / (X1 - X0)) * rise);
+          }
+          seg.stopBearing = JOINTS.EAVE_BEARING;
+          pieces.push(seg);
+        });
         if (roundFp) return { pieces, porchRings, legacy: false }; // cone keeps its own law (round v1)
         // Storey extents bottom→top — identical numbers to the walls/plates.
         const storeyTiers = [];
@@ -2300,53 +2347,138 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           mesh = box(element.w, hIn, element.d, element.x + element.w / 2, elevation + hIn / 2, element.y + element.d / 2, ghHandle);
           elementHeight = hIn;
         } else if (element.category === 'deck') {
-          // A railed outdoor deck on its floor: wood platform at the storey's
-          // elevation, railing on every side that faces open air (sides against
-          // the house or its storey outline stay open for the doorway), short
-          // posts to grade on the ground floor.
-          const lvlD = Math.max(1, Number(element.level || 1));
-          const deckTopY = lvlD >= 2 ? storeyElevationFt(spec.shell, lvlD) + JOINTS.DECK_LIFT : 0.8;
-          const deckMatD = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.8, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
-          const dparts = [];
-          const dp = (m) => { m.userData.roomId = element.id; m.userData.generated = true; group.add(m); dparts.push(m); return m; };
-          dp(box(element.w, 0.35, element.d, element.x + element.w / 2, deckTopY, element.y + element.d / 2, deckMatD));
-          // which sides face the building? probe just outside each edge
-          const insideMassAt = (px, pz) => {
-            if (lvlD === 1) return customFp ? pointInFootprint(fpPoly, px, pz) : (px > 0 && px < width && pz > 0 && pz < depth);
-            const pr = upperPlateRect(spec, lvlD) || { x: 0, y: 0, w: width, d: depth };
-            return px > pr.x && px < pr.x + pr.w && pz > pr.y && pz < pr.y + pr.d;
-          };
-          const railSides = {
-            north: !insideMassAt(element.x + element.w / 2, element.y - 0.4),
-            south: !insideMassAt(element.x + element.w / 2, element.y + element.d + 0.4),
-            west: !insideMassAt(element.x - 0.4, element.y + element.d / 2),
-            east: !insideMassAt(element.x + element.w + 0.4, element.y + element.d / 2)
-          };
+          // A deck or patio, drawn from the SAME resolveDeck() answer the
+          // receipts price: surface material, raised vs at-grade, railing
+          // style along the open edges only (the house and neighboring decks
+          // close an edge — that's the wraparound), auto steps when the floor
+          // sits high, a skirt hiding the underframe, and posts up to the
+          // canopy when a roof piece covers it.
+          const dk = resolveDeck(spec, element);
+          const lvlD = dk.level;
+          const deckTopY = dk.topFt;
+          const ex0 = Number(element.x) || 0; const ey0 = Number(element.y) || 0;
+          const ew0 = Math.max(1, Number(element.w) || 10); const ed0 = Math.max(1, Number(element.d) || 8);
+          const surfLook = {
+            wood: { color: 0x8a6a48, grain: 'wood', rough: 0.8 },
+            composite: { color: 0x8d8377, grain: 'wood', rough: 0.55 },
+            stone: { color: 0x9b948a, grain: 'earth', rough: 0.95 }
+          }[dk.surfaceKey] || { color: 0x8a6a48, grain: 'wood', rough: 0.8 };
+          const deckMatD = new THREE.MeshStandardMaterial({ color: surfLook.color, roughness: surfLook.rough, map: grainTexture(surfLook.grain), bumpMap: bumpTexture(surfLook.grain), bumpScale: 0.08 });
+          const railMatD = dk.railKey === 'cable'
+            ? new THREE.MeshStandardMaterial({ color: 0x9aa2a6, roughness: 0.35, metalness: 0.7 })
+            : new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.8, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
+          const dp = (m, mat) => { m.userData.roomId = element.id; m.userData.generated = true; group.add(m); return m; };
+          // the walking surface: a slab-thin patio at grade, a framed platform raised
+          dp(box(ew0, dk.placement === 'grade' ? 0.25 : 0.35, ed0, ex0 + ew0 / 2, deckTopY, ey0 + ed0 / 2, deckMatD));
           const railTop = deckTopY + 3;
-          const railOn = (horizontal, fixedC, a0, a1) => {
-            dp(horizontal
-              ? box(a1 - a0, 0.18, 0.18, (a0 + a1) / 2, railTop, fixedC, deckMatD)
-              : box(0.18, 0.18, a1 - a0, fixedC, railTop, (a0 + a1) / 2, deckMatD));
-            const n = Math.max(1, Math.round((a1 - a0) / 4));
-            for (let i = 0; i <= n; i += 1) {
-              const at = a0 + ((a1 - a0) * i) / n;
-              dp(horizontal
-                ? box(0.15, railTop - deckTopY, 0.15, at, (deckTopY + railTop) / 2, fixedC, deckMatD)
-                : box(0.15, railTop - deckTopY, 0.15, fixedC, (deckTopY + railTop) / 2, at, deckMatD));
+          // steps come down the LONGEST open edge; the railing leaves a gap there
+          let stepGap = null;
+          if (dk.needsSteps) {
+            let bestSeg = null; let bestSide = null;
+            for (const [side, segs] of Object.entries(dk.openSides)) {
+              for (const s of segs) {
+                if (!bestSeg || (s.a1 - s.a0) > (bestSeg.a1 - bestSeg.a0)) { bestSeg = s; bestSide = side; }
+              }
+            }
+            if (bestSeg && bestSeg.a1 - bestSeg.a0 >= 3) {
+              const mid = (bestSeg.a0 + bestSeg.a1) / 2;
+              const gapW = Math.min(4, bestSeg.a1 - bestSeg.a0);
+              stepGap = { side: bestSide, a0: mid - gapW / 2, a1: mid + gapW / 2 };
+              // treads marching outward and down from the deck edge to the ground
+              const stepsN = Math.max(2, Math.ceil(deckTopY / 0.65));
+              const stepH = deckTopY / stepsN;
+              const horiz = bestSide === 'north' || bestSide === 'south';
+              const edgeAt = bestSide === 'north' ? ey0 : bestSide === 'south' ? ey0 + ed0 : bestSide === 'west' ? ex0 : ex0 + ew0;
+              const outDir = (bestSide === 'north' || bestSide === 'west') ? -1 : 1;
+              for (let s = 1; s <= stepsN; s += 1) {
+                const topY = deckTopY - s * stepH + stepH / 2;
+                const off = edgeAt + outDir * (s * 0.9 - 0.45);
+                dp(horiz
+                  ? box(gapW - 0.3, stepH, 0.9, mid, topY, off, deckMatD)
+                  : box(0.9, stepH, gapW - 0.3, off, topY, mid, deckMatD));
+              }
+            }
+          }
+          // railing along each OPEN segment, in the chosen style
+          const railOnSeg = (side, a0, a1) => {
+            if (dk.railKey === 'none' || a1 - a0 < 0.6) return;
+            const horiz = side === 'north' || side === 'south';
+            const at = side === 'north' ? ey0 + 0.1 : side === 'south' ? ey0 + ed0 - 0.1 : side === 'west' ? ex0 + 0.1 : ex0 + ew0 - 0.1;
+            dp(horiz
+              ? box(a1 - a0, 0.18, 0.18, (a0 + a1) / 2, railTop, at, railMatD)
+              : box(0.18, 0.18, a1 - a0, at, railTop, (a0 + a1) / 2, railMatD));
+            if (dk.railKey === 'cable') {
+              // steel posts every ~5 ft with three thin cables strung between
+              const n = Math.max(1, Math.round((a1 - a0) / 5));
+              for (let i = 0; i <= n; i += 1) {
+                const p = a0 + ((a1 - a0) * i) / n;
+                dp(horiz
+                  ? box(0.12, railTop - deckTopY, 0.12, p, (deckTopY + railTop) / 2, at, railMatD)
+                  : box(0.12, railTop - deckTopY, 0.12, at, (deckTopY + railTop) / 2, p, railMatD));
+              }
+              [0.8, 1.6, 2.4].forEach((h) => {
+                dp(horiz
+                  ? box(a1 - a0, 0.04, 0.04, (a0 + a1) / 2, deckTopY + h, at, railMatD)
+                  : box(0.04, 0.04, a1 - a0, at, deckTopY + h, (a0 + a1) / 2, railMatD));
+              });
+            } else {
+              // wood balusters
+              const n = Math.max(1, Math.round((a1 - a0) / 4));
+              for (let i = 0; i <= n; i += 1) {
+                const p = a0 + ((a1 - a0) * i) / n;
+                dp(horiz
+                  ? box(0.15, railTop - deckTopY, 0.15, p, (deckTopY + railTop) / 2, at, railMatD)
+                  : box(0.15, railTop - deckTopY, 0.15, at, (deckTopY + railTop) / 2, p, railMatD));
+              }
             }
           };
-          if (railSides.north) railOn(true, element.y + 0.1, element.x, element.x + element.w);
-          if (railSides.south) railOn(true, element.y + element.d - 0.1, element.x, element.x + element.w);
-          if (railSides.west) railOn(false, element.x + 0.1, element.y, element.y + element.d);
-          if (railSides.east) railOn(false, element.x + element.w - 0.1, element.y, element.y + element.d);
-          if (lvlD === 1) {
-            [[element.x + 0.3, element.y + 0.3], [element.x + element.w - 0.3, element.y + 0.3], [element.x + 0.3, element.y + element.d - 0.3], [element.x + element.w - 0.3, element.y + element.d - 0.3]].forEach(([px, pz]) => {
+          for (const [side, segs] of Object.entries(dk.openSides)) {
+            for (const s of segs) {
+              if (stepGap && stepGap.side === side && stepGap.a1 > s.a0 && stepGap.a0 < s.a1) {
+                // split the railing around the stair gap
+                railOnSeg(side, s.a0, Math.max(s.a0, stepGap.a0));
+                railOnSeg(side, Math.min(s.a1, stepGap.a1), s.a1);
+              } else railOnSeg(side, s.a0, s.a1);
+            }
+          }
+          if (dk.placement === 'raised' && lvlD === 1) {
+            // corner posts to grade…
+            [[ex0 + 0.3, ey0 + 0.3], [ex0 + ew0 - 0.3, ey0 + 0.3], [ex0 + 0.3, ey0 + ed0 - 0.3], [ex0 + ew0 - 0.3, ey0 + ed0 - 0.3]].forEach(([px, pz]) => {
               dp(box(0.35, deckTopY, 0.35, px, deckTopY / 2, pz, deckMatD));
             });
+            // …and a skirt over the open sides when the frame sits high
+            if (deckTopY > 1.5) {
+              for (const [side, segs] of Object.entries(dk.openSides)) {
+                const at = side === 'north' ? ey0 + 0.12 : side === 'south' ? ey0 + ed0 - 0.12 : side === 'west' ? ex0 + 0.12 : ex0 + ew0 - 0.12;
+                const horiz = side === 'north' || side === 'south';
+                for (const s of segs) {
+                  if (s.a1 - s.a0 < 0.8) continue;
+                  const skirtH = Math.max(0.3, deckTopY - 0.35);
+                  dp(horiz
+                    ? box(s.a1 - s.a0, skirtH, 0.12, (s.a0 + s.a1) / 2, skirtH / 2, at, deckMatD)
+                    : box(0.12, skirtH, s.a1 - s.a0, at, skirtH / 2, (s.a0 + s.a1) / 2, deckMatD));
+                }
+              }
+            }
+          }
+          // a covered deck's posts rise to MEET THE PLAN PIECE — never a
+          // guessed height (the one-roof law reaches the deck posts too)
+          if (dk.roofKey) {
+            const piece = roofPlan.pieces.find((p) => p.deckId === element.id);
+            if (piece) {
+              const postMatD = new THREE.MeshStandardMaterial({ color: 0x7a5c3e, roughness: 0.7, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
+              const postsAt = [[ex0 + 0.4, ey0 + 0.4], [ex0 + ew0 - 0.4, ey0 + 0.4], [ex0 + 0.4, ey0 + ed0 - 0.4], [ex0 + ew0 - 0.4, ey0 + ed0 - 0.4]];
+              if (ew0 > 12) postsAt.push([ex0 + ew0 / 2, ey0 + 0.4], [ex0 + ew0 / 2, ey0 + ed0 - 0.4]);
+              if (ed0 > 12) postsAt.push([ex0 + 0.4, ey0 + ed0 / 2], [ex0 + ew0 - 0.4, ey0 + ed0 / 2]);
+              postsAt.forEach(([px, pz]) => {
+                const topY = piece.topAt(px, pz) - 0.12;
+                if (topY > deckTopY + 1) dp(box(0.42, topY - deckTopY, 0.42, px, deckTopY + (topY - deckTopY) / 2, pz, postMatD));
+              });
+            }
           }
           // full-volume invisible handle = the select/drag target
           const deckHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
-          mesh = box(element.w, Math.max(1, railTop - deckTopY), element.d, element.x + element.w / 2, (deckTopY + railTop) / 2, element.y + element.d / 2, deckHandle);
+          mesh = box(ew0, Math.max(1, railTop - deckTopY), ed0, ex0 + ew0 / 2, (deckTopY + railTop) / 2, ey0 + ed0 / 2, deckHandle);
           elementHeight = railTop - deckTopY;
         } else if (/stair/i.test(element.name || '') && !/ladder/i.test(element.name || '')) {
           // A real stair run: treads and risers climbing the storey (or out of
@@ -2870,6 +3002,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           });
         }
         roofPlan.pieces.forEach((seg) => {
+          if (seg.kind === 'deckShed' || seg.kind === 'deckGable') return; // rendered below, round houses included
           const segPitch = (seg.level || 1) > 1 ? (tierPitchOf(seg.level) ?? pitchNow) : pitchNow;
           let mesh = null;
           if (seg.legacy && !['shed', 'flat'].includes(roofSpec.roofType)) {
@@ -2896,6 +3029,20 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           }
         });
         }
+        // COVERED-DECK canopies — plan pieces given material form with the
+        // same mesh builders as the house roof (one roof law). Outside the
+        // round/rect split above so a round house's covered deck renders too.
+        roofPlan.pieces.forEach((seg) => {
+          if (seg.kind !== 'deckShed' && seg.kind !== 'deckGable') return;
+          const mesh = seg.kind === 'deckGable'
+            ? makeGableSegment(seg.rect, seg.eave, seg.deckPitch, seg.o, roofMat)
+            : makeShedPiece(seg.rect, seg.o, seg.topAt, roofMat);
+          mesh.name = 'Deck roof';
+          mesh.userData.roomId = seg.deckId; // tapping the canopy selects its deck
+          mesh.userData.generated = true;
+          roomMeshes.push(mesh);
+          group.add(addEdges(mesh));
+        });
       }
 
       const fixedGridSize = Number(spec.shell.outdoorGridSizeFt || DEFAULT_OUTDOOR_GRID_SIZE_FT);
@@ -3497,7 +3644,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       raycaster.setFromCamera(pointer, camera);
     }
 
+    // Right-click: remember where the button went down so the context menu
+    // only opens on a CLICK — a right-DRAG is OrbitControls' pan, and the
+    // contextmenu event it fires on release must not pop a menu mid-pan.
+    let rightDownAt = null;
+
     function onPointerDown(event) {
+      if (event.button === 2) { rightDownAt = { x: event.clientX, y: event.clientY }; return; }
+      if (event.button !== 0) return; // middle/right never start an object drag
       updatePointer(event);
       const handleHit = raycaster.intersectObjects(resizeHandles, false)[0];
       if (handleHit?.object?.userData?.resizeHandle) {
@@ -3721,6 +3875,25 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       }
     }
 
+    // Right-click on anything pickable → tell the app WHAT was clicked and
+    // WHERE on screen, so it can open its own quick-actions menu. The browser
+    // menu never shows over the model. Uses the same raycast targets as a
+    // left-click pick, so "selectable" and "right-clickable" stay one truth.
+    function onContextMenu(event) {
+      event.preventDefault();
+      if (!callbacksRef.current.onContext) return;
+      if (rightDownAt && Math.hypot(event.clientX - rightDownAt.x, event.clientY - rightDownAt.y) > 6) return; // that was a pan
+      updatePointer(event);
+      const buildingContext = ['foundation', 'shell', 'frame', 'floor', 'walls', 'roof', 'windows'].includes(context);
+      const targets = buildingContext
+        ? roomMeshes.filter(m => !m.userData.roomId || !spec.rooms.some(r => r.id === m.userData.roomId))
+        : roomMeshes;
+      const hit = raycaster.intersectObjects(targets, false)[0];
+      const id = hit?.object?.userData?.roomId;
+      if (!id) return;
+      callbacksRef.current.onContext(String(id), event.clientX, event.clientY);
+    }
+
     let rafId = 0;
     function animate() {
       const tween = tweenRef.current;
@@ -3778,6 +3951,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     renderer.domElement.addEventListener('pointermove', onPointerMove);
     renderer.domElement.addEventListener('pointerup', onPointerUp);
     renderer.domElement.addEventListener('pointercancel', onPointerUp);
+    renderer.domElement.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('resize', resize);
     // The container itself changes size without a window resize — hiding or
     // showing the chat column, for one. Track the mount, not just the window.
@@ -3798,6 +3972,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       renderer.domElement.removeEventListener('pointermove', onPointerMove);
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
       renderer.domElement.removeEventListener('pointercancel', onPointerUp);
+      renderer.domElement.removeEventListener('contextmenu', onContextMenu);
       window.removeEventListener('resize', resize);
       mountObserver?.disconnect();
       mount.removeChild(renderer.domElement);

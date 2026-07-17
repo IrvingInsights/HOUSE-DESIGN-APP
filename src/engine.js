@@ -1,7 +1,7 @@
 // Design engine: tables, spec logic, deriveDesign, detectIssues, planners (moved verbatim from main.jsx, JOB 0 split).
 import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES,
-  resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint,
+  resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint, pointInFootprint,
   isRoundFootprint, ellipseArea, ellipsePerimeter, rectRoundOverlapArea,
   basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt, storeyHeightFt,
   scoreTraceSpecChecks,
@@ -733,6 +733,117 @@ export const OUTBUILDING_PRESETS = [
 
 export function outdoorItemPresent(spec, item) {
   return (spec.elements || []).some((element) => element.name === item.name);
+}
+
+// ── DECKS & PATIOS ───────────────────────────────────────────────────────────
+// One deck model for everything downstream: the receipts price it and the 3D
+// scene draws it from the SAME resolveDeck() answer, so what you see is
+// exactly what you pay for. All fields are optional on the element — a deck
+// with none of them behaves like the decks always did (raised, wood, railed,
+// open to the sky).
+export const DECK_SURFACES = {
+  wood: { label: 'Wood boards', raisedPsf: 14, gradePsf: 10, carbonPsf: 3, note: 'the classic: joists and wood boards' },
+  composite: { label: 'Composite boards', raisedPsf: 22, gradePsf: 18, carbonPsf: 8, note: 'no staining and a longer life — more money and more carbon up front' },
+  stone: { label: 'Stone patio', raisedPsf: 12, gradePsf: 12, carbonPsf: 5, gradeOnly: true, note: 'flagstone or pavers laid on the ground — always sits at ground level' }
+};
+export const DECK_RAILS = {
+  wood: { label: 'Wood balusters', costLf: 12, carbonLf: 1 },
+  cable: { label: 'Steel cables', costLf: 28, carbonLf: 4 },
+  none: { label: 'No railing', costLf: 0, carbonLf: 0 }
+};
+export const DECK_ROOFS = {
+  shed: { label: 'Shed roof — one slope', costPsf: 14, carbonPsf: 5 },
+  gable: { label: 'Gable roof — a peak', costPsf: 16, carbonPsf: 6 }
+};
+export const DECK_STEPS_COST = 260;
+
+// Which stretches of a deck's four edges face OPEN AIR — the house (any
+// footprint shape, any storey plate) and NEIGHBORING DECKS both close an
+// edge. That one rule is the wraparound feature: park two decks side by
+// side and the shared edge loses its railing, so they read (and price) as
+// one continuous wrap. Sampled at 1 ft steps, merged into segments.
+export function deckOpenSides(spec, el) {
+  const W = Number(spec.shell?.widthFt) || 36;
+  const D = Number(spec.shell?.depthFt) || 28;
+  const level = Math.max(1, Number(el.level || 1));
+  const ex = Number(el.x) || 0; const ey = Number(el.y) || 0;
+  const ew = Math.max(1, Number(el.w) || 10); const ed = Math.max(1, Number(el.d) || 8);
+  const round = isRoundFootprint(spec);
+  const custom = hasCustomFootprint(spec) && !round;
+  const poly = custom ? footprintPolygon(spec) : null;
+  const insideHouse = (px, pz) => {
+    if (level >= 2) {
+      const pr = upperPlateRect(spec, level) || { x: 0, y: 0, w: W, d: D };
+      return px > pr.x && px < pr.x + pr.w && pz > pr.y && pz < pr.y + pr.d;
+    }
+    if (round) {
+      const nx = (px - W / 2) / Math.max(0.01, W / 2);
+      const nz = (pz - D / 2) / Math.max(0.01, D / 2);
+      return nx * nx + nz * nz < 1;
+    }
+    if (custom) return pointInFootprint(poly, px, pz);
+    return px > 0 && px < W && pz > 0 && pz < D;
+  };
+  const neighborDecks = (spec.elements || []).filter((o) => o.category === 'deck' && o.id !== el.id && Math.max(1, Number(o.level || 1)) === level);
+  const insideNeighbor = (px, pz) => neighborDecks.some((o) => {
+    const ox = Number(o.x) || 0; const oy = Number(o.y) || 0;
+    const ow = Math.max(1, Number(o.w) || 10); const od = Math.max(1, Number(o.d) || 8);
+    return px > ox - 0.15 && px < ox + ow + 0.15 && pz > oy - 0.15 && pz < oy + od + 0.15;
+  });
+  const blockedAt = (px, pz) => insideHouse(px, pz) || insideNeighbor(px, pz);
+  // walk each edge, probing 0.85 ft OUTSIDE it (the add button drops decks
+  // half a foot from the wall — a sub-foot gap still reads as "against"),
+  // and merge the open runs into segments
+  const sides = {};
+  const defs = {
+    north: { a0: ex, a1: ex + ew, probe: (a) => [a, ey - 0.85] },
+    south: { a0: ex, a1: ex + ew, probe: (a) => [a, ey + ed + 0.85] },
+    west: { a0: ey, a1: ey + ed, probe: (a) => [ex - 0.85, a] },
+    east: { a0: ey, a1: ey + ed, probe: (a) => [ex + ew + 0.85, a] }
+  };
+  let openLf = 0;
+  for (const [side, def] of Object.entries(defs)) {
+    const segs = [];
+    const len = def.a1 - def.a0;
+    const n = Math.max(2, Math.ceil(len));
+    let runStart = null;
+    for (let i = 0; i <= n; i += 1) {
+      const a = def.a0 + (len * i) / n;
+      const open = i < n ? !blockedAt(...def.probe(a + len / n / 2)) : false;
+      if (open && runStart == null) runStart = a;
+      if (!open && runStart != null) {
+        if (a - runStart > 0.6) segs.push({ a0: runStart, a1: a });
+        runStart = null;
+      }
+    }
+    segs.forEach((s) => { openLf += s.a1 - s.a0; });
+    sides[side] = segs;
+  }
+  return { sides, openLf };
+}
+
+// The whole deck, resolved: where it sits, what it's made of, what guards
+// its edges, what covers it, and whether it needs steps down to the ground.
+export function resolveDeck(spec, el) {
+  const surfaceKey = DECK_SURFACES[el.deckSurface] ? el.deckSurface : 'wood';
+  const level = Math.max(1, Number(el.level || 1));
+  const placement = level >= 2 ? 'raised'
+    : (DECK_SURFACES[surfaceKey].gradeOnly || el.deckPlacement === 'grade') ? 'grade' : 'raised';
+  const railKey = placement === 'grade' ? 'none' : (DECK_RAILS[el.deckRail] ? el.deckRail : 'wood');
+  const roofKey = DECK_ROOFS[el.deckRoof] ? el.deckRoof : '';
+  // a raised deck meets the house FLOOR: on a stem wall / rubble trench
+  // house the floor rides the stem, so the deck rises with it
+  const u = spec.utilities || {};
+  const stem = ['stemwall', 'rubble'].includes(u.foundationType)
+    ? Math.min(6, Math.max(0.5, Number(u.stemwallHeightFt) || 1.5)) : 0;
+  const topFt = level >= 2 ? storeyElevationFt(spec.shell, level) + 0.18
+    : placement === 'grade' ? 0.2
+    : stem > 0 ? stem + 0.05 : 0.8;
+  const needsSteps = placement === 'raised' && level === 1 && topFt > 1.5;
+  const area = Math.max(16, (Number(el.w) || 10) * (Number(el.d) || 8));
+  const open = deckOpenSides(spec, el);
+  const railLf = railKey === 'none' ? 0 : open.openLf;
+  return { surfaceKey, placement, railKey, roofKey, topFt, needsSteps, area, openSides: open.sides, openLf: open.openLf, railLf, level };
 }
 
 // Interior fixtures & equipment that live inside the house as placed objects —
@@ -2766,6 +2877,14 @@ export function applyStructuredDesignPlan(currentSpec, plan) {
         else { element.w = Number(operation.w) > 0 && Number(operation.w) <= 2 ? Number(operation.w) : thick; }
         if (!Number(operation.h)) element.h = Math.max(7, Number(next.shell.wallHeightFt || 10) - 0.5);
       }
+      if (element.category === 'deck') {
+        // deck options ride the add op (the Patio button, planner asks like
+        // "a covered composite deck") — resolveDeck validates the values
+        if (operation.deckSurface) element.deckSurface = operation.deckSurface;
+        if (operation.deckPlacement) element.deckPlacement = operation.deckPlacement;
+        if (operation.deckRail) element.deckRail = operation.deckRail;
+        if (operation.deckRoof) element.deckRoof = operation.deckRoof;
+      }
       next.elements.push({ ...element, ...clampObjectPosition(next, element, element.x, element.y) });
       changedIds.push(id);
       actions.push(operationDescription(operation, next));
@@ -3718,10 +3837,39 @@ export function deriveDesign(spec, wallSections) {
   // The greenhouse prices by its REAL footprint (a budget variable, $/sf) —
   // a stretched greenhouse shouldn't cost the same as the 12x8 default.
   const greenhouseCostSf = Number(spec.shell?.greenhouseCostSf ?? 62.5);
-  // Placed decks price by their real footprint: framing + boards + railing.
-  const deckCost = (spec.elements || [])
-    .filter((el) => el.category === 'deck')
-    .reduce((sum, el) => sum + Math.max(16, (Number(el.w) || 10) * (Number(el.d) || 8)) * 16, 0);
+  // Placed decks & patios price from resolveDeck — the same answer the 3D
+  // scene draws from. Itemized: surface (by material and raised/grade),
+  // railing by the open foot (shared edges with the house or a neighboring
+  // deck are free — that's the wraparound), a roof over it, steps down when
+  // the floor sits high. Every bucket becomes its own receipt line below.
+  const deckBuckets = { surface: new Map(), rail: new Map(), roof: new Map() };
+  let deckStepsCount = 0; let deckCarbon = 0;
+  for (const el of (spec.elements || []).filter((e) => e.category === 'deck')) {
+    const dk = resolveDeck(spec, el);
+    const s = DECK_SURFACES[dk.surfaceKey];
+    const psf = dk.placement === 'grade' ? s.gradePsf : s.raisedPsf;
+    const sKey = `${dk.surfaceKey}:${dk.placement}`;
+    const sb = deckBuckets.surface.get(sKey) || { label: s.label, placement: dk.placement, rate: psf, area: 0 };
+    sb.area += dk.area; deckBuckets.surface.set(sKey, sb);
+    deckCarbon += dk.area * s.carbonPsf;
+    if (dk.railKey !== 'none' && dk.railLf > 0) {
+      const r = DECK_RAILS[dk.railKey];
+      const rb = deckBuckets.rail.get(dk.railKey) || { label: r.label, rate: r.costLf, lf: 0 };
+      rb.lf += dk.railLf; deckBuckets.rail.set(dk.railKey, rb);
+      deckCarbon += dk.railLf * r.carbonLf;
+    }
+    if (dk.roofKey) {
+      const rf = DECK_ROOFS[dk.roofKey];
+      const fb = deckBuckets.roof.get(dk.roofKey) || { label: rf.label, rate: rf.costPsf, area: 0 };
+      fb.area += dk.area; deckBuckets.roof.set(dk.roofKey, fb);
+      deckCarbon += dk.area * rf.carbonPsf;
+    }
+    if (dk.needsSteps) deckStepsCount += 1;
+  }
+  const deckCost = [...deckBuckets.surface.values()].reduce((s, b) => s + b.area * b.rate, 0)
+    + [...deckBuckets.rail.values()].reduce((s, b) => s + b.lf * b.rate, 0)
+    + [...deckBuckets.roof.values()].reduce((s, b) => s + b.area * b.rate, 0)
+    + deckStepsCount * DECK_STEPS_COST;
   const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => {
     if (!outdoorItemPresent(spec, item)) return sum;
     if (item.key === 'greenhouse') {
@@ -3816,7 +3964,7 @@ export function deriveDesign(spec, wallSections) {
   const foundationCarbon = basement.present
     ? perimeterFt * basement.heightFt * 16 + floor * 12
     : (utilities.foundationType === 'slab' ? mainSlabArea : floor) * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra;
-  const carbonKg = foundationCarbon + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
+  const carbonKg = foundationCarbon + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + deckCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
   // What the reclaimed choices saved vs. buying everything new.
   const reclaimedSavings = {
@@ -3904,7 +4052,17 @@ export function deriveDesign(spec, wallSections) {
     }
     if (outbuildingCost > 0) lines.push(rline('Outbuildings', outbuildingCost, null, '', null, 'each footprint × its construction rate'));
     if (canopyCost > 0) lines.push(rline('Porch / deck canopies', canopyCost, canopyCost / 14, 'sf covered', 14, 'light roof on posts'));
-    if (deckCost > 0) lines.push(rline('Decks', deckCost, deckCost / 16, 'sf of deck', 16, 'framing + boards + railing'));
+    for (const b of deckBuckets.surface.values()) {
+      const short = b.label.toLowerCase().replace(' patio', '');
+      lines.push(rline(b.placement === 'grade' ? `Patio — ${short}` : `Deck — ${b.label.toLowerCase()}`, b.area * b.rate, b.area, b.placement === 'grade' ? 'sf of patio' : 'sf of deck', b.rate, b.placement === 'grade' ? 'laid at ground level — no posts or framing to buy' : 'joists, posts, and the walking surface'));
+    }
+    for (const b of deckBuckets.rail.values()) {
+      lines.push(rline(`Deck railing — ${b.label.toLowerCase()}`, b.lf * b.rate, b.lf, 'ft of railing', b.rate, 'only the edges facing open air — sides against the house or another deck need none'));
+    }
+    for (const b of deckBuckets.roof.values()) {
+      lines.push(rline(`Deck roof — ${b.label.split(' —')[0].toLowerCase()}`, b.area * b.rate, b.area, 'sf covered', b.rate, 'posts and a light metal roof over the deck'));
+    }
+    if (deckStepsCount > 0) lines.push(rline('Deck steps', deckStepsCount * DECK_STEPS_COST, deckStepsCount, deckStepsCount === 1 ? 'stair' : 'stairs', DECK_STEPS_COST, 'the deck floor sits more than 1½ ft up, so steps come down to the ground', true));
     costReceipts.outdoors = lines;
   }
   { // walls
