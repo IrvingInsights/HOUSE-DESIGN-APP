@@ -550,7 +550,10 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
               </clipPath>
             </defs>
             <ellipse cx={shellW / 2} cy={shellD / 2} rx={shellW / 2} ry={shellD / 2} fill={buildingContext ? 'var(--active-line)' : 'none'} fillOpacity={buildingContext ? 0.08 : 0} stroke={buildingContext ? 'var(--active-line)' : 'var(--ink3)'} strokeWidth={buildingContext ? 0.5 : 1} />
-            <ellipse cx={shellW / 2} cy={shellD / 2} rx={Math.max(0, shellW / 2 - 0.7)} ry={Math.max(0, shellD / 2 - 0.7)} fill="none" stroke="var(--line2)" strokeWidth={0.12} />
+            {(() => {
+              const tRing = resolveWallSide(spec, 'south').thicknessFt || 0.7;
+              return <ellipse cx={shellW / 2} cy={shellD / 2} rx={Math.max(0, shellW / 2 - tRing)} ry={Math.max(0, shellD / 2 - tRing)} fill="none" stroke="var(--line2)" strokeWidth={0.14} />;
+            })()}
           </>
         ) : fpCustom ? (
           <>
@@ -559,8 +562,23 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
           </>
         ) : (
           <>
+            {/* the wall band at its REAL thickness (per-side assembly — an
+                18″ bale wall reads as a fat poché band, a stud wall as thin) */}
+            {(() => {
+              const tN = resolveWallSide(spec, 'north').thicknessFt || 0.7;
+              const tS = resolveWallSide(spec, 'south').thicknessFt || 0.7;
+              const tE = resolveWallSide(spec, 'east').thicknessFt || 0.7;
+              const tW = resolveWallSide(spec, 'west').thicknessFt || 0.7;
+              const iw = Math.max(0, shellW - tW - tE); const ih = Math.max(0, shellD - tN - tS);
+              return (
+                <g pointerEvents="none">
+                  <path d={`M0 0 H${shellW} V${shellD} H0 Z M${tW} ${tN} V${tN + ih} H${tW + iw} V${tN} Z`}
+                    fill="var(--ink3)" fillOpacity={0.14} fillRule="evenodd" />
+                  <rect x={tW} y={tN} width={iw} height={ih} fill="none" stroke="var(--line2)" strokeWidth={0.14} />
+                </g>
+              );
+            })()}
             <rect x={0} y={0} width={shellW} height={shellD} fill={buildingContext ? 'var(--active-line)' : 'none'} fillOpacity={buildingContext ? 0.08 : 0} stroke={buildingContext ? 'var(--active-line)' : 'var(--ink3)'} strokeWidth={buildingContext ? 0.5 : 1} />
-            <rect x={0.7} y={0.7} width={Math.max(0, shellW - 1.4)} height={Math.max(0, shellD - 1.4)} fill="none" stroke="var(--line2)" strokeWidth={0.12} />
           </>
         )}
         {buildingContext && onResizeShell && (

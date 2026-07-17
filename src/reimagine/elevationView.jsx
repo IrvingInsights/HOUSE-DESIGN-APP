@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { OPENING_TYPES, storeyElevationFt, storeyHeightFt } from '../../backend/bim-core.mjs';
-import { resolveWallSide } from '../engine.js';
+import { resolveWallSide, upperPlateRect } from '../engine.js';
 
 // ElevationView — the chosen wall drawn face-on, from OUTSIDE the house, so
 // doors and windows can be placed the way you'd sketch them on paper: slide
@@ -29,12 +29,28 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   const hS = Number(shell.southWallHeightFt) || Number(shell.wallHeightFt) || 10;
   const hN = Number(shell.northWallHeightFt) || Number(shell.wallHeightFt) || 10;
   const groundH = Number(resolveWallSide(spec, wall).heightFt) || 10;
-  // Upper storeys ride on top of the ground wall (drawn full-run — a set-back
-  // storey is narrower in reality, but along-the-wall placement is identical).
-  const upperLift = storeys > 1
-    ? storeyElevationFt(shell, storeys) + storeyHeightFt(shell, storeys) - storeyElevationFt(shell, 2)
-    : 0;
-  const groundTopAt = (t) => {
+  const width = Number(shell.widthFt) || 24;
+  const depth = Number(shell.depthFt) || 24;
+  const elevOf = (lv) => storeyElevationFt(shell, lv);
+  // Each upper storey shows on this wall only where its own outline stands:
+  // TOUCHING the wall = the face steps up there ("built up only where the
+  // second storey is"); SET BACK from it = drawn faint behind the face.
+  const touching = [];
+  const setBack = [];
+  for (let lv = 2; lv <= storeys; lv += 1) {
+    const h = storeyHeightFt(shell, lv);
+    if (h <= 0) continue;
+    const r = upperPlateRect(spec, lv) || { x: 0, y: 0, w: width, d: depth };
+    const touches = wall === 'north' ? r.y <= 0.05
+      : wall === 'south' ? r.y + r.d >= depth - 0.05
+      : wall === 'west' ? r.x <= 0.05
+      : r.x + r.w >= width - 0.05;
+    const s0 = clampN(horiz ? r.x : r.y, 0, run);
+    const s1 = clampN(horiz ? r.x + r.w : r.y + r.d, 0, run);
+    if (s1 - s0 < 0.1) continue;
+    (touches ? touching : setBack).push({ lv, s0, s1, y0: elevOf(lv), y1: elevOf(lv) + h });
+  }
+  const groundProfileAt = (t) => {
     if (roofType === 'shed') {
       if (wall === 'south') return hS;
       if (wall === 'north') return hN;
@@ -42,23 +58,36 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
     }
     return groundH;
   };
-  const gableRise = roofType === 'gable' && horiz ? (Number(shell.depthFt) || 24) * pitch : 0;
+  const gableRise = roofType === 'gable' && horiz && storeys === 1 ? (Number(shell.depthFt) || 24) * pitch : 0;
+  // the face's top edge: ground profile, capped at a covering storey's floor,
+  // then raised by every storey standing on this stretch of the wall
   const topAt = (t) => {
-    let v = groundTopAt(t) + upperLift;
+    const covers = touching.filter((c) => t > c.s0 - 0.01 && t < c.s1 + 0.01);
+    let g = groundProfileAt(t);
+    if (covers.length) g = Math.min(g, Math.min(...covers.map((c) => c.y0)));
+    let v = Math.max(g, ...covers.map((c) => c.y1));
     if (gableRise > 0) {
       const half = run / 2;
       v += gableRise * (1 - Math.abs(t - half) / half); // the gable peak, mid-wall
     }
     return v;
   };
-  const maxTop = Math.max(topAt(0), topAt(run / 2), topAt(run));
+  const cuts = [...new Set([0, run, run / 2, ...touching.flatMap((c) => [c.s0, c.s1])])]
+    .filter((t) => t >= 0 && t <= run).sort((a, b) => a - b);
+  const maxTop = Math.max(...cuts.map((t) => topAt(t)), ...setBack.map((c) => c.y1));
   const Y = (v) => maxTop - v; // feet measure up; paper draws down
   const X = (t) => (flipX ? run - t : t);
 
-  // the wall face as a polygon: grade → up one end → along the top → down
-  const topPts = gableRise > 0
-    ? [[0, topAt(0)], [run / 2, topAt(run / 2)], [run, topAt(run)]]
-    : [[0, topAt(0)], [run, topAt(run)]];
+  // the wall face as a polygon: grade → up one end → step along the top → down.
+  // Each stretch between cuts contributes both of its top corners (sampled
+  // just inside, so steps draw as true verticals and rakes stay straight).
+  const topPts = [];
+  for (let ci = 0; ci < cuts.length - 1; ci += 1) {
+    const t0 = cuts[ci]; const t1 = cuts[ci + 1];
+    if (t1 - t0 < 0.02) continue;
+    const eps = Math.min(0.02, (t1 - t0) / 4);
+    topPts.push([t0, topAt(t0 + eps)], [t1, topAt(t1 - eps)]);
+  }
   const facePts = [[0, 0], ...topPts, [run, 0]].map(([t, v]) => `${X(t)},${Y(v)}`).join(' ');
 
   // which end is which, seen from outside this wall
@@ -105,7 +134,7 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
     const prof = OPENING_TYPES[spec.openings[drag.idx]?.type] || OPENING_TYPES.window;
     // how much wall stands above this opening's floor, where it sits
     const bandH = o.level === 1
-      ? groundTopAt(clampN(o.along + o.w / 2, 0, run))
+      ? groundProfileAt(clampN(o.along + o.w / 2, 0, run))
       : storeyHeightFt(shell, o.level);
     let ghost;
     if (drag.mode === 'move') {
@@ -151,6 +180,12 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
         {/* ground: a soil band under the grade line */}
         <rect x={-pad} y={Y(0)} width={run + pad * 2} height={soil} fill="#d8cfbc" opacity="0.55" />
         <line x1={-pad} y1={Y(0)} x2={run + pad} y2={Y(0)} stroke="#8a8271" strokeWidth={0.12} />
+
+        {/* storeys set back from this wall show faint, behind the face */}
+        {setBack.map((c) => (
+          <rect key={`sb${c.lv}`} x={flipX ? run - c.s1 : c.s0} y={Y(c.y1)} width={c.s1 - c.s0} height={c.y1 - c.y0}
+            fill="#e9e2d1" stroke="#a49d8a" strokeWidth={0.09} strokeDasharray="0.7 0.5" opacity="0.7" pointerEvents="none" />
+        ))}
 
         {/* the wall face */}
         <polygon points={facePts} fill="#f4efe3" stroke="#4a4f47" strokeWidth={0.16} strokeLinejoin="round" />
@@ -212,7 +247,7 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
         <text x={run - 0.2} y={Y(0) + 1.6} textAnchor="end" fontSize="1.15" fill="#6b6f66" pointerEvents="none">{rightEnd}</text>
 
         {openings.length === 0 && (
-          <text x={run / 2} y={Y(Math.max(2, groundTopAt(run / 2) / 2))} textAnchor="middle" fontSize="1.3" fill="#8a8271" pointerEvents="none">
+          <text x={run / 2} y={Y(Math.max(2, groundProfileAt(run / 2) / 2))} textAnchor="middle" fontSize="1.3" fill="#8a8271" pointerEvents="none">
             No doors or windows on this wall yet — add one from the list on the left.
           </text>
         )}

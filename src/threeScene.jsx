@@ -371,6 +371,18 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const heightAt = (level) => storeyHeightFt(spec.shell, level);
       const upAbove = (level) => Math.max(0, storeyElevationFt(spec.shell, level) - elev2);
       const upThru = (lv) => Math.max(0, storeyElevationFt(spec.shell, lv + 1) - elev2);
+      // A design with a genuinely SET-BACK storey (a tower, a loft band) uses
+      // the ENGINE's global floor elevations for every wall, roof tier, and
+      // plate, so walls agree with floors. A design whose storeys all cover
+      // the whole footprint keeps the classic stacked model (walls ride the
+      // roof profile of the side below — a sloped-ceiling top floor).
+      const anySetback = (() => {
+        for (let lv = 2; lv <= Math.ceil(Number(spec.shell.storeys || 1)); lv += 1) {
+          const p = upperPlateRect(spec, lv);
+          if (p && p.w * p.d < spec.shell.widthFt * spec.shell.depthFt - 1) return true;
+        }
+        return false;
+      })();
       const basementH = basementInfo(spec.shell).heightFt;
       const wallHeight = roofSpec.highWallHeightFt + storeyLift;
       const southWallHeight = (roofSpec.roofType === 'shed' ? roofSpec.southWallHeightFt : roofSpec.highWallHeightFt) + storeyLift;
@@ -383,26 +395,35 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // Exact for shed/flat (incl. the stepped plate), long-axis-ridge
       // approximation for gable/hip.
       const roofUnderAt = (px, pz) => {
-        // TIER-AWARE lift: the roof over a plan point is raised by exactly the
-        // storeys whose extents stand there — every level consulted (a 3rd
-        // floor set back inside the 2nd steps the roof twice, and everything
-        // that reads the roof underside follows).
-        let lift = 0;
+        // TIER-AWARE: the roof over a plan point is the roof of the TOPMOST
+        // storey standing there, at the ENGINE's floor elevations — the same
+        // numbers the walls, floor plates, and roof tiers use. (The old form
+        // summed storey heights onto the ground plane, which put a shed
+        // tower's roof 7′ high wherever the ground wall was the tall side.)
+        let topLv = 1; let topRect = null; let lift = 0;
         for (let lv = 2; lv <= Math.ceil(storeys); lv += 1) {
           const hLv = heightAt(lv);
           if (hLv <= 0) continue;
           const pR = upperPlateRect(spec, lv);
-          if (!pR || (px >= pR.x && px <= pR.x + pR.w && pz >= pR.y && pz <= pR.y + pR.d)) lift += hLv;
+          if (!pR || (px >= pR.x && px <= pR.x + pR.w && pz >= pR.y && pz <= pR.y + pR.d)) { topLv = lv; topRect = pR || { x: 0, y: 0, w: width, d: depth }; lift += hLv; }
         }
+        const nH = roofSpec.northWallHeightFt; const sH = roofSpec.southWallHeightFt;
+        if (topLv === 1 || !anySetback) {
+          // classic stacked plane (also the whole-footprint multi-storey model)
+          if (roofSpec.roofType === 'shed') return nH + (sH - nH) * clamp(depth > 0 ? pz / depth : 0, 0, 1) + lift;
+          if (roofSpec.roofType === 'flat') return roofSpec.highWallHeightFt + lift + 0.2;
+          const alongX = width >= depth;
+          const distEdge = Math.max(0, alongX ? Math.min(pz, depth - pz) : Math.min(px, width - px));
+          return roofSpec.highWallHeightFt + lift + distEdge * (Number(spec.shell.roofPitch) || 0.32);
+        }
+        const tierTop = elev2 + upThru(topLv); // top of that storey's walls
         if (roofSpec.roofType === 'shed') {
-          const nH = roofSpec.northWallHeightFt; const sH = roofSpec.southWallHeightFt;
-          return nH + (sH - nH) * clamp(depth > 0 ? pz / depth : 0, 0, 1) + lift;
+          // the tier's shed piece anchors its high (south) edge at the tier top
+          return tierTop - (depth > 0 ? (sH - nH) / depth : 0) * Math.max(0, topRect.y + topRect.d - pz);
         }
-        if (roofSpec.roofType === 'flat') return roofSpec.highWallHeightFt + lift + 0.2;
-        const eave = roofSpec.highWallHeightFt + lift;
-        const alongX = width >= depth;
-        const distEdge = Math.max(0, alongX ? Math.min(pz, depth - pz) : Math.min(px, width - px));
-        return eave + distEdge * (Number(spec.shell.roofPitch) || 0.32);
+        if (roofSpec.roofType === 'flat') return tierTop + 0.2;
+        const distEdgeT = Math.max(0, Math.min(pz - topRect.y, topRect.y + topRect.d - pz, px - topRect.x, topRect.x + topRect.w - px));
+        return tierTop + distEdgeT * (Number(spec.shell.roofPitch) || 0.32);
       };
 
       const slabMat = new THREE.MeshStandardMaterial({ color: 0xc0b49b, roughness: 0.92, map: grainTexture('earth'), bumpMap: bumpTexture('earth'), bumpScale: 0.2 });
@@ -524,7 +545,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const wallMatFor = (side) => wallMatOf(wallResolved[side]);
       // Stem wall foundation: the walls BEAR ON the stem's top — their bottoms
       // start at the reveal height, never running down through the concrete.
-      const stemReveal = utilitiesOf(spec).foundationType === 'stemwall'
+      // A stem wall foundation lifts the walls onto its top — and so does a
+      // RUBBLE TRENCH: in real natural building the trench always carries a
+      // stem/plinth above grade, because bale walls can never start at the
+      // dirt. Both lift by stemwallHeightFt (default 1.5′), all the way around.
+      const wholeHouseStem = ['stemwall', 'rubble'].includes(utilitiesOf(spec).foundationType);
+      const stemReveal = wholeHouseStem
         ? Math.min(6, Math.max(0.5, Number(utilitiesOf(spec).stemwallHeightFt) || 1.5)) : 0;
       // …and the same rule for stem walls built as PLACED FOUNDATION RUNS
       // (the Foundation chapter's draggable pieces): a wall whose line has a
@@ -621,9 +647,59 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         openingGapsByWall.set(key, list);
       });
       const gapsFor = (key) => openingGapsByWall.get(key) || [];
+      // Every storey's wall lives at the ENGINE's floor elevations — the same
+      // numbers the floor plates, rooms, and openings use — never stacked on
+      // this side's own ground wall. Side-stacking desynced walls from floors
+      // whenever the sides differ: a 17′ south shed wall put the 2nd floor's
+      // south wall at 17′ while its floor sat at 10′ (the tower ran 7′ tall).
+      const elevAt = (level) => elev2 + upAbove(level);
+      // Where a storey's own wall has no storey directly under it (a tower
+      // side overhanging the main roof), it drops to the roof plane it rises
+      // out of; where a storey stands below, it sits at its floor.
+      const bandSeatY = (level, edgeX, edgeZ) => {
+        for (let below = level - 1; below >= 2; below -= 1) {
+          const bp = upperPlateRect(spec, below) || { x: 0, y: 0, w: width, d: depth };
+          if (edgeX > bp.x - 0.05 && edgeX < bp.x + bp.w + 0.05 && edgeZ > bp.y - 0.05 && edgeZ < bp.y + bp.d + 0.05) return elevAt(level);
+        }
+        if (roofSpec.roofType === 'shed') {
+          const wingTop = roofSpec.northWallHeightFt
+            + (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) * clamp(depth > 0 ? edgeZ / depth : 0, 0, 1);
+          return Math.min(elevAt(level), wingTop - 0.45);
+        }
+        return Math.min(elevAt(level), (roofSpec.highWallHeightFt || 10) - 0.45);
+      };
       const pushSideBoxes = (side, totalH, thickness, place) => {
         const groundH = Math.max(1, totalH - storeyLift);
-        wallMeshSpecs.push({ side, storey: 'ground', meshes: place(thickness, groundH, 0) });
+        // Where an upper storey stands ON this side (its extent touches the
+        // side's edge), the ground wall stops at that storey's floor and the
+        // storey's own wall carries on — "built up only where the second
+        // storey is". Stretches under open roof keep the full ground height.
+        const horizSide = side === 'north' || side === 'south';
+        const alongMax = horizSide ? width : depth;
+        const touching = [];
+        for (let lv = 2; lv <= Math.ceil(storeys); lv += 1) {
+          if (heightAt(lv) <= 0) continue;
+          const r = upperPlateRect(spec, lv) || { x: 0, y: 0, w: width, d: depth };
+          const touches = side === 'north' ? r.y <= 0.05
+            : side === 'south' ? r.y + r.d >= depth - 0.05
+            : side === 'west' ? r.x <= 0.05
+            : r.x + r.w >= width - 0.05;
+          if (!touches) continue;
+          const s0 = clamp(horizSide ? r.x : r.y, 0, alongMax);
+          const s1 = clamp(horizSide ? r.x + r.w : r.y + r.d, 0, alongMax);
+          if (s1 - s0 > 0.1) touching.push({ s0, s1, floorY: elevAt(lv) });
+        }
+        const bounds = [...new Set([0, alongMax, ...touching.flatMap((c) => [c.s0, c.s1])])].sort((x, y) => x - y);
+        const groundMeshes = [];
+        for (let bi = 0; bi < bounds.length - 1; bi += 1) {
+          const s0 = bounds[bi]; const s1 = bounds[bi + 1];
+          if (s1 - s0 < 0.1) continue;
+          const mid = (s0 + s1) / 2;
+          const covers = anySetback ? touching.filter((c) => mid > c.s0 && mid < c.s1) : [];
+          const capY = covers.length ? Math.min(...covers.map((c) => c.floorY)) : Infinity;
+          groundMeshes.push(...place(thickness, Math.max(1, Math.min(groundH, capY)), 0, s0, s1));
+        }
+        wallMeshSpecs.push({ side, storey: 'ground', meshes: groundMeshes });
         for (let level = 2; level <= Math.ceil(storeys); level++) {
           const uH = heightAt(level);
           if (uH > 0) {
@@ -631,23 +707,18 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             if (u.omitted) continue;
             const tU = u.thicknessFt;
             const p = upperPlateRect(spec, level) || { x: 0, y: 0, w: width, d: depth };
-            const liftOffset = groundH + upAbove(level);
-            const realPlate = upperPlateRect(spec, level);
-            const stepped = Boolean(realPlate && realPlate.w * realPlate.d < width * depth - 1);
-            let upperMesh;
-            if (stepped && roofSpec.roofType === 'shed' && (side === 'north' || side === 'south')) {
-              const wingTop = (zz) => roofSpec.northWallHeightFt
-                + (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) * clamp(depth > 0 ? zz / depth : 0, 0, 1);
-              const TUCK = 0.45;
-              const zz = side === 'north' ? p.y : p.y + p.d;
-              const yBot = wingTop(zz) - TUCK;
-              upperMesh = box(p.w, uH + TUCK, tU, p.x + p.w / 2, yBot + (uH + TUCK) / 2 + upAbove(level), side === 'north' ? p.y + tU / 2 : p.y + p.d - tU / 2, wallMatOf(u));
-            } else {
-              upperMesh = side === 'north' ? box(p.w, uH, tU, p.x + p.w / 2, liftOffset + uH / 2, p.y + tU / 2, wallMatOf(u))
-                : side === 'south' ? box(p.w, uH, tU, p.x + p.w / 2, liftOffset + uH / 2, p.y + p.d - tU / 2, wallMatOf(u))
-                : side === 'west' ? box(tU, uH, p.d, p.x + tU / 2, liftOffset + uH / 2, p.y + p.d / 2, wallMatOf(u))
-                : box(tU, uH, p.d, p.x + p.w - tU / 2, liftOffset + uH / 2, p.y + p.d / 2, wallMatOf(u));
-            }
+            // whole-footprint storeys keep the classic stacked seat; set-back
+            // designs put every storey at its ENGINE floor elevation
+            const yTop = anySetback ? elevAt(level) + uH : groundH + upAbove(level) + uH;
+            const edgeZ = side === 'north' ? p.y : side === 'south' ? p.y + p.d : p.y + p.d / 2;
+            const edgeX = side === 'west' ? p.x : side === 'east' ? p.x + p.w : p.x + p.w / 2;
+            const yBot = anySetback ? bandSeatY(level, edgeX, edgeZ) : groundH + upAbove(level);
+            const bH = yTop - yBot;
+            if (bH < 0.05) continue;
+            const upperMesh = side === 'north' ? box(p.w, bH, tU, p.x + p.w / 2, yBot + bH / 2, p.y + tU / 2, wallMatOf(u))
+              : side === 'south' ? box(p.w, bH, tU, p.x + p.w / 2, yBot + bH / 2, p.y + p.d - tU / 2, wallMatOf(u))
+              : side === 'west' ? box(tU, bH, p.d, p.x + tU / 2, yBot + bH / 2, p.y + p.d / 2, wallMatOf(u))
+              : box(tU, bH, p.d, p.x + p.w - tU / 2, yBot + bH / 2, p.y + p.d / 2, wallMatOf(u));
             wallMeshSpecs.push({ side, storey: 'upper', level, meshes: [upperMesh] });
           }
         }
@@ -798,8 +869,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         }
       } else if (roofSpec.roofType === 'shed') {
         const eaveAtZ = (zz) => northWallHeight + (southWallHeight - northWallHeight) * clamp(depth > 0 ? zz / depth : 0, 0, 1);
-        pushSideBoxes('north', hN, tN, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north'), yBase: sideReveal.north }));
-        pushSideBoxes('south', hS, tS, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south'), yBase: sideReveal.south }));
+        pushSideBoxes('north', hN, tN, (t, h, lift, s0 = 0, s1 = width) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: s0, a1: s1, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north'), yBase: sideReveal.north }));
+        pushSideBoxes('south', hS, tS, (t, h, lift, s0 = 0, s1 = width) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: s0, a1: s1, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south'), yBase: sideReveal.south }));
         // The raked side walls step TIER BY TIER: along each stretch of the
         // side they rise exactly as high as the storeys that actually stand
         // at that edge (every level's extent consulted — three set-back floors
@@ -819,18 +890,20 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         };
         const buildRakedSide = (side, thickCenter, tSide) => {
           const plates = edgePlateInfo(side);
-          const bounds = [...new Set([0, depth, ...plates.flatMap((p) => [p.y0, p.y1])])].sort((a, b) => a - b);
+          const bounds = [...new Set([0, depth, ...plates.filter((p) => p.touches).flatMap((p) => [p.y0, p.y1])])].sort((a, b) => a - b);
           const meshes = [];
           for (let bi = 0; bi < bounds.length - 1; bi += 1) {
             const a0 = bounds[bi]; const a1 = bounds[bi + 1];
             if (a1 - a0 < 0.1) continue;
             const mid = (a0 + a1) / 2;
-            // this stretch is missing the height of every storey NOT standing here
-            const missing = plates.reduce((sum, p) => sum
-              + ((p.touches && mid > p.y0 && mid < p.y1) ? 0 : heightAt(p.lv)), 0);
+            // A stretch with a storey standing on it stops at that storey's
+            // FLOOR (global elevation — the storey band continues from there);
+            // an open stretch rakes with the ground roof plane.
+            const covers = anySetback ? plates.filter((p) => p.touches && mid > p.y0 && mid < p.y1) : [];
+            const capY = covers.length ? Math.min(...covers.map((p) => elevAt(p.lv))) : Infinity;
             meshes.push(...wallRunMeshes({
               horizontal: false, thickCenter, t: tSide, a0, a1,
-              hAt: (zz) => Math.max(1, eaveAtZ(zz) - missing),
+              hAt: (zz) => Math.max(1, anySetback ? Math.min(eaveAtZ(zz) - storeyLift, capY) : eaveAtZ(zz)),
               mat: wallMatFor(side), gaps: gapsFor(side), yBase: sideReveal[side]
             }));
           }
@@ -838,33 +911,32 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         };
         buildRakedSide('west', tW / 2, tW);
         buildRakedSide('east', width - tE / 2, tE);
-        // Set-back storeys also need their own east/west walls standing ON the
-        // tier below (the sloped parallelogram bands) — floors 2 and 3 of a
-        // shed house had NO east/west walls at all ("missing from the upper
-        // floors"). North/south bands come from pushSideBoxes above; here the
-        // east/west bands, skipped where the storey touches the edge (the
-        // perimeter wall already covers those).
-        if (storeyLift > 0) {
-          const wingTopAtZ = (zz) => roofSpec.northWallHeightFt + (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) * clamp(depth > 0 ? zz / depth : 0, 0, 1);
-          const TUCK = 0.45;
+        // Every upper storey needs its own east/west wall band: on the
+        // perimeter where its extent touches the edge, or standing at its own
+        // extent line where it is set back — seated on the storey below when
+        // there is one, dropped to the roof plane where it overhangs open roof.
+        // (Whole-footprint designs need none: the raked side wall above rises
+        // through every storey, the classic stacked model.)
+        if (storeyLift > 0 && anySetback) {
           for (let level = 2; level <= Math.ceil(storeys); level += 1) {
             const uH = heightAt(level);
             if (uH <= 0) continue;
-            const p = upperPlateRect(spec, level);
-            if (!p) continue;
+            const p = upperPlateRect(spec, level) || { x: 0, y: 0, w: width, d: depth };
             ['west', 'east'].forEach((side) => {
               if (omittedWalls.has(side) || wallResolved[side].omitted) return;
-              const touches = side === 'west' ? p.x <= 0.05 : p.x + p.w >= width - 0.05;
-              if (touches) return;
               const u = resolveWallSide(spec, side, level);
+              if (u.omitted) return;
               const tU = u.thicknessFt;
-              const z0 = p.y; const z1 = p.y + p.d;
-              const y0 = wingTopAtZ(z0) - TUCK + (uH + TUCK) / 2 + upAbove(level);
-              const y1 = wingTopAtZ(z1) - TUCK + (uH + TUCK) / 2 + upAbove(level);
-              const len = Math.hypot(z1 - z0, y1 - y0);
-              const xAt = side === 'west' ? p.x + tU / 2 : p.x + p.w - tU / 2;
-              const band = box(tU, uH + TUCK, len, xAt, (y0 + y1) / 2, (z0 + z1) / 2, wallMatOf(u));
-              band.rotation.x = -Math.atan2(y1 - y0, z1 - z0);
+              const touches = side === 'west' ? p.x <= 0.05 : p.x + p.w >= width - 0.05;
+              const xAt = touches
+                ? (side === 'west' ? tU / 2 : width - tU / 2)
+                : (side === 'west' ? p.x + tU / 2 : p.x + p.w - tU / 2);
+              const z0 = clamp(p.y, 0, depth); const z1 = clamp(p.y + p.d, 0, depth);
+              if (z1 - z0 < 0.1) return;
+              const yTop = elevAt(level) + uH;
+              const yBot = Math.min(bandSeatY(level, xAt, z0), bandSeatY(level, xAt, z1));
+              if (yTop - yBot < 0.05) return;
+              const band = box(tU, yTop - yBot, z1 - z0, xAt, (yBot + yTop) / 2, (z0 + z1) / 2, wallMatOf(u));
               wallMeshSpecs.push({ side, storey: 'upper', level, meshes: [band] });
             });
           }
@@ -892,10 +964,10 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // perimeter roof of a stepped storey reads LOW (outside the plate), so
         // capping there would clamp the total and collapse the ground wall.
         const capped = (side, h) => storeyLift > 0 ? Math.max(1, h) : Math.max(1, Math.min(h, roofCapForSide(side)));
-        pushSideBoxes('north', capped('north', hN), tN, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north'), yBase: sideReveal.north }));
-        pushSideBoxes('south', capped('south', hS), tS, (t, h) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: 0, a1: width, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south'), yBase: sideReveal.south }));
-        pushSideBoxes('west', capped('west', hW), tW, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('west'), gaps: gapsFor('west'), yBase: sideReveal.west }));
-        pushSideBoxes('east', capped('east', hE), tE, (t, h) => wallRunMeshes({ horizontal: false, thickCenter: width - t / 2, t, a0: 0, a1: depth, hAt: () => h, mat: wallMatFor('east'), gaps: gapsFor('east'), yBase: sideReveal.east }));
+        pushSideBoxes('north', capped('north', hN), tN, (t, h, lift, s0 = 0, s1 = width) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: s0, a1: s1, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north'), yBase: sideReveal.north }));
+        pushSideBoxes('south', capped('south', hS), tS, (t, h, lift, s0 = 0, s1 = width) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: s0, a1: s1, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south'), yBase: sideReveal.south }));
+        pushSideBoxes('west', capped('west', hW), tW, (t, h, lift, s0 = 0, s1 = depth) => wallRunMeshes({ horizontal: false, thickCenter: t / 2, t, a0: s0, a1: s1, hAt: () => h, mat: wallMatFor('west'), gaps: gapsFor('west'), yBase: sideReveal.west }));
+        pushSideBoxes('east', capped('east', hE), tE, (t, h, lift, s0 = 0, s1 = depth) => wallRunMeshes({ horizontal: false, thickCenter: width - t / 2, t, a0: s0, a1: s1, hAt: () => h, mat: wallMatFor('east'), gaps: gapsFor('east'), yBase: sideReveal.east }));
 
         // GABLE-END INFILL — a gable roof leaves an open triangle above the
         // eave on its two gable ends (the walls under the slopes stay flat at
@@ -1240,12 +1312,25 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             }
             return roofSpec.highWallHeightFt + lift;
           };
+          // Set-back designs: each tier's frame tops out at the ENGINE's
+          // global elevations (matching the walls and roof tiers), the shed
+          // slope restarting at the tier's own north edge. Whole-footprint
+          // designs keep the classic stacked plane.
+          const tierTopPlane = (spanPos, lv, p) => {
+            const lift = lv === 1 ? 0 : upThru(lv);
+            if (!anySetback || lv === 1) return eaveLiftAt(spanPos, lift);
+            if (roofSpec.roofType === 'shed') {
+              const slope = depth > 0 ? (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) / depth : 0;
+              return elev2 + lift + slope * Math.max(0, spanPos - p.y);
+            }
+            return elev2 + lift;
+          };
           frameTiers.forEach((tier, ti) => {
             const { lv, p } = tier;
             const above = frameTiers[ti + 1] ? frameTiers[ti + 1].p : null;
             const tierLift = lv === 1 ? 0 : upThru(lv);
             if (lv >= 2) {
-              const floorY = baseWallFt + upAbove(lv);
+              const floorY = (anySetback ? elev2 : baseWallFt) + upAbove(lv);
               const pS0 = (spanIsZ ? p.y : p.x) + fm.postW / 2;
               const pS1 = (spanIsZ ? p.y + p.d : p.x + p.w) - fm.postW / 2;
               const pB0 = (spanIsZ ? p.x : p.y) + fm.postW / 2;
@@ -1261,20 +1346,20 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               const upBays = Math.max(1, Math.ceil((pB1 - pB0) / bay));
               for (let i = 0; i <= upBays; i += 1) {
                 const at = pB0 + ((pB1 - pB0) * i) / upBays;
-                postAt(pS0, at, Math.max(1, eaveLiftAt(pS0, tierLift) - fm.plateH - floorY), fm.postW, floorY);
-                postAt(pS1, at, Math.max(1, eaveLiftAt(pS1, tierLift) - fm.plateH - floorY), fm.postW, floorY);
+                postAt(pS0, at, Math.max(1, tierTopPlane(pS0, lv, p) - fm.plateH - floorY), fm.postW, floorY);
+                postAt(pS1, at, Math.max(1, tierTopPlane(pS1, lv, p) - fm.plateH - floorY), fm.postW, floorY);
               }
-              straight(pB0, pB1, eaveLiftAt(pS0, tierLift) - fm.plateH / 2, pS0, fm.postW + 0.1, fm.plateH);
-              straight(pB0, pB1, eaveLiftAt(pS1, tierLift) - fm.plateH / 2, pS1, fm.postW + 0.1, fm.plateH);
+              straight(pB0, pB1, tierTopPlane(pS0, lv, p) - fm.plateH / 2, pS0, fm.postW + 0.1, fm.plateH);
+              straight(pB0, pB1, tierTopPlane(pS1, lv, p) - fm.plateH / 2, pS1, fm.postW + 0.1, fm.plateH);
             }
             if (!above) {
               // top tier: the full roof rides over its plate
               if (roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat') {
                 const b0 = spanIsZ ? p.x : p.y; const b1 = spanIsZ ? p.x + p.w : p.y + p.d;
                 const s0 = (spanIsZ ? p.y : p.x) - 0.35; const s1 = (spanIsZ ? p.y + p.d : p.x + p.w) + 0.35;
-                rafterRun(b0, b1, (zz) => eaveLiftAt(zz, tierLift) + 0.12, spanIsZ, s0, s1);
+                rafterRun(b0, b1, (zz) => tierTopPlane(zz, lv, p) + 0.12, spanIsZ, s0, s1);
               } else {
-                gableRafters(p.x, p.x + p.w, p.y, p.y + p.d, roofSpec.highWallHeightFt + tierLift);
+                gableRafters(p.x, p.x + p.w, p.y, p.y + p.d, (anySetback && lv > 1 ? elev2 : roofSpec.highWallHeightFt) + tierLift);
               }
               return;
             }
@@ -1311,11 +1396,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               const z0 = rect.y - oSide.north; const z1 = rect.y + rect.d + oSide.south;
               if (roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat') {
                 // wings ride this tier's shed plane — same as the roof tiers
-                const tierPlane = (zz) => eaveLiftAt(zz, tierLift) + 0.12;
+                const tierPlane = (zz) => tierTopPlane(zz, lv, p) + 0.12;
                 rafterRun(rect.x, rect.x + rect.w, tierPlane, true, z0, z1);
                 return;
               }
-              const topY = roofSpec.highWallHeightFt + tierLift + 0.25;
+              const topY = (anySetback && lv > 1 ? elev2 : roofSpec.highWallHeightFt) + tierLift + 0.25;
               if (touch === 'north' || touch === 'south') {
                 const drop = Math.max(0.1, (z1 - z0) * pitchF);
                 const planeAt = (zz) => (touch === 'north'
@@ -1337,10 +1422,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // (The old floating assembly-summary chip is gone — that information
       // lives in the selection chip and the Walls page; it was pure clutter.)
 
-      // Stem wall foundation: a visible concrete plinth ring under the walls.
+      // Stem wall foundation: a visible plinth ring under the walls — also
+      // drawn for a rubble trench, whose stem lifts the walls the same way.
       // (layers.foundation gates all three foundation renders — the Time
       // Machine reveals them at the foundation phase; default is visible.)
-      if (layers.foundation !== false && utilitiesOf(spec).foundationType === 'stemwall') {
+      if (layers.foundation !== false && wholeHouseStem) {
         const stemH = Math.min(6, Math.max(0.5, Number(utilitiesOf(spec).stemwallHeightFt) || 1.5));
         const stemMat = new THREE.MeshStandardMaterial({ color: 0xaaa79b, roughness: 0.95, map: grainTexture('concrete'), bumpMap: bumpTexture('concrete'), bumpScale: 0.15 });
         const lip = 0.25;
@@ -1502,6 +1588,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         if (!layers.elements || (layers.hiddenCats || []).includes(element.category || 'custom')) return;
         let elementHeight = element.h || 1.2;
         let elevation = Number(element.z || 0);
+        // A storey extent plate ALWAYS sits at the engine's floor elevation —
+        // a stale stored z (from an older stacking model) must not float the
+        // 2nd floor at 17′ while its rooms and walls sit at 10′.
+        if (element.category === 'floor' && Number(element.level || 1) >= 2) {
+          elevation = storeyElevationFt(spec.shell, Number(element.level));
+        }
         let mesh;
         if ((element.category === 'tower' || element.category === 'loft') && upperPlateRect(spec, Math.max(2, Number(element.level || 2)))) {
           // A tower/loft whose level HAS an extent plate is already fully
@@ -2179,7 +2271,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         const storeyTiers = [];
         for (let lv = 1; lv <= Math.max(1, Math.ceil(storeys)); lv += 1) {
           const plate = lv === 1 ? fullRect : (upperPlateRect(spec, lv) || fullRect);
-          storeyTiers.push({ rect: plate, topEave: groundEave + upThru(lv), level: lv });
+          // Upper tiers top out at the ENGINE's floor elevations (floor of
+          // lv+1) — the same numbers the walls and floor plates use now. The
+          // old `groundEave + upThru` stacked tiers on the TALL side of a shed
+          // (a 17′ south wall put a 10+10 tower's roof at 37′ instead of 30′).
+          const topY = lv === 1 ? groundEave : elev2 + upThru(lv);
+          storeyTiers.push({ rect: plate, topEave: topY, level: lv });
         }
         const rectHas = (r, px, py) => px > r.x + 0.01 && px < r.x + r.w - 0.01 && py > r.y + 0.01 && py < r.y + r.d - 0.01;
         // Is (px,py) under a storey ABOVE `lv`? — a wing there tucks under that wall.
@@ -2236,7 +2333,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             // Top storey gets the pitched roof; every setback below it gets a
             // wing ring (its extent minus the storey above) at its own eave.
             const top = storeyTiers[storeyTiers.length - 1];
-            segments.push({ rect: top.rect, eave: top.topEave, kind: 'full', upper: true, level: top.level });
+            segments.push({ rect: top.rect, eave: top.topEave, kind: 'full', upper: true, level: top.level, tierY0: top.rect.y });
             for (let i = storeyTiers.length - 2; i >= 0; i -= 1) {
               const below = storeyTiers[i];
               const above = storeyTiers[i + 1];
@@ -2290,7 +2387,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
                 });
                 continue;
               }
-              ring.forEach((rect) => segments.push({ rect, eave: below.topEave, kind: 'wing', highSide: touchSide(rect, above.rect), level: below.level, tierDrop: storeyLift - upThru(below.level) }));
+              ring.forEach((rect) => segments.push({ rect, eave: below.topEave, kind: 'wing', highSide: touchSide(rect, above.rect), level: below.level, tierDrop: storeyLift - upThru(below.level), tierY0: below.rect.y }));
             }
           } else {
             decomposeFootprint(fpPoly).forEach((rect) => segments.push({ rect, eave: wallHeight, kind: 'full', upper: true, level: storeyTiers.length }));
@@ -2303,6 +2400,19 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const sH = roofSpec.southWallHeightFt + storeyLift + 0.28;
             return nH + (sH - nH) * clamp((zz - z0) / Math.max(0.01, z1 - z0), 0, 1);
           };
+          // In a set-back design each tier's shed piece rides its OWN storey:
+          // low (north) edge at the tier's global wall top, rising south at
+          // the roof pitch — so a 10+10+10 tower's roof starts at 30, not at
+          // "tall south wall + every storey" (37). Ground pieces keep the
+          // true ground plane.
+          const shedSlopeNow = depth > 0 ? (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) / depth : 0;
+          const shedPlaneFor = (seg) => {
+            const lvl = seg.level || 1;
+            if (!anySetback || lvl <= 1) return (zz) => shedYAt(zz) - (seg.tierDrop ?? storeyLift);
+            const topPlane = elev2 + upThru(lvl) + 0.28;
+            const y0 = seg.tierY0 ?? seg.rect.y;
+            return (zz) => topPlane + shedSlopeNow * Math.max(0, zz - y0);
+          };
           segments.forEach((seg) => {
             const o = segOverhangs(seg.rect, Boolean(seg.upper), seg.level || 1);
             let mesh = null;
@@ -2311,10 +2421,10 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               // tier's top; a pitched roof's wings are lean-to planes tucking
               // under the storey above.
               mesh = roofSpec.roofType === 'shed'
-                ? makeShedPiece(seg.rect, o, (zz) => shedYAt(zz) - (seg.tierDrop ?? storeyLift), roofMat)
+                ? makeShedPiece(seg.rect, o, shedPlaneFor(seg), roofMat)
                 : makeStepRoofPlane(seg.rect, seg.highSide, seg.eave + 0.25, pitchNow, o, roofMat);
             } else if (roofSpec.roofType === 'shed') {
-              mesh = makeShedPiece(seg.rect, o, shedYAt, roofMat);
+              mesh = makeShedPiece(seg.rect, o, anySetback && (seg.level || 1) > 1 ? shedPlaneFor(seg) : shedYAt, roofMat);
             } else if (roofSpec.roofType === 'flat') {
               mesh = makeShedPiece(seg.rect, o, () => seg.eave + 0.25, roofMat);
             } else if (roofSpec.roofType === 'hip') {

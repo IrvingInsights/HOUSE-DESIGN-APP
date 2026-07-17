@@ -40,7 +40,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 76 · Jul 16';
+const UPDATE_STAMP = 'update 77 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1060,6 +1060,9 @@ export default function App() {
                         const parsed = JSON.parse(text);
                         const specIn = parsed.spec && parsed.spec.shell ? parsed.spec : (parsed.shell ? parsed : null);
                         if (!specIn || !Array.isArray(specIn.rooms)) { setSaveFlash('That did not look like a design code.'); return; }
+                        // an older or hand-trimmed design code may lack the systems
+                        // block — default it so nothing downstream trips on it
+                        if (!specIn.systems) specIn.systems = { structure: '', envelope: '', water: '', energy: '' };
                         snapshotBeforeReplace();
                         commitSpec(structuredClone(specIn));
                         setSelectedId(null);
