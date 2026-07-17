@@ -863,10 +863,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // above the roof on the south (the gap) and stab through the upper
         // roof on the north.
         if (storeyLift > 0) {
-          const wingTopAt = (zz) => (shed
-            ? roofSpec.northWallHeightFt + (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) * clamp(depth > 0 ? zz / depth : 0, 0, 1)
-            : Math.max(1, (wallResolved.north.heightFt || 10)));
-          const TUCK = 0.45;
+          // Same law as the rectangle path: every storey's walls at the
+          // ENGINE's floor elevations; exposed walls rise to their own roof
+          // and rake with it; seated on the storey below or dropped to the
+          // roof plane they rise out of. (The old block stacked bands on the
+          // shed wing planes — on a jogged outline the tower's side walls
+          // stood up to 19′ THROUGH the roof.) A hair of inward inset keeps
+          // band faces off the ground-wall faces (no coplanar shimmer).
+          const INSET = 0.03;
           for (let level = 2; level <= Math.ceil(storeys); level++) {
             const uH = heightAt(level);
             if (uH > 0) {
@@ -876,31 +880,32 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
                   if (omittedWalls.has(side) || wallResolved[side].omitted) return;
                   const u = resolveWallSide(spec, side, level);
                   const tU = u.thicknessFt;
-                  let upperMesh;
-                  if (shed) {
-                    if (side === 'north' || side === 'south') {
-                      const zz = side === 'north' ? p.y : p.y + p.d;
-                      const yBot = wingTopAt(zz) - TUCK;
-                      upperMesh = box(p.w, uH + TUCK, tU, p.x + p.w / 2, yBot + (uH + TUCK) / 2 + upAbove(level), side === 'north' ? p.y + tU / 2 : p.y + p.d - tU / 2, wallMatOf(u));
-                    } else {
-                      // E/W: the band follows the slope — a parallelogram, i.e. a
-                      // box laid along the plane's angle (both planes share it).
-                      const z0 = p.y; const z1 = p.y + p.d;
-                      const y0 = wingTopAt(z0) - TUCK + (uH + TUCK) / 2 + upAbove(level);
-                      const y1 = wingTopAt(z1) - TUCK + (uH + TUCK) / 2 + upAbove(level);
-                      const len = Math.hypot(z1 - z0, y1 - y0);
-                      const xAt = side === 'west' ? p.x + tU / 2 : p.x + p.w - tU / 2;
-                      upperMesh = box(tU, uH + TUCK, len, xAt, (y0 + y1) / 2, (z0 + z1) / 2, wallMatOf(u));
-                      upperMesh.rotation.x = -Math.atan2(y1 - y0, z1 - z0);
+                  let upperMesh = null;
+                  if (side === 'north' || side === 'south') {
+                    const edgeZ = side === 'north' ? p.y : p.y + p.d;
+                    const probeZ = side === 'north' ? p.y + 0.3 : p.y + p.d - 0.3;
+                    const exposed2 = !coveredJustAbove(level, p.x + p.w / 2, probeZ) && !ringIsPorch(level);
+                    const yTop = shed && exposed2 ? tierWallTop(level, edgeZ) : elevAt(level) + uH;
+                    const yBot = bandSeatY(level, p.x + p.w / 2, edgeZ);
+                    if (yTop - yBot > 0.05) {
+                      const zAt = side === 'north' ? p.y + tU / 2 + INSET : p.y + p.d - tU / 2 - INSET;
+                      upperMesh = box(p.w, yTop - yBot, tU, p.x + p.w / 2, yBot + (yTop - yBot) / 2, zAt, wallMatOf(u));
                     }
                   } else {
-                    const liftOffset = groundH + upAbove(level);
-                    upperMesh = side === 'north' ? box(p.w, uH, tU, p.x + p.w / 2, liftOffset + uH / 2, p.y + tU / 2, wallMatOf(u))
-                      : side === 'south' ? box(p.w, uH, tU, p.x + p.w / 2, liftOffset + uH / 2, p.y + p.d - tU / 2, wallMatOf(u))
-                      : side === 'west' ? box(tU, uH, p.d, p.x + tU / 2, liftOffset + uH / 2, p.y + p.d / 2, wallMatOf(u))
-                      : box(tU, uH, p.d, p.x + p.w - tU / 2, liftOffset + uH / 2, p.y + p.d / 2, wallMatOf(u));
+                    const xAt = (side === 'west' ? p.x + tU / 2 + INSET : p.x + p.w - tU / 2 - INSET);
+                    const z0 = clamp(p.y, 0, depth); const z1 = clamp(p.y + p.d, 0, depth);
+                    if (z1 - z0 > 0.1) {
+                      const yBot = Math.min(bandSeatY(level, xAt, z0), bandSeatY(level, xAt, z1));
+                      const exposed2 = shed && !coveredJustAbove(level, xAt + (side === 'west' ? 0.3 : -0.3), (z0 + z1) / 2) && !ringIsPorch(level);
+                      if (exposed2) {
+                        upperMesh = rakedPieceZ(xAt, tU, z0, z1, yBot, tierWallTop(level, z0), tierWallTop(level, z1), wallMatOf(u));
+                      } else if (elevAt(level) + uH - yBot > 0.05) {
+                        const bH = elevAt(level) + uH - yBot;
+                        upperMesh = box(tU, bH, z1 - z0, xAt, yBot + bH / 2, (z0 + z1) / 2, wallMatOf(u));
+                      }
+                    }
                   }
-                  wallMeshSpecs.push({ side, storey: 'upper', level, meshes: [upperMesh] });
+                  if (upperMesh) wallMeshSpecs.push({ side, storey: 'upper', level, meshes: [upperMesh] });
                 });
               }
             }
@@ -1068,6 +1073,34 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             });
           }
         }
+      }
+      // ── THE STANDING LAW ────────────────────────────────────────────────
+      // No wall may rise past the roof surface above it — whatever
+      // combination of wall heights, roof pitch, storeys, splits, or outline
+      // produced it. Enforced mesh-by-mesh, VERTEX-by-vertex against the
+      // exact roof plane, so every build path obeys (the plain rectangle,
+      // a jogged/custom outline's segments, storey bands, everything).
+      // Shed and flat roofs have exact planes; a gable's peaked interior is
+      // approximate, so gables keep their own eave caps + gable-end infill.
+      if ((roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat') && !roundFp) {
+        const ROOF_SLACK = 0.08;
+        wallMeshSpecs.forEach(({ meshes }) => (meshes || []).forEach((m) => {
+          if (!m?.isMesh || !m.geometry?.getAttribute) return;
+          if (m.rotation.x !== 0 || m.rotation.y !== 0 || m.rotation.z !== 0) return; // sloped members already follow their planes
+          const posA = m.geometry.getAttribute('position');
+          let changed = false;
+          for (let i = 0; i < posA.count; i += 1) {
+            const wy = posA.getY(i) + m.position.y;
+            const cap = roofUnderAt(posA.getX(i) + m.position.x, posA.getZ(i) + m.position.z) + ROOF_SLACK;
+            if (wy > cap) { posA.setY(i, cap - m.position.y); changed = true; }
+          }
+          if (changed) {
+            posA.needsUpdate = true;
+            m.geometry.computeVertexNormals();
+            m.geometry.computeBoundingBox();
+            m.geometry.computeBoundingSphere();
+          }
+        }));
       }
       wallMeshSpecs.forEach(({ side, storey, level, meshes, edgeKey }) => {
         if (omittedWalls.has(side) || wallResolved[side].omitted) return;
