@@ -3505,7 +3505,7 @@ export function deriveDesign(spec, wallSections) {
   const southOpeningGlass = (spec.openings || []).filter((opening) => opening.wall === 'south' && (OPENING_TYPES[opening.type] || OPENING_TYPES.window).glazed)
     .reduce((sum, opening) => {
       const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
-      return sum + (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1);
+      return sum + (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1) * (profile.liteFrac ?? 1);
     }, 0);
   // Angled sun-glazing bands above kneewalls (the greenhouse face): glass area
   // = run x slant length. Tilted glass meets the low winter sun more squarely,
@@ -3552,7 +3552,7 @@ export function deriveDesign(spec, wallSections) {
     const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
     if (!profile.glazed) return sum;
     if (profile.roof) return sum + (Number(opening.widthFt) || 2.5) ** 2;
-    return sum + (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1);
+    return sum + (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1) * (profile.liteFrac ?? 1);
   }, 0) + sunBands.reduce((sum, b) => sum + b.glass, 0);
   const glazingU = utilities.windowQuality === 'triple' ? 0.28 : 0.5;
   // Insulation is an explicit layer of the roof and floor assemblies.
