@@ -49,7 +49,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 88 · Jul 17';
+const UPDATE_STAMP = 'update 89 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -67,7 +67,7 @@ const PHASE_REVEALS = {
   'site-prep': { layers: { pad: true }, cats: ['earthwork', 'site'] },
   foundation: { layers: { foundation: true }, cats: ['foundation'] },
   framing: { layers: { frame: true, upperFloors: true }, cats: ['floor', 'structure', 'loft', 'tower'] },
-  walls: { layers: { wallNorth: true, wallSouth: true, wallEast: true, wallWest: true, openings: true }, cats: ['wall', 'partition'] },
+  walls: { layers: { wallNorth: true, wallSouth: true, wallEast: true, wallWest: true, openings: true }, cats: ['wall', 'partition', 'greenhouse'] },
   roofing: { layers: { roof: true }, cats: ['roof', 'chimney'] },
   utilities: { cats: ['water', 'power', 'waste'] },
   heater: { cats: ['thermal'] },
@@ -100,7 +100,10 @@ function scrubLayers(schedule, scrubWeek, spec) {
     (reveal.cats || []).forEach((cat) => shownCats.add(cat));
   });
   if (showAll) return { ...DEFAULT_MODEL_LAYERS };
-  const allCats = new Set((spec.elements || []).map((el) => el.category || 'custom'));
+  // 'greenhouse' is always governed: the annex a greenhouse ROOM grows is
+  // synthesized at render time (it has no element), so without this it was
+  // visible from bare ground — glazing standing before the frame existed.
+  const allCats = new Set([...(spec.elements || []).map((el) => el.category || 'custom'), 'greenhouse']);
   layers.hiddenCats = [...allCats].filter((cat) => !shownCats.has(cat));
   return layers;
 }
