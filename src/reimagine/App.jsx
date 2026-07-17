@@ -39,7 +39,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 73 · Jul 16';
+const UPDATE_STAMP = 'update 74 · Jul 16';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -992,6 +992,25 @@ export default function App() {
                       }
                     }}
                   >📋 Copy design code (for Claude)</button>
+                  <button
+                    className="rz-designs-save"
+                    title="Paste a design code someone sent you (Claude, or a friend) - it becomes your working design; the current one stays one Ctrl+Z away"
+                    onClick={() => {
+                      const text = window.prompt('Paste the design code here:');
+                      if (!text) return;
+                      try {
+                        const parsed = JSON.parse(text);
+                        const specIn = parsed.spec && parsed.spec.shell ? parsed.spec : (parsed.shell ? parsed : null);
+                        if (!specIn || !Array.isArray(specIn.rooms)) { setSaveFlash('That did not look like a design code.'); return; }
+                        commitSpec(structuredClone(specIn));
+                        setSelectedId(null);
+                        setSaveFlash('Design loaded - Ctrl+Z brings the old one back.');
+                      } catch {
+                        setSaveFlash('Could not read that - make sure the whole code was pasted.');
+                      }
+                      setTimeout(() => setSaveFlash(null), 3500);
+                    }}
+                  >&#x2913; Paste design code</button>
                   {saveFlash && <div className="rz-designs-flash">{saveFlash}</div>}
                   {STARTER_DESIGNS.map((st) => (
                     <div key={st.id} className="rz-designs-item">
