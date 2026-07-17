@@ -51,6 +51,21 @@ function cutPlanes(spec, cut) {
   return [new THREE.Plane(new THREE.Vector3(0, 0, -1), cutZ)];
 }
 
+// ── THE JOINTS TABLE ─────────────────────────────────────────────────────────
+// Every seam offset in the model, named once. Builders read these instead of
+// scattering magic numbers — a seam fix is a one-line change here, and the
+// in-scene seam audit (window.__nbView.seamAudit) checks the build against it.
+export const JOINTS = {
+  ROOF_BEARING: 0.28,  // a shed roof plane rides this far above the wall-top line
+  EAVE_BEARING: 0.25,  // a gable/flat/hip plane rides this far above its eave
+  TUCK: 0.45,          // a wall band drops this far into the roof plane it rises out of
+  LAP: 0.05,           // hairline overlap between neighboring pieces
+  BAND_INSET: 0.03,    // a storey band's face sits this far inside the ground wall face
+  ROOF_SLACK: 0.08,    // the standing law's clamp allowance above the roof line
+  DECK_LIFT: 0.18,     // deck boards ride this far above their floor line
+  RAFTER_DROP: 0.34,   // rafter tops sit this far below the roof deck surface
+};
+
 export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, viewRequest = null, sectionCut = 1, onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview, onFallbackNav, showCompass = false, context = null }) {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
@@ -679,9 +694,9 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         if (roofSpec.roofType === 'shed') {
           const wingTop = roofSpec.northWallHeightFt
             + (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) * clamp(depth > 0 ? edgeZ / depth : 0, 0, 1);
-          return Math.min(elevAt(level), wingTop - 0.45);
+          return Math.min(elevAt(level), wingTop - JOINTS.TUCK);
         }
-        return Math.min(elevAt(level), (roofSpec.highWallHeightFt || 10) - 0.45);
+        return Math.min(elevAt(level), (roofSpec.highWallHeightFt || 10) - JOINTS.TUCK);
       };
       // A storey's wall rises TO ITS OWN ROOF wherever nothing stands above
       // it — the tower's walls go to the roof plane and rake to match it
@@ -875,7 +890,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // shed wing planes — on a jogged outline the tower's side walls
           // stood up to 19′ THROUGH the roof.) A hair of inward inset keeps
           // band faces off the ground-wall faces (no coplanar shimmer).
-          const INSET = 0.03;
+          const INSET = JOINTS.BAND_INSET;
           for (let level = 2; level <= Math.ceil(storeys); level++) {
             const uH = heightAt(level);
             if (uH > 0) {
@@ -1088,7 +1103,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // Shed and flat roofs have exact planes; a gable's peaked interior is
       // approximate, so gables keep their own eave caps + gable-end infill.
       if ((roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat') && !roundFp) {
-        const ROOF_SLACK = 0.08;
+        const ROOF_SLACK = JOINTS.ROOF_SLACK;
         wallMeshSpecs.forEach(({ meshes }) => (meshes || []).forEach((m) => {
           if (!m?.isMesh || !m.geometry?.getAttribute) return;
           if (m.rotation.x !== 0 || m.rotation.y !== 0 || m.rotation.z !== 0) return; // sloped members already follow their planes
@@ -1107,6 +1122,38 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           }
         }));
       }
+      // Standing SEAM AUDIT — callable any time (console or automated test):
+      // window.__nbSeamAudit() returns every seam that violates the JOINTS
+      // law: a wall vertex past the roof line, a floor plate off its storey
+      // elevation, a non-finite coordinate. Empty list = the build is tight.
+      window.__nbSeamAudit = () => {
+        const problems = [];
+        const shedOrFlat = (roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat') && !roundFp;
+        group.traverse((m) => {
+          if (!m.isMesh || !m.geometry?.getAttribute) return;
+          const id = String(m.userData?.roomId || '');
+          m.geometry.computeBoundingBox();
+          const bb = m.geometry.boundingBox.clone();
+          m.updateWorldMatrix(true, false);
+          bb.applyMatrix4(m.matrixWorld);
+          if (![bb.min.x, bb.max.y, bb.min.z].every(Number.isFinite)) { problems.push({ check: 'finite', id }); return; }
+          if (shedOrFlat && id.startsWith('wall-') && m.rotation.x === 0 && m.rotation.y === 0 && m.rotation.z === 0) {
+            const pos = m.geometry.getAttribute('position');
+            for (let i = 0; i < pos.count; i += 1) {
+              const wy = pos.getY(i) + m.position.y;
+              const cap = roofUnderAt(pos.getX(i) + m.position.x, pos.getZ(i) + m.position.z) + JOINTS.ROOF_SLACK + 0.1;
+              if (wy > cap) { problems.push({ check: 'wall-over-roof', id, over: Math.round((wy - cap) * 100) / 100 }); break; }
+            }
+          }
+        });
+        (spec.elements || []).forEach((el) => {
+          if (el.category === 'floor' && Number(el.level || 1) >= 2) {
+            const want = storeyElevationFt(spec.shell, Number(el.level));
+            if (Math.abs(Number(el.z || 0) - want) > 0.6) problems.push({ check: 'plate-elevation', id: el.id, at: el.z, want });
+          }
+        });
+        return problems;
+      };
       wallMeshSpecs.forEach(({ side, storey, level, meshes, edgeKey }) => {
         if (omittedWalls.has(side) || wallResolved[side].omitted) return;
         if (!layers[`wall${titleCase(side)}`]) return;
@@ -1328,7 +1375,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // Rafters carry the deck from BELOW it: top of rafter at the roof
         // plane minus the slab thickness. Riding the plane itself left half
         // of every member poking through the roof surface.
-        const DECK = 0.34;
+        const DECK = JOINTS.RAFTER_DROP;
         const rafterRun = (b0, b1, planeAt, axisIsZ, s0, s1) => {
           const count = Math.max(1, Math.round((b1 - b0) / rOC));
           for (let i = 0; i <= count; i += 1) {
@@ -1914,7 +1961,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // the house or its storey outline stay open for the doorway), short
           // posts to grade on the ground floor.
           const lvlD = Math.max(1, Number(element.level || 1));
-          const deckTopY = lvlD >= 2 ? storeyElevationFt(spec.shell, lvlD) + 0.18 : 0.8;
+          const deckTopY = lvlD >= 2 ? storeyElevationFt(spec.shell, lvlD) + JOINTS.DECK_LIFT : 0.8;
           const deckMatD = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.8, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
           const dparts = [];
           const dp = (m) => { m.userData.roomId = element.id; m.userData.generated = true; group.add(m); dparts.push(m); return m; };
@@ -2518,7 +2565,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               if (plateEl && plateEl.topTreatment === 'porch') {
                 const deckMat = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.8, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
                 ring.forEach((rect) => {
-                  const deckY = below.topEave + 0.18;
+                  const deckY = below.topEave + JOINTS.DECK_LIFT;
                   const deck = box(rect.w, 0.35, rect.d, rect.x + rect.w / 2, deckY, rect.y + rect.d / 2, deckMat);
                   deck.name = 'Porch deck';
                   deck.userData.roomId = 'roof-main';
@@ -2566,8 +2613,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             // through the wall tops at the wall lines; overhangs continue the
             // slope (the stretched 0..overhang-tip mapping diluted it and let
             // a tall south wall pierce its own roof)
-            const nH = roofSpec.northWallHeightFt + storeyLift + 0.28;
-            const sH = roofSpec.southWallHeightFt + storeyLift + 0.28;
+            const nH = roofSpec.northWallHeightFt + storeyLift + JOINTS.ROOF_BEARING;
+            const sH = roofSpec.southWallHeightFt + storeyLift + JOINTS.ROOF_BEARING;
             return nH + (depth > 0 ? (sH - nH) / depth : 0) * zz;
           };
           // In a set-back design each tier's shed piece rides its OWN storey:
@@ -2579,7 +2626,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const shedPlaneFor = (seg) => {
             const lvl = seg.level || 1;
             if (!anySetback || lvl <= 1) return (zz) => shedYAt(zz) - (seg.tierDrop ?? storeyLift);
-            const topPlane = elev2 + upThru(lvl) + 0.28;
+            const topPlane = elev2 + upThru(lvl) + JOINTS.ROOF_BEARING;
             const y0 = seg.tierY0 ?? seg.rect.y;
             const slopeT = tierPitchOf(lvl) ?? shedSlopeNow;
             return (zz) => topPlane + slopeT * Math.max(0, zz - y0);
@@ -3046,8 +3093,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // this, a two-storey shed drew its roof at the ground plane, 10+ feet
         // below its own walls and rafters.
         const lift = Math.max(0, wallHeight - Math.max(roofSpec.southWallHeightFt, roofSpec.northWallHeightFt));
-        const southHeight = roofSpec.southWallHeightFt + lift + 0.28;
-        const northHeight = roofSpec.northWallHeightFt + lift + 0.28;
+        const southHeight = roofSpec.southWallHeightFt + lift + JOINTS.ROOF_BEARING;
+        const northHeight = roofSpec.northWallHeightFt + lift + JOINTS.ROOF_BEARING;
         // The plane passes THROUGH the wall tops AT THE WALL LINES and keeps
         // the same slope over the overhangs. Reaching the wall heights only
         // at the overhang tips diluted the slope, so a tall south wall stood
