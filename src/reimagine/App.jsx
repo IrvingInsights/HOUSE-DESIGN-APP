@@ -49,7 +49,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 94 · Jul 17';
+const UPDATE_STAMP = 'update 95 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1297,7 +1297,7 @@ export default function App() {
                   <span>Roof steepness over this floor</span>
                   <NumInput
                     value={Math.round((Number(el.roofPitch) > 0 ? Number(el.roofPitch) : Number(spec.shell.roofPitch || 0.32)) * 12 * 10) / 10}
-                    min={0.5} max={18} step={0.5} unit=":12"
+                    min={0.5} max={18} step={0.5} unit="/12"
                     onCommit={(v) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'roofPitch', value: clamp(v / 12, 0.02, 1.5) }])}
                   />
                 </label>
@@ -1305,7 +1305,7 @@ export default function App() {
                   <button
                     type="button" className="rz-fresh" style={{ alignSelf: 'flex-start' }}
                     onClick={() => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'roofPitch', value: 0 }])}
-                  >match the main roof ({Math.round(Number(spec.shell.roofPitch || 0.32) * 12 * 10) / 10}:12)</button>
+                  >match the main roof ({Math.round(Number(spec.shell.roofPitch || 0.32) * 12 * 10) / 10}/12)</button>
                 )}
               </>
             )}
@@ -2531,14 +2531,14 @@ function UpperRoofControls({ spec, level, floors, onOps }) {
         <span>Roof steepness over this floor</span>
         <NumInput
           value={Math.round(ownPitch * 12 * 10) / 10}
-          min={0.5} max={18} step={0.5} unit=":12"
+          min={0.5} max={18} step={0.5} unit="/12"
           onCommit={(v) => onOps([{ type: 'update_object', targetId: plate.id, name: plate.name, field: 'roofPitch', value: clamp(v / 12, 0.02, 1.5) }])}
         />
       </label>
       {Number(plate.roofPitch) > 0 && (
         <button type="button" className="rz-fresh" style={{ alignSelf: 'flex-start' }}
           onClick={() => onOps([{ type: 'update_object', targetId: plate.id, name: plate.name, field: 'roofPitch', value: 0 }])}
-        >match the main roof ({Math.round(mainPitch * 12 * 10) / 10}:12)</button>
+        >match the main roof ({Math.round(mainPitch * 12 * 10) / 10}/12)</button>
       )}
       {floors > level && (
         <label className="rz-field">
@@ -2592,7 +2592,7 @@ function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOver
             <span>Steepness (pitch)</span>
             <NumInput
               value={Math.round(((fallNow / Math.max(1, Number(spec.shell.depthFt) || 24)) * 12) * 10) / 10}
-              min={0.25} max={8} step={0.25} unit=":12"
+              min={0.25} max={8} step={0.25} unit="/12"
               onCommit={(v) => onShedFall(drainsNow || 'north', clamp((v / 12) * (Number(spec.shell.depthFt) || 24), 0.5, 24))}
             />
           </label>
@@ -2603,8 +2603,8 @@ function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOver
         </>
       ) : roofType !== 'flat' && (
         <label className="rz-field rz-field-num">
-          <span>Steepness · {Math.round(pitch * 12)}:12</span>
-          <NumInput value={Math.round(pitch * 12)} min={1} max={18} step={1} unit=":12" onCommit={(v) => onPitch(clamp(v / 12, 0.02, 1.5))} />
+          <span>Steepness · {Math.round(pitch * 12)}/12</span>
+          <NumInput value={Math.round(pitch * 12)} min={1} max={18} step={1} unit="/12" onCommit={(v) => onPitch(clamp(v / 12, 0.02, 1.5))} />
         </label>
       )}
 
