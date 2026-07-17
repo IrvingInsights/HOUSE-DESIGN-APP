@@ -2298,6 +2298,12 @@ export function applyBimOperations(currentSpec, plan) {
           actions.push(`Raised the house to ${lvl} storeys so ${target.name} has its floor.`);
         }
         target.z = lvl >= 2 ? storeyElevationFt(next.shell, lvl) : 0;
+      } else if (operation.field === 'roofPitch') {
+        // Per-storey roof steepness on a floor plate (a tower's flatter cap).
+        // Numeric, clamped; zero/invalid clears back to the whole-roof pitch.
+        const v = Number(operation.value);
+        if (Number.isFinite(v) && v > 0) target.roofPitch = clamp(v, 0.02, 1.5);
+        else delete target.roofPitch;
       } else if (operation.field) target[operation.field] = operation.value;
       changedIds.push(target.id);
       actions.push(operationDescription({ ...operation, name: target.name }, next));

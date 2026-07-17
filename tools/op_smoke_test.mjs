@@ -178,6 +178,18 @@ r = apply(r.spec, [{ type: 'update_object', targetId: 'opening-0', field: 'sillF
 ok(r.spec.openings[0].sillFt === 24, 'sillFt clamps to a sane ceiling', String(r.spec.openings[0].sillFt));
 r = apply(r.spec, [{ type: 'update_object', targetId: 'opening-0', field: 'sillFt', value: -1 }]);
 ok(!('sillFt' in r.spec.openings[0]), 'a negative/blank sill clears the override (back to the type default)');
+// per-storey roof pitch on a floor plate (the tower's flatter cap): set, clamp, clear
+{
+  let s2 = apply(freshSpec(), [{ type: 'add_element', name: 'Storey 2 extent', category: 'floor', x: 8, y: 4, w: 16, d: 12, h: 0.4, level: 2 }]).spec;
+  const plate = s2.elements.find((el) => el.category === 'floor');
+  s2 = apply(s2, [{ type: 'update_object', targetId: plate.id, field: 'roofPitch', value: 0.06 }]).spec;
+  ok(Math.abs(s2.elements.find((el) => el.id === plate.id).roofPitch - 0.06) < 1e-9, 'plate roofPitch sets (flat tower cap)');
+  s2 = apply(s2, [{ type: 'update_object', targetId: plate.id, field: 'roofPitch', value: 9 }]).spec;
+  ok(s2.elements.find((el) => el.id === plate.id).roofPitch === 1.5, 'plate roofPitch clamps');
+  s2 = apply(s2, [{ type: 'update_object', targetId: plate.id, field: 'roofPitch', value: 0 }]).spec;
+  ok(!('roofPitch' in s2.elements.find((el) => el.id === plate.id)), 'roofPitch 0 clears back to the whole-roof pitch');
+}
+
 // fixture on an upper floor keeps its level + elevation
 r = apply(freshSpec(), [{ type: 'add_element', name: 'Loft Tub', category: 'water', x: 4, y: 4, z: 10.45, w: 5, d: 3, h: 2, level: 2 }]);
 const tub = r.spec.elements.find((el) => el.name === 'Loft Tub');
