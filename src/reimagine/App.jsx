@@ -40,7 +40,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 78 · Jul 17';
+const UPDATE_STAMP = 'update 79 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1164,6 +1164,26 @@ export default function App() {
                   <option value="porch">Open porch — a walkable deck with a railing</option>
                 </select>
               </label>
+            )}
+            {el && el.category === 'floor' && Number(el.level || 1) >= 2 && (
+              <>
+                {/* per-floor roof steepness — a tower can wear a flatter cap
+                    than the main roof (the FL0 drawings do exactly this) */}
+                <label className="rz-field rz-field-num">
+                  <span>Roof steepness over this floor</span>
+                  <NumInput
+                    value={Math.round((Number(el.roofPitch) > 0 ? Number(el.roofPitch) : Number(spec.shell.roofPitch || 0.32)) * 12 * 10) / 10}
+                    min={0.5} max={18} step={0.5} unit=":12"
+                    onCommit={(v) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'roofPitch', value: clamp(v / 12, 0.02, 1.5) }])}
+                  />
+                </label>
+                {Number(el.roofPitch) > 0 && (
+                  <button
+                    type="button" className="rz-fresh" style={{ alignSelf: 'flex-start' }}
+                    onClick={() => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'roofPitch', value: 0 }])}
+                  >match the main roof ({Math.round(Number(spec.shell.roofPitch || 0.32) * 12 * 10) / 10}:12)</button>
+                )}
+              </>
             )}
             <p className="rz-muted">Drag it in the plan to move it; grab a corner to resize.</p>
             {el && (

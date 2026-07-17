@@ -383,6 +383,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         }
         return false;
       })();
+      // A storey's floor plate can carry its OWN roof pitch (a tower wearing
+      // a flatter cap than the main roof). Null = ride the whole-roof pitch.
+      const tierPitchOf = (lv) => {
+        if (lv <= 1) return null;
+        const elP = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === lv);
+        const v = Number(elP?.roofPitch);
+        return Number.isFinite(v) && v > 0 ? v : null;
+      };
       const basementH = basementInfo(spec.shell).heightFt;
       const wallHeight = roofSpec.highWallHeightFt + storeyLift;
       const southWallHeight = (roofSpec.roofType === 'shed' ? roofSpec.southWallHeightFt : roofSpec.highWallHeightFt) + storeyLift;
@@ -418,12 +426,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         }
         const tierTop = elev2 + upThru(topLv); // top of that storey's walls
         if (roofSpec.roofType === 'shed') {
-          // the tier's shed piece anchors its high (south) edge at the tier top
-          return tierTop - (depth > 0 ? (sH - nH) / depth : 0) * Math.max(0, topRect.y + topRect.d - pz);
+          // the tier's shed piece anchors its LOW (north) edge at the tier
+          // top and rises south — matching the mesh shedPlaneFor builds
+          const slopeT = tierPitchOf(topLv) ?? (depth > 0 ? (sH - nH) / depth : 0);
+          return tierTop + slopeT * Math.max(0, pz - topRect.y);
         }
         if (roofSpec.roofType === 'flat') return tierTop + 0.2;
         const distEdgeT = Math.max(0, Math.min(pz - topRect.y, topRect.y + topRect.d - pz, px - topRect.x, topRect.x + topRect.w - px));
-        return tierTop + distEdgeT * (Number(spec.shell.roofPitch) || 0.32);
+        return tierTop + distEdgeT * (tierPitchOf(topLv) ?? (Number(spec.shell.roofPitch) || 0.32));
       };
 
       const slabMat = new THREE.MeshStandardMaterial({ color: 0xc0b49b, roughness: 0.92, map: grainTexture('earth'), bumpMap: bumpTexture('earth'), bumpScale: 0.2 });
@@ -1320,7 +1330,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const lift = lv === 1 ? 0 : upThru(lv);
             if (!anySetback || lv === 1) return eaveLiftAt(spanPos, lift);
             if (roofSpec.roofType === 'shed') {
-              const slope = depth > 0 ? (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) / depth : 0;
+              const slope = tierPitchOf(lv) ?? (depth > 0 ? (roofSpec.southWallHeightFt - roofSpec.northWallHeightFt) / depth : 0);
               return elev2 + lift + slope * Math.max(0, spanPos - p.y);
             }
             return elev2 + lift;
@@ -2411,7 +2421,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             if (!anySetback || lvl <= 1) return (zz) => shedYAt(zz) - (seg.tierDrop ?? storeyLift);
             const topPlane = elev2 + upThru(lvl) + 0.28;
             const y0 = seg.tierY0 ?? seg.rect.y;
-            return (zz) => topPlane + shedSlopeNow * Math.max(0, zz - y0);
+            const slopeT = tierPitchOf(lvl) ?? shedSlopeNow;
+            return (zz) => topPlane + slopeT * Math.max(0, zz - y0);
           };
           segments.forEach((seg) => {
             const o = segOverhangs(seg.rect, Boolean(seg.upper), seg.level || 1);
@@ -2422,7 +2433,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               // under the storey above.
               mesh = roofSpec.roofType === 'shed'
                 ? makeShedPiece(seg.rect, o, shedPlaneFor(seg), roofMat)
-                : makeStepRoofPlane(seg.rect, seg.highSide, seg.eave + 0.25, pitchNow, o, roofMat);
+                : makeStepRoofPlane(seg.rect, seg.highSide, seg.eave + 0.25, (seg.level || 1) > 1 ? (tierPitchOf(seg.level) ?? pitchNow) : pitchNow, o, roofMat);
             } else if (roofSpec.roofType === 'shed') {
               mesh = makeShedPiece(seg.rect, o, anySetback && (seg.level || 1) > 1 ? shedPlaneFor(seg) : shedYAt, roofMat);
             } else if (roofSpec.roofType === 'flat') {
@@ -2432,7 +2443,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               mesh.position.x += seg.rect.x;
               mesh.position.z += seg.rect.y;
             } else {
-              mesh = makeGableSegment(seg.rect, seg.eave, pitchNow, o, roofMat);
+              mesh = makeGableSegment(seg.rect, seg.eave, (seg.level || 1) > 1 ? (tierPitchOf(seg.level) ?? pitchNow) : pitchNow, o, roofMat);
             }
             if (mesh) {
               mesh.name = seg.kind === 'wing' ? 'Roof (lower wing)' : 'Roof';
