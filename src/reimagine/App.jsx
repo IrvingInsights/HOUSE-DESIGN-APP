@@ -29,10 +29,12 @@ import './shell.css';
 // edges for Shape, room dragging for Rooms, door/window gaps for Openings) —
 // so each chapter looks and acts like what it's for.
 const CHAPTERS = [
-  { id: 'shape', label: 'Shape', view: 'plan', planContext: 'shell', greet: (d) => `Shape the whole building — a plain rectangle or an L, T, or U — or pick any room or element from the dropdown to size just that one. Right now the house is ${fmtNum(d.floor)} sq ft.` },
+  { id: 'shape', label: 'Shape', view: 'plan', planContext: 'shell', greet: (d) => `Shape the whole building — a plain rectangle, an L, T, U, or round — or pick any room or element from the dropdown to size just that one. Right now the house is ${fmtNum(d.floor)} sq ft.` },
+  { id: 'storeys', label: 'Storeys', view: 'plan', planContext: 'rooms', greet: (d) => `How the house stacks — ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'} right now. Add a floor, give each its own size and height, sink a basement — and jump from any floor straight to its rooms, its walls, or its roof.` },
   { id: 'rooms', label: 'Rooms', view: 'plan', planContext: 'rooms', greet: () => 'Lay the rooms out flat, from above. Use the Floor selector (top left) to add a floor or switch between them — each floor keeps its own rooms and its own outline. Drag a room to move it, a corner to resize.' },
   { id: 'foundation', label: 'Foundation', view: 'plan', planContext: 'foundation', greet: () => 'What the house sits on. Pick the main type below — and the foundation doesn’t have to match the rooms: drop extra footings and drag them under whatever they carry, even outside the walls.' },
-  { id: 'shell', label: 'Shell', view: '3d', greet: (d) => `The shell stands ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'}. Pick the wall system and the frame that carries the roof — the timeline and every receipt follow along.` },
+  { id: 'walls', label: 'Walls', view: '3d', planContext: 'shell', greet: () => 'The walls themselves — how tall they stand and what they’re made of. Set all four at once, or one side, one floor, or one section of a wall at a time.' },
+  { id: 'frame', label: 'Frame', view: '3d', greet: () => 'What holds the roof up. Load-bearing walls carry it themselves — the usual choice for bale and cob — or a timber frame, posts and beams, or stick framing stands inside the walls.' },
   { id: 'roof', label: 'Roof', view: '3d', greet: () => 'Choose how the roof sheds weather and sun. Pick the shape, how steep it runs, what insulates it, and how far it reaches past the walls.' },
   { id: 'openings', label: 'Openings', view: 'wall', planContext: 'windows', greet: () => 'Place doors and windows where light and paths want them. Slide them along their wall.' },
   { id: 'systems', label: 'Systems', view: '3d', greet: () => 'Heat, water, power, waste — the working parts. Each shows its own receipts.' },
@@ -50,7 +52,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 101 · Jul 17';
+const UPDATE_STAMP = 'update 102 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -890,8 +892,21 @@ export default function App() {
   // Each upper floor gets its own construction (bale below, a framed +
   // charred 2nd floor, a cordwood tower). ONE batched dispatch per floor.
   const setUpperWalls = (level, field, value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, level, field, value })));
-  const setFrame = (value) => applyOps([{ type: 'set_frame', value }]);
+  // Level 0/1 sets the whole-house frame; level 2/3 gives that storey its own
+  // (a timber ground floor under a stick-framed tower is one design).
+  const setFrame = (value, level = 0) => applyOps([{ type: 'set_frame', value, ...(Number(level) > 1 ? { level } : {}) }]);
+  const setBaySpacing = (v) => applyOps([{ type: 'set_frame', field: 'baySpacingFt', value: clamp(Number(v) || 8, 4, 16) }]);
   const setWallSide = (side, field, value) => applyOps([{ type: 'set_wall_side', wall: side, field, value }]);
+  // Split one side into three sections (engine picks that side's longest
+  // edge) — each section can then carry its own construction.
+  const splitWallSide = (side) => applyOps([{ type: 'split_wall_edge', wall: side }]);
+  // The greenhouse classic in one tap: a 2 ft south kneewall with slanted
+  // glass rising to the eave — ONE dispatch so undo is one step.
+  const makeGreenhouseSouth = () => applyOps([
+    { type: 'set_wall_side', wall: 'south', field: 'heightFt', value: 2 },
+    { type: 'set_wall_side', wall: 'south', field: 'sunGlazing', value: true },
+    { type: 'set_wall_side', wall: 'south', field: 'sunGlazingTiltDeg', value: 30 }
+  ]);
   // --- finishes: floor, exterior cladding, reclaimed materials ---------------
   const setFlooring = (value) => applyOps([{ type: 'set_flooring', value }]);
   const setSubfloor = (value) => applyOps([{ type: 'set_flooring', field: 'subfloor', value }]);
@@ -936,6 +951,13 @@ export default function App() {
 
   // switching chapters nudges you to the view that chapter is best done in
   const goChapter = (c) => { setActiveChapter(c.id); if (c.view) setViewMode(c.view); };
+  // Jump links ("lay out this floor's rooms ›") — chapter + floor in one hop.
+  const jumpTo = (chapterId, floor = null) => {
+    const c = CHAPTERS.find((ch) => ch.id === chapterId);
+    if (!c) return;
+    goChapter(c);
+    if (floor !== null) setActiveFloor(floor);
+  };
 
   // In the Shape chapter, if a room/element is the shape target, the plan lets
   // you see and drag it (rooms context); otherwise it edits the building
@@ -971,7 +993,7 @@ export default function App() {
             onMoveOpening={moveOpening}
             context={planContext}
             onContext={timelineOpen ? null : openContext}
-            activeFloor={activeChapter === 'rooms' || activeChapter === 'openings' ? activeFloor : 1}
+            activeFloor={activeChapter === 'rooms' || activeChapter === 'openings' || activeChapter === 'storeys' ? activeFloor : 1}
           />
         ) : (
           <ThreeScene
@@ -1091,15 +1113,29 @@ export default function App() {
             {activeChapter === 'shape' && (
               <ShapeControls
                 spec={spec}
-                floors={floors}
                 onShapeBuilding={setShape}
                 onSizeBuilding={resizeShell}
+                fitInfo={fitWorthIt ? fitPreview : null}
+                onFitWalls={fitWalls}
+                onGoStoreys={() => jumpTo('storeys')}
+              />
+            )}
+            {activeChapter === 'storeys' && (
+              <StoreysControls
+                spec={spec}
+                floors={floors}
+                hasBasement={hasBasement}
+                activeFloor={activeFloor}
+                onSelectFloor={setActiveFloor}
                 onAddFloor={addFloor}
                 onRemoveFloor={removeFloor}
                 onResizeFloor={resizeFloor}
                 onFloorHeight={setFloorHeight}
-                fitInfo={fitWorthIt ? fitPreview : null}
-                onFitWalls={fitWalls}
+                onChooseFoundation={chooseFoundation}
+                onShell={setShellField}
+                onOps={applyOps}
+                onSelectPlate={(id) => { setSelectedId(id); setViewMode('plan'); }}
+                onJump={jumpTo}
               />
             )}
             {activeChapter === 'rooms' && (
@@ -1208,21 +1244,32 @@ export default function App() {
                 onSelectRun={setSelectedId}
               />
             )}
-            {activeChapter === 'shell' && (
-              <StructureControls
+            {activeChapter === 'walls' && (
+              <WallsControls
                 spec={spec}
                 floors={floors}
+                wallSections={wallSections}
                 onAllWalls={setAllWalls}
                 onShedHeights={setShedHeights}
                 onShedHeightsEW={setShedHeightsEW}
                 onUpperWalls={setUpperWalls}
-                onFrame={setFrame}
                 onShell={setShellField}
                 onWallSide={setWallSide}
+                onSplitWall={splitWallSide}
+                onGreenhouse={makeGreenhouseSouth}
                 onSelectWall={(side) => { setSelectedId(`wall-${side}`); setViewMode('3d'); }}
-                onAddFloor={addFloor}
-                onRemoveFloor={removeFloor}
-                onLayoutFloors={() => { setActiveChapter('rooms'); setViewMode('plan'); }}
+                onJump={jumpTo}
+              />
+            )}
+            {activeChapter === 'frame' && (
+              <FrameControls
+                spec={spec}
+                floors={floors}
+                onFrame={setFrame}
+                onBaySpacing={setBaySpacing}
+                showingBones={modelShow === 'bones'}
+                onToggleBones={() => { setModelShow((v) => (v === 'bones' ? 'all' : 'bones')); setViewMode('3d'); }}
+                onJump={jumpTo}
               />
             )}
             {activeChapter === 'roof' && (
@@ -1677,7 +1724,7 @@ export default function App() {
           return (
             <Menu title={level > 1 ? `${sideLabel} wall — ${floorLabel(spec, level).toLowerCase()}` : `${sideLabel} wall — ${r.assembly.label}`}>
               <button onClick={() => {
-                if (level > 1) { setActiveChapter('shell'); setSelectedId(null); }
+                if (level > 1) { setActiveChapter('walls'); setSelectedId(null); }
                 else setSelectedId(`wall-${side}`);
                 closeMenu();
               }}>{level > 1 ? 'This floor’s wall settings…' : 'Height & what it’s made of…'}</button>
@@ -1721,7 +1768,7 @@ export default function App() {
           const fKey = resolveFrameType(spec, 1);
           return (
             <Menu title={`Frame — ${FRAME_TYPES[fKey]?.label || fKey}`} h={170}>
-              <button onClick={() => { setActiveChapter('shell'); closeMenu(); }}>Change what carries the roof…</button>
+              <button onClick={() => { setActiveChapter('frame'); closeMenu(); }}>Change what carries the roof…</button>
               <button onClick={() => { setModelShow((v) => (v === 'bones' ? 'all' : 'bones')); closeMenu(); }}>
                 {modelShow === 'bones' ? 'Show the whole house again' : 'Show just the bones (frame & foundation)'}
               </button>
@@ -2163,7 +2210,7 @@ function BudgetSheet({ derived, onClose }) {
 // building or any single room/element — from the dropdown. The building gets
 // the outline presets (Rectangle / L / T / U) and its size; a room or element
 // gets its own width × depth. One general control instead of building-only.
-function ShapeControls({ spec, floors, onShapeBuilding, onSizeBuilding, onAddFloor, onRemoveFloor, onResizeFloor, onFloorHeight, fitInfo = null, onFitWalls = null }) {
+function ShapeControls({ spec, onShapeBuilding, onSizeBuilding, fitInfo = null, onFitWalls = null, onGoStoreys = null }) {
   const isRound = spec.shell.footprint === 'round';
   const isRect = !spec.shell.footprint;
   const corners = Array.isArray(spec.shell.footprint) ? spec.shell.footprint.length : 4;
@@ -2205,7 +2252,7 @@ function ShapeControls({ spec, floors, onShapeBuilding, onSizeBuilding, onAddFlo
           >{label}</button>
         ))}
       </div>
-      {isRound && <div className="rz-shape-note">round outline · an ellipse — set how wide & deep in the Floors sizes below</div>}
+      {isRound && <div className="rz-shape-note">round outline · an ellipse — set how wide & deep with the Width and Depth above</div>}
       {!isRect && !isRound && (
         nearRect
           ? <div className="rz-shape-note rz-shape-warn">⚠ this outline is almost — but not quite — a rectangle (a small jog in a wall). Rooms stop at the jog, which can look like a stuck gap. Tap <b>Rectangle</b> to straighten it.</div>
@@ -2218,9 +2265,13 @@ function ShapeControls({ spec, floors, onShapeBuilding, onSizeBuilding, onAddFlo
         </div>
       )}
 
-      {/* Every floor — ground included — sizes the same way in the Floors list
-          below (the ground floor's width & depth ARE the building footprint). */}
-      <StoreysControl spec={spec} floors={floors} onAddFloor={onAddFloor} onRemoveFloor={onRemoveFloor} onResizeFloor={onResizeFloor} onFloorHeight={onFloorHeight} />
+      {/* floors moved to their own chapter — one signposted hop away */}
+      {onGoStoreys && (
+        <button type="button" className="rz-floorbar-outline" onClick={onGoStoreys}
+          title="Floors, the basement, and each storey's own size and height">
+          Floors &amp; basement live in Storeys ›
+        </button>
+      )}
     </div>
   );
 }
@@ -2291,57 +2342,120 @@ function NumInput({ value, min, max, step = 1, unit = 'ft', onCommit }) {
   );
 }
 
-// Storeys — how the building STACKS, shown in the Shape chapter next to the
-// footprint. Add/remove a storey, and give each upper storey its own extent
-// (it can set back, smaller than the floor below) and the shared upper-floor
-// height. Sizing is by the numbers here, on purpose: the plan stays free for
-// laying out rooms (the extent plate is a non-interactive outline there), so
-// storey-sizing and room-work never fight over the same drag.
-function StoreysControl({ spec, floors, onAddFloor, onRemoveFloor, onResizeFloor, onFloorHeight }) {
+// The Storeys chapter — how the building STACKS. Add/remove a floor, give
+// each its own size and height, sink a basement, and set what happens where a
+// floor above steps back (roof it or walk out onto it). Sizing is by the
+// numbers here, on purpose: the plan stays free for laying out rooms (the
+// extent plate is selectable but never fights a room drag), and every floor
+// links straight to its rooms, its walls, and its roof.
+function StoreysControls({ spec, floors, hasBasement, activeFloor, onSelectFloor, onAddFloor, onRemoveFloor, onResizeFloor, onFloorHeight, onChooseFoundation, onShell, onOps, onSelectPlate, onJump }) {
   const uppers = [];
   for (let lvl = 2; lvl <= floors; lvl += 1) uppers.push(lvl);
   // ground floor W×D is the building footprint (resizeFloor(1) → resizeShell)
   const gW = Math.round((Number(spec.shell.widthFt) || 36) * 10) / 10;
   const gD = Math.round((Number(spec.shell.depthFt) || 28) * 10) / 10;
-  const gH = Math.round(storeyHeightFt(spec.shell, 1) * 10) / 10;
+  const basement = basementInfo(spec.shell);
+  // every floor row ends with the same three hops
+  const jumps = (lvl) => (
+    <div className="rz-storey-links">
+      <button type="button" onClick={() => onJump('rooms', lvl)} title="Lay out this floor's rooms on the plan">rooms ›</button>
+      <button type="button" onClick={() => onJump('walls', lvl >= 1 ? lvl : 1)} title="This floor's walls — height and what they're made of">walls ›</button>
+      <button type="button" onClick={() => onJump('roof', Math.max(1, lvl))} title="The roof over this floor">roof ›</button>
+    </div>
+  );
+  // onW/onD null = the size is not this row's to edit (the basement follows
+  // the ground floor) — show the numbers as plain text, never a dead input.
+  const row = (lvl, name, w, d, h, sizeMin, onW, onD) => (
+    <div className={`rz-storey-row${activeFloor === lvl ? ' on' : ''}`}>
+      <button type="button" className="rz-storey-name" title="Show this floor on the plan" onClick={() => onSelectFloor(lvl)}>{name}</button>
+      <div className="rz-run-size">
+        {onW && onD ? (
+          <>
+            <label>W<NumInput value={w} min={sizeMin} max={96} step={0.5} unit="" onCommit={onW} /></label>
+            <span className="rz-run-x">×</span>
+            <label>D<NumInput value={d} min={sizeMin} max={80} step={0.5} unit="" onCommit={onD} /></label>
+          </>
+        ) : (
+          <span className="rz-storey-fixed">{w} × {d}</span>
+        )}
+        <label className="rz-storey-h">H<NumInput value={h} min={lvl === BASEMENT_LEVEL ? 6 : 7} max={lvl === BASEMENT_LEVEL ? 12 : 16} step={0.5} unit="ft" onCommit={(v) => (lvl === BASEMENT_LEVEL ? onShell('basementHeightFt', v) : onFloorHeight(lvl, v))} /></label>
+      </div>
+    </div>
+  );
   return (
-    <div className="rz-storeys-block">
-      <div className="rz-found-head" style={{ marginTop: 10 }}>Floors</div>
+    <div className="rz-found rz-storeys-block">
+      <div className="rz-found-head" style={{ marginTop: 0 }}>Floors</div>
       <div className="rz-field">
         <div className="rz-storeys">
           <button type="button" disabled={floors <= 1} onClick={onRemoveFloor} title="Remove the top floor — its rooms come down a floor">−</button>
-          <b>{floors} floor{floors === 1 ? '' : 's'}</b>
+          <b>{floors} floor{floors === 1 ? '' : 's'}{hasBasement ? ' + basement' : ''}</b>
           <button type="button" disabled={floors >= 3} onClick={onAddFloor} title="Add a floor on top">+</button>
         </div>
       </div>
+      {/* Basement — the storey that is ALSO a foundation choice (one source
+          of truth: shell.basementHeightFt drives both, same as Foundation). */}
+      <label className="rz-nowall">
+        <input type="checkbox" checked={hasBasement} onChange={(e) => onChooseFoundation(e.target.checked ? 'basement' : (utilitiesOf(spec).foundationType || 'rubble'))} />
+        <span>Basement — a full storey below grade</span>
+      </label>
+      {hasBasement && (
+        <>
+          {row(BASEMENT_LEVEL, 'Basement', gW, gD, Math.round(basement.heightFt * 10) / 10, 12, null, null)}
+          <div className="rz-shape-note">The basement sits under the whole house, so its size follows the ground floor. It is also the Foundation chapter's choice — turning it off goes back to the foundation you had. {' '}
+            <button type="button" className="rz-storey-link-inline" onClick={() => onJump('foundation')}>foundation ›</button>
+          </div>
+          {jumps(BASEMENT_LEVEL)}
+        </>
+      )}
       {/* Ground floor — the same width / depth / height row as every other
           floor (its W×D is the building footprint). */}
-      <div className="rz-storey-row">
-        <span className="rz-storey-name">Ground</span>
-        <div className="rz-run-size">
-          <label>W<NumInput value={gW} min={12} max={96} step={0.5} unit="" onCommit={(v) => onResizeFloor(1, v, gD)} /></label>
-          <span className="rz-run-x">×</span>
-          <label>D<NumInput value={gD} min={12} max={80} step={0.5} unit="" onCommit={(v) => onResizeFloor(1, gW, v)} /></label>
-          <label className="rz-storey-h">H<NumInput value={gH} min={7} max={16} step={0.5} unit="ft" onCommit={(v) => onFloorHeight(1, v)} /></label>
-        </div>
-      </div>
+      {row(1, 'Ground', gW, gD, Math.round(storeyHeightFt(spec.shell, 1) * 10) / 10, 12,
+        (v) => onResizeFloor(1, v, gD), (v) => onResizeFloor(1, gW, v))}
+      {jumps(1)}
       {uppers.map((lvl) => {
         const plate = (spec.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === lvl);
         const w = Math.round((Number(plate?.w) || Number(spec.shell.widthFt)) * 10) / 10;
         const d = Math.round((Number(plate?.d) || Number(spec.shell.depthFt)) * 10) / 10;
         const h = Math.round(storeyHeightFt(spec.shell, lvl) * 10) / 10;
+        const px = Math.round((Number(plate?.x) || 0) * 10) / 10;
+        const py = Math.round((Number(plate?.y) || 0) * 10) / 10;
+        const setsBack = plate && (w < gW - 0.05 || d < gD - 0.05);
         return (
-          <div key={lvl} className="rz-storey-row">
-            <span className="rz-storey-name">{floorLabel(spec, lvl)}</span>
-            <div className="rz-run-size">
-              <label>W<NumInput value={w} min={8} max={96} step={0.5} unit="" onCommit={(v) => onResizeFloor(lvl, v, d)} /></label>
-              <span className="rz-run-x">×</span>
-              <label>D<NumInput value={d} min={8} max={80} step={0.5} unit="" onCommit={(v) => onResizeFloor(lvl, w, v)} /></label>
-              <label className="rz-storey-h">H<NumInput value={h} min={7} max={16} step={0.5} unit="ft" onCommit={(v) => onFloorHeight(lvl, v)} /></label>
-            </div>
-          </div>
+          <React.Fragment key={lvl}>
+            {row(lvl, floorLabel(spec, lvl), w, d, h, 8,
+              (v) => onResizeFloor(lvl, v, d), (v) => onResizeFloor(lvl, w, v))}
+            {plate && (
+              <div className="rz-storey-extra">
+                {/* where the smaller floor SITS on the one below — the same
+                    numbers its card shows; the outline is draggable too */}
+                {setsBack && (
+                  <div className="rz-run-size rz-storey-pos">
+                    <label>From west<NumInput value={px} min={0} max={96} step={0.5} unit="" onCommit={(v) => onOps([{ type: 'move_object', targetId: plate.id, name: plate.name, x: v, y: py }])} /></label>
+                    <label>From north<NumInput value={py} min={0} max={80} step={0.5} unit="" onCommit={(v) => onOps([{ type: 'move_object', targetId: plate.id, name: plate.name, x: px, y: v }])} /></label>
+                  </div>
+                )}
+                <div className="rz-storey-btnrow">
+                  <button type="button" className="rz-storey-outline-btn" onClick={() => onSelectPlate(plate.id)}
+                    title="Select this floor's outline on the plan — drag it, or its corners, by hand">✥ outline on plan</button>
+                  {floors > lvl && (
+                    <select
+                      title="Where the floor above steps back, what covers the step: a sloped roof, or an open walk-out porch with a railing"
+                      value={plate.topTreatment === 'porch' ? 'porch' : 'roof'}
+                      onChange={(e) => onOps([{ type: 'update_object', targetId: plate.id, name: plate.name, field: 'topTreatment', value: e.target.value === 'porch' ? 'porch' : 'roof' }])}
+                    >
+                      <option value="roof">step above: roofed</option>
+                      <option value="porch">step above: open porch</option>
+                    </select>
+                  )}
+                </div>
+              </div>
+            )}
+            {!plate && <div className="rz-shape-note">This floor covers the whole footprint. Make its W × D smaller to set it back — it gets its own outline you can place.</div>}
+            {jumps(lvl)}
+          </React.Fragment>
         );
       })}
+      <div className="rz-shape-note">A smaller upper floor makes a step in the building — the Roof chapter decides how each step is covered, and “step above” here switches roof or porch. Heights are floor-to-floor.</div>
     </div>
   );
 }
@@ -2693,31 +2807,33 @@ function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, on
   );
 }
 
-// Shell chapter: the structure in three plain choices — what the walls are,
-// what carries the roof, how tall the walls run. The timeline's build order
-// and every receipt follow these.
-function StructureControls({ spec, floors, onAllWalls, onShedHeights, onShedHeightsEW, onUpperWalls, onFrame, onShell, onWallSide, onSelectWall, onAddFloor, onRemoveFloor, onLayoutFloors }) {
-  const resolved = WALL_SIDES.map((side) => resolveWallSide(spec, side));
+// The Walls chapter — heights first, then what the walls are made of, at
+// every grain the engine knows: all four sides at once, one floor, one side,
+// or one SECTION of one side (split a wall, then mix a framed section beside
+// straw or cob infill). The timeline and every receipt follow along.
+function WallsControls({ spec, floors, wallSections, onAllWalls, onShedHeights, onShedHeightsEW, onUpperWalls, onShell, onWallSide, onSplitWall, onGreenhouse, onSelectWall, onJump }) {
+  const [side, setSide] = useState('south');
+  const resolved = WALL_SIDES.map((s) => resolveWallSide(spec, s));
   const wallKeys = new Set(resolved.map((r) => r.assemblyKey));
   const wallVal = wallKeys.size === 1 ? [...wallKeys][0] : '__mixed';
   // one row of controls per upper floor — each resolves its own construction
   const upperLevels = Array.from({ length: Math.max(0, Math.ceil(floors) - 1) }, (_, k) => k + 2);
   const upperState = upperLevels.map((lv) => {
-    const rs = WALL_SIDES.map((side) => resolveWallSide(spec, side, lv));
+    const rs = WALL_SIDES.map((s) => resolveWallSide(spec, s, lv));
     const keys = new Set(rs.map((r) => r.assemblyKey));
     const clads = new Set(rs.map((r) => r.cladding));
     return { lv, wallVal: keys.size === 1 ? [...keys][0] : '__mixed', cladVal: clads.size === 1 ? [...clads][0] : '__mixed' };
   });
-  const frameVal = resolveFrameType(spec, 1);
   const heights = new Set(resolved.map((r) => Math.round(r.heightFt * 10)));
   const shed = (spec.shell.roofType || 'gable') === 'shed';
   const shedAxis = roofProfile(spec.shell).axis;
+  const isRound = spec.shell.footprint === 'round';
+  // ground-floor SECTIONS of split walls (they carry an edgeKey); a plain
+  // rectangle has none until a wall is split
+  const sections = (wallSections || []).filter((sec) => sec.edgeKey && Number(sec.level) === 1);
+  const southR = resolved[WALL_SIDES.indexOf('south')];
   return (
     <div className="rz-found">
-      <div className="rz-shape-note" style={{ marginTop: 0 }}>
-        {floors > 1 ? `${floors} storeys` : 'One storey'} — storeys, their setbacks, and heights live in the <b>Shape</b> chapter. This page is the walls, frame, and roof structure.
-      </div>
-
       {/* the plainest numbers FIRST: wall heights (on a shed, the two heights
           that ARE the roof — one "height for all" would flatten it). The
           boxes follow the fall axis: south/north when it falls north or
@@ -2787,64 +2903,87 @@ function StructureControls({ spec, floors, onAllWalls, onShedHeights, onShedHeig
           </label>
         </React.Fragment>
       ))}
-      <label className="rz-field">
-        <span>Frame — what holds the roof up</span>
-        <select value={frameVal} onChange={(e) => onFrame(e.target.value)}>
-          {Object.entries(FRAME_TYPES).map(([key, f]) => (
-            <option key={key} value={key}>{f.green ? '🌿 ' : ''}{f.label}</option>
-          ))}
-        </select>
-      </label>
-      <div className="rz-shape-note">
-        {frameVal === 'load-bearing'
-          ? 'Load-bearing: the walls themselves hold up the roof — no separate posts. The usual choice for straw bale, cob, and cordwood.'
-          : `${FRAME_TYPES[frameVal]?.note || ''} The timber posts and beams stand inside the walls, which wrap around them.`}
-      </div>
-      {/* not all walls are the same height: a 2-ft greenhouse kneewall on the
-          south, a tall north wall a shed falls from — each side has its own */}
-      <details className="rz-perwall">
-        <summary>Wall by wall — height &amp; construction ▸</summary>
-        {WALL_SIDES.map((side, i) => (
-          <div key={side} className="rz-perwall-row">
-            <button type="button" className="rz-perwall-name" title="See this wall in 3D" onClick={() => onSelectWall(side)}>
-              {side[0].toUpperCase() + side.slice(1)}
+      {/* the greenhouse classic, one tap — a low south kneewall with slanted
+          glass rising to the eave (all three settings land together) */}
+      {!(southR.sunGlazing && southR.heightFt <= 4) && (
+        <button type="button" className="rz-floorbar-outline" onClick={onGreenhouse}
+          title="Sets the south wall to a 2 ft kneewall with slanted greenhouse glass above it — one tap, one undo">
+          ☀ Greenhouse south face — 2 ft kneewall + slanted glass
+        </button>
+      )}
+      {/* ONE WALL AT A TIME — pick a side, get its full card inline: height,
+          system, thickness, face, glazing, or no wall at all */}
+      <div className="rz-found-head">One wall at a time</div>
+      <div className="rz-wall-tabs">
+        {WALL_SIDES.map((s) => {
+          const r = resolved[WALL_SIDES.indexOf(s)];
+          return (
+            <button key={s} type="button" className={side === s ? 'on' : ''} onClick={() => setSide(s)}
+              title={`${WALL_SIDE_LABELS[s]} wall — ${r.omitted ? 'no wall' : r.assembly.label}`}>
+              {s[0].toUpperCase() + s.slice(1)}
             </button>
-            <select
-              className="rz-perwall-sys"
-              title={`What the ${side} wall is built of`}
-              value={resolved[i].assemblyKey}
-              onChange={(e) => onWallSide(side, 'assembly', e.target.value)}
-            >
-              {Object.values(WALL_ASSEMBLIES).map((a) => (
-                <option key={a.key} value={a.key}>{a.green ? '🌿 ' : ''}{a.label}</option>
-              ))}
+          );
+        })}
+      </div>
+      <WallSideFields side={side} spec={spec} onWallSide={onWallSide} />
+      <button type="button" className="rz-storey-outline-btn" onClick={() => onSelectWall(side)} title="Select this wall in 3D — its card opens there too">
+        see the {side} wall in 3D ›
+      </button>
+      {/* SECTIONS — one wall, several constructions along its length */}
+      <div className="rz-found-head">Sections of a wall</div>
+      {isRound ? (
+        <div className="rz-shape-note">A round wall has no straight sections — its construction is set per side (the N/S/E/W quarters above).</div>
+      ) : (
+        <>
+          <label className="rz-field">
+            <span>Split a wall into three sections</span>
+            <select value="" onChange={(e) => { if (e.target.value) onSplitWall(e.target.value); }}>
+              <option value="">Pick a wall to split…</option>
+              {WALL_SIDES.map((s) => <option key={s} value={s}>{WALL_SIDE_LABELS[s]}</option>)}
             </select>
-            <NumInput value={Math.round(resolved[i].heightFt * 10) / 10} min={2} max={40} step={0.5} onCommit={(v) => onWallSide(side, 'heightFt', v)} />
+          </label>
+          {sections.length > 0 && (
+            <div className="rz-sections">
+              {sections.map((sec) => {
+                const ov = (spec.wallSegments || {})[sec.edgeKey] || {};
+                return (
+                  <div key={sec.edgeKey} className="rz-perwall-row">
+                    <span className="rz-perwall-name">{sec.name} · {Math.round(sec.lengthFt)} ft</span>
+                    <select
+                      className="rz-perwall-sys"
+                      title={`What this stretch of the ${sec.side} wall is built of`}
+                      value={ov.assembly || ''}
+                      onChange={(e) => onWallSide(sec.edgeKey, 'assembly', e.target.value)}
+                    >
+                      <option value="">— match the {sec.side} side —</option>
+                      {Object.values(WALL_ASSEMBLIES).map((a) => (
+                        <option key={a.key} value={a.key}>{a.green ? '🌿 ' : ''}{a.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="rz-shape-note">
+            {sections.length > 0
+              ? 'Each section can be its own construction — a framed stretch beside straw or cob. Drag a middle section on the Plan to push it in or out (that’s how an L or a notch happens). Height and “no wall” stay whole-side choices.'
+              : 'Splitting turns one wall into three pieces you can build differently — a framed section beside infill — or drag on the Plan to notch the outline.'}
           </div>
-        ))}
-        <div className="rz-shape-note">
-          {shed ? 'On a shed roof the south and north heights set which way it falls.' : 'Down to a 2 ft kneewall.'} Setting the all-walls choices above puts every side back in step. Tap a wall in 3D for its full card.
-        </div>
-      </details>
-      <div className="rz-shape-note">Whole-house choices — with load-bearing walls the timeline walls first, then roofs; with a frame it roofs before straw walls go in. Or tap any wall in 3D to set just that one.</div>
+        </>
+      )}
+      <div className="rz-shape-note">The frame that carries the roof lives in the <b>Frame</b> chapter{onJump ? <> — <button type="button" className="rz-storey-link-inline" onClick={() => onJump('frame')}>frame ›</button></> : null}. Tap any wall in the 3D house for this same card.</div>
     </div>
   );
 }
 
-// Tap a wall in 3D → its own card: THIS wall's height and system.
-function WallCard({ side, spec, onWallSide, onClose }) {
+// One wall side's full construction — shared by the Walls chapter's
+// one-wall-at-a-time picker and the tap-a-wall-in-3D card, so the two can
+// never drift apart.
+function WallSideFields({ side, spec, onWallSide }) {
   const r = resolveWallSide(spec, side);
-  const label = side[0].toUpperCase() + side.slice(1);
   return (
-    <div className="rz-card">
-      <div className="rz-card-head">
-        <h2>{label} wall</h2>
-        <button className="rz-x" onClick={onClose}>×</button>
-      </div>
-      <div className="rz-vitals">
-        <Vital label="System" value={r.assembly.label} />
-        <Vital label="Thickness" value={`${round1(r.thicknessFt)} ft`} />
-      </div>
+    <>
       <label className="rz-field rz-field-num">
         <span>Height (this wall)</span>
         <NumInput value={Math.round(r.heightFt * 10) / 10} min={2} max={40} step={0.5} onCommit={(v) => onWallSide(side, 'heightFt', v)} />
@@ -2856,6 +2995,10 @@ function WallCard({ side, spec, onWallSide, onClose }) {
             <option key={a.key} value={a.key}>{a.green ? '🌿 ' : ''}{a.label} — R{a.rValue}</option>
           ))}
         </select>
+      </label>
+      <label className="rz-field rz-field-num">
+        <span>Thickness (this wall)</span>
+        <NumInput value={Math.round(r.thicknessFt * 10) / 10} min={0.2} max={3.5} step={0.1} onCommit={(v) => onWallSide(side, 'thicknessFt', v)} />
       </label>
       <label className="rz-field">
         <span>Weather face (this wall)</span>
@@ -2880,6 +3023,78 @@ function WallCard({ side, spec, onWallSide, onClose }) {
         <input type="checkbox" checked={Boolean(r.omitted)} onChange={(e) => onWallSide(side, 'omitted', e.target.checked)} />
         <span>No wall on this side (opens to an attached space)</span>
       </label>
+    </>
+  );
+}
+
+// The Frame chapter — what holds the roof up: the whole-house choice, each
+// upper storey's own frame, and how far apart the posts stand. With
+// load-bearing walls the timeline builds walls first, then the roof; with a
+// frame it roofs early so straw goes in dry.
+function FrameControls({ spec, floors, onFrame, onBaySpacing, showingBones, onToggleBones, onJump }) {
+  const frameVal = resolveFrameType(spec, 1);
+  const upperLevels = Array.from({ length: Math.max(0, Math.ceil(floors) - 1) }, (_, k) => k + 2);
+  const anyFramed = frameVal !== 'load-bearing' || upperLevels.some((lv) => resolveFrameType(spec, lv) !== 'load-bearing');
+  return (
+    <div className="rz-found">
+      <label className="rz-field">
+        <span>{floors > 1 ? 'Ground floor — frame' : 'Frame — what holds the roof up'}</span>
+        <select value={frameVal} onChange={(e) => onFrame(e.target.value)}>
+          {Object.entries(FRAME_TYPES).map(([key, f]) => (
+            <option key={key} value={key}>{f.green ? '🌿 ' : ''}{f.label}</option>
+          ))}
+        </select>
+      </label>
+      <div className="rz-shape-note">
+        {frameVal === 'load-bearing'
+          ? 'Load-bearing: the walls themselves hold up the roof — no separate posts. The usual choice for straw bale, cob, and cordwood.'
+          : `${FRAME_TYPES[frameVal]?.note || ''} The timber posts and beams stand inside the walls, which wrap around them.`}
+      </div>
+      {/* each upper storey can carry its own frame — a timber ground floor
+          under a stick-framed tower is one design */}
+      {upperLevels.map((lv) => (
+        <label key={lv} className="rz-field">
+          <span>{floorLabel(spec, lv)} — frame</span>
+          <select value={resolveFrameType(spec, lv)} onChange={(e) => onFrame(e.target.value, lv)}>
+            {Object.entries(FRAME_TYPES).map(([key, f]) => (
+              <option key={key} value={key}>{f.green ? '🌿 ' : ''}{f.label}</option>
+            ))}
+          </select>
+        </label>
+      ))}
+      {anyFramed && (
+        <label className="rz-field rz-field-num">
+          <span>Post spacing (bay)</span>
+          <NumInput value={Math.round((Number(spec.frame?.baySpacingFt) || 8) * 10) / 10} min={4} max={16} step={0.5} onCommit={onBaySpacing} />
+        </label>
+      )}
+      <button type="button" className="rz-floorbar-outline" onClick={onToggleBones}
+        title="Hide the walls and roof to see just the frame standing on its foundation">
+        {showingBones ? 'Show the whole house again' : '🦴 Show just the bones — frame & foundation'}
+      </button>
+      <div className="rz-shape-note">
+        With load-bearing walls the timeline builds walls first, then the roof; with a frame it roofs before the straw goes in — watch it play out in <b>▶ Watch it build</b>. The walls themselves live in the <b>Walls</b> chapter{onJump ? <> — <button type="button" className="rz-storey-link-inline" onClick={() => onJump('walls')}>walls ›</button></> : null}.
+      </div>
+    </div>
+  );
+}
+
+// Tap a wall in 3D → its own card: THIS wall's height and system (the same
+// fields the Walls chapter shows, one component behind both).
+function WallCard({ side, spec, onWallSide, onClose }) {
+  const r = resolveWallSide(spec, side);
+  const label = side[0].toUpperCase() + side.slice(1);
+  return (
+    <div className="rz-card">
+      <div className="rz-card-head">
+        <h2>{label} wall</h2>
+        <button className="rz-x" onClick={onClose}>×</button>
+      </div>
+      <div className="rz-vitals">
+        <Vital label="System" value={r.assembly.label} />
+        <Vital label="Thickness" value={`${round1(r.thicknessFt)} ft`} />
+      </div>
+      <WallSideFields side={side} spec={spec} onWallSide={onWallSide} />
       <p className="rz-muted" style={{ marginTop: 8 }}>Just this wall — the other three keep their own height, system, and face. Slanted glazing on the south face makes a greenhouse; a full glass wall is the “Glazed” wall system above.</p>
     </div>
   );

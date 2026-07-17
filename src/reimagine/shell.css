@@ -540,6 +540,38 @@
 .rz-storey-row .rz-run-size label { font-size: 11px; color: var(--moss, #868a7c); display: flex; align-items: center; gap: 2px; }
 .rz-storey-h { margin-left: auto; }
 .rz-storey-sub { font-size: 11px; color: var(--moss, #868a7c); }
+/* the Storeys chapter: floor-name buttons, jump links, per-floor extras */
+button.rz-storey-name { border: none; background: transparent; cursor: pointer; padding: 2px 4px; border-radius: 7px; font: inherit; font-size: 12px; color: var(--moss, #868a7c); text-align: left; }
+button.rz-storey-name:hover { color: var(--evergreen, #3c6472); background: color-mix(in srgb, var(--sage, #e2ecee) 60%, transparent); }
+.rz-storey-row.on button.rz-storey-name { color: var(--evergreen, #3c6472); font-weight: 700; }
+.rz-storey-fixed { font-size: 12px; color: var(--moss, #868a7c); }
+.rz-storey-links { display: flex; gap: 6px; margin: 1px 0 4px 74px; }
+.rz-storey-links button {
+  border: none; background: transparent; cursor: pointer; padding: 1px 6px;
+  border-radius: 8px; font: inherit; font-size: 11.5px; color: var(--evergreen, #3c6472);
+}
+.rz-storey-links button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 70%, transparent); }
+.rz-storey-link-inline { border: none; background: transparent; cursor: pointer; padding: 0; font: inherit; font-weight: 600; color: var(--evergreen, #3c6472); }
+.rz-storey-extra { display: flex; flex-direction: column; gap: 5px; margin: 2px 0 2px 74px; }
+.rz-storey-pos { display: flex; gap: 8px; padding: 0; }
+.rz-storey-pos label { font-size: 11px; color: var(--moss, #868a7c); display: flex; align-items: center; gap: 3px; }
+.rz-storey-pos .rz-num { width: 52px; }
+.rz-storey-btnrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rz-storey-btnrow select { font: inherit; font-size: 12px; padding: 3px 6px; border-radius: 8px; border: 1px solid var(--line, #dbd9ce); background: var(--raise, #fff); color: var(--earth, #565a4f); }
+.rz-storey-outline-btn {
+  align-self: flex-start; border: 1px dashed var(--line, #dbd9ce); background: transparent;
+  cursor: pointer; padding: 3px 8px; border-radius: 9px; font: inherit; font-size: 12px; color: var(--evergreen, #3c6472);
+}
+.rz-storey-outline-btn:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 60%, transparent); }
+/* the Walls chapter: side tabs + section rows */
+.rz-wall-tabs { display: flex; gap: 4px; }
+.rz-wall-tabs button {
+  flex: 1; border: 1px solid var(--line, #dbd9ce); background: var(--raise, #fff);
+  cursor: pointer; padding: 5px 0; border-radius: 9px; font: inherit; font-size: 12.5px; color: var(--earth, #565a4f);
+}
+.rz-wall-tabs button.on { background: var(--evergreen, #3c6472); border-color: var(--evergreen, #3c6472); color: #fff; font-weight: 600; }
+.rz-sections { display: flex; flex-direction: column; gap: 5px; }
+.rz-sections .rz-perwall-name { flex: 0 0 auto; min-width: 96px; font-size: 11.5px; }
 
 /* shared Trail-block field styles (Foundation + Shell chapters) */
 .rz-found { display: flex; flex-direction: column; gap: 9px; margin: 0 4px 14px; }
