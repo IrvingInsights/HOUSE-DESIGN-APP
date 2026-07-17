@@ -107,6 +107,7 @@ export const CLADDING_TYPES = {
   lap:         { key: 'lap',         label: 'Wood lap siding',                       costPsf: 7,   carbonPsf: 2,  color: 0x9a7a52, texture: 'wood', green: true },
   boardbatten: { key: 'boardbatten', label: 'Board & batten',                        costPsf: 6.5, carbonPsf: 2,  color: 0x8a6f4e, texture: 'wood', green: true },
   shingle:     { key: 'shingle',     label: 'Cedar shingles',                        costPsf: 9,   carbonPsf: 2,  color: 0x8d7355, texture: 'wood', green: true },
+  charred:     { key: 'charred',     label: 'Charred wood (shou sugi ban)',          costPsf: 8.5, carbonPsf: 2,  color: 0x2e2a26, texture: 'wood', green: true },
   metal:       { key: 'metal',       label: 'Metal panel / standing seam',           costPsf: 8,   carbonPsf: 6,  color: 0x9aa0a0, texture: 'metal' },
   stucco:      { key: 'stucco',      label: 'Lime stucco on mesh',                   costPsf: 5,   carbonPsf: 3,  color: 0xd8d2c0, texture: 'plaster', green: true },
   stone:       { key: 'stone',       label: 'Stone veneer',                          costPsf: 14,  carbonPsf: 10, color: 0x8f8b80, texture: 'concrete' },
@@ -923,6 +924,27 @@ function upsertRoom(spec, room) {
 // both layers. FOLLOW-UP (reimagining spec §6/§10): fully unify these by relocating
 // deriveDesign into a shared lower module so one detectIssues can serve both.
 function normalizeRooms(spec) {
+  // Self-healing reconciliations — corrupt or legacy-era stored values that
+  // disagree with the engine's own derived truth get pulled back in line:
+  // (1) On a shed/gable roof the SHELL owns the north/south wall heights
+  // (set_wall_side syncs both ways); a per-wall override that disagrees is a
+  // desync (it once forced a whole 10′ north wall to render 17′) — shell wins.
+  if (spec.shell && spec.walls) {
+    for (const side of ['south', 'north']) {
+      const shellH = Number(side === 'south' ? spec.shell.southWallHeightFt : spec.shell.northWallHeightFt);
+      const w = spec.walls[side];
+      if (w && Number.isFinite(Number(w.heightFt)) && Number.isFinite(shellH) && shellH > 0
+        && Math.abs(Number(w.heightFt) - shellH) > 0.05) delete w.heightFt;
+    }
+  }
+  // (2) A storey extent plate always sits at the engine's floor elevation —
+  // stale z values from an older stacking model floated plates 7′ high.
+  for (const el of (spec.elements || [])) {
+    if (el.category === 'floor' && Number(el.level || 1) >= 2) {
+      const zNow = storeyElevationFt(spec.shell, Number(el.level));
+      if (Math.abs(Number(el.z || 0) - zNow) > 0.05) el.z = zNow;
+    }
+  }
   // ONE extent plate per level (dedupe): keep the plate that best overlaps
   // that level's rooms; drop the rest. Duplicated plates (trace/audit/tower
   // paths) made walls, roof steps, and controls disagree about the storey.
@@ -1067,7 +1089,7 @@ function detectIssues(spec) {
   if (naturalApproach && glazedOffSouth.length) issues.push({ severity: 'warning', title: `Glass wall faces ${glazedOffSouth.join(' + ')} — little solar gain, big heat leak`, owner: 'Natural Builder', fix: 'A glazed wall earns its keep facing south. Off-south glass loses heat all winter for little gain — face it south, or accept the heat cost knowingly.' });
   const basementBedroom = basementInfo(spec.shell).present && spec.rooms.find((room) => Number(room.level || 1) === BASEMENT_LEVEL && room.type === 'sleeping');
   if (basementBedroom) issues.push({ severity: 'critical', title: `${basementBedroom.name} is a basement bedroom — egress required`, owner: 'Engineer', fix: 'A below-grade sleeping room needs an egress window or a walkout door (min clear opening per code). Plan the well or walkout on the downhill side.' });
-  if (String(spec.systems.envelope || '').toLowerCase().includes('natural') && !String(spec.systems.envelope || '').toLowerCase().includes('rainscreen')) issues.push({ severity: 'warning', title: 'Natural wall lacks drying layer', owner: 'Natural Builder', fix: 'Include rainscreen, generous roof overhangs, and capillary breaks.' });
+  if (String(spec.systems?.envelope || '').toLowerCase().includes('natural') && !String(spec.systems?.envelope || '').toLowerCase().includes('rainscreen')) issues.push({ severity: 'warning', title: 'Natural wall lacks drying layer', owner: 'Natural Builder', fix: 'Include rainscreen, generous roof overhangs, and capillary breaks.' });
   if (naturalApproach && !spec.rooms.some((room) => /mud|laundry|service/i.test(room.name))) issues.push({ severity: 'warning', title: 'Farm workflow has no dirty entry', owner: 'Homestead/Farm', fix: 'Add a mud/laundry buffer between exterior work and clean living space.' });
   if (issues.length === 0) issues.push({ severity: 'pass', title: 'Schematic passes current council checks', owner: 'Project Manager', fix: 'Ready for PE/architect review, structural sizing, jurisdictional code check, and stamped drawing development.' });
   return issues;

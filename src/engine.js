@@ -2988,6 +2988,23 @@ export function upsertRoom(spec, room) {
 // change a shared check, decide whether the bim-core copy needs it too. FOLLOW-UP
 // (reimagining spec §6/§10): unify by moving deriveDesign into a shared lower module.
 export function normalizeRooms(spec) {
+  // Self-healing reconciliations (kept in step with the bim-core copy):
+  // shell owns N/S wall heights — a disagreeing per-wall override is a
+  // desync; storey plates always sit at the engine's floor elevation.
+  if (spec.shell && spec.walls) {
+    for (const side of ['south', 'north']) {
+      const shellH = Number(side === 'south' ? spec.shell.southWallHeightFt : spec.shell.northWallHeightFt);
+      const w = spec.walls[side];
+      if (w && Number.isFinite(Number(w.heightFt)) && Number.isFinite(shellH) && shellH > 0
+        && Math.abs(Number(w.heightFt) - shellH) > 0.05) delete w.heightFt;
+    }
+  }
+  for (const el of (spec.elements || [])) {
+    if (el.category === 'floor' && Number(el.level || 1) >= 2) {
+      const zNow = storeyElevationFt(spec.shell, Number(el.level));
+      if (Math.abs(Number(el.z || 0) - zNow) > 0.05) el.z = zNow;
+    }
+  }
   // ONE extent plate per level (dedupe): keep the plate that best overlaps
   // that level's rooms; drop the rest. Duplicated plates (trace/audit/tower
   // paths) made walls, roof steps, and controls disagree about the storey.
@@ -3226,7 +3243,7 @@ export function detectIssues(spec) {
       issues.push({ severity: 'warning', title: `${stairEl.name} is too short for its ${Math.round(rise)}′ climb`, owner: 'Architect', system: 'rooms', fix: `About ${Math.ceil(neededRun)}′ of run is needed at code-friendly 7¾" risers / 10" treads — stretch the stair in the Plan, or accept a steeper ship-ladder knowingly.` });
     }
   }
-  if (spec.systems.envelope.toLowerCase().includes('natural') && !spec.systems.envelope.toLowerCase().includes('rainscreen')) {
+  if (String(spec.systems?.envelope || '').toLowerCase().includes('natural') && !String(spec.systems?.envelope || '').toLowerCase().includes('rainscreen')) {
     issues.push({ severity: 'warning', title: 'Natural wall lacks drying layer', owner: 'Natural Builder', system: 'walls', fix: 'Include rainscreen, generous roof overhangs, and capillary breaks.' });
   }
   // Frame ↔ wall consistency: a framed (stud) wall assembly needs a structural
