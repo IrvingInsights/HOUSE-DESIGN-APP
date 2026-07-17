@@ -39,7 +39,7 @@ const CHAPTERS = [
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 74 · Jul 16';
+const UPDATE_STAMP = 'update 75 · Jul 16';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -586,6 +586,7 @@ export default function App() {
   const openDesign = (id) => {
     const d = designs.find((x) => x.id === id);
     if (!d) return;
+    snapshotBeforeReplace();
     commitSpec(structuredClone(d.spec)); // undoable — Ctrl+Z returns to what you had
     setSelectedId(null);
     setPhaseOrder(null);
@@ -595,10 +596,26 @@ export default function App() {
     setDesigns((prev) => { const next = prev.filter((d) => d.id !== id); persistDesigns(next); return next; });
   };
   const [saveFlash, setSaveFlash] = useState(null);
-  // "Start a new design" — the current one is safe: save it to the shelf first
-  // if you want it, and either way Ctrl+Z brings it right back.
+  // Safety net: before ANYTHING replaces the design being worked on (new design,
+  // opening a saved one or a starter, pasting a code), quietly keep a copy on
+  // the shelf. Undo does not survive a page reload — the shelf does. Skipped
+  // when the shelf already holds this exact design (it was just saved).
+  const snapshotBeforeReplace = () => {
+    const current = JSON.stringify(spec);
+    if (designs.some((d) => JSON.stringify(d.spec) === current)) return;
+    const base = (spec.projectName || 'My design').trim() || 'My design';
+    const name = `${base} — auto-saved`;
+    const snapshot = { id: `d${Date.now()}`, name, spec: structuredClone(spec), savedAt: Date.now() };
+    setDesigns((prev) => {
+      const next = [snapshot, ...prev.filter((d) => d.name !== name)];
+      persistDesigns(next);
+      return next;
+    });
+  };
+  // "Start a new design" — the current one is auto-saved to the shelf first.
   const startFresh = () => {
-    if (!window.confirm('Start a new design?\n\nTip: click “Save this design” first if you want to keep this one. (You can also press Ctrl+Z to bring it back.)')) return;
+    if (!window.confirm('Start a new design?\n\nYour current design is saved to the My designs shelf automatically, so you can always come back to it.')) return;
+    snapshotBeforeReplace();
     try { localStorage.removeItem(STORE_KEY); } catch { /* fine */ }
     commitSpec(structuredClone(seedSpec)); // undoable — Ctrl+Z brings the design back
     setSelectedId(null);
@@ -970,7 +987,7 @@ export default function App() {
                 <button className="rz-designs-toggle" onClick={() => setDesignsOpen((v) => !v)} title="Your saved designs">
                   {designsOpen ? '▾' : '▸'} My designs{designs.length ? ` (${designs.length})` : ''}
                 </button>
-                <button className="rz-designs-new" title="Start a brand-new design (your current one is safe — save it first or press Ctrl+Z)" onClick={startFresh}>+ New</button>
+                <button className="rz-designs-new" title="Start a brand-new design (your current one is auto-saved to the shelf first)" onClick={startFresh}>+ New</button>
               </div>
               {designsOpen && (
                 <div className="rz-designs-panel">
@@ -994,7 +1011,7 @@ export default function App() {
                   >📋 Copy design code (for Claude)</button>
                   <button
                     className="rz-designs-save"
-                    title="Paste a design code someone sent you (Claude, or a friend) - it becomes your working design; the current one stays one Ctrl+Z away"
+                    title="Paste a design code someone sent you (Claude, or a friend) - it becomes your working design; the current one is auto-saved to this shelf first"
                     onClick={() => {
                       const text = window.prompt('Paste the design code here:');
                       if (!text) return;
@@ -1002,9 +1019,10 @@ export default function App() {
                         const parsed = JSON.parse(text);
                         const specIn = parsed.spec && parsed.spec.shell ? parsed.spec : (parsed.shell ? parsed : null);
                         if (!specIn || !Array.isArray(specIn.rooms)) { setSaveFlash('That did not look like a design code.'); return; }
+                        snapshotBeforeReplace();
                         commitSpec(structuredClone(specIn));
                         setSelectedId(null);
-                        setSaveFlash('Design loaded - Ctrl+Z brings the old one back.');
+                        setSaveFlash('Design loaded - your old one is saved on the shelf.');
                       } catch {
                         setSaveFlash('Could not read that - make sure the whole code was pasted.');
                       }
@@ -1018,7 +1036,8 @@ export default function App() {
                         className="rz-designs-open"
                         title={st.blurb}
                         onClick={() => {
-                          if (!window.confirm('Open the "' + st.name + '" starter? Your current design stays one Ctrl+Z away (or save it first).')) return;
+                          if (!window.confirm('Open the "' + st.name + '" starter?\n\nYour current design is saved to the My designs shelf automatically first.')) return;
+                          snapshotBeforeReplace();
                           commitSpec(structuredClone(st.spec));
                           setSelectedId(null);
                           setDesignsOpen(false);
