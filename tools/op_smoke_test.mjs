@@ -78,7 +78,23 @@ ok(r.spec.walls.west.thicknessFt === 2, 'set_wall_side thickness');
 r = apply(freshSpec(), [{ type: 'set_wall_side', wall: 'north', field: 'omitted', value: true }]);
 ok(r.spec.walls.north.omitted === true && r.spec.shell.omittedWalls.includes('north'), 'set_wall_side omitted syncs shell');
 r = apply(freshSpec(), [{ type: 'set_wall_side', wall: 'south', field: 'assembly', value: 'framed', level: 2 }]);
-ok(r.spec.wallsUpper.south.assembly === 'framed', 'set_wall_side upper storey');
+ok(r.spec.wallsUpperByLevel?.[2]?.south?.assembly === 'framed', 'set_wall_side upper storey writes per-level');
+// floor-by-floor: the 2nd and 3rd floors carry DISTINCT constructions, and a
+// legacy shared wallsUpper still reads through where no per-level override sits
+r = apply(freshSpec(), [
+  { type: 'set_shell', field: 'storeys', value: '3' },
+  { type: 'set_wall_side', wall: 'south', field: 'assembly', value: 'framed', level: 2 },
+  { type: 'set_wall_side', wall: 'south', field: 'assembly', value: 'cordwood', level: 3 }
+]);
+ok(resolveWallSide(r.spec, 'south', 2).assemblyKey === 'framed' && resolveWallSide(r.spec, 'south', 3).assemblyKey === 'cordwood',
+  'loft and tower walls resolve their own constructions');
+{
+  const legacy = structuredClone(freshSpec());
+  legacy.shell.storeys = 3;
+  legacy.wallsUpper = { south: { assembly: 'hemp-lime', cladding: 'charred' } };
+  ok(resolveWallSide(legacy, 'south', 2).assemblyKey === 'hemp-lime' && resolveWallSide(legacy, 'south', 3).cladding === 'charred',
+    'legacy shared wallsUpper still reads through on every upper floor');
+}
 r = apply(freshSpec(), ['north', 'south', 'east', 'west'].map((wall) => ({ type: 'set_wall_side', wall, field: 'assembly', value: 'hemp-lime' })));
 ok(['north', 'south', 'east', 'west'].every((s) => r.spec.walls[s].assembly === 'hemp-lime'), 'batched all-sides assembly (one dispatch)');
 r = apply(freshSpec(), [{ type: 'set_wall_side', wall: 'south', field: 'assembly', value: 'glazed' }]);

@@ -194,10 +194,13 @@ export function resolveWallSide(spec, side, level = 1, edgeKey = null) {
     omitted: Boolean(w.omitted) || omittedSet.has(side)
   };
   if (level <= 1) return overlaySegment(ground);
-  // Upper storeys: per-side overrides in spec.wallsUpper fall back to the
-  // ground wall — so an upper storey can run a different construction
-  // (light straw-clay over cob, framed over bale) without re-stating everything.
-  const u = (spec.wallsUpper || {})[side] || {};
+  // Upper storeys: shared per-side overrides in spec.wallsUpper fall back to
+  // the ground wall, and PER-LEVEL overrides in spec.wallsUpperByLevel beat
+  // both — so the loft and the tower can each run their own construction
+  // (framed 2nd floor under a cordwood 3rd) without re-stating everything.
+  const sharedU = (spec.wallsUpper || {})[side] || {};
+  const perLevelU = ((spec.wallsUpperByLevel || {})[level] || (spec.wallsUpperByLevel || {})[String(level)] || {})[side] || {};
+  const u = { ...sharedU, ...perLevelU };
   const upperKey = u.assembly && WALL_ASSEMBLIES[u.assembly] ? u.assembly : ground.assemblyKey;
   const upperAssembly = WALL_ASSEMBLIES[upperKey] || ground.assembly;
   return overlaySegment({
@@ -1589,13 +1592,18 @@ export function applyBimOperations(currentSpec, plan) {
       // Upper-storey walls keep their own overrides — construction can vary
       // by storey. Height/omit stay ground-level concepts.
       if (Number(operation.level) > 1) {
-        next.wallsUpper ||= {};
-        next.wallsUpper[side] ||= {};
-        if (field === 'assembly') next.wallsUpper[side].assembly = WALL_ASSEMBLIES[operation.value] ? operation.value : 'framed';
-        else if (field === 'thicknessFt') next.wallsUpper[side].thicknessFt = clamp(Number(operation.value), 0.2, 3.5);
-        else if (field === 'cladding') next.wallsUpper[side].cladding = CLADDING_TYPES[operation.value] ? operation.value : 'render';
-        else if (field === 'interiorFinish' || field === 'exteriorFinish') next.wallsUpper[side][field] = String(operation.value || '');
-        actions.push(`Set upper-storey ${side} wall ${field} to ${operation.value}.`);
+        // Each upper storey keeps its OWN overrides (wallsUpperByLevel);
+        // the older shared spec.wallsUpper stays as a read fallback, so
+        // designs configured before the split keep their look.
+        const lvlU = Math.min(3, Math.max(2, Math.round(Number(operation.level))));
+        next.wallsUpperByLevel ||= {};
+        next.wallsUpperByLevel[lvlU] ||= {};
+        const slot = (next.wallsUpperByLevel[lvlU][side] ||= {});
+        if (field === 'assembly') slot.assembly = WALL_ASSEMBLIES[operation.value] ? operation.value : 'framed';
+        else if (field === 'thicknessFt') slot.thicknessFt = clamp(Number(operation.value), 0.2, 3.5);
+        else if (field === 'cladding') slot.cladding = CLADDING_TYPES[operation.value] ? operation.value : 'render';
+        else if (field === 'interiorFinish' || field === 'exteriorFinish') slot[field] = String(operation.value || '');
+        actions.push(`Set level-${lvlU} ${side} wall ${field} to ${operation.value}.`);
         continue;
       }
       next.walls[side] ||= {};

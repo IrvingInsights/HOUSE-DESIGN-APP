@@ -49,7 +49,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 85 · Jul 17';
+const UPDATE_STAMP = 'update 86 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -750,9 +750,9 @@ export default function App() {
   // ONE dispatch for all four sides — four separate calls would race on the
   // same base spec and only the last would land (a bug this app has had).
   const setAllWalls = (value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, field: 'assembly', value })));
-  // Upper floors get their own construction (bale below, framed + charred
-  // wood above). ONE batched dispatch — never four racing calls.
-  const setUpperWalls = (field, value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, level: 2, field, value })));
+  // Each upper floor gets its own construction (bale below, a framed +
+  // charred 2nd floor, a cordwood tower). ONE batched dispatch per floor.
+  const setUpperWalls = (level, field, value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, level, field, value })));
   const setFrame = (value) => applyOps([{ type: 'set_frame', value }]);
   const setWallSide = (side, field, value) => applyOps([{ type: 'set_wall_side', wall: side, field, value }]);
   // --- finishes: floor, exterior cladding, reclaimed materials ---------------
@@ -2203,11 +2203,14 @@ function StructureControls({ spec, floors, onAllWalls, onUpperWalls, onFrame, on
   const resolved = WALL_SIDES.map((side) => resolveWallSide(spec, side));
   const wallKeys = new Set(resolved.map((r) => r.assemblyKey));
   const wallVal = wallKeys.size === 1 ? [...wallKeys][0] : '__mixed';
-  const upperResolved = WALL_SIDES.map((side) => resolveWallSide(spec, side, 2));
-  const upperKeys = new Set(upperResolved.map((r) => r.assemblyKey));
-  const upperVal = upperKeys.size === 1 ? [...upperKeys][0] : '__mixed';
-  const upperCladKeys = new Set(upperResolved.map((r) => r.cladding));
-  const upperCladVal = upperCladKeys.size === 1 ? [...upperCladKeys][0] : '__mixed';
+  // one row of controls per upper floor — each resolves its own construction
+  const upperLevels = Array.from({ length: Math.max(0, Math.ceil(floors) - 1) }, (_, k) => k + 2);
+  const upperState = upperLevels.map((lv) => {
+    const rs = WALL_SIDES.map((side) => resolveWallSide(spec, side, lv));
+    const keys = new Set(rs.map((r) => r.assemblyKey));
+    const clads = new Set(rs.map((r) => r.cladding));
+    return { lv, wallVal: keys.size === 1 ? [...keys][0] : '__mixed', cladVal: clads.size === 1 ? [...clads][0] : '__mixed' };
+  });
   const frameVal = resolveFrameType(spec, 1);
   const heights = new Set(resolved.map((r) => Math.round(r.heightFt * 10)));
   const shed = (spec.shell.roofType || 'gable') === 'shed';
@@ -2226,31 +2229,30 @@ function StructureControls({ spec, floors, onAllWalls, onUpperWalls, onFrame, on
           ))}
         </select>
       </label>
-      {floors > 1 && (
-        <>
-          {/* wall construction floor by floor: the ground setting above, the
-              upper floors here — bale below, framed + charred wood up top */}
+      {/* wall construction floor by floor: the ground setting above, then one
+          row per upper floor — bale below, framed + charred 2nd, its own tower */}
+      {upperState.map(({ lv, wallVal: uWall, cladVal: uClad }) => (
+        <React.Fragment key={lv}>
           <label className="rz-field">
-            <span>Upper floors — wall system</span>
-            <select value={upperVal} onChange={(e) => { if (e.target.value !== '__mixed') onUpperWalls('assembly', e.target.value); }}>
-              {upperVal === '__mixed' && <option value="__mixed">Mixed — sides differ</option>}
+            <span>{floorLabel(spec, lv)} — wall system</span>
+            <select value={uWall} onChange={(e) => { if (e.target.value !== '__mixed') onUpperWalls(lv, 'assembly', e.target.value); }}>
+              {uWall === '__mixed' && <option value="__mixed">Mixed — sides differ</option>}
               {Object.values(WALL_ASSEMBLIES).map((a) => (
                 <option key={a.key} value={a.key}>{a.green ? '🌿 ' : ''}{a.label} — R{a.rValue}</option>
               ))}
             </select>
           </label>
           <label className="rz-field">
-            <span>Upper floors — outside face</span>
-            <select value={upperCladVal} onChange={(e) => { if (e.target.value !== '__mixed') onUpperWalls('cladding', e.target.value); }}>
-              {upperCladVal === '__mixed' && <option value="__mixed">Mixed — sides differ</option>}
+            <span>{floorLabel(spec, lv)} — outside face</span>
+            <select value={uClad} onChange={(e) => { if (e.target.value !== '__mixed') onUpperWalls(lv, 'cladding', e.target.value); }}>
+              {uClad === '__mixed' && <option value="__mixed">Mixed — sides differ</option>}
               {Object.values(CLADDING_TYPES).map((c) => (
                 <option key={c.key} value={c.key}>{c.green ? '🌿 ' : ''}{c.label}</option>
               ))}
             </select>
           </label>
-          <div className="rz-shape-note">The 2nd and 3rd floors share this. “Walls (all sides)” above stays the ground floor.</div>
-        </>
-      )}
+        </React.Fragment>
+      ))}
       <label className="rz-field">
         <span>Frame — what holds the roof up</span>
         <select value={frameVal} onChange={(e) => onFrame(e.target.value)}>
