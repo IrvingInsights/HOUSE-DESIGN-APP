@@ -16,7 +16,7 @@ import { resolveWallSide, upperPlateRect } from '../engine.js';
 const snapHalf = (v) => Math.round(v * 2) / 2;
 const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
-export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSizeAlong, onContext = null }) {
+export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSizeAlong, onContext = null, onWallHeight = null, onPickWall = null }) {
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
   const shell = spec.shell || {};
@@ -106,6 +106,30 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   const cornerEnds = { south: ['West end', 'East end'], north: ['East end', 'West end'], east: ['South end', 'North end'], west: ['North end', 'South end'] };
   const [leftEnd, rightEnd] = cornerEnds[wall] || ['', ''];
 
+  // --- 2D wall shaping: grab the top edge and pull it up or down -------------
+  // On a level-walled house the whole wall line moves together; on a shed the
+  // flat faces move their own side, and a RAKED face gets a handle at each end
+  // so the slope is shaped corner by corner. Commits go through the same
+  // set_wall_height / wall-height ops as the Shell chapter's number boxes.
+  const sideH = { south: hS, north: hN, east: hE, west: hW };
+  const baseH = Number(shell.wallHeightFt) || 10;
+  const isShed = roofType === 'shed';
+  const rakedFace = isShed && (shedEW ? horiz : !horiz);
+  // which wall each end of a raked top edge belongs to (t-space; X() mirrors)
+  const endSides = shedEW ? ['west', 'east'] : ['north', 'south'];
+  const capWord = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
+
+  function startWallDrag(event, side, tEnd, startTopV) {
+    if (!onWallHeight) return;
+    event.stopPropagation();
+    event.preventDefault();
+    try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
+    const { fy } = toFeet(event);
+    const startH = side ? Number(sideH[side]) || baseH : baseH;
+    setDrag({ wallShape: { side, tEnd, startH, startTopV }, startFy: fy, ghostH: null });
+    onSelect(-1);
+  }
+
   const openings = (spec.openings || []).map((o, i) => ({ o, i })).filter(({ o }) => o.wall === wall);
   const sillOf = (o) => {
     const prof = OPENING_TYPES[o.type] || OPENING_TYPES.window;
@@ -139,6 +163,14 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
   function onPointerMove(event) {
     if (!drag) return;
+    if (drag.wallShape) {
+      const { fy } = toFeet(event);
+      const dUp = drag.startFy - fy;
+      const ws = drag.wallShape;
+      const h = clampN(snapHalf(ws.startH + dUp), ws.side ? 2 : 7, 18);
+      setDrag((d) => (d ? { ...d, ghostH: h } : d));
+      return;
+    }
     const { fx, fy } = toFeet(event);
     const dAlong = (flipX ? -1 : 1) * (fx - drag.startFx);
     const dUp = drag.startFy - fy; // paper y grows down; sills grow up
@@ -167,6 +199,12 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
   function onPointerUp() {
     if (!drag) return;
+    if (drag.wallShape) {
+      const { wallShape, ghostH } = drag;
+      setDrag(null);
+      if (ghostH != null && Math.abs(ghostH - wallShape.startH) > 0.01) onWallHeight(wallShape.side, ghostH);
+      return;
+    }
     const { idx, mode, ghost } = drag;
     setDrag(null);
     if (!ghost) return;
@@ -180,6 +218,14 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
   return (
     <div className="planWrap rz-elev-wrap">
+      {onPickWall && (
+        <div className="rz-wallpick">
+          <span>Looking at the <b>{capWord(wall)} wall</b> from outside{onWallHeight ? ' — drag its top edge ↕ to change the height' : ''}.</span>
+          {['south', 'north', 'east', 'west'].map((s) => (
+            <button key={s} type="button" className={s === wall ? 'on' : ''} onClick={() => onPickWall(s)}>{capWord(s)}</button>
+          ))}
+        </div>
+      )}
       <svg
         ref={svgRef}
         className="rz-elev"
@@ -188,6 +234,7 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerDown={() => onSelect(-1)}
+        onContextMenu={(event) => event.preventDefault()}
       >
         {/* ground: a soil band under the grade line */}
         <rect x={-pad} y={Y(0)} width={run + pad * 2} height={soil} fill="#d8cfbc" opacity="0.55" />
@@ -263,6 +310,59 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
         {/* which corner is which */}
         <text x={0.2} y={Y(0) + 1.6} fontSize="1.15" fill="#6b6f66" pointerEvents="none">{leftEnd}</text>
         <text x={run - 0.2} y={Y(0) + 1.6} textAnchor="end" fontSize="1.15" fill="#6b6f66" pointerEvents="none">{rightEnd}</text>
+
+        {/* shape the wall: a level top edge drags as one; a raked (sloped)
+            top gets a handle at each end so you pull each corner where you
+            want it */}
+        {onWallHeight && !rakedFace && (
+          <g>
+            <polyline
+              points={topPts.map(([t, v]) => `${X(t)},${Y(v)}`).join(' ')}
+              fill="none" stroke="transparent" strokeWidth={1.8}
+              style={{ cursor: 'ns-resize' }}
+              onPointerDown={(e) => startWallDrag(e, isShed ? wall : null, run / 2, topAt(run / 2))}
+            />
+            <g pointerEvents="none">
+              <rect x={run / 2 - 1.3} y={Y(topAt(run / 2)) - 0.3} width={2.6} height={0.6} rx={0.3} fill="#3C6472" opacity="0.85" />
+              <text x={run / 2} y={Y(topAt(run / 2)) + 0.22} textAnchor="middle" fontSize="0.62" fill="#fff" fontWeight="700">↕</text>
+            </g>
+          </g>
+        )}
+        {onWallHeight && rakedFace && endSides.map((side, k) => {
+          const tEnd = k === 0 ? 0 : run;
+          const vTop = topAt(k === 0 ? 0.02 : run - 0.02);
+          const hNow = Math.round((Number(sideH[side]) || baseH) * 10) / 10;
+          return (
+            <g key={side}>
+              <rect
+                x={X(tEnd) - 0.55} y={Y(vTop) - 0.55} width={1.1} height={1.1} rx={0.2}
+                fill="#3C6472" stroke="#fff" strokeWidth={0.12}
+                style={{ cursor: 'ns-resize' }}
+                onPointerDown={(e) => startWallDrag(e, side, tEnd, vTop)}
+              />
+              <text x={X(tEnd) < run / 2 ? X(tEnd) + 0.9 : X(tEnd) - 0.9} y={Y(vTop) - 0.9}
+                textAnchor={X(tEnd) < run / 2 ? 'start' : 'end'} fontSize="1.05" fill="#3C6472" fontWeight="600" pointerEvents="none">
+                {capWord(side)} wall {hNow}′
+              </text>
+            </g>
+          );
+        })}
+        {drag?.wallShape && drag.ghostH != null && (() => {
+          const ws = drag.wallShape;
+          const vNew = ws.startTopV + (drag.ghostH - ws.startH);
+          const label = ws.side ? `${capWord(ws.side)} wall: ${drag.ghostH}′ tall` : `All the walls: ${drag.ghostH}′ tall`;
+          const otherT = rakedFace && ws.side ? (ws.tEnd === 0 ? run : 0) : null;
+          return (
+            <g pointerEvents="none">
+              {otherT == null ? (
+                <line x1={0} y1={Y(vNew)} x2={run} y2={Y(vNew)} stroke="#3C6472" strokeWidth={0.14} strokeDasharray="0.9 0.6" />
+              ) : (
+                <line x1={X(otherT)} y1={Y(topAt(otherT === 0 ? 0.02 : run - 0.02))} x2={X(ws.tEnd)} y2={Y(vNew)} stroke="#3C6472" strokeWidth={0.14} strokeDasharray="0.9 0.6" />
+              )}
+              <text x={run / 2} y={Y(vNew) + 1.5} textAnchor="middle" fontSize="1.25" fill="#22251F" fontWeight="700">{label}</text>
+            </g>
+          );
+        })()}
 
         {openings.length === 0 && (
           <text x={run / 2} y={Y(Math.max(2, groundProfileAt(run / 2) / 2))} textAnchor="middle" fontSize="1.3" fill="#8a8271" pointerEvents="none">

@@ -529,6 +529,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
         onPointerUp={(event) => { endDrag(); endShellDrag(event); endEdgeDrag(); endOpeningDrag(); endPan(); }}
         onPointerLeave={(event) => { endDrag(); endShellDrag(event); endEdgeDrag(); endOpeningDrag(); endPan(); }}
         onClick={() => {}}
+        onContextMenu={(event) => event.preventDefault()}
       >
         {/* the ground — oversized so panning never runs out of paper; drag it
             to move the view, double-tap to fit everything again */}
@@ -609,6 +610,13 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                 stroke="var(--active-line)" strokeWidth={1.6} strokeOpacity={active ? 0.35 : 0.001}
                 style={{ cursor: edge.horizontal ? 'ns-resize' : 'ew-resize' }}
                 onPointerDown={(event) => startEdgeDrag(event, edge)}
+                onContextMenu={(event) => {
+                  if (!onContext) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onSelect?.(`wall-${edge.key}`);
+                  onContext(`wall-${edge.key}`, event.clientX, event.clientY);
+                }}
               />
             </g>
           );
@@ -719,7 +727,14 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                     <rect x={el.x} y={el.y} width={w} height={d} fill="none"
                       stroke="transparent" strokeWidth={1.6} pointerEvents="stroke"
                       style={{ cursor: drag ? 'grabbing' : 'grab' }}
-                      onPointerDown={(event) => startDrag(event, raw, 'move')} />
+                      onPointerDown={(event) => startDrag(event, raw, 'move')}
+                      onContextMenu={(event) => {
+                        if (!onContext) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onSelect?.(raw.id);
+                        onContext(raw.id, event.clientX, event.clientY);
+                      }} />
                     {['nw', 'ne', 'sw', 'se'].map((corner) => {
                       const cx = el.x + (corner.includes('e') ? w : 0);
                       const cy = el.y + (corner.includes('s') ? d : 0);

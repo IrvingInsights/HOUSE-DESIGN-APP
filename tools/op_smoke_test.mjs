@@ -51,6 +51,17 @@ ok(r.spec.shell.storeyHeights && r.spec.shell.storeyHeights[2] === 9 && r.spec.s
 ok(near(storeyElevationFt(r.spec.shell, 3), 19) && near(storeyElevationFt(r.spec.shell, 4), 26), 'storeys stack 10/9/7 → floors at 19 and 26');
 r = apply(r.spec, [{ type: 'set_storey_height', level: 3, value: 0 }]);
 ok(!r.spec.shell.storeyHeights?.[3] && storeyHeightFt(r.spec.shell, 3) === 10, 'clearing a floor height falls back to base');
+// --- where the 2nd floor starts: walls lead, roofline shaping never drags it --
+r = apply(freshSpec(), [{ type: 'set_shell', field: 'storeys', value: '2' }, { type: 'set_wall_side', wall: 'south', field: 'heightFt', value: 2 }]);
+ok(near(storeyElevationFt(r.spec.shell, 2), 10), '2ft kneewall does NOT drag floor 2 down — stays at the 10ft walls');
+r = apply(freshSpec(), [{ type: 'set_shell', field: 'storeys', value: '2' }, { type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: 14, northWallHeightFt: 10 }]);
+ok(near(storeyElevationFt(r.spec.shell, 2), 14), '14/10 shed: floor 2 starts at the 14ft standing wall');
+r = apply(r.spec, [{ type: 'set_storey_height', level: 1, value: 10 }]);
+ok(near(storeyElevationFt(r.spec.shell, 2), 10) && r.spec.shell.southWallHeightFt === 14, 'ground H pin on a shed moves the floor, not the walls');
+r = apply(r.spec, [{ type: 'set_shell', field: 'wallHeightFt', value: 12 }]);
+ok(near(storeyElevationFt(r.spec.shell, 2), 12) && !r.spec.shell.storeyHeights?.[1], 'one-height-for-all clears the ground pin — floor rides the walls again');
+r = apply(freshSpec(), [{ type: 'set_shell', field: 'storeys', value: '2' }, { type: 'set_storey_height', level: 1, value: 12 }]);
+ok(r.spec.shell.wallHeightFt === 12 && near(storeyElevationFt(r.spec.shell, 2), 12), 'ground H on level walls moves the walls with it');
 r = apply(freshSpec(), [{ type: 'set_shell', field: 'overhangFt', value: '3' }]);
 ok(r.spec.shell.overhangFt === 3, 'set_shell overhangFt');
 r = apply(freshSpec(), [{ type: 'set_shell', field: 'roofType', value: 'hip' }]);
@@ -518,6 +529,18 @@ async function httpSanity() {
   const r = apply(s, [{ type: 'move_object', targetId: b.id, name: 'Rubble trench run', x: 20, y: 31 }]).spec;
   const a2 = r.elements.find((e) => e.id === a.id), b2 = r.elements.find((e) => e.id === b.id);
   ok(a2.x === 2 && b2.x === 20, 'move by id hits the right run — same-named runs never snap together', `A@${a2.x} B@${b2.x}`);
+}
+
+// --- deck options ride the add op (the Patio button, planner deck asks) ------
+{
+  const r = apply(freshSpec(), [
+    { type: 'add_element', name: 'Patio', category: 'deck', x: 12, y: 29, w: 12, d: 10, h: 0.25, level: 1, deckSurface: 'stone', deckPlacement: 'grade' },
+    { type: 'add_element', name: 'Covered deck', category: 'deck', x: 30, y: 29, w: 10, d: 8, h: 0.35, level: 1, deckRail: 'cable', deckRoof: 'gable' }
+  ]).spec;
+  const patio = r.elements.find((e) => e.name === 'Patio');
+  const cov = r.elements.find((e) => e.name === 'Covered deck');
+  ok(patio?.deckSurface === 'stone' && patio?.deckPlacement === 'grade', 'add_element keeps the patio\'s stone-at-grade options');
+  ok(cov?.deckRail === 'cable' && cov?.deckRoof === 'gable', 'add_element keeps the covered deck\'s railing and roof choices');
 }
 
 const wantHttp = process.argv.includes('--http');

@@ -14,7 +14,8 @@ import {
   floorCount, floorLabel, storeyInfo, upperPlateRect, utilitiesOf, resolveOverhangs,
   WALL_SIDES, WALL_SIDE_LABELS, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS,
   ROOM_PRESETS, planNewRoomPlacements, roomPresetFromName,
-  resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons, downloadFile
+  resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons, downloadFile,
+  DECK_SURFACES, resolveDeck
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms } from '../placement.js';
 import { STARTER_DESIGNS } from './starters.js';
@@ -49,7 +50,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 99 · Jul 17';
+const UPDATE_STAMP = 'update 100 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -401,6 +402,19 @@ export default function App() {
   // A dormer is a 2nd-floor+ window carried by a dormer of the chosen style.
   const addDormer = (wall, style, level) => addOpening(wall, 'window', Math.max(2, level), { dormerStyle: style });
   const removeOpening = (index) => applyOps([{ type: 'remove_object', targetId: `opening-${index}` }]);
+  // Same wall, same size, same trims — the engine slides the copy to the next
+  // free stretch. Shared by the right-click menu and the opening's card.
+  const duplicateOpening = (index) => {
+    const op = spec.openings?.[index];
+    if (!op) return;
+    const prof = OPENING_TYPES[op.type] || OPENING_TYPES.window;
+    addOpening(op.wall, op.type, Number(op.level || 1), {
+      widthFt: Number(op.widthFt) || prof.defaultW,
+      ...(Number(op.tiltDeg) > 0 ? { tiltDeg: op.tiltDeg } : {}),
+      ...(Number(op.shadeFt) > 0 ? { shadeFt: op.shadeFt } : {}),
+      ...(op.dormerStyle ? { dormerStyle: op.dormerStyle } : {})
+    });
+  };
   const sizeOpening = (index, widthFt) => {
     const op = spec.openings?.[index]; if (!op) return;
     applyOps([{ type: 'update_object', targetId: `opening-${index}`, field: 'widthFt', value: clamp(Number(widthFt), 1, 24) }]);
@@ -532,13 +546,23 @@ export default function App() {
     });
     applyOps(ops);
   };
-  // One height knob per floor. The ground floor's height is the wall height
-  // (drives the roof); each upper storey carries its OWN height so a 10' ground
-  // under a 9' second and an 8' third all stack correctly.
+  // One height knob per floor. On level walls the ground number moves the
+  // walls too; on a shed-shaped house it pins where the 2nd floor starts and
+  // the walls keep their profile (the engine decides — one rule for typed
+  // heights and planner ops alike). Each upper storey carries its OWN height
+  // so a 10' ground under a 9' second and an 8' third all stack correctly.
   const setFloorHeight = (level, ft) => {
     const v = clamp(Number(ft), 7, 16);
-    if (level === 1) setShellField('wallHeightFt', v);
-    else applyOps([{ type: 'set_storey_height', level, value: v }]);
+    applyOps([{ type: 'set_storey_height', level, value: v }]);
+  };
+  // Wall-view shaping commits. No side = "all the walls together" (a level
+  // house top): set_shell wallHeightFt resets every per-side override so the
+  // whole line truly moves as one. A named side is a shed profile edit — the
+  // same op the Shell chapter's per-wall boxes use.
+  const shapeWallHeight = (side, ft) => {
+    const v = clamp(Number(ft), side ? 2 : 7, 18);
+    if (!side) setShellField('wallHeightFt', v);
+    else applyOps([{ type: 'set_wall_height', wall: side, h: v }]);
   };
 
   // --- foundation: the main type + free-roaming footing runs ----------------
@@ -623,6 +647,14 @@ export default function App() {
     applyOps([{ type: 'update_object', targetId: room.id, name: room.name, field: 'level', value: String(level) }]);
     if (activeChapter === 'rooms') setActiveFloor(level);
   };
+  // Duplicate a placed element: same kind and size, dropped a little
+  // down-and-right of the original (the same landing pasteClipboard uses).
+  const duplicateElement = (el) => applyOps([{
+    type: 'add_element', name: `${el.name} copy`, category: el.category, construction: el.construction || '',
+    x: Number(el.x) + 2, y: Number(el.y) + 2, z: Number(el.z) || 0,
+    w: Number(el.w), d: Number(el.d), h: Number(el.h) || 1, level: Number(el.level) || 1,
+    roofType: el.roofType || ''
+  }]);
 
   // --- cut / copy / paste of the selected room or element --------------------
   const selectedObj = () => spec.rooms.find((r) => r.id === selectedId)
@@ -782,6 +814,14 @@ export default function App() {
     window.addEventListener('keydown', onEsc);
     return () => { window.removeEventListener('pointerdown', close); window.removeEventListener('keydown', onEsc); };
   }, [ctxMenu]);
+  // The Wall view follows whichever opening gets picked — tap a window in the
+  // 3D house or on the plan and the face-on view swings to its wall.
+  useEffect(() => {
+    if (!String(selectedId || '').startsWith('opening-')) return;
+    const op = spec.openings?.[Number(String(selectedId).replace('opening-', ''))];
+    if (op && op.wall !== 'roof') setOpenWall(op.wall);
+  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const renameObject = (obj, name) => {
     if (name.trim() && name.trim() !== obj.name) applyOps([{ type: 'update_object', targetId: obj.id, name: obj.name, field: 'name', value: name.trim() }]);
   };
@@ -808,6 +848,14 @@ export default function App() {
       if (mod && key === 'v') { if (clipboard) { e.preventDefault(); pasteClipboard(); } return; }
 
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+        // A picked door/window/skylight deletes too — its id is 'opening-<i>',
+        // not a room or element, so it needs its own branch.
+        if (String(selectedId).startsWith('opening-')) {
+          e.preventDefault();
+          removeOpening(Number(String(selectedId).replace('opening-', '')));
+          setSelectedId(null);
+          return;
+        }
         const obj = spec.rooms.find((r) => r.id === selectedId) || (spec.elements || []).find((el) => el.id === selectedId);
         if (!obj) return;
         e.preventDefault();
@@ -899,7 +947,7 @@ export default function App() {
     <div className="rz-root">
       {/* SURFACE 1 — the Model / Plan, center stage and full-bleed */}
       <div className="rz-model">
-        {viewMode === 'wall' && activeChapter === 'openings' ? (
+        {viewMode === 'wall' ? (
           <ElevationView
             spec={spec}
             wall={openWall}
@@ -908,8 +956,10 @@ export default function App() {
             onPlace={placeOpening}
             onSizeAlong={sizeOpeningOnWall}
             onContext={timelineOpen ? null : (index, x, y) => openContext(`opening-${index}`, x, y)}
+            onWallHeight={shapeWallHeight}
+            onPickWall={setOpenWall}
           />
-        ) : viewMode === 'plan' || viewMode === 'wall' ? (
+        ) : viewMode === 'plan' ? (
           <PlanView
             spec={spec}
             selectedRoom={selectedId}
@@ -936,6 +986,7 @@ export default function App() {
               else moveObject(id, x, y);
             }}
             onResizeEnd={(id, w, d) => { const o = findObj(id); if (o) applyOps([{ type: 'resize_object', targetId: id, name: o.name, w, d, h: Number(o.h) || 0.22 }]); }}
+            onContext={timelineOpen ? null : openContext}
             showCompass
             onFallbackNav={() => {}}
           />
@@ -1005,9 +1056,7 @@ export default function App() {
       {/* Plan / 3D toggle + (3D only) view angles — the Time Machine owns the
           view while it's open */}
       {!timelineOpen && <div className="rz-views">
-        {activeChapter === 'openings' && (
-          <button className={viewMode === 'wall' ? 'on' : ''} title="The chosen wall face-on — drag doors and windows right on it" onClick={() => setViewMode('wall')}>Wall</button>
-        )}
+        <button className={viewMode === 'wall' ? 'on' : ''} title="The chosen wall face-on — drag its top edge to change the height, and drag doors and windows right on it" onClick={() => setViewMode('wall')}>Wall</button>
         <button className={viewMode === 'plan' ? 'on' : ''} onClick={() => setViewMode('plan')}>Plan</button>
         <button className={viewMode === '3d' ? 'on' : ''} onClick={() => setViewMode('3d')}>3D</button>
         {viewMode === '3d' && webglOK && <span className="rz-views-sep" />}
@@ -1098,6 +1147,19 @@ export default function App() {
                     applyOps([{ type: 'add_element', name: lvl > 1 ? `${floorLabel(spec, lvl)} deck` : 'Deck', category: 'deck', x: Math.round(W / 2 - 5), y: D + 0.5, w: 10, d: 8, h: 0.35, level: lvl, z: lvl >= 2 ? storeyElevationFt(spec.shell, lvl) : 0 }]);
                   }}
                 >＋ Deck — outdoor platform on this floor (10 × 8 ft)</button>
+                {activeFloor === 1 && (
+                  <button
+                    type="button"
+                    className="rz-floorbar-outline"
+                    title="A stone terrace laid right on the ground — no posts, no railing; drag it anywhere, grab a corner to resize"
+                    onClick={() => {
+                      const W = Number(spec.shell.widthFt) || 36;
+                      const D = Number(spec.shell.depthFt) || 28;
+                      applyOps([{ type: 'add_element', name: 'Patio', category: 'deck', x: Math.round(W / 2 - 6), y: D + 0.5, w: 12, d: 10, h: 0.25, level: 1, z: 0, deckSurface: 'stone', deckPlacement: 'grade' }]);
+                    }}
+                  >＋ Patio — stone terrace on the ground (12 × 10 ft)</button>
+                )}
+                <div className="rz-shape-note">Tap a placed deck to pick its surface, railing, roof, and how it sits. Two decks pushed together join into one wraparound.</div>
                 {roomNote && <div className="rz-shape-note">{roomNote}</div>}
                 <div className="rz-shape-note">Tap a room on the plan to rename or remove it (or press Delete). Right-click for more.</div>
               </div>
@@ -1109,22 +1171,11 @@ export default function App() {
                 )}
                 <OpeningsControls
                   spec={spec}
-                  selectedId={selectedId}
                   level={activeFloor}
                   wall={openWall}
                   onWall={setOpenWall}
                   onAdd={addOpening}
                   onAddDormer={addDormer}
-                  onRemove={removeOpening}
-                  onSize={sizeOpening}
-                  onSetField={setOpeningField}
-                  onSelect={(index) => {
-                    if (index < 0) { setSelectedId(null); return; }
-                    setSelectedId(`opening-${index}`);
-                    const o = spec.openings?.[index];
-                    if (o && o.wall !== 'roof') setOpenWall(o.wall); // the wall view follows the pick
-                  }}
-                  onContext={(index, x, y) => openContext(`opening-${index}`, x, y)}
                 />
               </>
             )}
@@ -1362,6 +1413,63 @@ export default function App() {
         if (wallSide) {
           return <WallCard side={wallSide} spec={spec} onWallSide={setWallSide} onClose={() => setSelectedId(null)} />;
         }
+        // A picked door/window/skylight gets its own card — this is THE place
+        // its numbers live now (the chapter only adds; tapping edits).
+        if (String(selectedId).startsWith('opening-')) {
+          const oi = Number(String(selectedId).replace('opening-', ''));
+          const op = spec.openings?.[oi];
+          if (!op) return null;
+          const prof = OPENING_TYPES[op.type] || OPENING_TYPES.window;
+          const isRoofOp = op.wall === 'roof';
+          const isUpperWall = !isRoofOp && Number(op.level || 1) > 1;
+          const kindWord = prof.roof ? 'skylight' : prof.entry ? 'door' : 'window';
+          const floorNote = !isRoofOp && Number(op.level || 1) !== 1 ? ` — ${floorLabel(spec, Number(op.level || 1)).toLowerCase()}` : '';
+          return (
+            <div className="rz-card">
+              <div className="rz-card-head">
+                <NameField value={op.label || prof.label} onCommit={(name) => { if (name && name.trim()) setOpeningField(oi, 'name', name.trim()); }} />
+                <button className="rz-x" onClick={() => setSelectedId(null)}>×</button>
+              </div>
+              <p className="rz-muted">{prof.label} {isRoofOp ? 'in the roof' : `in the ${op.wall} wall`}{floorNote}. Drag it on the Wall view to slide or lift it — or set the numbers here.</p>
+              <label className="rz-field rz-field-num">
+                <span>How wide</span>
+                <NumInput value={Math.round((Number(op.widthFt) || prof.defaultW) * 10) / 10} min={1} max={24} step={0.5} unit="ft" onCommit={(v) => sizeOpening(oi, v)} />
+              </label>
+              {!isRoofOp && (
+                <>
+                  <label className="rz-field rz-field-num">
+                    <span>Bottom edge above the floor (sill)</span>
+                    <NumInput value={Math.round((Number.isFinite(Number(op.sillFt)) ? Number(op.sillFt) : prof.sill) * 10) / 10} min={0} max={20} step={0.5} unit="ft" onCommit={(v) => setOpeningField(oi, 'sillFt', v)} />
+                  </label>
+                  <label className="rz-field rz-field-num">
+                    <span>Shade eyebrow (overhang)</span>
+                    <NumInput value={Number(op.shadeFt) || 0} min={0} max={6} step={0.5} unit="ft" onCommit={(v) => setOpeningField(oi, 'shadeFt', v)} />
+                  </label>
+                </>
+              )}
+              {isUpperWall && (
+                <label className="rz-field">
+                  <span>Dormer</span>
+                  <select value={op.dormerStyle || ''} onChange={(e) => setOpeningField(oi, 'dormerStyle', e.target.value)}>
+                    <option value="">Auto — only if the roof buries it</option>
+                    <option value="gable">Gable dormer (peaked)</option>
+                    <option value="shed">Shed dormer (single slope)</option>
+                  </select>
+                </label>
+              )}
+              {(op.type === 'tilted' || Number(op.tiltDeg) > 0) && (
+                <label className="rz-field rz-field-num">
+                  <span>Glass tilt</span>
+                  <NumInput value={Number(op.tiltDeg) || 25} min={5} max={60} step={5} unit="°" onCommit={(v) => setOpeningField(oi, 'tiltDeg', v)} />
+                </label>
+              )}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button type="button" className="rz-fresh" onClick={() => duplicateOpening(oi)}>Duplicate</button>
+                <button type="button" className="rz-remove" onClick={() => { removeOpening(oi); setSelectedId(null); }}>Remove this {kindWord}</button>
+              </div>
+            </div>
+          );
+        }
         const el = (spec.elements || []).find((e) => e.id === selectedId);
         return (
           <div className="rz-card">
@@ -1378,6 +1486,70 @@ export default function App() {
                 onResize={(w, d) => resizeObject(el.id, Number(el.x) || 0, Number(el.y) || 0, w, d)}
               />
             )}
+            {el && el.category === 'deck' && (() => {
+              // THE DECK CARD — every deck option in one place, priced live
+              // in the Budget receipts. resolveDeck is the same answer the
+              // 3D model draws from, so the card, the picture, and the
+              // receipts can never disagree.
+              const dk = resolveDeck(spec, el);
+              const setDk = (field, value) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field, value }]);
+              const lvl = Math.max(1, Number(el.level || 1));
+              return (
+                <>
+                  {lvl === 1 && (
+                    <label className="rz-field">
+                      <span>How it sits</span>
+                      <select
+                        value={dk.placement}
+                        onChange={(e2) => {
+                          const v = e2.target.value;
+                          if (v === 'raised' && dk.surfaceKey === 'stone') {
+                            // stone can't stand on posts — raising it switches to wood boards
+                            applyOps([
+                              { type: 'update_object', targetId: el.id, name: el.name, field: 'deckSurface', value: 'wood' },
+                              { type: 'update_object', targetId: el.id, name: el.name, field: 'deckPlacement', value: 'raised' }
+                            ]);
+                          } else setDk('deckPlacement', v);
+                        }}
+                      >
+                        <option value="raised">Raised deck — up at the house floor{dk.topFt > 1.5 ? ', with steps down' : ''}</option>
+                        <option value="grade">Ground patio — laid right on the ground</option>
+                      </select>
+                    </label>
+                  )}
+                  <label className="rz-field">
+                    <span>Surface</span>
+                    <select value={dk.surfaceKey} onChange={(e2) => setDk('deckSurface', e2.target.value)}>
+                      {Object.entries(DECK_SURFACES).map(([k, s]) => (
+                        (lvl === 1 || !s.gradeOnly) ? <option key={k} value={k}>{s.label} — {s.note}</option> : null
+                      ))}
+                    </select>
+                  </label>
+                  {dk.placement === 'raised' && (
+                    <label className="rz-field">
+                      <span>Railing on the open edges</span>
+                      <select value={dk.railKey} onChange={(e2) => setDk('deckRail', e2.target.value)}>
+                        <option value="wood">Wood balusters — the classic pickets</option>
+                        <option value="cable">Steel cables — thin lines, open view</option>
+                        <option value="none">No railing</option>
+                      </select>
+                    </label>
+                  )}
+                  <label className="rz-field">
+                    <span>Roof over it</span>
+                    <select value={dk.roofKey} onChange={(e2) => setDk('deckRoof', e2.target.value)}>
+                      <option value="">Open to the sky</option>
+                      <option value="shed">Covered — one slope leaning away from the house</option>
+                      <option value="gable">Covered — a little peak (gable)</option>
+                    </select>
+                  </label>
+                  <div className="rz-shape-note">
+                    Railings and their cost only grow on edges facing open air — push this deck against the house (a doorway) or against another deck (a wraparound) and the shared edge opens up.
+                    {dk.needsSteps ? ' Its floor sits high, so steps come down the longest open side automatically.' : ''}
+                  </div>
+                </>
+              );
+            })()}
             {el && el.category === 'floor' && Number(el.level || 1) >= 2 && floors > Number(el.level || 1) && (
               <label className="rz-field">
                 <span>Top of this floor, where the floor above steps back</span>
@@ -1447,71 +1619,177 @@ export default function App() {
         </div>
       )}
 
-      {/* right-click menu — quick actions on whatever was tapped */}
+      {/* right-click menu — quick actions on whatever was tapped. EVERY kind
+          of selectable thing has one, in the Plan, Wall, and 3D views alike:
+          openings, walls (whole sides, single pieces, upper-storey bands),
+          the roof, the frame, the ground pad, a floor's outline, rooms, and
+          every placed element. Short lists on purpose — the full card is one
+          tap away. One look, one component. */}
       {ctxMenu && (() => {
-        // Openings get their own quick menu (right-click on the Wall view or
-        // the plan): rename, duplicate onto a free stretch, tune, remove.
-        if (String(ctxMenu.id).startsWith('opening-')) {
-          const oi = Number(String(ctxMenu.id).replace('opening-', ''));
+        const idStr = String(ctxMenu.id);
+        const closeMenu = () => setCtxMenu(null);
+        const menuStyle = (h = 240) => ({
+          left: Math.min(ctxMenu.x, window.innerWidth - 240),
+          top: Math.min(ctxMenu.y, window.innerHeight - h)
+        });
+        const Menu = ({ title, h = 240, children }) => (
+          <div className="rz-ctx" style={menuStyle(h)} onPointerDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
+            <div className="rz-ctx-title">{title}</div>
+            {children}
+          </div>
+        );
+        const startRename = () => {
+          closeMenu();
+          setTimeout(() => { const f = document.querySelector('.rz-card-name'); f?.focus(); f?.select(); }, 60);
+        };
+
+        // Openings — rename, duplicate onto a free stretch, tune, remove.
+        if (idStr.startsWith('opening-')) {
+          const oi = Number(idStr.replace('opening-', ''));
           const op = spec.openings?.[oi];
           if (!op) return null;
           const prof = OPENING_TYPES[op.type] || OPENING_TYPES.window;
-          const styleO = { left: Math.min(ctxMenu.x, window.innerWidth - 230), top: Math.min(ctxMenu.y, window.innerHeight - 190) };
           return (
-            <div className="rz-ctx" style={styleO} onPointerDown={(e) => e.stopPropagation()}>
-              <div className="rz-ctx-title">{op.label || prof.label}</div>
+            <Menu title={op.label || prof.label} h={190}>
               <button onClick={() => {
-                setCtxMenu(null);
+                closeMenu();
                 const name = window.prompt('Name this opening:', op.label || prof.label);
                 if (name && name.trim()) setOpeningField(oi, 'name', name.trim());
               }}>Rename…</button>
-              <button onClick={() => {
-                addOpening(op.wall, op.type, Number(op.level || 1), {
-                  widthFt: Number(op.widthFt) || prof.defaultW,
-                  ...(Number(op.tiltDeg) > 0 ? { tiltDeg: op.tiltDeg } : {}),
-                  ...(Number(op.shadeFt) > 0 ? { shadeFt: op.shadeFt } : {}),
-                  ...(op.dormerStyle ? { dormerStyle: op.dormerStyle } : {})
-                });
-                setCtxMenu(null);
-              }}>Duplicate</button>
-              <button onClick={() => { setSelectedId(`opening-${oi}`); if (op.wall !== 'roof') setOpenWall(op.wall); setCtxMenu(null); }}>Size &amp; details…</button>
-              <button className="rz-ctx-danger" onClick={() => { removeOpening(oi); setSelectedId(null); setCtxMenu(null); }}>Remove opening</button>
-            </div>
+              <button onClick={() => { duplicateOpening(oi); closeMenu(); }}>Duplicate</button>
+              <button onClick={() => { setSelectedId(`opening-${oi}`); if (op.wall !== 'roof') setOpenWall(op.wall); closeMenu(); }}>Size &amp; details…</button>
+              <button className="rz-ctx-danger" onClick={() => { removeOpening(oi); setSelectedId(null); closeMenu(); }}>Remove opening</button>
+            </Menu>
           );
         }
-        const room = spec.rooms.find((r) => r.id === ctxMenu.id);
+
+        // Walls — a whole side (3D), one piece of a custom outline (plan or
+        // 3D), or an upper storey's band. All speak the same language; a
+        // single piece borrows its facing side's actions.
+        const sideMatch = /^wall-(north|south|east|west)(?:-u(\d*))?$/.exec(idStr);
+        const edgeMatch = /^wall-e(\d+)(?:-u(\d*))?$/.exec(idStr);
+        if (sideMatch || edgeMatch) {
+          const side = sideMatch ? sideMatch[1] : (footprintEdges(spec)[Number(edgeMatch[1])]?.facing || 'south');
+          const upRaw = sideMatch ? sideMatch[2] : edgeMatch[2];
+          const level = upRaw === undefined ? 1 : (upRaw === '' ? 2 : Number(upRaw));
+          const r = resolveWallSide(spec, side, level);
+          const sideLabel = WALL_SIDE_LABELS[side] || side;
+          return (
+            <Menu title={level > 1 ? `${sideLabel} wall — ${floorLabel(spec, level).toLowerCase()}` : `${sideLabel} wall — ${r.assembly.label}`}>
+              <button onClick={() => {
+                if (level > 1) { setActiveChapter('shell'); setSelectedId(null); }
+                else setSelectedId(`wall-${side}`);
+                closeMenu();
+              }}>{level > 1 ? 'This floor’s wall settings…' : 'Height & what it’s made of…'}</button>
+              <button onClick={() => { addOpening(side, 'door', level); closeMenu(); }}>+ Door on this wall</button>
+              <button onClick={() => { addOpening(side, 'window', level); closeMenu(); }}>+ Window on this wall</button>
+              <button onClick={() => { setActiveChapter('openings'); setOpenWall(side); setActiveFloor(Math.max(1, level)); setViewMode('wall'); closeMenu(); }}>See this wall face-on</button>
+              {level === 1 && (
+                <button onClick={() => { setWallSide(side, 'omitted', !r.omitted); closeMenu(); }}>
+                  {r.omitted ? 'Put this wall back' : 'No wall on this side (open it up)'}
+                </button>
+              )}
+            </Menu>
+          );
+        }
+
+        // The roof (tapped in 3D).
+        if (idStr === 'roof-main') {
+          const roofType = spec.shell.roofType || 'gable';
+          const shape = ROOF_SHAPES.find((s) => s.key === roofType);
+          const prof = roofProfile(spec.shell);
+          const pitchNow = Number(spec.shell.roofPitch || 0.32);
+          const nudgePitch = (dir) => {
+            // A shed's steepness IS its two wall heights — nudge the fall.
+            if (roofType === 'shed') setShedFall(prof.lowSide || 'north', Math.max(0.5, Math.round((prof.riseFt + dir) * 2) / 2));
+            else setRoofPitch(clamp(pitchNow + dir / 12, 0.02, 1.5));
+          };
+          return (
+            <Menu title={`Roof — ${shape?.label || roofType}`}>
+              <button onClick={() => { setActiveChapter('roof'); setActiveFloor(1); setViewMode('3d'); closeMenu(); }}>Roof settings… (shape, steepness, overhang)</button>
+              {roofType !== 'flat' && <button onClick={() => { nudgePitch(1); closeMenu(); }}>A bit steeper</button>}
+              {roofType !== 'flat' && <button onClick={() => { nudgePitch(-1); closeMenu(); }}>A bit gentler</button>}
+              <button onClick={() => { setModelShow((v) => (v === 'noroof' ? 'all' : 'noroof')); closeMenu(); }}>
+                {modelShow === 'noroof' ? 'Put the roof back on' : 'Lift the roof off (peek inside)'}
+              </button>
+            </Menu>
+          );
+        }
+
+        // The frame (tapped in 3D).
+        if (idStr === 'frame-main') {
+          const fKey = resolveFrameType(spec, 1);
+          return (
+            <Menu title={`Frame — ${FRAME_TYPES[fKey]?.label || fKey}`} h={170}>
+              <button onClick={() => { setActiveChapter('shell'); closeMenu(); }}>Change what carries the roof…</button>
+              <button onClick={() => { setModelShow((v) => (v === 'bones' ? 'all' : 'bones')); closeMenu(); }}>
+                {modelShow === 'bones' ? 'Show the whole house again' : 'Show just the bones (frame & foundation)'}
+              </button>
+            </Menu>
+          );
+        }
+
+        // The ground pad the house stands on (tapped in 3D).
+        if (idStr === 'site-pad') {
+          return (
+            <Menu title="The ground around the house" h={170}>
+              <button onClick={() => { setActiveChapter('foundation'); setViewMode('plan'); closeMenu(); }}>Foundation &amp; outdoor pads…</button>
+              <button onClick={() => { setActiveChapter('rooms'); setViewMode('plan'); closeMenu(); }}>Lay out the rooms…</button>
+            </Menu>
+          );
+        }
+
+        const room = spec.rooms.find((r2) => r2.id === ctxMenu.id);
         const el = room ? null : (spec.elements || []).find((e) => e.id === ctxMenu.id);
         const obj = room || el;
         if (!obj) return null;
         const level = Number(obj.level || 1);
+
+        // A storey's extent outline — the floor plate.
+        if (el && el.category === 'floor') {
+          return (
+            <Menu title={el.name}>
+              <button onClick={startRename}>Rename…</button>
+              <button onClick={closeMenu}>Move &amp; size… (the card)</button>
+              {level >= 2 && floors > level && (
+                <button onClick={() => {
+                  applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'topTreatment', value: el.topTreatment === 'porch' ? 'roof' : 'porch' }]);
+                  closeMenu();
+                }}>{el.topTreatment === 'porch' ? 'Roof the step above instead' : 'Open porch where the floor above steps back'}</button>
+              )}
+              {level >= 2 && (
+                <button onClick={() => { setActiveChapter('roof'); setActiveFloor(level); setViewMode('3d'); closeMenu(); }}>The roof over this floor…</button>
+              )}
+              <button className="rz-ctx-danger" onClick={() => { removeObject(el); closeMenu(); }}>
+                Remove — this floor covers the whole footprint again
+              </button>
+            </Menu>
+          );
+        }
+
+        // Rooms and every placed element (stairs, decks, pads, tanks, coops…).
         // Floors on offer: existing ones, one new floor above (up to 3), and
         // the basement when there is one — never the floor it's already on.
-        const floorChoices = room ? [
+        // Ground-bound things (foundations, earthworks, site work) stay put.
+        const canChangeFloor = room ? true : !['foundation', 'earthwork', 'site'].includes(el.category || '');
+        const floorChoices = canChangeFloor ? [
           ...(hasBasement ? [BASEMENT_LEVEL] : []),
           ...Array.from({ length: Math.min(3, floors + 1) }, (_, i) => i + 1)
         ].filter((f) => f !== level) : [];
-        const style = {
-          left: Math.min(ctxMenu.x, window.innerWidth - 230),
-          top: Math.min(ctxMenu.y, window.innerHeight - (150 + floorChoices.length * 30))
-        };
-        const startRename = () => {
-          setCtxMenu(null);
-          setTimeout(() => { const f = document.querySelector('.rz-card-name'); f?.focus(); f?.select(); }, 60);
-        };
         return (
-          <div className="rz-ctx" style={style} onPointerDown={(e) => e.stopPropagation()}>
-            <div className="rz-ctx-title">{obj.name}</div>
+          <Menu title={obj.name} h={190 + floorChoices.length * 30}>
             <button onClick={startRename}>Rename…</button>
-            {room && <button onClick={() => { duplicateRoom(room); setCtxMenu(null); }}>Duplicate</button>}
+            <button onClick={() => { if (room) duplicateRoom(room); else duplicateElement(el); closeMenu(); }}>Duplicate</button>
             {floorChoices.map((f) => (
-              <button key={f} onClick={() => { moveRoomToFloor(room, f); setCtxMenu(null); }}>
+              <button key={f} onClick={() => { moveRoomToFloor(obj, f); closeMenu(); }}>
                 Move to {floorLabel(spec, f).toLowerCase().replace(' floor', '')}{f > floors ? ' (new floor)' : ''}
               </button>
             ))}
-            <button className="rz-ctx-danger" onClick={() => { removeObject(obj); setCtxMenu(null); }}>
+            <button onClick={closeMenu}>Move &amp; size… (the card)</button>
+            <button className="rz-ctx-danger" onClick={() => { removeObject(obj); closeMenu(); }}>
               Remove {room ? 'room' : 'it'}
             </button>
-          </div>
+          </Menu>
         );
       })()}
 
@@ -2073,10 +2351,19 @@ function StoreysControl({ spec, floors, onAddFloor, onRemoveFloor, onResizeFloor
 // roof. Openings carry the floor picked in the Floor selector — a 2nd-floor
 // window goes in the upper wall, and a dormer opens the roof to meet it.
 const DORMER_STYLES = [['gable', 'Gable dormer', 'peaked doghouse'], ['shed', 'Shed dormer', 'single slope']];
-function OpeningsControls({ spec, selectedId, level = 1, wall = 'south', onWall, onAdd, onAddDormer, onRemove, onSize, onSetField, onSelect, onContext = null }) {
+function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAddDormer }) {
   const openings = spec.openings || [];
   const onThisFloor = (o) => o.wall === 'roof' ? level === 1 : Number(o.level || 1) === level;
   const floorWord = level === 1 ? 'ground floor' : floorLabel(spec, level).toLowerCase();
+  // One line instead of a list: how many live here, split the way Daniel
+  // thinks of them. Editing happens by TAPPING one (Wall view, plan or the
+  // 3D house) — its card opens with every number.
+  const here = openings.filter(onThisFloor);
+  const tally = [
+    ['window', here.filter((o) => { const p = OPENING_TYPES[o.type] || OPENING_TYPES.window; return !p.entry && !p.roof; }).length],
+    ['door', here.filter((o) => (OPENING_TYPES[o.type] || OPENING_TYPES.window).entry).length],
+    ['skylight', here.filter((o) => (OPENING_TYPES[o.type] || OPENING_TYPES.window).roof).length]
+  ].filter(([, n]) => n > 0).map(([word, n]) => `${n} ${word}${n === 1 ? '' : 's'}`).join(' · ');
   return (
     <div className="rz-found">
       {level > 1 && <div className="rz-shape-note" style={{ marginBottom: 6 }}>Placing on the <b>{floorWord}</b> — switch floors with the Floor selector (top left). A window here goes in the upper wall; if the roof covers that wall it opens a dormer to meet it.</div>}
@@ -2129,61 +2416,10 @@ function OpeningsControls({ spec, selectedId, level = 1, wall = 'south', onWall,
           )}
         </select>
       </label>
-      {openings.some(onThisFloor) && (
-        <div className="rz-open-list">
-          <div className="rz-found-head">On the {floorWord}</div>
-          {openings.map((o, i) => ({ o, i })).filter(({ o }) => onThisFloor(o)).map(({ o, i }) => {
-            const prof = OPENING_TYPES[o.type] || OPENING_TYPES.window;
-            const sel = String(selectedId || '') === `opening-${i}`;
-            const isUpperWall = o.wall !== 'roof' && Number(o.level || 1) > 1;
-            return (
-              <div key={i}>
-                <div className={`rz-run-row${sel ? ' on' : ''}`}>
-                  <button
-                    type="button" className="rz-run-name" onClick={() => onSelect(sel ? -1 : i)}
-                    onContextMenu={(e) => { if (!onContext) return; e.preventDefault(); onContext(i, e.clientX, e.clientY); }}
-                  >
-                    {o.label || prof.label} <small>{o.wall}</small>
-                  </button>
-                  <label className="rz-field rz-field-num rz-run-size">
-                    <NumInput value={Math.round((Number(o.widthFt) || prof.defaultW) * 10) / 10} min={1} max={24} step={0.5} unit="" onCommit={(v) => onSize(i, v)} />
-                  </label>
-                  <button type="button" className="rz-remove" title="Remove this opening" onClick={() => onRemove(i)}>✕</button>
-                </div>
-                {sel && o.wall !== 'roof' && (
-                  <div className="rz-open-detail">
-                    <label className="rz-field rz-field-num">
-                      <span>Bottom edge above the floor (sill)</span>
-                      <NumInput value={Math.round((Number.isFinite(Number(o.sillFt)) ? Number(o.sillFt) : prof.sill) * 10) / 10} min={0} max={20} step={0.5} unit="ft" onCommit={(v) => onSetField(i, 'sillFt', v)} />
-                    </label>
-                    <label className="rz-field rz-field-num">
-                      <span>Shade eyebrow (overhang)</span>
-                      <NumInput value={Number(o.shadeFt) || 0} min={0} max={6} step={0.5} unit="ft" onCommit={(v) => onSetField(i, 'shadeFt', v)} />
-                    </label>
-                    {isUpperWall && (
-                      <label className="rz-field">
-                        <span>Dormer</span>
-                        <select value={o.dormerStyle || ''} onChange={(e) => onSetField(i, 'dormerStyle', e.target.value)}>
-                          <option value="">Auto — only if the roof buries it</option>
-                          <option value="gable">Gable dormer (peaked)</option>
-                          <option value="shed">Shed dormer (single slope)</option>
-                        </select>
-                      </label>
-                    )}
-                    {(o.type === 'tilted' || Number(o.tiltDeg) > 0) && (
-                      <label className="rz-field rz-field-num">
-                        <span>Glass tilt</span>
-                        <NumInput value={Number(o.tiltDeg) || 25} min={5} max={60} step={5} unit="°" onCommit={(v) => onSetField(i, 'tiltDeg', v)} />
-                      </label>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+      {tally && (
+        <div className="rz-shape-note">{tally} on the {floorWord} — tap one on the Wall view (or the 3D house) to edit it.</div>
       )}
-      <div className="rz-shape-note">The Wall view shows this wall face-on: drag a door or window to slide it along or lift it up and down; drag its side handles to widen it. Tap one here for its numbers.</div>
+      <div className="rz-shape-note">The Wall view shows this wall face-on: drag a door or window to slide it along or lift it up and down; drag its side handles to widen it. Tap one and its card opens with every number — rename, resize, duplicate or remove it there. Press Delete to remove the one you’ve picked; right-click for more.</div>
     </div>
   );
 }

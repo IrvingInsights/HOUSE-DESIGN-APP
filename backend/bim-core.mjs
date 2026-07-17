@@ -1381,20 +1381,23 @@ export const parseWxD = (value) => {
   return m ? { w: Number(m[1]), d: Number(m[2]) } : null;
 };
 
-// The FLOOR-TO-FLOOR height of one storey. The ground storey's height is the
-// LOW wall on a shed (the plate rides the general ceiling, not the tall south
-// face). Each upper storey can carry its OWN height — shell.storeyHeights[lv]
-// wins, else the shared shell.upperStoreyHeightFt, else the ground base. So a
-// 10' ground floor under a 9' second and an 8' third is one design.
+// The FLOOR-TO-FLOOR height of one storey. The ground storey is the WALL
+// height (shell.wallHeightFt — on a shed that's the high/standing wall):
+// shed low eaves and kneewalls shape the ROOFLINE, never where the 2nd
+// floor starts. A 2' greenhouse kneewall on a 10' house keeps floor 2 at
+// 10'. An explicit ground pin (shell.storeyHeights[1], the Floors H box)
+// beats the wall height. Each upper storey can carry its OWN height —
+// shell.storeyHeights[lv] wins, else the shared shell.upperStoreyHeightFt,
+// else the ground base. So a 10' ground floor under a 9' second and an 8'
+// third is one design.
 export function storeyHeightFt(shell, lvl) {
   const level = Number(lvl) || 1;
-  const south = Number(shell?.southWallHeightFt || shell?.wallHeightFt || 10);
-  const north = Number(shell?.northWallHeightFt || shell?.wallHeightFt || 10);
-  const east = Number(shell?.eastWallHeightFt || shell?.wallHeightFt || 10);
-  const west = Number(shell?.westWallHeightFt || shell?.wallHeightFt || 10);
-  const base = Math.max(6, Math.min(south, north, east, west, Number(shell?.wallHeightFt || 10)));
-  if (level <= 1) return base;
+  const base = Math.max(6, Number(shell?.wallHeightFt || 10));
   const per = shell?.storeyHeights || {};
+  if (level <= 1) {
+    const pin = Number(per[1] ?? per['1']);
+    return Number.isFinite(pin) && pin > 0 ? Math.min(16, Math.max(6, pin)) : base;
+  }
   const raw = per[level] ?? per[String(level)] ?? shell?.upperStoreyHeightFt ?? base;
   const h = Number(raw);
   return Math.min(16, Math.max(3, Number.isFinite(h) && h > 0 ? h : base));
@@ -1473,6 +1476,10 @@ export function applyBimOperations(currentSpec, plan) {
           next.shell.northWallHeightFt = h;
           delete next.shell.eastWallHeightFt;
           delete next.shell.westWallHeightFt;
+          if (next.shell.storeyHeights) {
+            delete next.shell.storeyHeights[1];
+            if (Object.keys(next.shell.storeyHeights).length === 0) delete next.shell.storeyHeights;
+          }
         }
         actions.push(`Set shell to ${next.shell.widthFt}' x ${next.shell.depthFt}'.`);
         continue;
@@ -1495,6 +1502,7 @@ export function applyBimOperations(currentSpec, plan) {
       else if (field === 'wallHeightFt') {
         // Global wall height = "one height for all": reset the S/N mirrors and
         // clear any per-side height overrides so every wall follows it again.
+        // The ground-floor pin clears too — the 2nd floor rides the walls.
         const h = clamp(numeric, 7, 40);
         next.shell.wallHeightFt = h;
         next.shell.southWallHeightFt = h;
@@ -1503,6 +1511,10 @@ export function applyBimOperations(currentSpec, plan) {
         delete next.shell.westWallHeightFt;
         for (const side of WALL_SIDES) {
           if (next.walls[side]) delete next.walls[side].heightFt;
+        }
+        if (next.shell.storeyHeights) {
+          delete next.shell.storeyHeights[1];
+          if (Object.keys(next.shell.storeyHeights).length === 0) delete next.shell.storeyHeights;
         }
       }
       else if (field === 'padExtensionFt') next.shell.padExtensionFt = clamp(numeric, 0, 240);
@@ -1917,11 +1929,41 @@ export function applyBimOperations(currentSpec, plan) {
     }
 
     if (operation.type === 'set_storey_height') {
-      // One upper storey's own floor-to-floor height (level 2+). Level 1 is the
-      // wall height (set_shell wallHeightFt). Clearing it falls back to the
-      // shared upperStoreyHeightFt / the ground height.
-      const lvl = Math.max(2, Math.min(3, Math.round(Number(operation.level) || 2)));
+      // One storey's own floor-to-floor height. Level 1 on a level-walled
+      // house IS the wall height (walls follow the number); on a shed-shaped
+      // house the walls keep their profile and the ground storey gets an
+      // explicit pin instead, so the roofline and the floor stack stay
+      // independent. Clearing an upper level falls back to the shared
+      // upperStoreyHeightFt / the ground height.
+      const lvl = Math.max(1, Math.min(3, Math.round(Number(operation.level) || 2)));
       const v = Number(operation.value);
+      if (lvl === 1) {
+        const flat = roofProfile(next.shell).riseFt < 0.05;
+        if (Number.isFinite(v) && v > 0 && flat) {
+          // Level walls: ground height IS the wall height — move the walls.
+          const h = clamp(v, 7, 40);
+          next.shell.wallHeightFt = h;
+          next.shell.southWallHeightFt = h;
+          next.shell.northWallHeightFt = h;
+          delete next.shell.eastWallHeightFt;
+          delete next.shell.westWallHeightFt;
+          if (next.shell.storeyHeights) {
+            delete next.shell.storeyHeights[1];
+            if (Object.keys(next.shell.storeyHeights).length === 0) delete next.shell.storeyHeights;
+          }
+          actions.push(`Set the ground-floor height to ${h}'.`);
+        } else {
+          // Shed-shaped walls stay put; pin where the 2nd floor starts.
+          next.shell.storeyHeights = { ...(next.shell.storeyHeights || {}) };
+          if (Number.isFinite(v) && v > 0) next.shell.storeyHeights[1] = clamp(v, 6, 16);
+          else delete next.shell.storeyHeights[1];
+          if (Object.keys(next.shell.storeyHeights).length === 0) delete next.shell.storeyHeights;
+          actions.push(Number.isFinite(v) && v > 0
+            ? `Set the ground-floor height to ${clamp(v, 6, 16)}' — the walls keep their shape.`
+            : 'Ground-floor height follows the wall height again.');
+        }
+        continue;
+      }
       next.shell.storeyHeights = { ...(next.shell.storeyHeights || {}) };
       if (Number.isFinite(v) && v > 0) next.shell.storeyHeights[lvl] = clamp(v, 3, 16);
       else delete next.shell.storeyHeights[lvl];
@@ -2248,6 +2290,14 @@ export function applyBimOperations(currentSpec, plan) {
         if (longAxis === 'w') { element.d = Number(operation.d) > 0 && Number(operation.d) <= 2 ? Number(operation.d) : thick; }
         else { element.w = Number(operation.w) > 0 && Number(operation.w) <= 2 ? Number(operation.w) : thick; }
         if (!Number(operation.h)) element.h = Math.max(7, Number(next.shell.wallHeightFt || 10) - 0.5);
+      }
+      if (element.category === 'deck') {
+        // deck options ride the add op (the Patio button, planner asks like
+        // "a covered composite deck") — resolveDeck validates the values
+        if (operation.deckSurface) element.deckSurface = operation.deckSurface;
+        if (operation.deckPlacement) element.deckPlacement = operation.deckPlacement;
+        if (operation.deckRail) element.deckRail = operation.deckRail;
+        if (operation.deckRoof) element.deckRoof = operation.deckRoof;
       }
       const placed = { ...element, ...clampObjectPosition(next, element, element.x, element.y) };
       // ONE extent plate per level, enforced at the op layer: a second

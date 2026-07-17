@@ -7,7 +7,7 @@
 // (or vice versa), this fails and names the line.
 
 import {
-  seedSpec, getWallSections, deriveDesign, convertSpecApproach
+  seedSpec, getWallSections, deriveDesign, convertSpecApproach, resolveDeck
 } from '../src/engine.js';
 
 const fixtures = () => {
@@ -38,6 +38,17 @@ const fixtures = () => {
   // a shed roof with full drainage: gutters all around + a cistern
   const drained = structuredClone(seedSpec);
   drained.shell = { ...drained.shell, roofType: 'shed', southWallHeightFt: 12, northWallHeightFt: 8, gutters: 'all', discharge: 'cistern' };
+  // decks with every option in play, on a stem-wall house (raised floor →
+  // auto steps): a wood deck against the south wall, a covered cable-railed
+  // deck snapped to its east edge (wraparound — the shared edge prices no
+  // railing), and a stone patio at grade away from the house.
+  const decked = structuredClone(seedSpec);
+  decked.utilities = { ...(decked.utilities || {}), foundationType: 'stemwall' };
+  decked.elements = [
+    { id: 'dk1', name: 'Deck', category: 'deck', x: 8, y: 28.5, w: 12, d: 8, h: 0.35, level: 1 },
+    { id: 'dk2', name: 'Covered deck', category: 'deck', x: 20.2, y: 28.5, w: 10, d: 8, h: 0.35, level: 1, deckRail: 'cable', deckRoof: 'shed' },
+    { id: 'pt1', name: 'Patio', category: 'deck', x: -18, y: 2, w: 12, d: 10, h: 0.25, level: 1, deckSurface: 'stone' }
+  ];
   return {
     seed: structuredClone(seedSpec),
     standard: convertSpecApproach(structuredClone(seedSpec), 'standard'),
@@ -46,7 +57,8 @@ const fixtures = () => {
     padSlab,
     padExtra,
     padOutsideOnSlab,
-    drained
+    drained,
+    decked
   };
 };
 
@@ -109,6 +121,46 @@ for (const [name, spec] of Object.entries(fixtures())) {
   const perim = 2 * (Number(f.drained.shell.widthFt) + Number(f.drained.shell.depthFt));
   const gutterLine = d.receipts.systems.roof.find((l) => l.label === 'Gutters');
   ok(Math.abs(gutterLine.amount - perim * 8) < 0.5, `drained: gutters = ${perim} ft × $8 (got ${Math.round(gutterLine.amount)})`);
+}
+
+// Deck options — the receipts itemize what the 3D scene draws, from the same
+// resolveDeck answer. Wraparound = the shared edge (and the house edge)
+// prices NO railing; a stem-wall house lifts the deck floor → auto steps;
+// a stone patio sits at grade with no railing and no steps.
+{
+  const f = fixtures();
+  const spec = f.decked;
+  const d = deriveDesign(spec, getWallSections(spec));
+  const out = d.receipts.systems.outdoors;
+  const find = (re) => out.find((l) => re.test(l.label));
+  ok(Boolean(find(/^Deck — wood boards/)), 'decked: a wood-boards deck line exists');
+  const wood = find(/^Deck — wood boards/);
+  ok(Math.abs(wood.qty - (96 + 80)) < 0.5, `decked: both raised decks price as one 176 sf wood line (got ${wood?.qty})`);
+  ok(Boolean(find(/^Patio — stone/)), 'decked: the stone patio prices as a patio line');
+  ok(Math.abs(find(/^Patio — stone/).qty - 120) < 0.5, 'decked: patio = 120 sf at grade');
+  ok(Boolean(find(/^Deck roof — shed/)), 'decked: the covered deck prices its shed roof');
+  ok(Math.abs(find(/^Deck roof — shed/).qty - 80) < 0.5, 'decked: 80 sf covered');
+  ok(Boolean(find(/^Deck steps/)), 'decked: stem-wall house → the raised decks price steps down');
+  ok(find(/^Deck steps/).qty === 2, 'decked: two raised decks, two stairs (the patio needs none)');
+  // railing: dk1 keeps south (12) + west (8) = 20 lf of wood — its north edge
+  // faces the house and its east edge faces dk2 (the wraparound join)
+  const woodRail = find(/^Deck railing — wood/);
+  ok(Boolean(woodRail) && Math.abs(woodRail.qty - 20) < 1.2, `decked: wood railing only on the open edges, ~20 lf (got ${woodRail?.qty})`);
+  // dk2 keeps south (10) + east (8) = 18 lf of cable
+  const cableRail = find(/^Deck railing — steel/);
+  ok(Boolean(cableRail) && Math.abs(cableRail.qty - 18) < 1.2, `decked: cable railing ~18 lf on the covered deck (got ${cableRail?.qty})`);
+  // resolveDeck invariants the scene relies on
+  const rPatio = resolveDeck(spec, spec.elements[2]);
+  ok(rPatio.placement === 'grade' && rPatio.railKey === 'none' && !rPatio.needsSteps, 'decked: stone forces at-grade — no railing, no steps');
+  const rDeck = resolveDeck(spec, spec.elements[0]);
+  ok(rDeck.topFt > 1.5 && rDeck.needsSteps, 'decked: stem wall lifts the deck floor past 1.5 ft → steps');
+  ok((rDeck.openSides.north || []).length === 0, 'decked: the house-facing edge stays open for the doorway (no rail segments)');
+  ok((rDeck.openSides.east || []).length === 0, 'decked: the edge shared with the neighboring deck is a join, not a railing');
+  // and with the neighbor gone, that east edge rails again (the join is LIVE)
+  const alone = structuredClone(spec);
+  alone.elements = alone.elements.filter((e) => e.id !== 'dk2');
+  const rAlone = resolveDeck(alone, alone.elements[0]);
+  ok((rAlone.openSides.east || []).length === 1, 'decked: remove the neighbor and the shared edge grows its railing back');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
