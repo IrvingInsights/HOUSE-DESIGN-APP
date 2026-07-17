@@ -49,7 +49,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 86 · Jul 17';
+const UPDATE_STAMP = 'update 87 · Jul 17';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -2393,9 +2393,19 @@ function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOver
               <option value="south">Falls south — high north wall</option>
             </select>
           </label>
+          {/* pitch and fall are the same slope said two ways — builders use
+              both. Either commits through setShedFall (high eave stays put). */}
+          <label className="rz-field rz-field-num">
+            <span>Steepness (pitch)</span>
+            <NumInput
+              value={Math.round(((fallNow / Math.max(1, Number(spec.shell.depthFt) || 24)) * 12) * 10) / 10}
+              min={0.25} max={8} step={0.25} unit=":12"
+              onCommit={(v) => onShedFall(drainsNow || 'north', clamp((v / 12) * (Number(spec.shell.depthFt) || 24), 0.5, 24))}
+            />
+          </label>
           <label className="rz-field rz-field-num">
             <span>Fall, high eave to low</span>
-            <NumInput value={fallNow} min={0.5} max={12} step={0.5} onCommit={(v) => onShedFall(drainsNow || 'north', v)} />
+            <NumInput value={fallNow} min={0.5} max={24} step={0.5} onCommit={(v) => onShedFall(drainsNow || 'north', v)} />
           </label>
         </>
       ) : roofType !== 'flat' && (
