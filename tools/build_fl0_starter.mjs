@@ -39,15 +39,21 @@ addRoom('passage', 'Open Passage', 'living', 9, 12, 5, 9);
 addRoom('pantry', 'Pantry / Storage', 'storage', 14, 10, 10, 8);
 addRoom('kitchen', 'Kitchen', 'service', 14, 18, 10, 10);
 addRoom('great', 'Great Room', 'living', 0, 21, 14, 7);
-// tower studio (level 2) over the east kitchen/pantry bay
-apply([{ type: 'set_shell', field: 'storeys', value: '2' }]);
-spec.rooms.push({ id: 'tower-studio', name: 'Tower Studio', type: 'living', x: 14, y: 0, w: 10, d: 8, level: 2 });
-// its extent plate = the tower footprint; tower storey ~9.8 ft to hit 19.8/21
+// THREE levels (Daniel): ground -> LOFT 2nd floor -> TOWER 3rd floor SE.
+// The loft's ceiling rises 3 ft above the 17 ft south eave ("for a loft
+// ceiling height of 10 ft, it will rise only 3 ft above the S wall"); the
+// tower rises from that point over the SE corner.
+apply([{ type: 'set_shell', field: 'storeys', value: '3' }]);
 spec.elements = (spec.elements || []).filter((e) => e.category !== 'floor');
-spec.elements.push({ id: 'storey-2-extent', name: 'Tower extent', category: 'floor', level: 2, x: 14, y: 0, w: 10, d: 8, h: 0.4, z: 10 });
-// NE corner (Daniel's revision): the main roof is LOW there (10-12 ft), so a
-// 9 ft tower storey lands its roof at ~19-21 — the drawn EL 19'-9" / 21'-0".
-apply([{ type: 'set_storey_height', level: 2, value: 9 }]);
+// loft over the south half (headroom side of the shed)
+spec.elements.push({ id: 'storey-2-extent', name: 'Loft extent', category: 'floor', level: 2, x: 0, y: 14, w: 24, d: 14, h: 0.4, z: 10 });
+spec.rooms.push({ id: 'loft', name: 'Loft', type: 'living', x: 0, y: 14, w: 24, d: 14, level: 2 });
+// tower over the SE corner, nested inside the loft's extent
+spec.elements.push({ id: 'storey-3-extent', name: 'Tower extent', category: 'floor', level: 3, x: 14, y: 20, w: 10, d: 8, h: 0.4, z: 13 });
+spec.rooms.push({ id: 'tower-studio', name: 'Tower Studio', type: 'living', x: 14, y: 20, w: 10, d: 8, level: 3 });
+// loft band = +3 ft above the eave line; tower storey 9 ft above that
+apply([{ type: 'set_storey_height', level: 2, value: 3 }]);
+apply([{ type: 'set_storey_height', level: 3, value: 9 }]);
 
 // greenhouse band along the south, OUTSIDE the envelope (A-101/A-301)
 spec.rooms.push({ id: 'greenhouse', name: 'Greenhouse (isolated sunspace)', type: 'plant', x: 0, y: 28, w: 18, d: 8, level: 1 });
@@ -55,7 +61,10 @@ spec.rooms.push({ id: 'greenhouse', name: 'Greenhouse (isolated sunspace)', type
 // stairs rise from the open passage (A-101 stair/tower)
 apply([{ type: 'add_element', name: 'Stairs', category: 'structure', x: 10, y: 12.5, w: 3.5, d: 8, h: 8, level: 1 }]);
 // compact stove/mass at the kitchen-great-room hinge
-apply([{ type: 'add_element', name: 'Compact stove / mass', category: 'thermal', x: 12.5, y: 19, w: 2, d: 2, h: 5, level: 1 }]);
+apply([{ type: 'add_element', name: 'Compact stove / mass', category: 'thermal', x: 14.5, y: 20.5, w: 2, d: 2, h: 5, level: 1 }]);
+// the heater STACK: one chimney rising from the stove, through the tower,
+// out its roof (tower roof tops ~29 - the stack clears it)
+apply([{ type: 'add_element', name: 'Heater stack', category: 'chimney', x: 15.1, y: 21.1, w: 1.2, d: 1.2, h: 30, level: 1 }]);
 // covered outdoor kitchen / work edge east (pad; its roof is future work)
 apply([{ type: 'add_element', name: 'Covered outdoor kitchen (pad)', category: 'foundation', construction: 'slabpad', x: 24, y: 10, w: 8, d: 18, h: 0.6 }]);
 
