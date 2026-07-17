@@ -436,39 +436,213 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // full-height elements stop here instead of stabbing through the roof.
       // Exact for shed/flat (incl. the stepped plate), long-axis-ridge
       // approximation for gable/hip.
+      // ══════════════ THE ROOF PLAN — the ONE authority ══════════════
+      // Every roof surface is computed HERE, ONCE, as an exact plane function
+      // per piece — and then everything downstream consumes it: the roof
+      // MESHES are built from these same functions, the WALLS are vertex-
+      // capped against it (every roof type now, not just shed/flat), the
+      // FRAME samples it so members ride their roof by construction, and the
+      // seam audit judges against it. Three hand-synced copies of "where is
+      // the roof" (mesh math / roofUnderAt approximations / frame plane math)
+      // were the root cause of every pierced-roof bug — this kills the class.
+      const roundFp = isRoundFootprint(spec);
+      const customFp = hasCustomFootprint(spec) && !roundFp;
+      const segFp = hasSegmentedFootprint(spec);
+      const fpPoly = customFp ? footprintPolygon(spec) : null;
+      const fpEdges = segFp ? footprintEdges(spec) : null;
+      const ringIsPorch = (lv) => {
+        const elP = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === lv);
+        return elP?.topTreatment === 'porch';
+      };
+      const oAll = resolveOverhangs(spec.shell);
+      const pitchNow = Number(spec.shell.roofPitch || 0.32);
+      const fullRect = { x: 0, y: 0, w: width, d: depth };
+      const roofPlan = (() => {
+        const pieces = [];
+        const porchRings = []; // open decks — NO roof over them
+        if (roundFp) return { pieces, porchRings, legacy: false }; // cone keeps its own law (round v1)
+        // Storey extents bottom→top — identical numbers to the walls/plates.
+        const storeyTiers = [];
+        for (let lv = 1; lv <= Math.max(1, Math.ceil(storeys)); lv += 1) {
+          const plate = lv === 1 ? fullRect : (upperPlateRect(spec, lv) || fullRect);
+          const topY = lv === 1 ? roofSpec.highWallHeightFt : elev2 + upThru(lv);
+          if (lv === 1 || heightAt(lv) > 0) storeyTiers.push({ rect: plate, topEave: topY, level: lv });
+        }
+        const rectHas = (r, px, py) => px > r.x + 0.01 && px < r.x + r.w - 0.01 && py > r.y + 0.01 && py < r.y + r.d - 0.01;
+        const coveredAbove = (px, py, lv) => storeyTiers.some((t) => t.level > lv && rectHas(t.rect, px, py));
+        const steps = storeyLift > 0 && storeyTiers.some((t, i) => i > 0 && t.rect.w * t.rect.d < storeyTiers[i - 1].rect.w * storeyTiers[i - 1].rect.d - 1);
+        const insideFp = (px, py) => (customFp
+          ? pointInFootprint(fpPoly, px, py)
+          : px > 0.01 && px < width - 0.01 && py > 0.01 && py < depth - 0.01);
+        const segOverhangs = (rect, isUpper, segLevel) => {
+          const probe = 0.4;
+          const probes = {
+            north: [rect.x + rect.w / 2, rect.y - probe],
+            south: [rect.x + rect.w / 2, rect.y + rect.d + probe],
+            west: [rect.x - probe, rect.y + rect.d / 2],
+            east: [rect.x + rect.w + probe, rect.y + rect.d / 2]
+          };
+          const out = {};
+          for (const side of WALL_SIDES) {
+            const [px, py] = probes[side];
+            if (!isUpper && coveredAbove(px, py, segLevel)) out[side] = 0.35;
+            else if (insideFp(px, py)) out[side] = 0.05;
+            else out[side] = oAll[side];
+          }
+          return out;
+        };
+        const touchSide = (rect, above) => {
+          const overlapX = rect.x < above.x + above.w && rect.x + rect.w > above.x;
+          const overlapY = rect.y < above.y + above.d && rect.y + rect.d > above.y;
+          return Math.abs(rect.y + rect.d - above.y) < 0.05 && overlapX ? 'south'
+            : Math.abs(rect.y - (above.y + above.d)) < 0.05 && overlapX ? 'north'
+            : Math.abs(rect.x + rect.w - above.x) < 0.05 && overlapY ? 'east'
+            : Math.abs(rect.x - (above.x + above.w)) < 0.05 && overlapY ? 'west'
+            : (Math.abs((rect.x + rect.w / 2) - (above.x + above.w / 2)) > Math.abs((rect.y + rect.d / 2) - (above.y + above.d / 2))
+              ? ((rect.x + rect.w / 2) < (above.x + above.w / 2) ? 'east' : 'west')
+              : ((rect.y + rect.d / 2) < (above.y + above.d / 2) ? 'south' : 'north'));
+        };
+        // Raw segments, exactly as the mesh builder has always assembled them.
+        const segments = [];
+        const legacy = !customFp && !steps;
+        if (legacy) {
+          segments.push({ rect: fullRect, eave: wallHeight, kind: 'full', upper: true, level: storeyTiers.length, tierY0: 0, tierX0: 0, legacy: true });
+        } else if (steps) {
+          const top = storeyTiers[storeyTiers.length - 1];
+          segments.push({ rect: top.rect, eave: top.topEave, kind: 'full', upper: true, level: top.level, tierY0: top.rect.y, tierX0: top.rect.x });
+          for (let i = storeyTiers.length - 2; i >= 0; i -= 1) {
+            const below = storeyTiers[i];
+            const above = storeyTiers[i + 1];
+            if (below.rect.w * below.rect.d <= above.rect.w * above.rect.d + 1) continue;
+            const ring = (customFp && below.level === 1)
+              ? subtractRectFromFootprint(fpPoly, above.rect)
+              : subtractRect(below.rect, above.rect);
+            if (below.level >= 2 && ringIsPorch(below.level)) {
+              ring.forEach((rect) => porchRings.push({ rect, level: below.level, topEave: below.topEave, hostRect: below.rect }));
+              continue;
+            }
+            ring.forEach((rect) => segments.push({ rect, eave: below.topEave, aboveTop: above.topEave, kind: 'wing', highSide: touchSide(rect, above.rect), level: below.level, tierDrop: storeyLift - upThru(below.level), tierY0: below.rect.y, tierX0: below.rect.x }));
+          }
+        } else {
+          decomposeFootprint(fpPoly).forEach((rect) => segments.push({ rect, eave: wallHeight, kind: 'full', upper: true, level: storeyTiers.length }));
+        }
+        // The global shed plane + per-tier variants (same law the walls use).
+        const shedYAt = (xx, zz) => shedEaveAt(xx, zz) + storeyLift + JOINTS.ROOF_BEARING;
+        const shedPlaneFor = (seg) => {
+          const lvl = seg.level || 1;
+          if (!anySetback || lvl <= 1) return (xx, zz) => shedYAt(xx, zz) - (seg.tierDrop ?? storeyLift);
+          const topPlane = elev2 + upThru(lvl) + JOINTS.ROOF_BEARING;
+          const slopeT = tierPitchOf(lvl) ?? shedSlopePerFt;
+          const a0 = shedEW ? (seg.tierX0 ?? seg.rect.x) : (seg.tierY0 ?? seg.rect.y);
+          return (xx, zz) => topPlane + slopeT * Math.max(0, (shedEW ? xx : zz) - a0);
+        };
+        // Per-segment EXACT top-surface function + the wall-stop bearing —
+        // matching the mesh each kind builds, coordinate for coordinate.
+        segments.forEach((seg) => {
+          const o = segOverhangs(seg.rect, Boolean(seg.upper), seg.level || 1);
+          seg.o = o;
+          const X0 = seg.rect.x - o.west, X1 = seg.rect.x + seg.rect.w + o.east;
+          const Z0 = seg.rect.y - o.north, Z1 = seg.rect.y + seg.rect.d + o.south;
+          seg.covers = (px, pz) => px >= X0 - 0.01 && px <= X1 + 0.01 && pz >= Z0 - 0.01 && pz <= Z1 + 0.01;
+          const segPitch = (seg.level || 1) > 1 ? (tierPitchOf(seg.level) ?? pitchNow) : pitchNow;
+          if (seg.kind === 'wing' && roofSpec.roofType === 'shed') {
+            seg.topAt = shedPlaneFor(seg);
+            seg.stopBearing = JOINTS.ROOF_BEARING;
+          } else if (seg.kind === 'wing') {
+            // A pitched roof's WING is a lean-to: its OUTER eave sits ON the
+            // tier's wall top and it RISES toward the storey above, tucking
+            // under that storey's top. (The old law hung the HIGH edge at the
+            // wall top and let the outer edge plunge run×pitch BELOW the
+            // walls — the walls and frame then "pierced" a roof that had
+            // dived under them. That was the recurring stepped-roof bug.)
+            const low = seg.eave + JOINTS.EAVE_BEARING;
+            const run = (seg.highSide === 'north' || seg.highSide === 'south') ? (Z1 - Z0) : (X1 - X0);
+            const rise = Math.max(0.1, Math.min(run * segPitch,
+              Number.isFinite(seg.aboveTop) ? Math.max(0.5, seg.aboveTop - seg.eave - 0.5) : run * segPitch));
+            seg.topAt = (px, pz) => (
+              seg.highSide === 'north' ? low + ((Z1 - pz) / (Z1 - Z0)) * rise
+              : seg.highSide === 'south' ? low + ((pz - Z0) / (Z1 - Z0)) * rise
+              : seg.highSide === 'west' ? low + ((X1 - px) / (X1 - X0)) * rise
+              : low + ((px - X0) / (X1 - X0)) * rise);
+            seg.stopBearing = JOINTS.EAVE_BEARING;
+          } else if (roofSpec.roofType === 'shed') {
+            seg.topAt = (anySetback && (seg.level || 1) > 1) ? shedPlaneFor(seg) : shedYAt;
+            seg.stopBearing = JOINTS.ROOF_BEARING;
+          } else if (roofSpec.roofType === 'flat') {
+            const y = seg.legacy ? wallHeight + JOINTS.EAVE_BEARING : seg.eave + JOINTS.EAVE_BEARING;
+            seg.topAt = () => y;
+            seg.stopBearing = JOINTS.EAVE_BEARING;
+          } else if (roofSpec.roofType === 'hip') {
+            // makeRoof hip on the overhang-extended rect: four 45° faces at
+            // the pitch, ridge along the longer axis, capped at the ridge.
+            const eave = seg.eave;
+            const ridgeY = eave + Math.min(X1 - X0, Z1 - Z0) / 2 * segPitch;
+            seg.topAt = (px, pz) => Math.min(ridgeY, eave + segPitch * Math.max(0, Math.min(px - X0, X1 - px, pz - Z0, Z1 - pz)));
+            seg.stopBearing = 0; // hip corners sit AT the eave height
+            seg.ridge = { y: ridgeY, eave };
+          } else if (seg.legacy) {
+            // THE LEGACY GABLE (single rectangle): makeRoof extrudes the
+            // profile along z — ridge runs north–south at x = width/2, apex
+            // at eave + depth·pitch, the two slopes falling east and west to
+            // eave + EAVE_BEARING at the overhang tips. Modeled EXACTLY.
+            const base = wallHeight + JOINTS.EAVE_BEARING;
+            const apex = wallHeight + depth * segPitch; // = makeRoof's extrusion profile, exactly
+            const cx = width / 2;
+            seg.topAt = (px) => (px <= cx
+              ? base + (apex - base) * Math.max(0, (px - X0) / Math.max(0.01, cx - X0))
+              : base + (apex - base) * Math.max(0, (X1 - px) / Math.max(0.01, X1 - cx)));
+            seg.stopBearing = JOINTS.EAVE_BEARING;
+            seg.ridge = { axis: 'z', at: cx, y: apex, base };
+          } else {
+            // makeGableSegment: ridge along the segment's LONGER axis (incl.
+            // overhangs), base at eave+EAVE_BEARING, gable ends vertical.
+            const base = seg.eave + JOINTS.EAVE_BEARING;
+            const spanX = X1 - X0, spanZ = Z1 - Z0;
+            const alongX = spanX >= spanZ;
+            const ridgeY = base + (Math.min(spanX, spanZ) / 2) * segPitch;
+            if (alongX) {
+              const cz = (Z0 + Z1) / 2;
+              seg.topAt = (px, pz) => base + (ridgeY - base) * Math.max(0, 1 - Math.abs(pz - cz) / Math.max(0.01, spanZ / 2));
+              seg.ridge = { axis: 'x', at: cz, y: ridgeY, base };
+            } else {
+              const cxs = (X0 + X1) / 2;
+              seg.topAt = (px) => base + (ridgeY - base) * Math.max(0, 1 - Math.abs(px - cxs) / Math.max(0.01, spanX / 2));
+              seg.ridge = { axis: 'z', at: cxs, y: ridgeY, base };
+            }
+            seg.stopBearing = JOINTS.EAVE_BEARING;
+          }
+          pieces.push(seg);
+        });
+        return { pieces, porchRings, legacy };
+      })();
+      // The roof underside law at a plan point: the TOPMOST covering piece's
+      // surface minus its bearing. +Infinity under open sky (a porch ring has
+      // no roof to hit); walls/frames/partitions are all judged against THIS.
+      const roofStopAt = (px, pz) => {
+        let best = -Infinity;
+        for (const p of roofPlan.pieces) {
+          if (p.covers(px, pz)) best = Math.max(best, p.topAt(px, pz) - p.stopBearing);
+        }
+        return best === -Infinity ? Infinity : best;
+      };
+      const roofTopAtPt = (px, pz) => {
+        let best = -Infinity;
+        for (const p of roofPlan.pieces) {
+          if (p.covers(px, pz)) best = Math.max(best, p.topAt(px, pz));
+        }
+        return best; // -Infinity under open sky
+      };
+      // Debug/test window: probe the plan the way the audit does.
+      window.__nbRoofPlan = {
+        topAt: (px, pz) => roofTopAtPt(px, pz),
+        stopAt: (px, pz) => roofStopAt(px, pz),
+        pieces: () => roofPlan.pieces.map((p) => ({ kind: p.kind, legacy: !!p.legacy, level: p.level, rect: p.rect, o: p.o }))
+      };
       const roofUnderAt = (px, pz) => {
-        // TIER-AWARE: the roof over a plan point is the roof of the TOPMOST
-        // storey standing there, at the ENGINE's floor elevations — the same
-        // numbers the walls, floor plates, and roof tiers use. (The old form
-        // summed storey heights onto the ground plane, which put a shed
-        // tower's roof 7′ high wherever the ground wall was the tall side.)
-        let topLv = 1; let topRect = null; let lift = 0;
-        for (let lv = 2; lv <= Math.ceil(storeys); lv += 1) {
-          const hLv = heightAt(lv);
-          if (hLv <= 0) continue;
-          const pR = upperPlateRect(spec, lv);
-          if (!pR || (px >= pR.x && px <= pR.x + pR.w && pz >= pR.y && pz <= pR.y + pR.d)) { topLv = lv; topRect = pR || { x: 0, y: 0, w: width, d: depth }; lift += hLv; }
-        }
-        if (topLv === 1 || !anySetback) {
-          // classic stacked plane (also the whole-footprint multi-storey model)
-          if (roofSpec.roofType === 'shed') return shedEaveAt(px, pz) + lift;
-          if (roofSpec.roofType === 'flat') return roofSpec.highWallHeightFt + lift + 0.2;
-          const alongX = width >= depth;
-          const distEdge = Math.max(0, alongX ? Math.min(pz, depth - pz) : Math.min(px, width - px));
-          return roofSpec.highWallHeightFt + lift + distEdge * (Number(spec.shell.roofPitch) || 0.32);
-        }
-        const tierTop = elev2 + upThru(topLv); // top of that storey's walls
-        if (roofSpec.roofType === 'shed') {
-          // the tier's shed piece anchors its x=0/z=0 edge at the tier top
-          // and follows the SIGNED slope along the fall axis — matching the
-          // mesh shedPlaneFor builds
-          const slopeT = tierPitchOf(topLv) ?? shedSlopePerFt;
-          const along = shedEW ? Math.max(0, px - topRect.x) : Math.max(0, pz - topRect.y);
-          return tierTop + slopeT * along;
-        }
-        if (roofSpec.roofType === 'flat') return tierTop + 0.2;
-        const distEdgeT = Math.max(0, Math.min(pz - topRect.y, topRect.y + topRect.d - pz, px - topRect.x, topRect.x + topRect.w - px));
-        return tierTop + distEdgeT * (tierPitchOf(topLv) ?? (Number(spec.shell.roofPitch) || 0.32));
+        const v = roofStopAt(px, pz);
+        if (Number.isFinite(v)) return v;
+        // open sky / round house: generous fallback so nothing clamps wrongly
+        return roofSpec.highWallHeightFt + storeyLift + 40;
       };
 
       const slabMat = new THREE.MeshStandardMaterial({ color: 0xc0b49b, roughness: 0.92, map: grainTexture('earth'), bumpMap: bumpTexture('earth'), bumpScale: 0.2 });
@@ -644,14 +818,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // over only one side of the building. No plate = the full footprint.
       const plate2 = upperPlateRect(spec, 2) || { x: 0, y: 0, w: width, d: depth };
       const wallMeshSpecs = [];
-      const roundFp = isRoundFootprint(spec);
-      const customFp = hasCustomFootprint(spec) && !roundFp;
-      // Walls branch on the SEGMENTED check (a just-split rectangle already
-      // has separate wall runs); roofs/rings/frames keep customFp — a
-      // rectangle-shaped outline uses the verbatim legacy shape math.
-      const segFp = hasSegmentedFootprint(spec);
-      const fpPoly = customFp ? footprintPolygon(spec) : null;
-      const fpEdges = segFp ? footprintEdges(spec) : null;
+      // (roundFp / customFp / segFp / fpPoly / fpEdges now live with the roof
+      // plan above — the walls branch on the same flags the roof law uses.)
       // Openings cut REAL holes: each wall run is built as pieces around its
       // openings (full-height stretches between them, a band under each sill,
       // a header above). Gap positions are collected per wall side — or per
@@ -740,10 +908,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         }
         return false;
       };
-      const ringIsPorch = (lv) => {
-        const elP = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === lv);
-        return elP?.topTreatment === 'porch';
-      };
+      // (ringIsPorch is defined with the roof plan above.)
       const pushSideBoxes = (side, totalH, thickness, place) => {
         const groundH = Math.max(1, totalH - storeyLift);
         // Where an upper storey stands ON this side (its extent touches the
@@ -1201,7 +1366,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // a jogged/custom outline's segments, storey bands, everything).
       // Shed and flat roofs have exact planes; a gable's peaked interior is
       // approximate, so gables keep their own eave caps + gable-end infill.
-      if ((roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat') && !roundFp) {
+      if (!roundFp) {
+        // THE STANDING LAW, now under EVERY roof type (it was shed/flat only
+        // — gable and hip walls relied on approximations and could pierce):
+        // no wall vertex rises above the roof plan's stop line, ever. The
+        // gable-end walls stay at their eave as built; the cap only bites
+        // when something exceeds the exact surface.
         const ROOF_SLACK = JOINTS.ROOF_SLACK;
         wallMeshSpecs.forEach(({ meshes }) => (meshes || []).forEach((m) => {
           if (!m?.isMesh || !m.geometry?.getAttribute) return;
@@ -1227,7 +1397,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // elevation, a non-finite coordinate. Empty list = the build is tight.
       window.__nbSeamAudit = () => {
         const problems = [];
-        const shedOrFlat = (roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat') && !roundFp;
+        const judge = !roundFp; // every roof type is judged against the plan now
         group.traverse((m) => {
           if (!m.isMesh || !m.geometry?.getAttribute) return;
           const id = String(m.userData?.roomId || '');
@@ -1236,12 +1406,37 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           m.updateWorldMatrix(true, false);
           bb.applyMatrix4(m.matrixWorld);
           if (![bb.min.x, bb.max.y, bb.min.z].every(Number.isFinite)) { problems.push({ check: 'finite', id }); return; }
-          if (shedOrFlat && id.startsWith('wall-') && m.rotation.x === 0 && m.rotation.y === 0 && m.rotation.z === 0) {
+          if (judge && id.startsWith('wall-') && m.rotation.x === 0 && m.rotation.y === 0 && m.rotation.z === 0) {
             const pos = m.geometry.getAttribute('position');
             for (let i = 0; i < pos.count; i += 1) {
               const wy = pos.getY(i) + m.position.y;
               const cap = roofUnderAt(pos.getX(i) + m.position.x, pos.getZ(i) + m.position.z) + JOINTS.ROOF_SLACK + 0.1;
               if (wy > cap) { problems.push({ check: 'wall-over-roof', id, over: Math.round((wy - cap) * 100) / 100 }); break; }
+            }
+          }
+          if (judge && id === 'frame-main') {
+            // FRAME members too (posts, plates, rafters — rotated or not):
+            // every corner of the member's true box, in world space, must sit
+            // under the roof plan's TOP surface. This is the check that used
+            // to not exist — frames pierced roofs and nothing said so.
+            const gb = m.geometry.boundingBox;
+            const corners = [];
+            [gb.min.x, gb.max.x].forEach((cx2) => [gb.min.y, gb.max.y].forEach((cy2) => [gb.min.z, gb.max.z].forEach((cz2) => corners.push(new THREE.Vector3(cx2, cy2, cz2)))));
+            const ctr = new THREE.Vector3((gb.min.x + gb.max.x) / 2, (gb.min.y + gb.max.y) / 2, (gb.min.z + gb.max.z) / 2).applyMatrix4(m.matrixWorld);
+            for (const c of corners) {
+              c.applyMatrix4(m.matrixWorld);
+              // judge a hair INSIDE the member — a corner exactly on a roof-
+              // piece boundary must not be judged against the lower neighbor
+              const dx = ctr.x - c.x; const dz = ctr.z - c.z;
+              const dl = Math.hypot(dx, dz) || 1;
+              const jx = c.x + (dx / dl) * Math.min(0.35, dl);
+              const jz = c.z + (dz / dl) * Math.min(0.35, dl);
+              const top = roofTopAtPt(jx, jz);
+              if (!Number.isFinite(top)) continue; // open sky — nothing to pierce
+              if (c.y > top + JOINTS.ROOF_SLACK + 0.12) {
+                problems.push({ check: 'frame-over-roof', id, name: m.name || 'member', over: Math.round((c.y - top) * 100) / 100 });
+                break;
+              }
             }
           }
         });
@@ -1479,54 +1674,95 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // plane minus the slab thickness. Riding the plane itself left half
         // of every member poking through the roof surface.
         const DECK = JOINTS.RAFTER_DROP;
-        const rafterRun = (b0, b1, planeAt, axisIsZ, s0, s1) => {
+        // ═══ THE FRAME IS BUILT FROM THE ROOF PLAN ═══ Every rafter SAMPLES
+        // the plan's exact top surface along its own line and follows it,
+        // splitting at creases (a gable ridge, a hip's jack region) with the
+        // crease position solved exactly. A member that is generated ON the
+        // surface cannot pierce it — the old parallel frame math (its own
+        // gable rise, its own shed plane) is gone, and with it the whole
+        // "frame pokes through the roof" family.
+        const sampledRafter = (axisIsZ, at, s0, s1) => {
+          const yAt = (s) => (axisIsZ ? roofTopAtPt(at, s) : roofTopAtPt(s, at)) - DECK - fm.rafterH / 2;
+          // A member's CHORD must lie on/under the surface along its whole
+          // run — where two roof pieces meet in a valley, subdividing turns
+          // one floating bridge into true jack pieces that follow the roof.
+          const emit = (a, b, depthLeft = 6) => {
+            if (b - a < 0.2) return;
+            const ya = yAt(a); const yb = yAt(b);
+            if (!Number.isFinite(ya) || !Number.isFinite(yb)) return; // open sky (porch)
+            let bulges = false;
+            for (const f of [0.2, 0.4, 0.5, 0.6, 0.8]) {
+              const sMid = a + (b - a) * f;
+              const chordY = ya + (yb - ya) * f;
+              const surfY = yAt(sMid);
+              if (Number.isFinite(surfY) && chordY > surfY + 0.12) { bulges = true; break; }
+            }
+            if (bulges) {
+              if (depthLeft > 0 && b - a > 0.45) {
+                const mid = a + (b - a) / 2;
+                emit(a, mid, depthLeft - 1);
+                emit(mid, b, depthLeft - 1);
+              }
+              return; // NEVER emit a member that rides over its roof
+            }
+            slopeMemberAxis(axisIsZ, a, ya, b, yb, at, fm.rafterW, fm.rafterH);
+          };
+          const STEP = 0.5; // fine enough that a tier step can't masquerade as a slope
+          // A surface JUMP (roof steps to another tier, or drops to open sky)
+          // is NOT a crease — a rafter must END at the step, never climb it.
+          const findJump = (lo0, hi0, yLo) => {
+            let lo = lo0; let hi = hi0;
+            for (let k = 0; k < 14 && hi - lo > 0.05; k += 1) {
+              const mid = (lo + hi) / 2;
+              const ym = yAt(mid);
+              if (Number.isFinite(ym) && Math.abs(ym - yLo) < 2) lo = mid; else hi = mid;
+            }
+            return lo;
+          };
+          let runStart = s0;
+          let prevS = s0; let prevY = yAt(s0); let slope = null;
+          for (let s = s0 + STEP; s <= s1 + 1e-6; s += STEP) {
+            const ss = Math.min(s, s1);
+            const y = yAt(ss);
+            const m = (y - prevY) / Math.max(0.001, ss - prevS);
+            // steeper than any legal pitch (1.5 rise/run) = a tier step, not a slope
+            const jump = !Number.isFinite(y) || !Number.isFinite(prevY) || Math.abs(y - prevY) > (ss - prevS) * 1.8 + 0.25;
+            if (jump) {
+              const edge = Number.isFinite(prevY) ? findJump(prevS, ss, prevY) : prevS;
+              emit(runStart, edge);
+              runStart = ss; slope = null;
+            } else if (slope === null) slope = m;
+            else if (Math.abs(m - slope) > 0.02 && Number.isFinite(m) && Number.isFinite(slope)) {
+              // crease between prevS and ss — intersect the two runs so the
+              // ridge/hip line lands crisp, not chamfered between samples
+              const t = Math.abs(slope - m) > 1e-6
+                ? clamp((y - m * ss - prevY + slope * prevS) / (slope - m), prevS, ss)
+                : prevS;
+              emit(runStart, t);
+              runStart = t;
+              slope = (y - yAt(t)) / Math.max(0.001, ss - t);
+            }
+            prevS = ss; prevY = y;
+          }
+          emit(runStart, s1);
+        };
+        const rafterRun = (b0, b1, _planeAt, axisIsZ, s0, s1) => {
           const count = Math.max(1, Math.round((b1 - b0) / rOC));
           for (let i = 0; i <= count; i += 1) {
             const at = clamp(b0 + ((b1 - b0) * i) / count, b0 + fm.rafterW, b1 - fm.rafterW);
-            slopeMemberAxis(axisIsZ, s0, planeAt(s0) - DECK - fm.rafterH / 2, s1, planeAt(s1) - DECK - fm.rafterH / 2, at, fm.rafterW, fm.rafterH);
+            sampledRafter(axisIsZ, at, s0, s1);
           }
         };
-        // Rafter pairs for a gable over one rect (ridge along the longer
-        // axis, matching makeGableSegment).
-        const gableRafters = (x0, x1, z0, z1, eave) => {
-          const base = eave + 0.25 - DECK;
+        // Gable rafter pairs are just sampled rafters across the ridge now.
+        const gableRafters = (x0, x1, z0, z1) => {
           const alongX = (x1 - x0) >= (z1 - z0);
-          const ridgeY = base + (Math.min(x1 - x0, z1 - z0) / 2) * pitchF;
-          if (alongX) {
-            const zm = (z0 + z1) / 2;
-            const count = Math.max(1, Math.round((x1 - x0) / rOC));
-            for (let i = 0; i <= count; i += 1) {
-              const at = clamp(x0 + ((x1 - x0) * i) / count, x0 + fm.rafterW, x1 - fm.rafterW);
-              slopeMemberAxis(true, z0, base - fm.rafterH / 2, zm, ridgeY - fm.rafterH / 2, at, fm.rafterW, fm.rafterH);
-              slopeMemberAxis(true, zm, ridgeY - fm.rafterH / 2, z1, base - fm.rafterH / 2, at, fm.rafterW, fm.rafterH);
-            }
-          } else {
-            const xm = (x0 + x1) / 2;
-            const count = Math.max(1, Math.round((z1 - z0) / rOC));
-            for (let i = 0; i <= count; i += 1) {
-              const at = clamp(z0 + ((z1 - z0) * i) / count, z0 + fm.rafterW, z1 - fm.rafterW);
-              slopeMemberAxis(false, x0, base - fm.rafterH / 2, xm, ridgeY - fm.rafterH / 2, at, fm.rafterW, fm.rafterH);
-              slopeMemberAxis(false, xm, ridgeY - fm.rafterH / 2, x1, base - fm.rafterH / 2, at, fm.rafterW, fm.rafterH);
-            }
-          }
+          if (alongX) rafterRun(x0, x1, null, true, z0, z1);
+          else rafterRun(z0, z1, null, false, x0, x1);
         };
 
         if (!stepsF) {
-          const rCount = Math.max(1, Math.round(bayRun / rOC));
-          for (let i = 0; i <= rCount; i += 1) {
-            const at = clamp((bayRun * i) / rCount, fm.rafterW, bayRun - fm.rafterW);
-            if (roofSpec.roofType === 'gable') {
-              const peakY = hLead + Math.max(0.3, gRise - 0.25) - DECK - fm.rafterH / 2;
-              const eaveY = hLead + 0.25 - DECK - fm.rafterH / 2;
-              slopeMember(-oLead, eaveY, span / 2, peakY, at, fm.rafterW, fm.rafterH);
-              slopeMember(span / 2, peakY, span + oTail, eaveY, at, fm.rafterW, fm.rafterH);
-            } else {
-              const y0 = hLead + 0.12 - DECK - fm.rafterH / 2;
-              const y1 = hTail + 0.12 - DECK - fm.rafterH / 2;
-              const slope = (y1 - y0) / Math.max(0.01, span);
-              slopeMember(-oLead, y0 - slope * oLead, span + oTail, y1 + slope * oTail, at, fm.rafterW, fm.rafterH);
-            }
-          }
+          // one call covers gable pairs, hip ends, shed slopes — all sampled
+          rafterRun(0, bayRun, null, spanIsZ, -oLead, span + oTail);
         } else {
           // STEPPED, TIER BY TIER: every set-back storey gets its own deck
           // (rim + joists at its floor), posts and plate beams rising to ITS
@@ -2563,10 +2799,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           roofMat.transparent = true;
           roofMat.opacity = layers.xray ? 0.4 : 0.55;
         }
-        const oAll = resolveOverhangs(spec.shell);
         const fpAreaNow = customFp ? polygonArea(fpPoly) : width * depth;
         const groundEave = roofSpec.highWallHeightFt;
-        const fullRect = { x: 0, y: 0, w: width, d: depth };
         // ROUND house wears an elliptical CONE (a flat roof = a low disc). No
         // gables, ridges, or valleys — one clean sweep matching the ring wall.
         if (roundFp) {
@@ -2594,188 +2828,73 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           group.add(roofMesh);
           group.add(addEdges(roofMesh));
         } else {
-        // Storey extents bottom→top: level 1 is the whole footprint; each upper
-        // level is its extent plate (or the full footprint when it isn't set
-        // back). topEave = the elevation at the TOP of that storey's walls, so
-        // the roof steps down at every setback — one tier per storey, not one.
-        const storeyTiers = [];
-        for (let lv = 1; lv <= Math.max(1, Math.ceil(storeys)); lv += 1) {
-          const plate = lv === 1 ? fullRect : (upperPlateRect(spec, lv) || fullRect);
-          // Upper tiers top out at the ENGINE's floor elevations (floor of
-          // lv+1) — the same numbers the walls and floor plates use now. The
-          // old `groundEave + upThru` stacked tiers on the TALL side of a shed
-          // (a 17′ south wall put a 10+10 tower's roof at 37′ instead of 30′).
-          const topY = lv === 1 ? groundEave : elev2 + upThru(lv);
-          storeyTiers.push({ rect: plate, topEave: topY, level: lv });
-        }
-        const rectHas = (r, px, py) => px > r.x + 0.01 && px < r.x + r.w - 0.01 && py > r.y + 0.01 && py < r.y + r.d - 0.01;
-        // Is (px,py) under a storey ABOVE `lv`? — a wing there tucks under that wall.
-        const coveredAbove = (px, py, lv) => storeyTiers.some((t) => t.level > lv && rectHas(t.rect, px, py));
-        // Stepped when any upper storey is a real setback (smaller than the one below).
-        const steps = storeyLift > 0 && storeyTiers.some((t, i) => i > 0 && t.rect.w * t.rect.d < storeyTiers[i - 1].rect.w * storeyTiers[i - 1].rect.d - 1);
-        if (!customFp && !steps) {
-          // Legacy path, byte-for-byte: one roof over the whole rectangle.
-          const roof = makeRoof(width, depth, wallHeight, spec.shell.roofPitch, roofMat, roofSpec, oAll);
-          roof.userData.roomId = 'roof-main';
-          roomMeshes.push(roof);
-          group.add(addEdges(roof));
-        } else {
-          // Roof as SEGMENTS — per rectangle of an L/T/U footprint and/or the
-          // stepped storey tiers + wings. Valleys are not modeled; segments meet.
-          const pitchNow = Number(spec.shell.roofPitch || 0.32);
-          const insideFp = (px, py) => (customFp
-            ? pointInFootprint(fpPoly, px, py)
-            : px > 0.01 && px < width - 0.01 && py > 0.01 && py < depth - 0.01);
-          // A segment side is a true eave only when nothing lies beyond it:
-          // probe just outside — storey above → tuck under it; neighbor segment
-          // → hairline lap; open air → the shell overhang for that facing.
-          const segOverhangs = (rect, isUpper, segLevel) => {
-            const probe = 0.4;
-            const probes = {
-              north: [rect.x + rect.w / 2, rect.y - probe],
-              south: [rect.x + rect.w / 2, rect.y + rect.d + probe],
-              west: [rect.x - probe, rect.y + rect.d / 2],
-              east: [rect.x + rect.w + probe, rect.y + rect.d / 2]
-            };
-            const out = {};
-            for (const side of WALL_SIDES) {
-              const [px, py] = probes[side];
-              if (!isUpper && coveredAbove(px, py, segLevel)) out[side] = 0.35;
-              else if (insideFp(px, py)) out[side] = 0.05;
-              else out[side] = oAll[side];
-            }
-            return out;
-          };
-          // Which side of a wing rect butts against the storey above (its high side).
-          const touchSide = (rect, above) => {
-            const overlapX = rect.x < above.x + above.w && rect.x + rect.w > above.x;
-            const overlapY = rect.y < above.y + above.d && rect.y + rect.d > above.y;
-            return Math.abs(rect.y + rect.d - above.y) < 0.05 && overlapX ? 'south'
-              : Math.abs(rect.y - (above.y + above.d)) < 0.05 && overlapX ? 'north'
-              : Math.abs(rect.x + rect.w - above.x) < 0.05 && overlapY ? 'east'
-              : Math.abs(rect.x - (above.x + above.w)) < 0.05 && overlapY ? 'west'
-              : (Math.abs((rect.x + rect.w / 2) - (above.x + above.w / 2)) > Math.abs((rect.y + rect.d / 2) - (above.y + above.d / 2))
-                ? ((rect.x + rect.w / 2) < (above.x + above.w / 2) ? 'east' : 'west')
-                : ((rect.y + rect.d / 2) < (above.y + above.d / 2) ? 'south' : 'north'));
-          };
-          const segments = [];
-          if (steps) {
-            // Top storey gets the pitched roof; every setback below it gets a
-            // wing ring (its extent minus the storey above) at its own eave.
-            const top = storeyTiers[storeyTiers.length - 1];
-            segments.push({ rect: top.rect, eave: top.topEave, kind: 'full', upper: true, level: top.level, tierY0: top.rect.y, tierX0: top.rect.x });
-            for (let i = storeyTiers.length - 2; i >= 0; i -= 1) {
-              const below = storeyTiers[i];
-              const above = storeyTiers[i + 1];
-              if (below.rect.w * below.rect.d <= above.rect.w * above.rect.d + 1) continue; // same extent — no ring
-              const ring = (customFp && below.level === 1)
-                ? subtractRectFromFootprint(fpPoly, above.rect)
-                : subtractRect(below.rect, above.rect);
-              // The storey can choose what its setback carries: a roof wing
-              // (default) or an OPEN PORCH — a walkable deck with a railing,
-              // wrapping the storey above (set on the floor outline's card).
-              const plateEl = below.level >= 2
-                ? (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === below.level)
-                : null;
-              if (plateEl && plateEl.topTreatment === 'porch') {
-                const deckMat = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.8, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
-                ring.forEach((rect) => {
-                  const deckY = below.topEave + JOINTS.DECK_LIFT;
-                  const deck = box(rect.w, 0.35, rect.d, rect.x + rect.w / 2, deckY, rect.y + rect.d / 2, deckMat);
-                  deck.name = 'Porch deck';
-                  deck.userData.roomId = 'roof-main';
-                  deck.userData.generated = true;
-                  roomMeshes.push(deck);
-                  group.add(addEdges(deck));
-                  // railing along the porch's OUTER edges (the ones on the
-                  // storey's own boundary — seams between ring pieces and the
-                  // face against the storey above stay open)
-                  const railTop = deckY + 3.1;
-                  const railEdges = [];
-                  if (Math.abs(rect.y - below.rect.y) < 0.05) railEdges.push(['h', rect.x, rect.x + rect.w, rect.y]);
-                  if (Math.abs(rect.y + rect.d - (below.rect.y + below.rect.d)) < 0.05) railEdges.push(['h', rect.x, rect.x + rect.w, rect.y + rect.d]);
-                  if (Math.abs(rect.x - below.rect.x) < 0.05) railEdges.push(['v', rect.y, rect.y + rect.d, rect.x]);
-                  if (Math.abs(rect.x + rect.w - (below.rect.x + below.rect.w)) < 0.05) railEdges.push(['v', rect.y, rect.y + rect.d, rect.x + rect.w]);
-                  railEdges.forEach(([dir, a0, a1, at]) => {
-                    const len = a1 - a0;
-                    if (len < 0.5) return;
-                    const rail = dir === 'h'
-                      ? box(len, 0.18, 0.18, (a0 + a1) / 2, railTop, at, deckMat)
-                      : box(0.18, 0.18, len, at, railTop, (a0 + a1) / 2, deckMat);
-                    rail.userData.roomId = 'roof-main'; rail.userData.generated = true;
-                    group.add(rail);
-                    const posts = Math.max(1, Math.round(len / 4));
-                    for (let pi = 0; pi <= posts; pi += 1) {
-                      const pa = a0 + (len * pi) / posts;
-                      const post = dir === 'h'
-                        ? box(0.15, railTop - deckY, 0.15, pa, deckY + (railTop - deckY) / 2, at, deckMat)
-                        : box(0.15, railTop - deckY, 0.15, at, deckY + (railTop - deckY) / 2, pa, deckMat);
-                      post.userData.roomId = 'roof-main'; post.userData.generated = true;
-                      group.add(post);
-                    }
-                  });
-                });
-                continue;
+        // ═══ MESHES FROM THE PLAN — the roof plan above is the ONLY source
+        // of roof geometry; this block just gives its pieces material form.
+        // A porch ring builds a walkable deck (open sky — no roof piece).
+        if (roofPlan.porchRings.length) {
+          const deckMat = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.8, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
+          roofPlan.porchRings.forEach(({ rect, topEave, hostRect }) => {
+            const deckY = topEave + JOINTS.DECK_LIFT;
+            const deck = box(rect.w, 0.35, rect.d, rect.x + rect.w / 2, deckY, rect.y + rect.d / 2, deckMat);
+            deck.name = 'Porch deck';
+            deck.userData.roomId = 'roof-main';
+            deck.userData.generated = true;
+            roomMeshes.push(deck);
+            group.add(addEdges(deck));
+            // railing along the porch's OUTER edges (seams between ring
+            // pieces and the face against the storey above stay open)
+            const railTop = deckY + 3.1;
+            const railEdges = [];
+            if (Math.abs(rect.y - hostRect.y) < 0.05) railEdges.push(['h', rect.x, rect.x + rect.w, rect.y]);
+            if (Math.abs(rect.y + rect.d - (hostRect.y + hostRect.d)) < 0.05) railEdges.push(['h', rect.x, rect.x + rect.w, rect.y + rect.d]);
+            if (Math.abs(rect.x - hostRect.x) < 0.05) railEdges.push(['v', rect.y, rect.y + rect.d, rect.x]);
+            if (Math.abs(rect.x + rect.w - (hostRect.x + hostRect.w)) < 0.05) railEdges.push(['v', rect.y, rect.y + rect.d, rect.x + rect.w]);
+            railEdges.forEach(([dir, a0, a1, at]) => {
+              const len = a1 - a0;
+              if (len < 0.5) return;
+              const rail = dir === 'h'
+                ? box(len, 0.18, 0.18, (a0 + a1) / 2, railTop, at, deckMat)
+                : box(0.18, 0.18, len, at, railTop, (a0 + a1) / 2, deckMat);
+              rail.userData.roomId = 'roof-main'; rail.userData.generated = true;
+              group.add(rail);
+              const posts = Math.max(1, Math.round(len / 4));
+              for (let pi = 0; pi <= posts; pi += 1) {
+                const pa = a0 + (len * pi) / posts;
+                const post = dir === 'h'
+                  ? box(0.15, railTop - deckY, 0.15, pa, deckY + (railTop - deckY) / 2, at, deckMat)
+                  : box(0.15, railTop - deckY, 0.15, at, deckY + (railTop - deckY) / 2, pa, deckMat);
+                post.userData.roomId = 'roof-main'; post.userData.generated = true;
+                group.add(post);
               }
-              ring.forEach((rect) => segments.push({ rect, eave: below.topEave, kind: 'wing', highSide: touchSide(rect, above.rect), level: below.level, tierDrop: storeyLift - upThru(below.level), tierY0: below.rect.y, tierX0: below.rect.x }));
-            }
-          } else {
-            decomposeFootprint(fpPoly).forEach((rect) => segments.push({ rect, eave: wallHeight, kind: 'full', upper: true, level: storeyTiers.length }));
-          }
-          // The global shed plane (the eave line runs along the fall axis
-          // across the whole house) — 'full' shed segments are coplanar
-          // pieces of it. Plane functions take BOTH plan coordinates so one
-          // form serves a north/south fall (slope along z) and an east/west
-          // fall (slope along x).
-          const shedYAt = (xx, zz) => {
-            // through the wall tops at the wall lines; overhangs continue the
-            // slope (the stretched 0..overhang-tip mapping diluted it and let
-            // a tall south wall pierce its own roof)
-            return shedEaveAt(xx, zz) + storeyLift + JOINTS.ROOF_BEARING;
-          };
-          // In a set-back design each tier's shed piece rides its OWN storey:
-          // low edge at the tier's global wall top, rising along the fall
-          // axis at the roof pitch — so a 10+10+10 tower's roof starts at 30,
-          // not at "tall wall + every storey" (37). Ground pieces keep the
-          // true ground plane.
-          const shedPlaneFor = (seg) => {
-            const lvl = seg.level || 1;
-            if (!anySetback || lvl <= 1) return (xx, zz) => shedYAt(xx, zz) - (seg.tierDrop ?? storeyLift);
-            const topPlane = elev2 + upThru(lvl) + JOINTS.ROOF_BEARING;
-            const slopeT = tierPitchOf(lvl) ?? shedSlopePerFt;
-            const a0 = shedEW ? (seg.tierX0 ?? seg.rect.x) : (seg.tierY0 ?? seg.rect.y);
-            return (xx, zz) => topPlane + slopeT * Math.max(0, (shedEW ? xx : zz) - a0);
-          };
-          segments.forEach((seg) => {
-            const o = segOverhangs(seg.rect, Boolean(seg.upper), seg.level || 1);
-            let mesh = null;
-            if (seg.kind === 'wing') {
-              // A shed's wings are pieces of the shed plane dropped to THIS
-              // tier's top; a pitched roof's wings are lean-to planes tucking
-              // under the storey above.
-              mesh = roofSpec.roofType === 'shed'
-                ? makeShedPiece(seg.rect, o, shedPlaneFor(seg), roofMat)
-                : makeStepRoofPlane(seg.rect, seg.highSide, seg.eave + 0.25, (seg.level || 1) > 1 ? (tierPitchOf(seg.level) ?? pitchNow) : pitchNow, o, roofMat);
-            } else if (roofSpec.roofType === 'shed') {
-              mesh = makeShedPiece(seg.rect, o, anySetback && (seg.level || 1) > 1 ? shedPlaneFor(seg) : shedYAt, roofMat);
-            } else if (roofSpec.roofType === 'flat') {
-              mesh = makeShedPiece(seg.rect, o, () => seg.eave + 0.25, roofMat);
-            } else if (roofSpec.roofType === 'hip') {
-              mesh = makeRoof(seg.rect.w, seg.rect.d, seg.eave, pitchNow, roofMat, roofSpec, o);
-              mesh.position.x += seg.rect.x;
-              mesh.position.z += seg.rect.y;
-            } else {
-              mesh = makeGableSegment(seg.rect, seg.eave, (seg.level || 1) > 1 ? (tierPitchOf(seg.level) ?? pitchNow) : pitchNow, o, roofMat);
-            }
-            if (mesh) {
-              mesh.name = seg.kind === 'wing' ? 'Roof (lower wing)' : 'Roof';
-              mesh.userData.roomId = 'roof-main';
-              mesh.userData.generated = true;
-              roomMeshes.push(mesh);
-              group.add(addEdges(mesh));
-            }
+            });
           });
         }
+        roofPlan.pieces.forEach((seg) => {
+          const segPitch = (seg.level || 1) > 1 ? (tierPitchOf(seg.level) ?? pitchNow) : pitchNow;
+          let mesh = null;
+          if (seg.legacy && !['shed', 'flat'].includes(roofSpec.roofType)) {
+            // the classic one-rectangle gable/hip keeps its long-proven mesh;
+            // the plan models this exact shape, so caps and frame agree
+            mesh = makeRoof(width, depth, wallHeight, spec.shell.roofPitch, roofMat, roofSpec, seg.o);
+          } else if (roofSpec.roofType === 'shed' || roofSpec.roofType === 'flat' || seg.kind === 'wing') {
+            // every planar piece (shed both axes, flat, stepped wings) is a
+            // quad evaluated ON the plan surface — one law, one mesh
+            mesh = makeShedPiece(seg.rect, seg.o, seg.topAt, roofMat);
+          } else if (roofSpec.roofType === 'hip') {
+            mesh = makeRoof(seg.rect.w, seg.rect.d, seg.eave, segPitch, roofMat, roofSpec, seg.o);
+            mesh.position.x += seg.rect.x;
+            mesh.position.z += seg.rect.y;
+          } else {
+            mesh = makeGableSegment(seg.rect, seg.eave, segPitch, seg.o, roofMat);
+          }
+          if (mesh) {
+            mesh.name = seg.kind === 'wing' ? 'Roof (lower wing)' : 'Roof';
+            mesh.userData.roomId = 'roof-main';
+            mesh.userData.generated = true;
+            roomMeshes.push(mesh);
+            group.add(addEdges(mesh));
+          }
+        });
         }
       }
 
