@@ -7,7 +7,7 @@
 // (or vice versa), this fails and names the line.
 
 import {
-  seedSpec, getWallSections, deriveDesign, convertSpecApproach, resolveDeck
+  seedSpec, getWallSections, deriveDesign, convertSpecApproach, resolveDeck, resolveDeckStairs
 } from '../src/engine.js';
 
 const fixtures = () => {
@@ -161,6 +161,37 @@ for (const [name, spec] of Object.entries(fixtures())) {
   alone.elements = alone.elements.filter((e) => e.id !== 'dk2');
   const rAlone = resolveDeck(alone, alone.elements[0]);
   ok((rAlone.openSides.east || []).length === 1, 'decked: remove the neighbor and the shared edge grows its railing back');
+}
+
+// Deck STAIRS everywhere — resolveDeckStairs is the one answer for the
+// renderer, the receipts, and the deck card. 'auto' keeps the old rule
+// (pinned above: two auto stairs on the decked fixture); a NAMED edge runs
+// deck→deck between levels, priced by the climb; 'none' clears it; an edge
+// leaning on the house reports blocked instead of inventing a run.
+{
+  const f = fixtures();
+  const spec = structuredClone(f.decked);
+  spec.shell = { ...spec.shell, storeys: 2 };
+  spec.elements.push(
+    { id: 'landing', name: 'Landing deck', category: 'deck', x: 6, y: 35, w: 14, d: 8, h: 0.35, level: 1 },
+    { id: 'bal', name: 'Balcony', category: 'deck', x: 8, y: 28.5, w: 10, d: 6, h: 0.35, level: 2, deckStairs: 'south' }
+  );
+  const st = resolveDeckStairs(spec, spec.elements.find((e) => e.id === 'bal'));
+  ok(Boolean(st) && !st.blocked && st.target === 'deck' && st.side === 'south' && !st.up,
+    `stairs: balcony's south steps land on the deck below (got ${JSON.stringify(st && { t: st.target, s: st.side })})`);
+  ok(Boolean(st) && st.rise > 6 && st.treads >= 10, `stairs: a storey of climb, real treads (rise ${st && st.rise.toFixed(1)}, ${st && st.treads} treads)`);
+  const d = deriveDesign(spec, getWallSections(spec));
+  const line = d.receipts.systems.outdoors.find((l) => /^Deck steps/.test(l.label));
+  ok(Boolean(line) && line.qty === 4, `stairs: 4 runs price (3 auto + the balcony's) (got ${line?.qty})`);
+  ok(Boolean(line) && line.amount > 4 * 260, `stairs: the tall balcony run prices MORE than a flat $260 (line $${line?.amount && Math.round(line.amount)})`);
+  // 'none' clears the run; a house-facing edge is blocked, not invented
+  const balNone = structuredClone(spec);
+  balNone.elements.find((e) => e.id === 'bal').deckStairs = 'none';
+  ok(resolveDeckStairs(balNone, balNone.elements.find((e) => e.id === 'bal')) === null, 'stairs: none = no run');
+  const balNorth = structuredClone(spec);
+  balNorth.elements.find((e) => e.id === 'bal').deckStairs = 'north';
+  const stN = resolveDeckStairs(balNorth, balNorth.elements.find((e) => e.id === 'bal'));
+  ok(Boolean(stN) && stN.blocked === true, 'stairs: the house-facing edge reports blocked (no open stretch)');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

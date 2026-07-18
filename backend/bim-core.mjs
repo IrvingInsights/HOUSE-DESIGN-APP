@@ -2319,6 +2319,7 @@ export function applyBimOperations(currentSpec, plan) {
         if (operation.deckPlacement) element.deckPlacement = operation.deckPlacement;
         if (operation.deckRail) element.deckRail = operation.deckRail;
         if (operation.deckRoof) element.deckRoof = operation.deckRoof;
+        if (operation.deckStairs) element.deckStairs = operation.deckStairs;
       }
       const placed = { ...element, ...clampObjectPosition(next, element, element.x, element.y) };
       // ONE extent plate per level, enforced at the op layer: a second

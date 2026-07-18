@@ -17,7 +17,7 @@ import {
 import {
   DEFAULT_OUTDOOR_GRID_SIZE_FT, clamp, padExtension, sitePadRect, objectBounds, titleCase, roofProfile, storeyInfo,
   upperPlateRect, resolveOverhangs, FOUNDATION_RUN_TYPES, DEFAULT_MODEL_LAYERS, siteOf, utilitiesOf, getSpecialBimObjects, wallAssemblyProfile,
-  WALL_SIDES, resolveWallSide, resolveDeck
+  WALL_SIDES, resolveWallSide, resolveDeck, resolveDeckStairs
 } from './engine.js';
 
 // Some browsers run with graphics acceleration (WebGL) turned off — locked-
@@ -2509,31 +2509,50 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // the walking surface: a slab-thin patio at grade, a framed platform raised
           dp(box(ew0, dk.placement === 'grade' ? 0.25 : 0.35, ed0, ex0 + ew0 / 2, deckTopY, ey0 + ed0 / 2, deckMatD));
           const railTop = deckTopY + 3;
-          // steps come down the LONGEST open edge; the railing leaves a gap there
+          // stairs: resolveDeckStairs is the one answer (renderer + receipts +
+          // card). 'auto' = the old longest-open-edge rule down to the ground;
+          // a chosen edge runs to whatever is outside it — a lower (or higher)
+          // deck on another level, or the ground. The railing leaves a gap.
           let stepGap = null;
-          if (dk.needsSteps) {
-            let bestSeg = null; let bestSide = null;
-            for (const [side, segs] of Object.entries(dk.openSides)) {
-              for (const s of segs) {
-                if (!bestSeg || (s.a1 - s.a0) > (bestSeg.a1 - bestSeg.a0)) { bestSeg = s; bestSide = side; }
-              }
-            }
-            if (bestSeg && bestSeg.a1 - bestSeg.a0 >= 3) {
-              const mid = (bestSeg.a0 + bestSeg.a1) / 2;
-              const gapW = Math.min(4, bestSeg.a1 - bestSeg.a0);
-              stepGap = { side: bestSide, a0: mid - gapW / 2, a1: mid + gapW / 2 };
-              // treads marching outward and down from the deck edge to the ground
-              const stepsN = Math.max(2, Math.ceil(deckTopY / 0.65));
-              const stepH = deckTopY / stepsN;
-              const horiz = bestSide === 'north' || bestSide === 'south';
-              const edgeAt = bestSide === 'north' ? ey0 : bestSide === 'south' ? ey0 + ed0 : bestSide === 'west' ? ex0 : ex0 + ew0;
-              const outDir = (bestSide === 'north' || bestSide === 'west') ? -1 : 1;
+          {
+            const st = resolveDeckStairs(spec, element, dk);
+            if (st && !st.blocked) {
+              stepGap = { side: st.side, a0: st.gapA0, a1: st.gapA1 };
+              const hiTop = Math.max(deckTopY, st.targetTop);
+              const stepsN = st.treads;
+              const stepH = st.rise / stepsN;
+              const horiz = st.side === 'north' || st.side === 'south';
+              const edgeAt = st.side === 'north' ? ey0 : st.side === 'south' ? ey0 + ed0 : st.side === 'west' ? ex0 : ex0 + ew0;
+              const outDir = (st.side === 'north' || st.side === 'west') ? -1 : 1;
+              // descending AWAY from whichever surface is higher: outward when
+              // this deck is higher, inward onto this deck when the target is
+              const marchDir = st.up ? -outDir : outDir;
               for (let s = 1; s <= stepsN; s += 1) {
-                const topY = deckTopY - s * stepH + stepH / 2;
-                const off = edgeAt + outDir * (s * 0.9 - 0.45);
+                const topY = hiTop - s * stepH + stepH / 2;
+                const off = edgeAt + marchDir * (s * 0.9 - 0.45);
                 dp(horiz
-                  ? box(gapW - 0.3, stepH, 0.9, mid, topY, off, deckMatD)
-                  : box(0.9, stepH, gapW - 0.3, off, topY, mid, deckMatD));
+                  ? box(st.gapW - 0.3, stepH, 0.9, st.mid, topY, off, deckMatD)
+                  : box(0.9, stepH, st.gapW - 0.3, off, topY, st.mid, deckMatD));
+              }
+              // a tall run gets sloped handrails down both sides
+              if (st.rise >= 3.5) {
+                const runLenH = stepsN * 0.9;
+                const railLen = Math.hypot(runLenH, st.rise);
+                const angle = Math.atan2(st.rise, runLenH);
+                // sign: the rail must descend toward the march direction
+                const railCtrY = hiTop - st.rise / 2 + 3;
+                const railCtrOff = edgeAt + marchDir * (runLenH / 2);
+                [st.gapA0 + 0.12, st.gapA1 - 0.12].forEach((railAt) => {
+                  let rm;
+                  if (horiz) {
+                    rm = box(0.15, 0.15, railLen, railAt, railCtrY, railCtrOff, railMatD);
+                    rm.rotation.x = (marchDir > 0 ? 1 : -1) * angle;
+                  } else {
+                    rm = box(railLen, 0.15, 0.15, railCtrOff, railCtrY, railAt, railMatD);
+                    rm.rotation.z = (marchDir > 0 ? -1 : 1) * angle;
+                  }
+                  dp(rm);
+                });
               }
             }
           }

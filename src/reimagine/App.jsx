@@ -15,7 +15,7 @@ import {
   WALL_SIDES, WALL_SIDE_LABELS, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS,
   ROOM_PRESETS, planNewRoomPlacements, roomPresetFromName,
   resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons, downloadFile,
-  DECK_SURFACES, resolveDeck
+  DECK_SURFACES, resolveDeck, resolveDeckStairs
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms } from '../placement.js';
 import { STARTER_DESIGNS } from './starters.js';
@@ -55,7 +55,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 107 · Jul 18';
+const UPDATE_STAMP = 'update 108 · Jul 18';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1691,6 +1691,27 @@ export default function App() {
                       <option value="gable">Covered — a little peak (gable)</option>
                     </select>
                   </label>
+                  <label className="rz-field">
+                    <span>Steps</span>
+                    <select value={['none', 'north', 'south', 'east', 'west'].includes(el.deckStairs) ? el.deckStairs : 'auto'} onChange={(e2) => setDk('deckStairs', e2.target.value)}>
+                      <option value="auto">Auto — down the longest open edge when the floor sits high</option>
+                      <option value="none">No steps</option>
+                      <option value="north">Down the north edge</option>
+                      <option value="south">Down the south edge</option>
+                      <option value="east">Down the east edge</option>
+                      <option value="west">Down the west edge</option>
+                    </select>
+                  </label>
+                  {(() => {
+                    const st = resolveDeckStairs(spec, el, dk);
+                    if (!st) return null;
+                    if (st.blocked) {
+                      return <div className="rz-shape-note">{st.flat
+                        ? 'That edge is already level with what’s beside it — nothing to climb.'
+                        : 'That edge leans on the house or another deck at this level — no open stretch to run steps from. Pick another edge.'}</div>;
+                    }
+                    return <div className="rz-shape-note">Steps run {st.up ? 'up' : 'down'} the {st.side} edge — {Math.round(st.rise * 10) / 10} ft, {st.treads} treads, {st.target === 'deck' ? `${st.up ? 'up to' : 'down onto'} ${st.targetName}` : 'down to the ground'}.</div>;
+                  })()}
                   <div className="rz-shape-note">
                     Railings and their cost only grow on edges facing open air — push this deck against the house (a doorway) or against another deck (a wraparound) and the shared edge opens up.
                     {dk.needsSteps ? ' Its floor sits high, so steps come down the longest open side automatically.' : ''}
