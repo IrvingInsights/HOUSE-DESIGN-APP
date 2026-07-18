@@ -1473,11 +1473,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             for (const c of corners) {
               c.applyMatrix4(m.matrixWorld);
               // judge a hair INSIDE the member — a corner exactly on a roof-
-              // piece boundary must not be judged against the lower neighbor
+              // piece boundary must not be judged against the lower neighbor.
+              // Nudge each plan axis on its own: a diagonal step (the old way)
+              // barely moves the SHORT axis of a long member (a 20-ft plate
+              // beam moved 0.01 ft sideways), leaving the judge point over the
+              // neighbor roof and flagging a beam flush with its own roof edge.
               const dx = ctr.x - c.x; const dz = ctr.z - c.z;
-              const dl = Math.hypot(dx, dz) || 1;
-              const jx = c.x + (dx / dl) * Math.min(0.35, dl);
-              const jz = c.z + (dz / dl) * Math.min(0.35, dl);
+              const jx = c.x + Math.sign(dx) * Math.min(0.35, Math.abs(dx));
+              const jz = c.z + Math.sign(dz) * Math.min(0.35, Math.abs(dz));
               const top = roofTopAtPt(jx, jz);
               if (!Number.isFinite(top)) continue; // open sky — nothing to pierce
               if (c.y > top + JOINTS.ROOF_SLACK + 0.12) {
