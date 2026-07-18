@@ -55,7 +55,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 105 · Jul 18';
+const UPDATE_STAMP = 'update 106 · Jul 18';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -969,7 +969,9 @@ export default function App() {
   // (a timber ground floor under a stick-framed tower is one design).
   const setFrame = (value, level = 0) => applyOps([{ type: 'set_frame', value, ...(Number(level) > 1 ? { level } : {}) }]);
   const setBaySpacing = (v) => applyOps([{ type: 'set_frame', field: 'baySpacingFt', value: clamp(Number(v) || 8, 4, 16) }]);
-  const setWallSide = (side, field, value) => applyOps([{ type: 'set_wall_side', wall: side, field, value }]);
+  // A level above 1 lands in that storey's own overrides (construction only —
+  // height/omit/glazing stay ground concepts, the engine's rule).
+  const setWallSide = (side, field, value, level = 0) => applyOps([{ type: 'set_wall_side', wall: side, field, value, ...(Number(level) > 1 ? { level: Number(level) } : {}) }]);
   // Split one side into three sections (engine picks that side's longest
   // edge) — each section can then carry its own construction.
   const splitWallSide = (side) => applyOps([{ type: 'split_wall_edge', wall: side }]);
@@ -1320,21 +1322,32 @@ export default function App() {
               />
             )}
             {activeChapter === 'walls' && (
-              <WallsControls
-                spec={spec}
-                floors={floors}
-                wallSections={wallSections}
-                onAllWalls={setAllWalls}
-                onShedHeights={setShedHeights}
-                onShedHeightsEW={setShedHeightsEW}
-                onUpperWalls={setUpperWalls}
-                onShell={setShellField}
-                onWallSide={setWallSide}
-                onSplitWall={splitWallSide}
-                onGreenhouse={makeGreenhouseSouth}
-                onSelectWall={(side) => { setSelectedId(`wall-${side}`); setViewMode('3d'); }}
-                onJump={jumpTo}
-              />
+              <>
+                {floors > 1 && (
+                  <FloorBar spec={spec} floors={floors} activeFloor={activeFloor} hasBasement={hasBasement} onSelect={setActiveFloor} onAdd={addFloor} onRemove={removeFloor} />
+                )}
+                {activeFloor === BASEMENT_LEVEL ? (
+                  <div className="rz-shape-note">The basement's walls ARE its foundation — concrete or block, chosen in the <b>Foundation</b> chapter <button type="button" className="rz-storey-link-inline" onClick={() => jumpTo('foundation')}>foundation ›</button>.</div>
+                ) : (
+                  <WallsControls
+                    spec={spec}
+                    floors={floors}
+                    level={Math.max(1, activeFloor)}
+                    wallSections={wallSections}
+                    onAllWalls={setAllWalls}
+                    onShedHeights={setShedHeights}
+                    onShedHeightsEW={setShedHeightsEW}
+                    onUpperWalls={setUpperWalls}
+                    onFloorHeight={setFloorHeight}
+                    onShell={setShellField}
+                    onWallSide={setWallSide}
+                    onSplitWall={splitWallSide}
+                    onGreenhouse={makeGreenhouseSouth}
+                    onSelectWall={(side, lv) => { setSelectedId(`wall-${side}${Number(lv) > 1 ? (Number(lv) === 2 ? '-u' : `-u${lv}`) : ''}`); setViewMode('3d'); }}
+                    onJump={jumpTo}
+                  />
+                )}
+              </>
             )}
             {activeChapter === 'frame' && (
               <FrameControls
@@ -1531,9 +1544,11 @@ export default function App() {
         />
       )}
       {selectedId && !selectedRoom && (() => {
-        const wallSide = WALL_SIDES.find((side) => selectedId === `wall-${side}`);
-        if (wallSide) {
-          return <WallCard side={wallSide} spec={spec} onWallSide={setWallSide} onClose={() => setSelectedId(null)} />;
+        // wall-south = ground; wall-south-u = level 2; wall-south-u3 = level 3
+        const wallMatch = String(selectedId).match(/^wall-(south|north|east|west)(?:-u(\d*))?$/);
+        if (wallMatch) {
+          const wLevel = wallMatch[2] === undefined ? 1 : (wallMatch[2] === '' ? 2 : Number(wallMatch[2]));
+          return <WallCard side={wallMatch[1]} level={wLevel} spec={spec} onWallSide={setWallSide} onClose={() => setSelectedId(null)} />;
         }
         // A picked door/window/skylight gets its own card — this is THE place
         // its numbers live now (the chapter only adds; tapping edits).
@@ -1799,7 +1814,7 @@ export default function App() {
           return (
             <Menu title={level > 1 ? `${sideLabel} wall — ${floorLabel(spec, level).toLowerCase()}` : `${sideLabel} wall — ${r.assembly.label}`}>
               <button onClick={() => {
-                if (level > 1) { setActiveChapter('walls'); setSelectedId(null); }
+                if (level > 1) { setActiveChapter('walls'); setActiveFloor(level); setSelectedId(null); }
                 else setSelectedId(`wall-${side}`);
                 closeMenu();
               }}>{level > 1 ? 'This floor’s wall settings…' : 'Height & what it’s made of…'}</button>
@@ -2886,7 +2901,7 @@ function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, on
 // every grain the engine knows: all four sides at once, one floor, one side,
 // or one SECTION of one side (split a wall, then mix a framed section beside
 // straw or cob infill). The timeline and every receipt follow along.
-function WallsControls({ spec, floors, wallSections, onAllWalls, onShedHeights, onShedHeightsEW, onUpperWalls, onShell, onWallSide, onSplitWall, onGreenhouse, onSelectWall, onJump }) {
+function WallsControls({ spec, floors, level = 1, wallSections, onAllWalls, onShedHeights, onShedHeightsEW, onUpperWalls, onFloorHeight, onShell, onWallSide, onSplitWall, onGreenhouse, onSelectWall, onJump }) {
   const [side, setSide] = useState('south');
   const resolved = WALL_SIDES.map((s) => resolveWallSide(spec, s));
   const wallKeys = new Set(resolved.map((r) => r.assemblyKey));
@@ -2907,6 +2922,60 @@ function WallsControls({ spec, floors, wallSections, onAllWalls, onShedHeights, 
   // rectangle has none until a wall is split
   const sections = (wallSections || []).filter((sec) => sec.edgeKey && Number(sec.level) === 1);
   const southR = resolved[WALL_SIDES.indexOf('south')];
+  // AN UPPER FLOOR'S WALLS — its own height, system, and face; then one wall
+  // at a time (construction only — height, glazing, and "no wall" shape the
+  // ground storey and the roofline, so they stay downstairs).
+  if (level > 1) {
+    const u = upperState.find((x) => x.lv === level) || { wallVal: '__mixed', cladVal: '__mixed' };
+    const floorName = floorLabel(spec, level);
+    const uResolved = WALL_SIDES.map((s) => resolveWallSide(spec, s, level));
+    return (
+      <div className="rz-found">
+        <label className="rz-field rz-field-num">
+          <span>{floorName} — floor height</span>
+          <NumInput value={Math.round(storeyHeightFt(spec.shell, level) * 10) / 10} min={7} max={16} step={0.5}
+            onCommit={(v) => onFloorHeight(level, v)} />
+        </label>
+        <label className="rz-field">
+          <span>{floorName} — wall system (all sides)</span>
+          <select value={u.wallVal} onChange={(e) => { if (e.target.value !== '__mixed') onUpperWalls(level, 'assembly', e.target.value); }}>
+            {u.wallVal === '__mixed' && <option value="__mixed">Mixed — sides differ</option>}
+            {Object.values(WALL_ASSEMBLIES).map((a) => (
+              <option key={a.key} value={a.key}>{a.green ? '🌿 ' : ''}{a.label} — R{a.rValue}</option>
+            ))}
+          </select>
+        </label>
+        <label className="rz-field">
+          <span>{floorName} — outside face (all sides)</span>
+          <select value={u.cladVal} onChange={(e) => { if (e.target.value !== '__mixed') onUpperWalls(level, 'cladding', e.target.value); }}>
+            {u.cladVal === '__mixed' && <option value="__mixed">Mixed — sides differ</option>}
+            {Object.values(CLADDING_TYPES).map((c) => (
+              <option key={c.key} value={c.key}>{c.green ? '🌿 ' : ''}{c.label}</option>
+            ))}
+          </select>
+        </label>
+        <div className="rz-found-head">One wall at a time</div>
+        <div className="rz-wall-tabs">
+          {WALL_SIDES.map((s) => {
+            const r = uResolved[WALL_SIDES.indexOf(s)];
+            return (
+              <button key={s} type="button" className={side === s ? 'on' : ''} onClick={() => setSide(s)}
+                title={`${WALL_SIDE_LABELS[s]} wall, ${floorName.toLowerCase()} — ${r.assembly.label}`}>
+                {s[0].toUpperCase() + s.slice(1)}
+              </button>
+            );
+          })}
+        </div>
+        <WallSideFields side={side} spec={spec} level={level} onWallSide={onWallSide} />
+        <button type="button" className="rz-storey-outline-btn" onClick={() => onSelectWall(side, level)} title="Select this wall band in 3D — its card opens there too">
+          see the {side} wall in 3D ›
+        </button>
+        <div className="rz-shape-note">
+          This floor's own size and placement live in <b>Storeys</b>{onJump ? <> — <button type="button" className="rz-storey-link-inline" onClick={() => onJump('storeys', level)}>storeys ›</button></> : null}. Wall height, sun glazing, no-wall, and sections shape the ground storey and the roofline — switch the Floor selector to Ground for those.
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="rz-found">
       {/* the plainest numbers FIRST: wall heights (on a shed, the two heights
@@ -2954,30 +3023,11 @@ function WallsControls({ spec, floors, wallSections, onAllWalls, onShedHeights, 
           ))}
         </select>
       </label>
-      {/* wall construction floor by floor: the ground setting above, then one
-          row per upper floor — bale below, framed + charred 2nd, its own tower */}
-      {upperState.map(({ lv, wallVal: uWall, cladVal: uClad }) => (
-        <React.Fragment key={lv}>
-          <label className="rz-field">
-            <span>{floorLabel(spec, lv)} — wall system</span>
-            <select value={uWall} onChange={(e) => { if (e.target.value !== '__mixed') onUpperWalls(lv, 'assembly', e.target.value); }}>
-              {uWall === '__mixed' && <option value="__mixed">Mixed — sides differ</option>}
-              {Object.values(WALL_ASSEMBLIES).map((a) => (
-                <option key={a.key} value={a.key}>{a.green ? '🌿 ' : ''}{a.label} — R{a.rValue}</option>
-              ))}
-            </select>
-          </label>
-          <label className="rz-field">
-            <span>{floorLabel(spec, lv)} — outside face</span>
-            <select value={uClad} onChange={(e) => { if (e.target.value !== '__mixed') onUpperWalls(lv, 'cladding', e.target.value); }}>
-              {uClad === '__mixed' && <option value="__mixed">Mixed — sides differ</option>}
-              {Object.values(CLADDING_TYPES).map((c) => (
-                <option key={c.key} value={c.key}>{c.green ? '🌿 ' : ''}{c.label}</option>
-              ))}
-            </select>
-          </label>
-        </React.Fragment>
-      ))}
+      {/* upper floors' walls live under the Floor selector at the top — each
+          floor gets this same chapter scoped to itself */}
+      {upperLevels.length > 0 && (
+        <div className="rz-shape-note">Each upper floor's walls — height, system, face, side by side — live under the <b>Floor</b> selector above.</div>
+      )}
       {/* the greenhouse classic, one tap — a low south kneewall with slanted
           glass rising to the eave (all three settings land together) */}
       {!(southR.sunGlazing && southR.heightFt <= 4) && (
@@ -3055,17 +3105,20 @@ function WallsControls({ spec, floors, wallSections, onAllWalls, onShedHeights, 
 // One wall side's full construction — shared by the Walls chapter's
 // one-wall-at-a-time picker and the tap-a-wall-in-3D card, so the two can
 // never drift apart.
-function WallSideFields({ side, spec, onWallSide }) {
-  const r = resolveWallSide(spec, side);
+function WallSideFields({ side, spec, onWallSide, level = 1 }) {
+  const r = resolveWallSide(spec, side, level);
+  const upper = Number(level) > 1;
   return (
     <>
-      <label className="rz-field rz-field-num">
-        <span>Height (this wall)</span>
-        <NumInput value={Math.round(r.heightFt * 10) / 10} min={2} max={40} step={0.5} onCommit={(v) => onWallSide(side, 'heightFt', v)} />
-      </label>
+      {!upper && (
+        <label className="rz-field rz-field-num">
+          <span>Height (this wall)</span>
+          <NumInput value={Math.round(r.heightFt * 10) / 10} min={2} max={40} step={0.5} onCommit={(v) => onWallSide(side, 'heightFt', v)} />
+        </label>
+      )}
       <label className="rz-field">
         <span>Wall system (this wall)</span>
-        <select value={r.assemblyKey} onChange={(e) => onWallSide(side, 'assembly', e.target.value)}>
+        <select value={r.assemblyKey} onChange={(e) => onWallSide(side, 'assembly', e.target.value, level)}>
           {Object.values(WALL_ASSEMBLIES).map((a) => (
             <option key={a.key} value={a.key}>{a.green ? '🌿 ' : ''}{a.label} — R{a.rValue}</option>
           ))}
@@ -3073,31 +3126,37 @@ function WallSideFields({ side, spec, onWallSide }) {
       </label>
       <label className="rz-field rz-field-num">
         <span>Thickness (this wall)</span>
-        <NumInput value={Math.round(r.thicknessFt * 10) / 10} min={0.2} max={3.5} step={0.1} onCommit={(v) => onWallSide(side, 'thicknessFt', v)} />
+        <NumInput value={Math.round(r.thicknessFt * 10) / 10} min={0.2} max={3.5} step={0.1} onCommit={(v) => onWallSide(side, 'thicknessFt', v, level)} />
       </label>
       <label className="rz-field">
         <span>Weather face (this wall)</span>
-        <select value={r.cladding || 'render'} onChange={(e) => onWallSide(side, 'cladding', e.target.value)}>
+        <select value={r.cladding || 'render'} onChange={(e) => onWallSide(side, 'cladding', e.target.value, level)}>
           {Object.values(CLADDING_TYPES).map((c) => (
             <option key={c.key} value={c.key}>{c.green ? '🌿 ' : ''}{c.label}</option>
           ))}
         </select>
       </label>
-      {/* greenhouse face: slanted glazing on this wall, carried by the frame */}
-      <label className="rz-nowall">
-        <input type="checkbox" checked={Boolean(r.sunGlazing)} onChange={(e) => onWallSide(side, 'sunGlazing', e.target.checked)} />
-        <span>Sun glazing — slanted greenhouse glass on this wall</span>
-      </label>
-      {r.sunGlazing && (
-        <label className="rz-field rz-field-num">
-          <span>Glass tilt (from vertical)</span>
-          <NumInput value={Math.round(Number(r.sunGlazingTiltDeg ?? 30))} min={0} max={45} step={5} unit="°" onCommit={(v) => onWallSide(side, 'sunGlazingTiltDeg', v)} />
-        </label>
+      {/* greenhouse face: slanted glazing on this wall, carried by the frame.
+          Glazing, height, and no-wall shape the ground storey + roofline —
+          upper bands keep to construction (the engine's rule). */}
+      {!upper && (
+        <>
+          <label className="rz-nowall">
+            <input type="checkbox" checked={Boolean(r.sunGlazing)} onChange={(e) => onWallSide(side, 'sunGlazing', e.target.checked)} />
+            <span>Sun glazing — slanted greenhouse glass on this wall</span>
+          </label>
+          {r.sunGlazing && (
+            <label className="rz-field rz-field-num">
+              <span>Glass tilt (from vertical)</span>
+              <NumInput value={Math.round(Number(r.sunGlazingTiltDeg ?? 30))} min={0} max={45} step={5} unit="°" onCommit={(v) => onWallSide(side, 'sunGlazingTiltDeg', v)} />
+            </label>
+          )}
+          <label className="rz-nowall">
+            <input type="checkbox" checked={Boolean(r.omitted)} onChange={(e) => onWallSide(side, 'omitted', e.target.checked)} />
+            <span>No wall on this side (opens to an attached space)</span>
+          </label>
+        </>
       )}
-      <label className="rz-nowall">
-        <input type="checkbox" checked={Boolean(r.omitted)} onChange={(e) => onWallSide(side, 'omitted', e.target.checked)} />
-        <span>No wall on this side (opens to an attached space)</span>
-      </label>
     </>
   );
 }
@@ -3161,21 +3220,24 @@ function FrameControls({ spec, floors, onFrame, onBaySpacing, modelShow, onModel
 
 // Tap a wall in 3D → its own card: THIS wall's height and system (the same
 // fields the Walls chapter shows, one component behind both).
-function WallCard({ side, spec, onWallSide, onClose }) {
-  const r = resolveWallSide(spec, side);
+function WallCard({ side, spec, onWallSide, onClose, level = 1 }) {
+  const r = resolveWallSide(spec, side, level);
   const label = side[0].toUpperCase() + side.slice(1);
+  const upper = Number(level) > 1;
   return (
     <div className="rz-card">
       <div className="rz-card-head">
-        <h2>{label} wall</h2>
+        <h2>{label} wall{upper ? ` — ${floorLabel(spec, level).toLowerCase()}` : ''}</h2>
         <button className="rz-x" onClick={onClose}>×</button>
       </div>
       <div className="rz-vitals">
         <Vital label="System" value={r.assembly.label} />
         <Vital label="Thickness" value={`${round1(r.thicknessFt)} ft`} />
       </div>
-      <WallSideFields side={side} spec={spec} onWallSide={onWallSide} />
-      <p className="rz-muted" style={{ marginTop: 8 }}>Just this wall — the other three keep their own height, system, and face. Slanted glazing on the south face makes a greenhouse; a full glass wall is the “Glazed” wall system above.</p>
+      <WallSideFields side={side} spec={spec} level={level} onWallSide={onWallSide} />
+      <p className="rz-muted" style={{ marginTop: 8 }}>{upper
+        ? 'Just this wall of this floor — construction only up here; the floor’s height lives in Walls under its Floor tab, and glazing or no-wall are ground choices.'
+        : 'Just this wall — the other three keep their own height, system, and face. Slanted glazing on the south face makes a greenhouse; a full glass wall is the “Glazed” wall system above.'}</p>
     </div>
   );
 }
