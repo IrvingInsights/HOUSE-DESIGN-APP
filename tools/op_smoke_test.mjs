@@ -300,6 +300,20 @@ r = apply(r.spec, [
 ok(resolveWallSide(r.spec, 'south').sunGlazing === true && resolveWallSide(r.spec, 'south').sunGlazingTiltDeg === 32, 'sun glazing + tilt round-trip');
 r = apply(freshSpec(), [{ type: 'set_wall_side', wall: 'north', field: 'heightFt', value: 0.5 }]);
 ok(r.spec.walls.north.heightFt === 2, 'kneewall clamps at 2ft floor');
+// A GLAZED side's height is the greenhouse kneewall — it must NOT redefine
+// the roof. (Daniel's 17/10 shed flipped to 2/10 when the ☀ preset synced
+// the 2ft kneewall into the shell; the glass then computed a zero gap and
+// the whole greenhouse vanished.)
+r = apply(freshSpec(), [
+  { type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: 17, northWallHeightFt: 10 },
+  { type: 'set_wall_side', wall: 'south', field: 'sunGlazing', value: true },
+  { type: 'set_wall_side', wall: 'south', field: 'heightFt', value: 2 }
+]);
+ok(r.spec.walls.south.heightFt === 2 && r.spec.shell.southWallHeightFt === 17 && r.spec.shell.roofType === 'shed',
+  'glazed kneewall does NOT reshape the roof — 17/10 shed keeps its 17ft south eave');
+r = apply(r.spec, [{ type: 'set_wall_side', wall: 'south', field: 'sunGlazing', value: false }]);
+ok(r.spec.walls.south.heightFt === undefined && r.spec.shell.southWallHeightFt === 17,
+  'glazing off removes the kneewall with it — the wall stands back up, the shell never moved');
 r = apply(freshSpec(), [{ type: 'set_frame', field: 'baySpacingFt', value: '6' }]);
 ok(r.spec.frame.baySpacingFt === 6, 'set_frame baySpacingFt');
 // segment resize: notch the south wall into 3, then set the middle's length + start

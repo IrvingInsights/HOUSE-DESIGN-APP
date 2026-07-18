@@ -1461,6 +1461,27 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               if (wy > cap) { problems.push({ check: 'wall-over-roof', id, over: Math.round((wy - cap) * 100) / 100 }); break; }
             }
           }
+          if (judge && m.userData?.sunGlazingBand && id.startsWith('wall-')) {
+            // The greenhouse glass itself — rotated, so the wall vertex law
+            // skips it. Same world-corner test as the frame: glazing may
+            // never rise through any roof. This check is why an invisible or
+            // fin-floating greenhouse can't pass the battery silently again.
+            const gg = m.geometry.boundingBox;
+            const gCorners = [];
+            [gg.min.x, gg.max.x].forEach((cx2) => [gg.min.y, gg.max.y].forEach((cy2) => [gg.min.z, gg.max.z].forEach((cz2) => gCorners.push(new THREE.Vector3(cx2, cy2, cz2)))));
+            const gCtr = new THREE.Vector3((gg.min.x + gg.max.x) / 2, (gg.min.y + gg.max.y) / 2, (gg.min.z + gg.max.z) / 2).applyMatrix4(m.matrixWorld);
+            for (const c of gCorners) {
+              c.applyMatrix4(m.matrixWorld);
+              const jx = c.x + Math.sign(gCtr.x - c.x) * Math.min(0.35, Math.abs(gCtr.x - c.x));
+              const jz = c.z + Math.sign(gCtr.z - c.z) * Math.min(0.35, Math.abs(gCtr.z - c.z));
+              const top = roofTopAtPt(jx, jz);
+              if (!Number.isFinite(top)) continue;
+              if (c.y > top + JOINTS.ROOF_SLACK + 0.12) {
+                problems.push({ check: 'glazing-over-roof', id, over: Math.round((c.y - top) * 100) / 100, at: { x: Math.round(c.x * 100) / 100, y: Math.round(c.y * 100) / 100, z: Math.round(c.z * 100) / 100, roofTop: Math.round(top * 100) / 100 } });
+                break;
+              }
+            }
+          }
           if (judge && id === 'frame-main') {
             // FRAME members too (posts, plates, rafters — rotated or not):
             // every corner of the member's true box, in world space, must sit
@@ -1542,56 +1563,105 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               ? (side === 'east' ? roofSpec.eastWallHeightFt + liftSg : side === 'west' ? roofSpec.westWallHeightFt + liftSg : roofSpec.highWallHeightFt + liftSg)
               : (side === 'south' ? roofSpec.southWallHeightFt + liftSg : side === 'north' ? roofSpec.northWallHeightFt + liftSg : Math.max(roofSpec.northWallHeightFt, roofSpec.southWallHeightFt) + liftSg))
             : roofSpec.highWallHeightFt + liftSg;
-          const gapH = eaveH - kneeH;
-          if (gapH < 1.5) return;
           const tiltRad = clamp(Number(rSg.sunGlazingTiltDeg ?? 30), 0, 45) * Math.PI / 180;
-          const slantLen = gapH / Math.cos(tiltRad);
-          const inset = gapH * Math.tan(tiltRad);
           const runLen = (side === 'north' || side === 'south' ? width : depth) - 1;
-          const bandGlassMat = new THREE.MeshStandardMaterial({ color: 0xcfe5ea, roughness: 0.1, metalness: 0.05, transparent: true, opacity: 0.36, side: THREE.DoubleSide, envMap: envTex, envMapIntensity: 0.85 });
-          const bandPart = (m) => { m.userData.roomId = `wall-${side}`; m.userData.wallSide = side; m.userData.generated = true; group.add(m); return m; };
-          const midY = kneeH + gapH / 2;
-          const place = (thick, isBatten, along = 0) => {
-            let m;
-            if (side === 'south') { m = box(isBatten ? 0.3 : runLen, slantLen, thick, width / 2 + along, midY, depth - inset / 2, isBatten ? frameMat : bandGlassMat); m.rotation.x = -tiltRad; }
-            else if (side === 'north') { m = box(isBatten ? 0.3 : runLen, slantLen, thick, width / 2 + along, midY, inset / 2, isBatten ? frameMat : bandGlassMat); m.rotation.x = tiltRad; }
-            else if (side === 'east') { m = box(thick, slantLen, isBatten ? 0.3 : runLen, width - inset / 2, midY, depth / 2 + along, isBatten ? frameMat : bandGlassMat); m.rotation.z = tiltRad; }
-            else { m = box(thick, slantLen, isBatten ? 0.3 : runLen, inset / 2, midY, depth / 2 + along, isBatten ? frameMat : bandGlassMat); m.rotation.z = -tiltRad; }
-            return bandPart(m);
+          const horizNS = side === 'north' || side === 'south';
+          // THE ROOF PLAN RULES THE BAND (the same law walls and frame obey):
+          // the band is built in BAYS, and each bay climbs only as high as the
+          // roof actually stands over ITS stretch of wall. Under a low wing it
+          // stops at the wing; where the true eave runs it reaches the eave.
+          // Only bays with under 1.5 ft of climb are skipped — the old code
+          // culled the WHOLE wall on one number (and rose full-length to one
+          // eave height, floating fins through every lower tier roof).
+          const alongAt = (t) => runLen * t - runLen / 2;
+          // The glass LEANS INTO the house — its top edge sits gap·tan(tilt)
+          // inside the wall face, where a falling roof is LOWER than at the
+          // eave. Probe the roof at the top edge's true position and shrink
+          // the climb until the glass tucks under (converges in a few steps;
+          // the old one-eave band poked 1.75 ft through Daniel's shed).
+          const roofAtAlong = (along, ins) => {
+            const c = (horizNS ? width : depth) / 2 + along;
+            const p = side === 'south' ? depth - 0.4 - ins : side === 'north' ? 0.4 + ins : side === 'east' ? width - 0.4 - ins : 0.4 + ins;
+            return horizNS ? roofUnderAt(c, p) : roofUnderAt(p, c);
           };
-          const pane = place(0.14, false);
-          roomMeshes.push(pane);
           const bays = Math.max(2, Math.round(runLen / 4));
-          for (let b = 0; b <= bays; b += 1) {
-            place(0.24, true, runLen * (b / bays) - runLen / 2);
+          const bayLen = runLen / bays;
+          const bayTops = [];
+          for (let b = 0; b < bays; b += 1) {
+            const a0 = alongAt(b / bays);
+            const a1 = alongAt((b + 1) / bays);
+            let top = Math.min(eaveH, Math.min(roofAtAlong(a0, 0), roofAtAlong(a1, 0)) + JOINTS.ROOF_SLACK);
+            for (let it = 0; it < 4; it += 1) {
+              const ins = Math.max(0, top - kneeH) * Math.tan(tiltRad);
+              top = Math.min(top, Math.min(roofAtAlong(a0, ins), roofAtAlong(a1, ins)) + JOINTS.ROOF_SLACK);
+            }
+            bayTops.push(top);
+          }
+          const visible = bayTops.map((t) => t - kneeH >= 1.5);
+          if (!visible.some(Boolean)) return; // no headroom anywhere on this wall
+          const gapOf = (b) => Math.max(0, bayTops[b] - kneeH);
+          const bandGlassMat = new THREE.MeshStandardMaterial({ color: 0xcfe5ea, roughness: 0.1, metalness: 0.05, transparent: true, opacity: 0.36, side: THREE.DoubleSide, envMap: envTex, envMapIntensity: 0.85 });
+          const bandPart = (m) => { m.userData.roomId = `wall-${side}`; m.userData.wallSide = side; m.userData.generated = true; m.userData.sunGlazingBand = true; group.add(m); return m; };
+          // one slanted box, sized by its own bay's climb (gap)
+          const slantedBox = (alongCenter, alongLen, gap, thick, mat) => {
+            const slant = gap / Math.cos(tiltRad);
+            const ins = gap * Math.tan(tiltRad);
+            const yC = kneeH + gap / 2;
+            let m;
+            if (side === 'south') { m = box(alongLen, slant, thick, width / 2 + alongCenter, yC, depth - ins / 2, mat); m.rotation.x = -tiltRad; }
+            else if (side === 'north') { m = box(alongLen, slant, thick, width / 2 + alongCenter, yC, ins / 2, mat); m.rotation.x = tiltRad; }
+            else if (side === 'east') { m = box(thick, slant, alongLen, width - ins / 2, yC, depth / 2 + alongCenter, mat); m.rotation.z = tiltRad; }
+            else { m = box(thick, slant, alongLen, ins / 2, yC, depth / 2 + alongCenter, mat); m.rotation.z = -tiltRad; }
+            return m;
+          };
+          for (let b = 0; b < bays; b += 1) {
+            if (!visible[b]) continue;
+            const pane = bandPart(slantedBox(alongAt((b + 0.5) / bays), bayLen - 0.06, gapOf(b), 0.14, bandGlassMat));
+            roomMeshes.push(pane);
+          }
+          // thin glazing stops at the bay lines, riding the shorter neighbour
+          for (let i = 0; i <= bays; i += 1) {
+            const near = [i - 1, i].filter((bb) => bb >= 0 && bb < bays && visible[bb]);
+            if (!near.length) continue;
+            bandPart(slantedBox(alongAt(i / bays), 0.3, Math.min(...near.map(gapOf)), 0.24, frameMat));
           }
           // HEAVY greenhouse framing — with a structural frame chosen, the
           // slanted glazing is CARRIED, not floating: principal slanted posts
           // at each bay line (riding the same tilt as the glass), a sill beam
-          // on top of the kneewall, and a header beam where the slant meets
-          // the eave. The thin battens above are just glazing stops; these
-          // members join the frame-main skeleton (Frame layer, selectable).
+          // on top of the kneewall, and a header beam where each bay's slant
+          // meets ITS roof. These members join the frame-main skeleton
+          // (Frame layer, selectable) and obey the roof plan like the glass.
           // The glazing ALWAYS needs its timber — even on a load-bearing
           // bale/cob house, the sun face is a framed opening (the classic
           // combo). Only the Frame layer toggle hides it.
           if (layers.frame !== false) {
-            const sgFrame = (m) => { m.userData.roomId = 'frame-main'; m.userData.generated = true; roomMeshes.push(m); group.add(addEdges(m)); return m; };
-            const horizNS = side === 'north' || side === 'south';
-            const beamAt = (yC, outPos) => sgFrame(horizNS
-              ? box(runLen + 0.5, 0.45, 0.5, width / 2, yC, outPos, frameMat)
-              : box(0.5, 0.45, runLen + 0.5, outPos, yC, depth / 2, frameMat));
-            if (side === 'south') { beamAt(kneeH + 0.1, depth - 0.3); beamAt(eaveH - 0.2, depth - inset + 0.15); }
-            else if (side === 'north') { beamAt(kneeH + 0.1, 0.3); beamAt(eaveH - 0.2, inset - 0.15); }
-            else if (side === 'east') { beamAt(kneeH + 0.1, width - 0.3); beamAt(eaveH - 0.2, width - inset + 0.15); }
-            else { beamAt(kneeH + 0.1, 0.3); beamAt(eaveH - 0.2, inset - 0.15); }
+            const sgFrame = (m) => { m.userData.roomId = 'frame-main'; m.userData.generated = true; m.userData.sunGlazingBand = true; roomMeshes.push(m); group.add(addEdges(m)); return m; };
+            const beamRun = (yC, outPos, alongCenter, alongLen) => sgFrame(horizNS
+              ? box(alongLen, 0.45, 0.5, width / 2 + alongCenter, yC, outPos, frameMat)
+              : box(0.5, 0.45, alongLen, outPos, yC, depth / 2 + alongCenter, frameMat));
+            const faceOut = side === 'south' ? depth - 0.3 : side === 'north' ? 0.3 : side === 'east' ? width - 0.3 : 0.3;
+            // sill beam per contiguous visible run of bays
+            let runStart = null;
             for (let b = 0; b <= bays; b += 1) {
-              const along = runLen * (b / bays) - runLen / 2;
-              let m;
-              if (side === 'south') { m = box(0.5, slantLen, 0.45, width / 2 + along, midY, depth - inset / 2, frameMat); m.rotation.x = -tiltRad; }
-              else if (side === 'north') { m = box(0.5, slantLen, 0.45, width / 2 + along, midY, inset / 2, frameMat); m.rotation.x = tiltRad; }
-              else if (side === 'east') { m = box(0.45, slantLen, 0.5, width - inset / 2, midY, depth / 2 + along, frameMat); m.rotation.z = tiltRad; }
-              else { m = box(0.45, slantLen, 0.5, inset / 2, midY, depth / 2 + along, frameMat); m.rotation.z = -tiltRad; }
-              sgFrame(m);
+              const vis = b < bays && visible[b];
+              if (vis && runStart === null) runStart = b;
+              if (!vis && runStart !== null) {
+                beamRun(kneeH + 0.1, faceOut, alongAt(((runStart + b) / 2) / bays), (b - runStart) * bayLen + 0.5);
+                runStart = null;
+              }
+            }
+            // header beam per bay — each meets its own roof line
+            for (let b = 0; b < bays; b += 1) {
+              if (!visible[b]) continue;
+              const ins = gapOf(b) * Math.tan(tiltRad);
+              const headOut = side === 'south' ? depth - ins + 0.15 : side === 'north' ? ins - 0.15 : side === 'east' ? width - ins + 0.15 : ins - 0.15;
+              beamRun(kneeH + gapOf(b) - 0.2, headOut, alongAt((b + 0.5) / bays), bayLen + 0.1);
+            }
+            // slanted principal posts at the bay lines
+            for (let i = 0; i <= bays; i += 1) {
+              const near = [i - 1, i].filter((bb) => bb >= 0 && bb < bays && visible[bb]);
+              if (!near.length) continue;
+              sgFrame(slantedBox(alongAt(i / bays), 0.5, Math.min(...near.map(gapOf)), 0.45, frameMat));
             }
           }
         });

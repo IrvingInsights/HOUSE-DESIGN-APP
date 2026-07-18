@@ -55,7 +55,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 106 · Jul 18';
+const UPDATE_STAMP = 'update 107 · Jul 18';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -758,7 +758,16 @@ export default function App() {
         // every spec goes through the same healing door a real load does
         setSpec(healLoadedSpec(structuredClone(c.spec)));
         const ok = await settle(prevAudit);
-        results.push({ name: c.name, problems: ok ? window.__nbSeamAudit() : [{ check: 'render-timeout' }] });
+        const problems = ok ? window.__nbSeamAudit() : [{ check: 'render-timeout' }];
+        // expected mesh tags: a design that SHOULD show something (e.g. the
+        // greenhouse glazing) fails if the scene rendered none of it —
+        // invisible-but-audit-clean is how the greenhouse got lost before.
+        for (const tag of (c.expect || [])) {
+          let found = 0;
+          if (ok && window.__nbView?.scene) window.__nbView.scene.traverse((n) => { if (n.isMesh && n.userData?.[tag]) found += 1; });
+          if (!found) problems.push({ check: 'expected-missing', tag });
+        }
+        results.push({ name: c.name, problems });
       }
       setSpec(restoreSpec);
       setViewMode(restoreView);
@@ -976,11 +985,13 @@ export default function App() {
   // edge) — each section can then carry its own construction.
   const splitWallSide = (side) => applyOps([{ type: 'split_wall_edge', wall: side }]);
   // The greenhouse classic in one tap: a 2 ft south kneewall with slanted
-  // glass rising to the eave — ONE dispatch so undo is one step.
+  // glass rising to the eave — ONE dispatch so undo is one step. Glazing
+  // FIRST: a glazed side's height is a kneewall, not a roof edit, so the
+  // roof keeps its shape (the old order flipped a 17/10 shed to 2/10).
   const makeGreenhouseSouth = () => applyOps([
-    { type: 'set_wall_side', wall: 'south', field: 'heightFt', value: 2 },
     { type: 'set_wall_side', wall: 'south', field: 'sunGlazing', value: true },
-    { type: 'set_wall_side', wall: 'south', field: 'sunGlazingTiltDeg', value: 30 }
+    { type: 'set_wall_side', wall: 'south', field: 'sunGlazingTiltDeg', value: 30 },
+    { type: 'set_wall_side', wall: 'south', field: 'heightFt', value: 2 }
   ]);
   // --- finishes: floor, exterior cladding, reclaimed materials ---------------
   const setFlooring = (value) => applyOps([{ type: 'set_flooring', value }]);
@@ -3112,7 +3123,7 @@ function WallSideFields({ side, spec, onWallSide, level = 1 }) {
     <>
       {!upper && (
         <label className="rz-field rz-field-num">
-          <span>Height (this wall)</span>
+          <span>{r.sunGlazing ? 'Kneewall height (the glass climbs from here to the roof)' : 'Height (this wall)'}</span>
           <NumInput value={Math.round(r.heightFt * 10) / 10} min={2} max={40} step={0.5} onCommit={(v) => onWallSide(side, 'heightFt', v)} />
         </label>
       )}
