@@ -3728,6 +3728,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         if (!object) return;
         callbacksRef.current.onSelectRoom(id);
         renderer.domElement.setPointerCapture(event.pointerId);
+        controls.enabled = false; // grabbing an object must not also orbit the camera
         if (!raycaster.ray.intersectPlane(floorPlane, dragPoint)) return;
         const anchor = {
           nw: { x: object.x + object.w, z: object.y + object.d },
@@ -3767,6 +3768,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           return;
         }
         renderer.domElement.setPointerCapture(event.pointerId);
+        controls.enabled = false;
         if (!raycaster.ray.intersectPlane(floorPlane, dragPoint)) return;
         const horiz = opening.wall === 'north' || opening.wall === 'south';
         const run = horiz ? Number(spec.shell.widthFt) : Number(spec.shell.depthFt);
@@ -3786,6 +3788,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           return;
         }
         renderer.domElement.setPointerCapture(event.pointerId);
+        controls.enabled = false;
         if (!raycaster.ray.intersectPlane(floorPlane, dragPoint)) return;
         const horiz = side === 'north' || side === 'south';
         const outSign = side === 'south' || side === 'east' ? 1 : -1;
@@ -3804,6 +3807,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         return;
       }
       renderer.domElement.setPointerCapture(event.pointerId);
+      controls.enabled = false;
       if (!raycaster.ray.intersectPlane(floorPlane, dragPoint)) return;
       const footprint = hit.object.userData.footprint || { w: 1, d: 1 };
       dragState = {
@@ -3830,7 +3834,6 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       if (!dragState.began) {
         dragState.began = true;
         callbacksRef.current.onMoveStart();
-        controls.enabled = false;
         renderer.domElement.style.cursor = dragState.mode === 'resize' ? 'nwse-resize' : 'grabbing';
       }
       dragState.moved = true;
@@ -3921,12 +3924,15 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     }
 
     function onPointerUp(event) {
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      const finished = dragState;
-      dragState = null;
+      // Recover BEFORE the dragState guard: pointerdown may have captured the
+      // pointer and disabled orbit, then bailed without ever creating a drag
+      // (floor-plane miss) — the camera must never stay locked.
       controls.enabled = true;
       renderer.domElement.style.cursor = '';
       if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      const finished = dragState;
+      dragState = null;
       callbacksRef.current.onDimensionPreview(null);
       if (finished.mode === 'openingSlide') {
         if (finished.moved && Number.isFinite(finished.finalAlong)) callbacksRef.current.onMoveEnd(finished.id, finished.finalAlong, 0);
