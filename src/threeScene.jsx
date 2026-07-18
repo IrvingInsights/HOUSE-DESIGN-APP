@@ -4054,7 +4054,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       composer.dispose();
       renderer.dispose();
     };
-  }, [spec, selectedRoom, layers]);
+  }, [spec, selectedRoom, layers, context]);
 
   if (!webglAvailable()) {
     // Say WHY, and fix what's one click fixable. ?no3d is a testing switch —

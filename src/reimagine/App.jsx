@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ThreeScene, webglAvailable } from '../threeScene.jsx';
 import { PlanView } from '../planView.jsx';
 import { ElevationView } from './elevationView.jsx';
@@ -48,12 +48,14 @@ const CHAPTERS = [
 const MODEL_SHOW_PRESETS = {
   all: null,
   bones: { ...DEFAULT_MODEL_LAYERS, wallNorth: false, wallSouth: false, wallEast: false, wallWest: false, roof: false, rooms: false, openings: false, labels: false },
-  noroof: { ...DEFAULT_MODEL_LAYERS, roof: false }
+  noroof: { ...DEFAULT_MODEL_LAYERS, roof: false },
+  // The frame ALONE on the ground — no foundation, floors, or elements either.
+  frame: { ...DEFAULT_MODEL_LAYERS, wallNorth: false, wallSouth: false, wallEast: false, wallWest: false, roof: false, rooms: false, openings: false, labels: false, foundation: false, upperFloors: false, elements: false, pad: false }
 };
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 104 · Jul 18';
+const UPDATE_STAMP = 'update 105 · Jul 18';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -184,6 +186,9 @@ export default function App() {
   // 3D "Show" filter: see just part of the build (frame on its foundation,
   // the house without its roof) — the same layer system the Time Machine uses.
   const [modelShow, setModelShow] = useState('all');
+  // Entering the Frame chapter shows the bones; leaving restores what was
+  // shown before. Picking from the Show dropdown by hand wins over both.
+  const preFrameShowRef = useRef(null);
   const [viewRequest, setViewRequest] = useState({ mode: 'iso', n: 1 });
   const [designs, setDesigns] = useState(loadDesigns); // the keepsake shelf
   const [designsOpen, setDesignsOpen] = useState(false);
@@ -879,6 +884,18 @@ export default function App() {
     const op = spec.openings?.[Number(String(selectedId).replace('opening-', ''))];
     if (op && op.wall !== 'roof') setOpenWall(op.wall);
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The Frame chapter is ABOUT the bones — walking in shows them, walking out
+  // brings the whole house back. A hand-picked Show choice (the dropdown)
+  // clears the restore so it always wins.
+  useEffect(() => {
+    if (activeChapter === 'frame') {
+      preFrameShowRef.current = modelShow;
+      setModelShow('bones');
+    } else if (preFrameShowRef.current !== null) {
+      setModelShow(preFrameShowRef.current);
+      preFrameShowRef.current = null;
+    }
+  }, [activeChapter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const renameObject = (obj, name) => {
     if (name.trim() && name.trim() !== obj.name) applyOps([{ type: 'update_object', targetId: obj.id, name: obj.name, field: 'name', value: name.trim() }]);
@@ -1056,6 +1073,7 @@ export default function App() {
             spec={spec}
             selectedRoom={selectedId}
             layers={timelineOpen ? timelineLayers : (MODEL_SHOW_PRESETS[modelShow] || undefined)}
+            context={activeChapter === 'frame' && !timelineOpen ? 'frame' : null}
             viewRequest={viewRequest}
             onSelectRoom={timelineOpen ? () => {} : setSelectedId}
             onMoveEnd={(id, x, y) => {
@@ -1143,9 +1161,10 @@ export default function App() {
         ))}
         {viewMode === '3d' && <span className="rz-views-sep" />}
         {viewMode === '3d' && (
-          <select className="rz-show" value={modelShow} title="See just part of the build" onChange={(e) => setModelShow(e.target.value)}>
+          <select className="rz-show" value={modelShow} title="See just part of the build" onChange={(e) => { preFrameShowRef.current = null; setModelShow(e.target.value); }}>
             <option value="all">Show all</option>
             <option value="bones">Frame &amp; foundation</option>
+            <option value="frame">Just the frame</option>
             <option value="noroof">No roof</option>
           </select>
         )}
@@ -1323,8 +1342,8 @@ export default function App() {
                 floors={floors}
                 onFrame={setFrame}
                 onBaySpacing={setBaySpacing}
-                showingBones={modelShow === 'bones'}
-                onToggleBones={() => { setModelShow((v) => (v === 'bones' ? 'all' : 'bones')); setViewMode('3d'); }}
+                modelShow={modelShow}
+                onModelShow={(v) => { setModelShow(v); setViewMode('3d'); }}
                 onJump={jumpTo}
               />
             )}
@@ -3087,7 +3106,7 @@ function WallSideFields({ side, spec, onWallSide }) {
 // upper storey's own frame, and how far apart the posts stand. With
 // load-bearing walls the timeline builds walls first, then the roof; with a
 // frame it roofs early so straw goes in dry.
-function FrameControls({ spec, floors, onFrame, onBaySpacing, showingBones, onToggleBones, onJump }) {
+function FrameControls({ spec, floors, onFrame, onBaySpacing, modelShow, onModelShow, onJump }) {
   const frameVal = resolveFrameType(spec, 1);
   const upperLevels = Array.from({ length: Math.max(0, Math.ceil(floors) - 1) }, (_, k) => k + 2);
   const anyFramed = frameVal !== 'load-bearing' || upperLevels.some((lv) => resolveFrameType(spec, lv) !== 'load-bearing');
@@ -3124,10 +3143,15 @@ function FrameControls({ spec, floors, onFrame, onBaySpacing, showingBones, onTo
           <NumInput value={Math.round((Number(spec.frame?.baySpacingFt) || 8) * 10) / 10} min={4} max={16} step={0.5} onCommit={onBaySpacing} />
         </label>
       )}
-      <button type="button" className="rz-floorbar-outline" onClick={onToggleBones}
-        title="Hide the walls and roof to see just the frame standing on its foundation">
-        {showingBones ? 'Show the whole house again' : '🦴 Show just the bones — frame & foundation'}
-      </button>
+      <label className="rz-field">
+        <span>🦴 Seeing</span>
+        <select value={modelShow === 'all' || modelShow === 'noroof' ? 'all' : modelShow} onChange={(e) => onModelShow(e.target.value)}
+          title="Hide the walls and roof to see and work with the structure by itself">
+          <option value="bones">The bones — frame &amp; foundation</option>
+          <option value="frame">Just the frame</option>
+          <option value="all">The whole house</option>
+        </select>
+      </label>
       <div className="rz-shape-note">
         With load-bearing walls the timeline builds walls first, then the roof; with a frame it roofs before the straw goes in — watch it play out in <b>▶ Watch it build</b>. The walls themselves live in the <b>Walls</b> chapter{onJump ? <> — <button type="button" className="rz-storey-link-inline" onClick={() => onJump('walls')}>walls ›</button></> : null}.
       </div>
