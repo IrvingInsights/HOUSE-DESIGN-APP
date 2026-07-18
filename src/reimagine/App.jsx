@@ -55,7 +55,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 109 · Jul 18';
+const UPDATE_STAMP = 'update 110 · Jul 18';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -142,6 +142,27 @@ function loadStoredSpec() {
     if (parsed?.spec?.shell && Array.isArray(parsed.spec.rooms)) return healLoadedSpec(parsed.spec);
   } catch { /* corrupt or blocked storage — start from the sample */ }
   return null;
+}
+
+// ── BACKUPS: a rolling ring of recent design states, restorable from the
+// My-designs shelf. Written whenever the working-design slot is about to be
+// overwritten by something DIFFERENT — including a write from ANOTHER window
+// of the app (the silent way work used to vanish: two windows open, last
+// writer wins, no copy kept anywhere) — plus a periodic copy of your own
+// progress. Ten slots, oldest falls off.
+const BACKUPS_KEY = 'rz.design.backups.v1';
+const BACKUPS_MAX = 10;
+function loadBackups() {
+  try { const a = JSON.parse(localStorage.getItem(BACKUPS_KEY) || '[]'); return Array.isArray(a) ? a.filter((b) => b && b.spec && b.spec.shell) : []; } catch { return []; }
+}
+function pushBackup(entry) {
+  try {
+    const ring = loadBackups();
+    const s = JSON.stringify(entry.spec);
+    if (ring.some((b) => JSON.stringify(b.spec) === s)) return; // already kept
+    ring.unshift(entry);
+    localStorage.setItem(BACKUPS_KEY, JSON.stringify(ring.slice(0, BACKUPS_MAX)));
+  } catch { /* storage full/blocked */ }
 }
 
 // Saved designs — a keepsake shelf so "start fresh" never has to throw work
@@ -720,10 +741,34 @@ export default function App() {
     return () => clearInterval(id);
   }, [viewMode, timelineOpen]);
 
-  // autosave the design to this browser (debounced — never per keystroke)
+  // autosave the design to this browser (debounced — never per keystroke).
+  // GUARDED: before writing, whatever a DIFFERENT source put in the slot
+  // since our last write (another window of the app, an older session) goes
+  // into the backups ring instead of being silently erased — and every half
+  // hour a copy of our own progress joins it. Restore from the shelf.
+  const lastWriteRef = useRef(0);
+  const lastOwnBackupRef = useRef(Date.now());
+  const autosaveOffRef = useRef(false); // the audit battery cycles canned designs — never save those
   useEffect(() => {
     const timer = setTimeout(() => {
-      try { localStorage.setItem(STORE_KEY, JSON.stringify({ spec, savedAt: Date.now() })); } catch { /* storage full/blocked — in-memory still works */ }
+      if (autosaveOffRef.current) return;
+      try {
+        const rawPrev = localStorage.getItem(STORE_KEY);
+        if (rawPrev) {
+          const prev = JSON.parse(rawPrev);
+          const prevAt = Number(prev?.savedAt) || 0;
+          if (prev?.spec?.shell && prevAt > lastWriteRef.current && JSON.stringify(prev.spec) !== JSON.stringify(spec)) {
+            pushBackup({ spec: prev.spec, savedAt: prevAt, why: 'overwritten' });
+          }
+        }
+        const now = Date.now();
+        localStorage.setItem(STORE_KEY, JSON.stringify({ spec, savedAt: now }));
+        lastWriteRef.current = now;
+        if (now - lastOwnBackupRef.current > 30 * 60 * 1000) {
+          pushBackup({ spec: structuredClone(spec), savedAt: now, why: 'periodic' });
+          lastOwnBackupRef.current = now;
+        }
+      } catch { /* storage full/blocked — in-memory still works */ }
     }, 400);
     return () => clearTimeout(timer);
   }, [spec]);
@@ -753,24 +798,32 @@ export default function App() {
       };
       if (viewMode !== '3d') setViewMode('3d');
       const results = [];
-      for (const c of cases) {
-        const prevAudit = window.__nbSeamAudit;
-        // every spec goes through the same healing door a real load does
-        setSpec(healLoadedSpec(structuredClone(c.spec)));
-        const ok = await settle(prevAudit);
-        const problems = ok ? window.__nbSeamAudit() : [{ check: 'render-timeout' }];
-        // expected mesh tags: a design that SHOULD show something (e.g. the
-        // greenhouse glazing) fails if the scene rendered none of it —
-        // invisible-but-audit-clean is how the greenhouse got lost before.
-        for (const tag of (c.expect || [])) {
-          let found = 0;
-          if (ok && window.__nbView?.scene) window.__nbView.scene.traverse((n) => { if (n.isMesh && n.userData?.[tag]) found += 1; });
-          if (!found) problems.push({ check: 'expected-missing', tag });
+      // the battery cycles CANNED designs through the live view — autosave
+      // stays off for the whole run so none of them can land in the user's
+      // working-design slot (a mid-run tab close used to risk exactly that)
+      autosaveOffRef.current = true;
+      try {
+        for (const c of cases) {
+          const prevAudit = window.__nbSeamAudit;
+          // every spec goes through the same healing door a real load does
+          setSpec(healLoadedSpec(structuredClone(c.spec)));
+          const ok = await settle(prevAudit);
+          const problems = ok ? window.__nbSeamAudit() : [{ check: 'render-timeout' }];
+          // expected mesh tags: a design that SHOULD show something (e.g. the
+          // greenhouse glazing) fails if the scene rendered none of it —
+          // invisible-but-audit-clean is how the greenhouse got lost before.
+          for (const tag of (c.expect || [])) {
+            let found = 0;
+            if (ok && window.__nbView?.scene) window.__nbView.scene.traverse((n) => { if (n.isMesh && n.userData?.[tag]) found += 1; });
+            if (!found) problems.push({ check: 'expected-missing', tag });
+          }
+          results.push({ name: c.name, problems });
         }
-        results.push({ name: c.name, problems });
+      } finally {
+        setSpec(restoreSpec);
+        setViewMode(restoreView);
+        autosaveOffRef.current = false;
       }
-      setSpec(restoreSpec);
-      setViewMode(restoreView);
       return results;
     };
     return () => { delete window.__nbSeamAuditBattery; };
@@ -853,6 +906,9 @@ export default function App() {
   }, []);
   const applyUpdateNow = async () => {
     setUpdate('applying');
+    // flush the working design NOW — the reload below must never race the
+    // debounced autosave
+    try { localStorage.setItem(STORE_KEY, JSON.stringify({ spec, savedAt: Date.now() })); } catch { /* fine */ }
     try {
       const r = await fetch('/api/update/apply', { method: 'POST' });
       const j = await r.json();
@@ -1522,6 +1578,33 @@ export default function App() {
                         <button className="rz-designs-del" title="Delete this saved design" onClick={() => deleteDesign(d.id)}>×</button>
                       </div>
                     ))}
+                  {/* BACKUPS — the app's own safety copies: kept automatically
+                      when a save was about to be overwritten (another window)
+                      and every half hour of editing. Restoring is safe: what
+                      you have now goes to the shelf first. */}
+                  {(() => {
+                    const backups = loadBackups();
+                    if (!backups.length) return null;
+                    return (
+                      <>
+                        <div className="rz-found-head">Backups (kept automatically)</div>
+                        {backups.map((b, i) => (
+                          <div key={`bk${b.savedAt}-${i}`} className="rz-designs-item">
+                            <button className="rz-designs-open" title="Bring this backup back — your current design is saved to the shelf first" onClick={() => {
+                              snapshotBeforeReplace();
+                              commitSpec(healLoadedSpec(structuredClone(b.spec)));
+                              setSelectedId(null);
+                              setSaveFlash('Backup restored — what you had is on the shelf.');
+                              setTimeout(() => setSaveFlash(null), 3000);
+                            }}>
+                              <b>{(b.spec.projectName || 'Design').trim() || 'Design'}{b.why === 'overwritten' ? ' — before an overwrite' : ''}</b>
+                              <small>{new Date(b.savedAt).toLocaleString()}</small>
+                            </button>
+                          </div>
+                        ))}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>
