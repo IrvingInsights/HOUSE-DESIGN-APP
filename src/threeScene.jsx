@@ -1897,14 +1897,20 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
                 const rS1 = (spanIsZ ? core.y + core.d : core.x + core.w) - fm.postW / 2;
                 const rB0 = (spanIsZ ? core.x : core.y) + fm.postW / 2;
                 const rB1 = (spanIsZ ? core.x + core.w : core.y + core.d) - fm.postW / 2;
+                // A porch tier bears a FLAT deck — the plan's porch ring rides
+                // topEave (elev2 + upThru) + DECK_LIFT, so the posts rise to
+                // that line and the plate beam kisses the deck slab. The
+                // sloped tierTopPlane is the ROOFED-tier law; following it
+                // here left the posts 1.6-4 ft short of the deck they carry.
+                const bearAt = porchTier ? () => elev2 + upThru(lv) : (sp) => tierTopPlane(sp, lv, p);
                 const upBays = Math.max(1, Math.ceil((rB1 - rB0) / bay));
                 for (let i = 0; i <= upBays; i += 1) {
                   const at = rB0 + ((rB1 - rB0) * i) / upBays;
-                  postAt(rS0, at, Math.max(1, tierTopPlane(rS0, lv, p) - fm.plateH - floorY), fm.postW, floorY);
-                  postAt(rS1, at, Math.max(1, tierTopPlane(rS1, lv, p) - fm.plateH - floorY), fm.postW, floorY);
+                  postAt(rS0, at, Math.max(1, bearAt(rS0) - fm.plateH - floorY), fm.postW, floorY);
+                  postAt(rS1, at, Math.max(1, bearAt(rS1) - fm.plateH - floorY), fm.postW, floorY);
                 }
-                straight(rB0, rB1, tierTopPlane(rS0, lv, p) - fm.plateH / 2, rS0, fm.postW + 0.1, fm.plateH);
-                straight(rB0, rB1, tierTopPlane(rS1, lv, p) - fm.plateH / 2, rS1, fm.postW + 0.1, fm.plateH);
+                straight(rB0, rB1, bearAt(rS0) - fm.plateH / 2, rS0, fm.postW + 0.1, fm.plateH);
+                straight(rB0, rB1, bearAt(rS1) - fm.plateH / 2, rS1, fm.postW + 0.1, fm.plateH);
               }
             }
             if (!above) {
