@@ -1725,6 +1725,50 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               sgFrame(slantedBox(alongAt(i / bays), 0.5, Math.min(...near.map(gapOf)), 0.45, frameMat));
             }
           }
+          // ── END FACES: where the band stops or steps, the open wedge
+          // between the slanted glass and the wall line closes with glass —
+          // a square-ish pane below, a triangle pane above, a wood rail
+          // across between them (Daniel's spec for the greenhouse sides).
+          const insOfEnd = (y) => Math.max(0, y - kneeH) * Math.tan(tiltRad);
+          const endPane = (y0, y1, alongW) => {
+            if (y1 - y0 < 0.3) return;
+            const pt = (y, u) => (side === 'south' ? [alongW, y, depth - u]
+              : side === 'north' ? [alongW, y, u]
+              : side === 'east' ? [width - u, y, alongW]
+              : [u, y, alongW]);
+            const v = [pt(y0, 0), pt(y1, 0), pt(y1, insOfEnd(y1)), pt(y0, insOfEnd(y0))];
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+              ...v[0], ...v[1], ...v[2], ...v[0], ...v[2], ...v[3]
+            ]), 3));
+            geo.computeVertexNormals();
+            bandPart(new THREE.Mesh(geo, bandGlassMat));
+          };
+          for (let i = 0; i <= bays; i += 1) {
+            const gapL = i > 0 && visible[i - 1] ? gapOf(i - 1) : 0;
+            const gapR = i < bays && visible[i] ? gapOf(i) : 0;
+            if (Math.abs(gapL - gapR) < 0.4) continue; // flush — nothing to close
+            const yLo = kneeH + Math.min(gapL, gapR);
+            const yHi = kneeH + Math.max(gapL, gapR);
+            const alongW = (horizNS ? width : depth) / 2 + alongAt(i / bays);
+            if (yHi - yLo >= 2.5 && insOfEnd((yLo + yHi) / 2) > 0.15) {
+              const yMid = (yLo + yHi) / 2;
+              endPane(yLo, yMid, alongW);   // the square-ish pane
+              endPane(yMid, yHi, alongW);   // the triangle pane
+              const insMid = insOfEnd(yMid);
+              const rail = side === 'south' ? box(0.24, 0.3, insMid, alongW, yMid, depth - insMid / 2, frameMat)
+                : side === 'north' ? box(0.24, 0.3, insMid, alongW, yMid, insMid / 2, frameMat)
+                : side === 'east' ? box(insMid, 0.3, 0.24, width - insMid / 2, yMid, alongW, frameMat)
+                : box(insMid, 0.3, 0.24, insMid / 2, yMid, alongW, frameMat);
+              rail.userData.roomId = 'frame-main';
+              rail.userData.generated = true;
+              rail.userData.sunGlazingBand = true;
+              roomMeshes.push(rail);
+              group.add(addEdges(rail));
+            } else {
+              endPane(yLo, yHi, alongW);    // too small to split — one pane
+            }
+          }
         });
       }
 
@@ -2260,7 +2304,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           plateRects = plateRects.flatMap((r) => subtractRect(r, cutRect));
         });
         plateRects.forEach((r) => {
-          const plate = box(r.w, 0.4, r.d, r.x + r.w / 2, baseStoreyFt + 0.2, r.y + r.d / 2, plateMat);
+          const plate = box(r.w, 0.4, r.d, r.x + r.w / 2, storeyElevationFt(spec.shell, 2) + 0.2, r.y + r.d / 2, plateMat);
           plate.name = `Upper floor plate (level 2, ${storeys === 1.5 ? 'loft' : 'full storey'})`;
           group.add(plate);
         });
@@ -2268,9 +2312,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
 
       if (layers.rooms) spec.rooms.forEach((room) => {
         const roomLevel = Number(room.level || 1);
+        // Upper rooms sit at the ENGINE's storey elevation — the old uniform
+        // (level−1)×baseStoreyFt stack drifted on tall/uneven ground storeys
+        // and floated a 3rd-floor room's slab and name label above the roof.
         const roomLift = roomLevel === BASEMENT_LEVEL
           ? -basementH + 0.12
-          : (Math.max(1, roomLevel) - 1) * baseStoreyFt + (roomLevel > 1 ? 0.42 : maxReveal);
+          : (roomLevel > 1 ? storeyElevationFt(spec.shell, roomLevel) + 0.42 : maxReveal);
         const material = new THREE.MeshStandardMaterial({
           color: floorTint || zonePalette[room.type] || 0x86a0a8,
           transparent: true,
@@ -2729,7 +2776,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const lvlS = Number(element.level || 1);
           const rise = lvlS === BASEMENT_LEVEL
             ? Math.max(4, basementH)
-            : (storeys > 1 ? baseStoreyFt + 0.45 : Math.max(4, Number(element.h) || 8));
+            : (storeys > 1 ? storeyHeightFt(spec.shell, Math.max(1, lvlS)) + 0.45 : Math.max(4, Number(element.h) || 8));
           elementHeight = rise;
           const treadMat = new THREE.MeshStandardMaterial({ color: 0x8a6f4e, roughness: 0.8, map: grainTexture('wood') });
           const steps = Math.max(3, Math.round(rise / 0.646));
