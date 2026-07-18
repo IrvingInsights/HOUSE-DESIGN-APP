@@ -19,6 +19,7 @@ import {
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms } from '../placement.js';
 import { STARTER_DESIGNS } from './starters.js';
+import { AUDIT_BATTERY_SPECS } from './auditBattery.js';
 import '../styles.css';
 import './shell.css';
 
@@ -52,7 +53,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 102 · Jul 17';
+const UPDATE_STAMP = 'update 103 · Jul 18';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -115,12 +116,28 @@ function scrubLayers(schedule, scrubWeek, spec) {
 // browser's local storage (this machine only), and the app picks it back up
 // on the next open. Losing an hour of design to a refresh is not a thing.
 const STORE_KEY = 'rz.design.v1';
+// Designs saved under an older stacking model can carry floor-plate z values
+// the engine no longer agrees with (before update 101 the ground storey height
+// was the LOWEST wall; now it is the standing wall height). The renderer
+// already places every storey plate at the engine's elevation — this makes the
+// SAVED DATA say the same thing, so an old design loads exactly as tight as a
+// fresh one. Runs at every door a spec comes in through (storage, shelf,
+// pasted code, file, starter); it never touches anything a person typed.
+function healLoadedSpec(specIn) {
+  if (!specIn?.shell) return specIn;
+  (specIn.elements || []).forEach((el) => {
+    if (el?.category !== 'floor' || Number(el.level || 1) < 2) return;
+    const want = storeyElevationFt(specIn.shell, Number(el.level));
+    if (Number.isFinite(want) && Math.abs(Number(el.z || 0) - want) > 0.05) el.z = want;
+  });
+  return specIn;
+}
 function loadStoredSpec() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (parsed?.spec?.shell && Array.isArray(parsed.spec.rooms)) return parsed.spec;
+    if (parsed?.spec?.shell && Array.isArray(parsed.spec.rooms)) return healLoadedSpec(parsed.spec);
   } catch { /* corrupt or blocked storage — start from the sample */ }
   return null;
 }
@@ -705,6 +722,45 @@ export default function App() {
     }, 400);
     return () => clearTimeout(timer);
   }, [spec]);
+  // THE LIVE SEAM AUDIT BATTERY — console-only, no UI. Renders each canned
+  // design (src/reimagine/auditBattery.js + the seed + every starter) in the
+  // REAL 3D view, runs window.__nbSeamAudit on the real meshes, restores what
+  // you were working on, and returns [{ name, problems }] — all must be [].
+  // Run:  await window.__nbSeamAuditBattery()
+  useEffect(() => {
+    window.__nbSeamAuditBattery = async () => {
+      const restoreSpec = spec;
+      const restoreView = viewMode;
+      const cases = [
+        { name: 'seed design', spec: seedSpec },
+        ...STARTER_DESIGNS.map((st) => ({ name: `starter: ${st.name}`, spec: st.spec })),
+        ...AUDIT_BATTERY_SPECS
+      ];
+      // a render is "settled" when the scene has rebuilt the audit closure.
+      // Timer-based on purpose: requestAnimationFrame starves in throttled /
+      // headless / embedded panes, and the battery must run anywhere.
+      const settle = async (prevAudit) => {
+        for (let t = 0; t < 80; t += 1) {
+          await new Promise((r) => setTimeout(r, 100));
+          if (window.__nbSeamAudit && window.__nbSeamAudit !== prevAudit) return true;
+        }
+        return false;
+      };
+      if (viewMode !== '3d') setViewMode('3d');
+      const results = [];
+      for (const c of cases) {
+        const prevAudit = window.__nbSeamAudit;
+        // every spec goes through the same healing door a real load does
+        setSpec(healLoadedSpec(structuredClone(c.spec)));
+        const ok = await settle(prevAudit);
+        results.push({ name: c.name, problems: ok ? window.__nbSeamAudit() : [{ check: 'render-timeout' }] });
+      }
+      setSpec(restoreSpec);
+      setViewMode(restoreView);
+      return results;
+    };
+    return () => { delete window.__nbSeamAuditBattery; };
+  }, [spec, viewMode]);
   // Save the design you're editing to the keepsake shelf — a new entry, or an
   // update to the one with the same name. Returns the saved snapshot.
   const saveCurrentDesign = (rawName) => {
@@ -729,7 +785,7 @@ export default function App() {
     const d = designs.find((x) => x.id === id);
     if (!d) return;
     snapshotBeforeReplace();
-    commitSpec(structuredClone(d.spec)); // undoable — Ctrl+Z returns to what you had
+    commitSpec(healLoadedSpec(structuredClone(d.spec))); // undoable — Ctrl+Z returns to what you had
     setSelectedId(null);
     setPhaseOrder(null);
   };
@@ -1340,7 +1396,7 @@ export default function App() {
                         // block — default it so nothing downstream trips on it
                         if (!specIn.systems) specIn.systems = { structure: '', envelope: '', water: '', energy: '' };
                         snapshotBeforeReplace();
-                        commitSpec(structuredClone(specIn));
+                        commitSpec(healLoadedSpec(structuredClone(specIn)));
                         setSelectedId(null);
                         setSaveFlash('Design loaded - your old one is saved on the shelf.');
                       } catch {
@@ -1381,7 +1437,7 @@ export default function App() {
                             if (!specIn || !Array.isArray(specIn.rooms)) { setSaveFlash('That file did not look like a design.'); setTimeout(() => setSaveFlash(null), 3500); return; }
                             if (!specIn.systems) specIn.systems = { structure: '', envelope: '', water: '', energy: '' };
                             snapshotBeforeReplace();
-                            commitSpec(structuredClone(specIn));
+                            commitSpec(healLoadedSpec(structuredClone(specIn)));
                             setSelectedId(null);
                             setSaveFlash('Design opened - your old one is saved on the shelf.');
                           } catch {
@@ -1402,7 +1458,7 @@ export default function App() {
                         onClick={() => {
                           if (!window.confirm('Open the "' + st.name + '" starter?\n\nYour current design is saved to the My designs shelf automatically first.')) return;
                           snapshotBeforeReplace();
-                          commitSpec(structuredClone(st.spec));
+                          commitSpec(healLoadedSpec(structuredClone(st.spec)));
                           setSelectedId(null);
                           setDesignsOpen(false);
                         }}

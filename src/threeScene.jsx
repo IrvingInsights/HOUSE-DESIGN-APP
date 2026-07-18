@@ -1481,7 +1481,10 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               const top = roofTopAtPt(jx, jz);
               if (!Number.isFinite(top)) continue; // open sky — nothing to pierce
               if (c.y > top + JOINTS.ROOF_SLACK + 0.12) {
-                problems.push({ check: 'frame-over-roof', id, name: m.name || 'member', over: Math.round((c.y - top) * 100) / 100 });
+                problems.push({
+                  check: 'frame-over-roof', id, name: m.name || 'member', over: Math.round((c.y - top) * 100) / 100,
+                  at: { x: Math.round(c.x * 100) / 100, y: Math.round(c.y * 100) / 100, z: Math.round(c.z * 100) / 100, roofTop: Math.round(top * 100) / 100 }
+                });
                 break;
               }
             }
@@ -1666,8 +1669,17 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           return false;
         })();
         const liftPerim = stepsF ? 0 : storeyLift;
-        const hLead = (spanIsZ ? roofSpec.northWallHeightFt : shedEW ? roofSpec.westWallHeightFt : roofSpec.highWallHeightFt) + liftPerim;
-        const hTail = (spanIsZ ? roofSpec.southWallHeightFt : shedEW ? roofSpec.eastWallHeightFt : roofSpec.highWallHeightFt) + liftPerim;
+        // Posts stand INSIDE the wall line — on a shed the roof plane there is
+        // already below the wall-line top (slope × the inset), so a post/plate
+        // raised to the WALL height rode over the roof plan (the frame-over-
+        // roof audit hit on every saved shed). The bearing height is the EAVE
+        // LINE at the post's own span position — same law the roof plane and
+        // walls follow.
+        const eaveAtSpanPos = (spanPos) => (roofSpec.roofType === 'shed'
+          ? (shedEW ? shedEaveAt(spanPos, 0) : shedEaveAt(0, spanPos))
+          : roofSpec.highWallHeightFt);
+        const hLead = eaveAtSpanPos(aLead) + liftPerim;
+        const hTail = eaveAtSpanPos(aTail) + liftPerim;
         const gRise = roofSpec.roofType === 'gable' ? depth * pitchF : 0;
         const hasBents = !fm.studs && fm.postW > 0;
         const bay = hasBents
@@ -1851,6 +1863,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const above = frameTiers[ti + 1] ? frameTiers[ti + 1].p : null;
             const tierLift = lv === 1 ? 0 : upThru(lv);
             if (lv >= 2) {
+              const plateElT = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === lv);
+              const porchTier = plateElT?.topTreatment === 'porch';
               const floorY = (anySetback ? elev2 : baseWallFt) + upAbove(lv);
               const pS0 = (spanIsZ ? p.y : p.x) + fm.postW / 2;
               const pS1 = (spanIsZ ? p.y + p.d : p.x + p.w) - fm.postW / 2;
@@ -1863,15 +1877,32 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               for (let j = 1; j < jCount; j += 1) {
                 straight(pB0, pB1, floorY + 0.28, pS0 + ((pS1 - pS0) * j) / jCount, 0.34, 0.55);
               }
-              // posts + plate beams to THIS tier's own top
-              const upBays = Math.max(1, Math.ceil((pB1 - pB0) / bay));
-              for (let i = 0; i <= upBays; i += 1) {
-                const at = pB0 + ((pB1 - pB0) * i) / upBays;
-                postAt(pS0, at, Math.max(1, tierTopPlane(pS0, lv, p) - fm.plateH - floorY), fm.postW, floorY);
-                postAt(pS1, at, Math.max(1, tierTopPlane(pS1, lv, p) - fm.plateH - floorY), fm.postW, floorY);
+              // posts + plate beams to THIS tier's own top — around the part
+              // of the plate that carries STRUCTURE. On a PORCH tier the ring
+              // is an open deck (the roof plan says open sky there): posts at
+              // the plate edge rose to a tier top no roof ever reaches — the
+              // audit's "frame 4 ft over the roof" fliers on saved designs.
+              // The bearing ring for a porch tier is the ENCLOSED CORE, the
+              // rectangle the storey above actually stands on.
+              const core = porchTier && above ? (() => {
+                const cx0 = Math.max(p.x, above.x); const cx1 = Math.min(p.x + p.w, above.x + above.w);
+                const cy0 = Math.max(p.y, above.y); const cy1 = Math.min(p.y + p.d, above.y + above.d);
+                return (cx1 - cx0 > fm.postW * 2 && cy1 - cy0 > fm.postW * 2) ? { x: cx0, y: cy0, w: cx1 - cx0, d: cy1 - cy0 } : null;
+              })() : (porchTier ? null : p);
+              if (core) {
+                const rS0 = (spanIsZ ? core.y : core.x) + fm.postW / 2;
+                const rS1 = (spanIsZ ? core.y + core.d : core.x + core.w) - fm.postW / 2;
+                const rB0 = (spanIsZ ? core.x : core.y) + fm.postW / 2;
+                const rB1 = (spanIsZ ? core.x + core.w : core.y + core.d) - fm.postW / 2;
+                const upBays = Math.max(1, Math.ceil((rB1 - rB0) / bay));
+                for (let i = 0; i <= upBays; i += 1) {
+                  const at = rB0 + ((rB1 - rB0) * i) / upBays;
+                  postAt(rS0, at, Math.max(1, tierTopPlane(rS0, lv, p) - fm.plateH - floorY), fm.postW, floorY);
+                  postAt(rS1, at, Math.max(1, tierTopPlane(rS1, lv, p) - fm.plateH - floorY), fm.postW, floorY);
+                }
+                straight(rB0, rB1, tierTopPlane(rS0, lv, p) - fm.plateH / 2, rS0, fm.postW + 0.1, fm.plateH);
+                straight(rB0, rB1, tierTopPlane(rS1, lv, p) - fm.plateH / 2, rS1, fm.postW + 0.1, fm.plateH);
               }
-              straight(pB0, pB1, tierTopPlane(pS0, lv, p) - fm.plateH / 2, pS0, fm.postW + 0.1, fm.plateH);
-              straight(pB0, pB1, tierTopPlane(pS1, lv, p) - fm.plateH / 2, pS1, fm.postW + 0.1, fm.plateH);
             }
             if (!above) {
               // top tier: the full roof rides over its plate
@@ -1940,6 +1971,34 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             });
           });
         }
+      }
+
+      // ── THE STANDING LAW, FOR THE FRAME TOO ──────────────────────────────
+      // Upright members (posts, plates, ties, joists, studs, deck rims) obey
+      // the same vertex-cap the walls do: no vertex rises past the roof plan.
+      // Rafters and braces are BUILT from the plan (sampled/sloped) and keep
+      // their rotation; everything axis-aligned gets clamped here, so a spec
+      // whose stored fields disagree with today's storey semantics (old saved
+      // designs carrying pre-update-101 heights) still renders tight.
+      if (!roundFp) {
+        roomMeshes.forEach((m) => {
+          if (String(m.userData?.roomId || '') !== 'frame-main') return;
+          if (!m?.isMesh || !m.geometry?.getAttribute) return;
+          if (m.rotation.x !== 0 || m.rotation.y !== 0 || m.rotation.z !== 0) return;
+          const posF = m.geometry.getAttribute('position');
+          let changedF = false;
+          for (let i = 0; i < posF.count; i += 1) {
+            const wy = posF.getY(i) + m.position.y;
+            const capF = roofUnderAt(posF.getX(i) + m.position.x, posF.getZ(i) + m.position.z) + JOINTS.ROOF_SLACK;
+            if (wy > capF) { posF.setY(i, capF - m.position.y); changedF = true; }
+          }
+          if (changedF) {
+            posF.needsUpdate = true;
+            m.geometry.computeVertexNormals();
+            m.geometry.computeBoundingBox();
+            m.geometry.computeBoundingSphere();
+          }
+        });
       }
 
       // (The old floating assembly-summary chip is gone — that information
