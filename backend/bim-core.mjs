@@ -948,12 +948,14 @@ function normalizeRooms(spec) {
   // (1) On a shed/gable roof the SHELL owns the north/south wall heights
   // (set_wall_side syncs both ways); a per-wall override that disagrees is a
   // desync (it once forced a whole 10′ north wall to render 17′) — shell wins.
+  // EXCEPT a glazed side: its height is the greenhouse KNEEWALL, which is
+  // supposed to sit far below the shell's eave (the glass climbs the gap).
   if (spec.shell && spec.walls) {
     const shellHFor = { south: 'southWallHeightFt', north: 'northWallHeightFt', east: 'eastWallHeightFt', west: 'westWallHeightFt' };
     for (const side of ['south', 'north', 'east', 'west']) {
       const shellH = Number(spec.shell[shellHFor[side]]);
       const w = spec.walls[side];
-      if (w && Number.isFinite(Number(w.heightFt)) && Number.isFinite(shellH) && shellH > 0
+      if (w && !w.sunGlazing && Number.isFinite(Number(w.heightFt)) && Number.isFinite(shellH) && shellH > 0
         && Math.abs(Number(w.heightFt) - shellH) > 0.05) delete w.heightFt;
     }
   }
@@ -1503,6 +1505,9 @@ export function applyBimOperations(currentSpec, plan) {
         // Global wall height = "one height for all": reset the S/N mirrors and
         // clear any per-side height overrides so every wall follows it again.
         // The ground-floor pin clears too — the 2nd floor rides the walls.
+        // A glazed side keeps its greenhouse kneewall (deleting it made the
+        // glass compute a zero gap and vanish; the glazing simply climbs to
+        // the new one-height eave instead).
         const h = clamp(numeric, 7, 40);
         next.shell.wallHeightFt = h;
         next.shell.southWallHeightFt = h;
@@ -1510,7 +1515,7 @@ export function applyBimOperations(currentSpec, plan) {
         delete next.shell.eastWallHeightFt;
         delete next.shell.westWallHeightFt;
         for (const side of WALL_SIDES) {
-          if (next.walls[side]) delete next.walls[side].heightFt;
+          if (next.walls[side] && !next.walls[side].sunGlazing) delete next.walls[side].heightFt;
         }
         if (next.shell.storeyHeights) {
           delete next.shell.storeyHeights[1];
@@ -1689,16 +1694,32 @@ export function applyBimOperations(currentSpec, plan) {
         // (low bale wall with angled glazing above). Global height stays >= 7.
         const h = clamp(Number(operation.value), 2, 40);
         next.walls[side].heightFt = h;
-        if (side === 'south') next.shell.southWallHeightFt = h;
-        if (side === 'north') next.shell.northWallHeightFt = h;
-        if (side === 'east') next.shell.eastWallHeightFt = h;
-        if (side === 'west') next.shell.westWallHeightFt = h;
-        const profile = roofProfile(next.shell);
-        next.shell.wallHeightFt = profile.highWallHeightFt;
-        next.shell.roofPitch = Math.round(profile.pitch * 1000) / 1000;
+        // A GLAZED side's height is the greenhouse KNEEWALL — it must NOT
+        // redefine the roof. (The ☀ preset once synced south 17→2 into the
+        // shell: the whole shed flipped, and the glass computed a zero gap
+        // and vanished. The kneewall shapes the wall; the roof keeps its
+        // shape and the glazing climbs from kneewall to that roof.)
+        if (!next.walls[side].sunGlazing) {
+          if (side === 'south') next.shell.southWallHeightFt = h;
+          if (side === 'north') next.shell.northWallHeightFt = h;
+          if (side === 'east') next.shell.eastWallHeightFt = h;
+          if (side === 'west') next.shell.westWallHeightFt = h;
+          const profile = roofProfile(next.shell);
+          next.shell.wallHeightFt = profile.highWallHeightFt;
+          next.shell.roofPitch = Math.round(profile.pitch * 1000) / 1000;
+        }
       } else if (field === 'sunGlazing') {
         // Angled greenhouse glazing above this wall, up to the eave.
-        next.walls[side].sunGlazing = operation.value === true || String(operation.value) === 'true' || operation.value === 1 || operation.value === '1';
+        const on = operation.value === true || String(operation.value) === 'true' || operation.value === 1 || operation.value === '1';
+        const hadGlazing = Boolean(next.walls[side].sunGlazing);
+        next.walls[side].sunGlazing = on;
+        // Turning glazing OFF removes the kneewall with it — the low wall
+        // only existed to carry the glass. The side stands back up to the
+        // shell's roofline; the shell itself never moved (kneewalls don't
+        // reshape roofs), so there is nothing to recompute.
+        if (!on && hadGlazing && Number(next.walls[side].heightFt) > 0) {
+          delete next.walls[side].heightFt;
+        }
       } else if (field === 'sunGlazingTiltDeg') {
         next.walls[side].sunGlazingTiltDeg = clamp(Number(operation.value) || 0, 0, 45);
       } else if (field === 'cladding') {
@@ -2298,6 +2319,7 @@ export function applyBimOperations(currentSpec, plan) {
         if (operation.deckPlacement) element.deckPlacement = operation.deckPlacement;
         if (operation.deckRail) element.deckRail = operation.deckRail;
         if (operation.deckRoof) element.deckRoof = operation.deckRoof;
+        if (operation.deckStairs) element.deckStairs = operation.deckStairs;
       }
       const placed = { ...element, ...clampObjectPosition(next, element, element.x, element.y) };
       // ONE extent plate per level, enforced at the op layer: a second
@@ -2429,6 +2451,21 @@ export function applyBimOperations(currentSpec, plan) {
         const v = Number(operation.value);
         if (Number.isFinite(v) && v > 0) target.roofPitch = clamp(v, 0.02, 1.5);
         else delete target.roofPitch;
+      } else if (operation.field === 'roofShape') {
+        // Per-storey roof SHAPE on a floor plate: how this storey's piece of
+        // the roof plan builds. 'wing' (or blank) = the automatic lean-to.
+        if (['shed', 'gable', 'flat'].includes(operation.value)) target.roofShape = operation.value;
+        else delete target.roofShape;
+      } else if (operation.field === 'roofFall') {
+        // Which way a per-storey SHED piece falls (its LOW side).
+        if (['north', 'south', 'east', 'west'].includes(operation.value)) target.roofFall = operation.value;
+        else delete target.roofFall;
+      } else if (operation.field === 'roofOverhangFt') {
+        // This storey's own eave reach past its walls; blank/zero = the
+        // whole-roof overhangs.
+        const ov = Number(operation.value);
+        if (Number.isFinite(ov) && ov > 0) target.roofOverhangFt = clamp(ov, 0, 12);
+        else delete target.roofOverhangFt;
       } else if (operation.field) target[operation.field] = operation.value;
       changedIds.push(target.id);
       actions.push(operationDescription({ ...operation, name: target.name }, next));

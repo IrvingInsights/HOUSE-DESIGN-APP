@@ -228,6 +228,24 @@ ok(!('sillFt' in r.spec.openings[0]), 'a negative/blank sill clears the override
   ok(s2.elements.find((el) => el.id === plate.id).roofPitch === 1.5, 'plate roofPitch clamps');
   s2 = apply(s2, [{ type: 'update_object', targetId: plate.id, field: 'roofPitch', value: 0 }]).spec;
   ok(!('roofPitch' in s2.elements.find((el) => el.id === plate.id)), 'roofPitch 0 clears back to the whole-roof pitch');
+  // full roof controls per storey: shape / fall / overhang on the plate —
+  // valid values stick, junk clears back to the automatic law
+  s2 = apply(s2, [
+    { type: 'update_object', targetId: plate.id, field: 'roofShape', value: 'gable' },
+    { type: 'update_object', targetId: plate.id, field: 'roofFall', value: 'west' },
+    { type: 'update_object', targetId: plate.id, field: 'roofOverhangFt', value: 20 }
+  ]).spec;
+  let p2 = s2.elements.find((el) => el.id === plate.id);
+  ok(p2.roofShape === 'gable' && p2.roofFall === 'west' && p2.roofOverhangFt === 12,
+    'plate roofShape/roofFall set; overhang clamps to 12');
+  s2 = apply(s2, [
+    { type: 'update_object', targetId: plate.id, field: 'roofShape', value: 'dome' },
+    { type: 'update_object', targetId: plate.id, field: 'roofFall', value: 'up' },
+    { type: 'update_object', targetId: plate.id, field: 'roofOverhangFt', value: 0 }
+  ]).spec;
+  p2 = s2.elements.find((el) => el.id === plate.id);
+  ok(!('roofShape' in p2) && !('roofFall' in p2) && !('roofOverhangFt' in p2),
+    'junk shape/fall and zero overhang clear back to auto');
 }
 
 // fixture on an upper floor keeps its level + elevation
@@ -300,6 +318,20 @@ r = apply(r.spec, [
 ok(resolveWallSide(r.spec, 'south').sunGlazing === true && resolveWallSide(r.spec, 'south').sunGlazingTiltDeg === 32, 'sun glazing + tilt round-trip');
 r = apply(freshSpec(), [{ type: 'set_wall_side', wall: 'north', field: 'heightFt', value: 0.5 }]);
 ok(r.spec.walls.north.heightFt === 2, 'kneewall clamps at 2ft floor');
+// A GLAZED side's height is the greenhouse kneewall — it must NOT redefine
+// the roof. (Daniel's 17/10 shed flipped to 2/10 when the ☀ preset synced
+// the 2ft kneewall into the shell; the glass then computed a zero gap and
+// the whole greenhouse vanished.)
+r = apply(freshSpec(), [
+  { type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: 17, northWallHeightFt: 10 },
+  { type: 'set_wall_side', wall: 'south', field: 'sunGlazing', value: true },
+  { type: 'set_wall_side', wall: 'south', field: 'heightFt', value: 2 }
+]);
+ok(r.spec.walls.south.heightFt === 2 && r.spec.shell.southWallHeightFt === 17 && r.spec.shell.roofType === 'shed',
+  'glazed kneewall does NOT reshape the roof — 17/10 shed keeps its 17ft south eave');
+r = apply(r.spec, [{ type: 'set_wall_side', wall: 'south', field: 'sunGlazing', value: false }]);
+ok(r.spec.walls.south.heightFt === undefined && r.spec.shell.southWallHeightFt === 17,
+  'glazing off removes the kneewall with it — the wall stands back up, the shell never moved');
 r = apply(freshSpec(), [{ type: 'set_frame', field: 'baySpacingFt', value: '6' }]);
 ok(r.spec.frame.baySpacingFt === 6, 'set_frame baySpacingFt');
 // segment resize: notch the south wall into 3, then set the middle's length + start

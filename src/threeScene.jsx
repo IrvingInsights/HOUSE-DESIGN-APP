@@ -17,7 +17,7 @@ import {
 import {
   DEFAULT_OUTDOOR_GRID_SIZE_FT, clamp, padExtension, sitePadRect, objectBounds, titleCase, roofProfile, storeyInfo,
   upperPlateRect, resolveOverhangs, FOUNDATION_RUN_TYPES, DEFAULT_MODEL_LAYERS, siteOf, utilitiesOf, getSpecialBimObjects, wallAssemblyProfile,
-  WALL_SIDES, resolveWallSide, resolveDeck
+  WALL_SIDES, resolveWallSide, resolveDeck, resolveDeckStairs
 } from './engine.js';
 
 // Some browsers run with graphics acceleration (WebGL) turned off — locked-
@@ -406,6 +406,18 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         const v = Number(elP?.roofPitch);
         return Number.isFinite(v) && v > 0 ? v : null;
       };
+      // …and its own roof SHAPE, fall direction, and overhang (update 109:
+      // full roof controls per storey). Null = the automatic law (a lean-to
+      // wing on a stepped ring; the whole-roof shape on the top tier).
+      const tierFieldOf = (lv, field) => {
+        if (lv <= 1) return null;
+        const elP = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === lv);
+        return elP ? elP[field] : null;
+      };
+      const tierShapeOf = (lv) => { const v = tierFieldOf(lv, 'roofShape'); return ['shed', 'gable', 'flat'].includes(v) ? v : null; };
+      const tierFallOf = (lv) => { const v = tierFieldOf(lv, 'roofFall'); return ['north', 'south', 'east', 'west'].includes(v) ? v : null; };
+      const tierOverhangOf = (lv) => { const v = Number(tierFieldOf(lv, 'roofOverhangFt')); return Number.isFinite(v) && v > 0 ? clamp(v, 0, 12) : null; };
+      const OPPOSITE_SIDE = { north: 'south', south: 'north', east: 'west', west: 'east' };
       const basementH = basementInfo(spec.shell).heightFt;
       const wallHeight = roofSpec.highWallHeightFt + storeyLift;
       // The shed's fall AXIS (from the engine's one roofProfile): 'ns' slopes
@@ -530,11 +542,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             east: [rect.x + rect.w + probe, rect.y + rect.d / 2]
           };
           const out = {};
+          // a storey with its OWN overhang reaches that far past its walls on
+          // every outward side (courtesy joints at neighbors stay tight)
+          const tOv = tierOverhangOf(segLevel);
           for (const side of WALL_SIDES) {
             const [px, py] = probes[side];
             if (!isUpper && coveredAbove(px, py, segLevel)) out[side] = 0.35;
             else if (insideFp(px, py)) out[side] = 0.05;
-            else out[side] = oAll[side];
+            else out[side] = tOv ?? oAll[side];
           }
           return out;
         };
@@ -556,7 +571,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           segments.push({ rect: fullRect, eave: wallHeight, kind: 'full', upper: true, level: storeyTiers.length, tierY0: 0, tierX0: 0, legacy: true });
         } else if (steps) {
           const top = storeyTiers[storeyTiers.length - 1];
-          segments.push({ rect: top.rect, eave: top.topEave, kind: 'full', upper: true, level: top.level, tierY0: top.rect.y, tierX0: top.rect.x });
+          segments.push({ rect: top.rect, eave: top.topEave, kind: 'full', upper: true, level: top.level, tierY0: top.rect.y, tierX0: top.rect.x, tiered: true });
           for (let i = storeyTiers.length - 2; i >= 0; i -= 1) {
             const below = storeyTiers[i];
             const above = storeyTiers[i + 1];
@@ -568,7 +583,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               ring.forEach((rect) => porchRings.push({ rect, level: below.level, topEave: below.topEave, hostRect: below.rect }));
               continue;
             }
-            ring.forEach((rect) => segments.push({ rect, eave: below.topEave, aboveTop: above.topEave, kind: 'wing', highSide: touchSide(rect, above.rect), level: below.level, tierDrop: storeyLift - upThru(below.level), tierY0: below.rect.y, tierX0: below.rect.x }));
+            ring.forEach((rect) => segments.push({ rect, eave: below.topEave, aboveTop: above.topEave, kind: 'wing', highSide: touchSide(rect, above.rect), level: below.level, tierDrop: storeyLift - upThru(below.level), tierY0: below.rect.y, tierX0: below.rect.x, tiered: true }));
           }
         } else {
           decomposeFootprint(fpPoly).forEach((rect) => segments.push({ rect, eave: wallHeight, kind: 'full', upper: true, level: storeyTiers.length }));
@@ -592,7 +607,53 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const Z0 = seg.rect.y - o.north, Z1 = seg.rect.y + seg.rect.d + o.south;
           seg.covers = (px, pz) => px >= X0 - 0.01 && px <= X1 + 0.01 && pz >= Z0 - 0.01 && pz <= Z1 + 0.01;
           const segPitch = (seg.level || 1) > 1 ? (tierPitchOf(seg.level) ?? pitchNow) : pitchNow;
-          if (seg.kind === 'wing' && roofSpec.roofType === 'shed') {
+          // PER-STOREY SHAPE OVERRIDE (stepped tiers only): the plate's own
+          // roofShape replaces this piece's automatic law. The topAt written
+          // here is the SAME law the mesh builder renders (gable pieces go to
+          // makeGableSegment, planar ones to makeShedPiece), so plan and mesh
+          // stay coordinate-identical and the one-roof law holds.
+          const tierShape = seg.tiered && (seg.level || 1) > 1 ? tierShapeOf(seg.level) : null;
+          if (tierShape === 'flat') {
+            const yF = seg.eave + JOINTS.EAVE_BEARING;
+            seg.topAt = () => yF;
+            seg.stopBearing = JOINTS.EAVE_BEARING;
+            seg.shape = 'flat';
+          } else if (tierShape === 'gable') {
+            // exact makeGableSegment law (ridge along the longer axis)
+            const base = seg.eave + JOINTS.EAVE_BEARING;
+            const spanX = X1 - X0, spanZ = Z1 - Z0;
+            const ridgeY = base + (Math.min(spanX, spanZ) / 2) * segPitch;
+            if (spanX >= spanZ) {
+              const cz = (Z0 + Z1) / 2;
+              seg.topAt = (px, pz) => base + (ridgeY - base) * Math.max(0, 1 - Math.abs(pz - cz) / Math.max(0.01, spanZ / 2));
+              seg.ridge = { axis: 'x', at: cz, y: ridgeY, base };
+            } else {
+              const cxs = (X0 + X1) / 2;
+              seg.topAt = (px) => base + (ridgeY - base) * Math.max(0, 1 - Math.abs(px - cxs) / Math.max(0.01, spanX / 2));
+              seg.ridge = { axis: 'z', at: cxs, y: ridgeY, base };
+            }
+            seg.stopBearing = JOINTS.EAVE_BEARING;
+            seg.shape = 'gable';
+          } else if (tierShape === 'shed') {
+            // one plane falling toward the chosen low side (default: away
+            // from the storey above on a wing, north on a top tier)
+            const fall = tierFallOf(seg.level) || (seg.kind === 'wing' && seg.highSide ? OPPOSITE_SIDE[seg.highSide] : 'north');
+            const high = OPPOSITE_SIDE[fall];
+            const run = (high === 'north' || high === 'south') ? (Z1 - Z0) : (X1 - X0);
+            let rise = Math.max(0.1, run * segPitch);
+            if (seg.kind === 'wing' && high === seg.highSide && Number.isFinite(seg.aboveTop)) {
+              // rising toward the storey above → still tucks under it
+              rise = Math.max(0.5, Math.min(rise, seg.aboveTop - seg.eave - 0.5));
+            }
+            const lowY = seg.eave + JOINTS.EAVE_BEARING;
+            seg.topAt = (px, pz) => (
+              high === 'north' ? lowY + ((Z1 - pz) / (Z1 - Z0)) * rise
+              : high === 'south' ? lowY + ((pz - Z0) / (Z1 - Z0)) * rise
+              : high === 'west' ? lowY + ((X1 - px) / (X1 - X0)) * rise
+              : lowY + ((px - X0) / (X1 - X0)) * rise);
+            seg.stopBearing = JOINTS.EAVE_BEARING;
+            seg.shape = 'shed';
+          } else if (seg.kind === 'wing' && roofSpec.roofType === 'shed') {
             seg.topAt = shedPlaneFor(seg);
             seg.stopBearing = JOINTS.ROOF_BEARING;
           } else if (seg.kind === 'wing') {
@@ -1461,6 +1522,27 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               if (wy > cap) { problems.push({ check: 'wall-over-roof', id, over: Math.round((wy - cap) * 100) / 100 }); break; }
             }
           }
+          if (judge && m.userData?.sunGlazingBand && id.startsWith('wall-')) {
+            // The greenhouse glass itself — rotated, so the wall vertex law
+            // skips it. Same world-corner test as the frame: glazing may
+            // never rise through any roof. This check is why an invisible or
+            // fin-floating greenhouse can't pass the battery silently again.
+            const gg = m.geometry.boundingBox;
+            const gCorners = [];
+            [gg.min.x, gg.max.x].forEach((cx2) => [gg.min.y, gg.max.y].forEach((cy2) => [gg.min.z, gg.max.z].forEach((cz2) => gCorners.push(new THREE.Vector3(cx2, cy2, cz2)))));
+            const gCtr = new THREE.Vector3((gg.min.x + gg.max.x) / 2, (gg.min.y + gg.max.y) / 2, (gg.min.z + gg.max.z) / 2).applyMatrix4(m.matrixWorld);
+            for (const c of gCorners) {
+              c.applyMatrix4(m.matrixWorld);
+              const jx = c.x + Math.sign(gCtr.x - c.x) * Math.min(0.35, Math.abs(gCtr.x - c.x));
+              const jz = c.z + Math.sign(gCtr.z - c.z) * Math.min(0.35, Math.abs(gCtr.z - c.z));
+              const top = roofTopAtPt(jx, jz);
+              if (!Number.isFinite(top)) continue;
+              if (c.y > top + JOINTS.ROOF_SLACK + 0.12) {
+                problems.push({ check: 'glazing-over-roof', id, over: Math.round((c.y - top) * 100) / 100, at: { x: Math.round(c.x * 100) / 100, y: Math.round(c.y * 100) / 100, z: Math.round(c.z * 100) / 100, roofTop: Math.round(top * 100) / 100 } });
+                break;
+              }
+            }
+          }
           if (judge && id === 'frame-main') {
             // FRAME members too (posts, plates, rafters — rotated or not):
             // every corner of the member's true box, in world space, must sit
@@ -1473,11 +1555,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             for (const c of corners) {
               c.applyMatrix4(m.matrixWorld);
               // judge a hair INSIDE the member — a corner exactly on a roof-
-              // piece boundary must not be judged against the lower neighbor
+              // piece boundary must not be judged against the lower neighbor.
+              // Nudge each plan axis on its own: a diagonal step (the old way)
+              // barely moves the SHORT axis of a long member (a 20-ft plate
+              // beam moved 0.01 ft sideways), leaving the judge point over the
+              // neighbor roof and flagging a beam flush with its own roof edge.
               const dx = ctr.x - c.x; const dz = ctr.z - c.z;
-              const dl = Math.hypot(dx, dz) || 1;
-              const jx = c.x + (dx / dl) * Math.min(0.35, dl);
-              const jz = c.z + (dz / dl) * Math.min(0.35, dl);
+              const jx = c.x + Math.sign(dx) * Math.min(0.35, Math.abs(dx));
+              const jz = c.z + Math.sign(dz) * Math.min(0.35, Math.abs(dz));
               const top = roofTopAtPt(jx, jz);
               if (!Number.isFinite(top)) continue; // open sky — nothing to pierce
               if (c.y > top + JOINTS.ROOF_SLACK + 0.12) {
@@ -1539,56 +1624,105 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               ? (side === 'east' ? roofSpec.eastWallHeightFt + liftSg : side === 'west' ? roofSpec.westWallHeightFt + liftSg : roofSpec.highWallHeightFt + liftSg)
               : (side === 'south' ? roofSpec.southWallHeightFt + liftSg : side === 'north' ? roofSpec.northWallHeightFt + liftSg : Math.max(roofSpec.northWallHeightFt, roofSpec.southWallHeightFt) + liftSg))
             : roofSpec.highWallHeightFt + liftSg;
-          const gapH = eaveH - kneeH;
-          if (gapH < 1.5) return;
           const tiltRad = clamp(Number(rSg.sunGlazingTiltDeg ?? 30), 0, 45) * Math.PI / 180;
-          const slantLen = gapH / Math.cos(tiltRad);
-          const inset = gapH * Math.tan(tiltRad);
           const runLen = (side === 'north' || side === 'south' ? width : depth) - 1;
-          const bandGlassMat = new THREE.MeshStandardMaterial({ color: 0xcfe5ea, roughness: 0.1, metalness: 0.05, transparent: true, opacity: 0.36, side: THREE.DoubleSide, envMap: envTex, envMapIntensity: 0.85 });
-          const bandPart = (m) => { m.userData.roomId = `wall-${side}`; m.userData.wallSide = side; m.userData.generated = true; group.add(m); return m; };
-          const midY = kneeH + gapH / 2;
-          const place = (thick, isBatten, along = 0) => {
-            let m;
-            if (side === 'south') { m = box(isBatten ? 0.3 : runLen, slantLen, thick, width / 2 + along, midY, depth - inset / 2, isBatten ? frameMat : bandGlassMat); m.rotation.x = -tiltRad; }
-            else if (side === 'north') { m = box(isBatten ? 0.3 : runLen, slantLen, thick, width / 2 + along, midY, inset / 2, isBatten ? frameMat : bandGlassMat); m.rotation.x = tiltRad; }
-            else if (side === 'east') { m = box(thick, slantLen, isBatten ? 0.3 : runLen, width - inset / 2, midY, depth / 2 + along, isBatten ? frameMat : bandGlassMat); m.rotation.z = tiltRad; }
-            else { m = box(thick, slantLen, isBatten ? 0.3 : runLen, inset / 2, midY, depth / 2 + along, isBatten ? frameMat : bandGlassMat); m.rotation.z = -tiltRad; }
-            return bandPart(m);
+          const horizNS = side === 'north' || side === 'south';
+          // THE ROOF PLAN RULES THE BAND (the same law walls and frame obey):
+          // the band is built in BAYS, and each bay climbs only as high as the
+          // roof actually stands over ITS stretch of wall. Under a low wing it
+          // stops at the wing; where the true eave runs it reaches the eave.
+          // Only bays with under 1.5 ft of climb are skipped — the old code
+          // culled the WHOLE wall on one number (and rose full-length to one
+          // eave height, floating fins through every lower tier roof).
+          const alongAt = (t) => runLen * t - runLen / 2;
+          // The glass LEANS INTO the house — its top edge sits gap·tan(tilt)
+          // inside the wall face, where a falling roof is LOWER than at the
+          // eave. Probe the roof at the top edge's true position and shrink
+          // the climb until the glass tucks under (converges in a few steps;
+          // the old one-eave band poked 1.75 ft through Daniel's shed).
+          const roofAtAlong = (along, ins) => {
+            const c = (horizNS ? width : depth) / 2 + along;
+            const p = side === 'south' ? depth - 0.4 - ins : side === 'north' ? 0.4 + ins : side === 'east' ? width - 0.4 - ins : 0.4 + ins;
+            return horizNS ? roofUnderAt(c, p) : roofUnderAt(p, c);
           };
-          const pane = place(0.14, false);
-          roomMeshes.push(pane);
           const bays = Math.max(2, Math.round(runLen / 4));
-          for (let b = 0; b <= bays; b += 1) {
-            place(0.24, true, runLen * (b / bays) - runLen / 2);
+          const bayLen = runLen / bays;
+          const bayTops = [];
+          for (let b = 0; b < bays; b += 1) {
+            const a0 = alongAt(b / bays);
+            const a1 = alongAt((b + 1) / bays);
+            let top = Math.min(eaveH, Math.min(roofAtAlong(a0, 0), roofAtAlong(a1, 0)) + JOINTS.ROOF_SLACK);
+            for (let it = 0; it < 4; it += 1) {
+              const ins = Math.max(0, top - kneeH) * Math.tan(tiltRad);
+              top = Math.min(top, Math.min(roofAtAlong(a0, ins), roofAtAlong(a1, ins)) + JOINTS.ROOF_SLACK);
+            }
+            bayTops.push(top);
+          }
+          const visible = bayTops.map((t) => t - kneeH >= 1.5);
+          if (!visible.some(Boolean)) return; // no headroom anywhere on this wall
+          const gapOf = (b) => Math.max(0, bayTops[b] - kneeH);
+          const bandGlassMat = new THREE.MeshStandardMaterial({ color: 0xcfe5ea, roughness: 0.1, metalness: 0.05, transparent: true, opacity: 0.36, side: THREE.DoubleSide, envMap: envTex, envMapIntensity: 0.85 });
+          const bandPart = (m) => { m.userData.roomId = `wall-${side}`; m.userData.wallSide = side; m.userData.generated = true; m.userData.sunGlazingBand = true; group.add(m); return m; };
+          // one slanted box, sized by its own bay's climb (gap)
+          const slantedBox = (alongCenter, alongLen, gap, thick, mat) => {
+            const slant = gap / Math.cos(tiltRad);
+            const ins = gap * Math.tan(tiltRad);
+            const yC = kneeH + gap / 2;
+            let m;
+            if (side === 'south') { m = box(alongLen, slant, thick, width / 2 + alongCenter, yC, depth - ins / 2, mat); m.rotation.x = -tiltRad; }
+            else if (side === 'north') { m = box(alongLen, slant, thick, width / 2 + alongCenter, yC, ins / 2, mat); m.rotation.x = tiltRad; }
+            else if (side === 'east') { m = box(thick, slant, alongLen, width - ins / 2, yC, depth / 2 + alongCenter, mat); m.rotation.z = tiltRad; }
+            else { m = box(thick, slant, alongLen, ins / 2, yC, depth / 2 + alongCenter, mat); m.rotation.z = -tiltRad; }
+            return m;
+          };
+          for (let b = 0; b < bays; b += 1) {
+            if (!visible[b]) continue;
+            const pane = bandPart(slantedBox(alongAt((b + 0.5) / bays), bayLen - 0.06, gapOf(b), 0.14, bandGlassMat));
+            roomMeshes.push(pane);
+          }
+          // thin glazing stops at the bay lines, riding the shorter neighbour
+          for (let i = 0; i <= bays; i += 1) {
+            const near = [i - 1, i].filter((bb) => bb >= 0 && bb < bays && visible[bb]);
+            if (!near.length) continue;
+            bandPart(slantedBox(alongAt(i / bays), 0.3, Math.min(...near.map(gapOf)), 0.24, frameMat));
           }
           // HEAVY greenhouse framing — with a structural frame chosen, the
           // slanted glazing is CARRIED, not floating: principal slanted posts
           // at each bay line (riding the same tilt as the glass), a sill beam
-          // on top of the kneewall, and a header beam where the slant meets
-          // the eave. The thin battens above are just glazing stops; these
-          // members join the frame-main skeleton (Frame layer, selectable).
+          // on top of the kneewall, and a header beam where each bay's slant
+          // meets ITS roof. These members join the frame-main skeleton
+          // (Frame layer, selectable) and obey the roof plan like the glass.
           // The glazing ALWAYS needs its timber — even on a load-bearing
           // bale/cob house, the sun face is a framed opening (the classic
           // combo). Only the Frame layer toggle hides it.
           if (layers.frame !== false) {
-            const sgFrame = (m) => { m.userData.roomId = 'frame-main'; m.userData.generated = true; roomMeshes.push(m); group.add(addEdges(m)); return m; };
-            const horizNS = side === 'north' || side === 'south';
-            const beamAt = (yC, outPos) => sgFrame(horizNS
-              ? box(runLen + 0.5, 0.45, 0.5, width / 2, yC, outPos, frameMat)
-              : box(0.5, 0.45, runLen + 0.5, outPos, yC, depth / 2, frameMat));
-            if (side === 'south') { beamAt(kneeH + 0.1, depth - 0.3); beamAt(eaveH - 0.2, depth - inset + 0.15); }
-            else if (side === 'north') { beamAt(kneeH + 0.1, 0.3); beamAt(eaveH - 0.2, inset - 0.15); }
-            else if (side === 'east') { beamAt(kneeH + 0.1, width - 0.3); beamAt(eaveH - 0.2, width - inset + 0.15); }
-            else { beamAt(kneeH + 0.1, 0.3); beamAt(eaveH - 0.2, inset - 0.15); }
+            const sgFrame = (m) => { m.userData.roomId = 'frame-main'; m.userData.generated = true; m.userData.sunGlazingBand = true; roomMeshes.push(m); group.add(addEdges(m)); return m; };
+            const beamRun = (yC, outPos, alongCenter, alongLen) => sgFrame(horizNS
+              ? box(alongLen, 0.45, 0.5, width / 2 + alongCenter, yC, outPos, frameMat)
+              : box(0.5, 0.45, alongLen, outPos, yC, depth / 2 + alongCenter, frameMat));
+            const faceOut = side === 'south' ? depth - 0.3 : side === 'north' ? 0.3 : side === 'east' ? width - 0.3 : 0.3;
+            // sill beam per contiguous visible run of bays
+            let runStart = null;
             for (let b = 0; b <= bays; b += 1) {
-              const along = runLen * (b / bays) - runLen / 2;
-              let m;
-              if (side === 'south') { m = box(0.5, slantLen, 0.45, width / 2 + along, midY, depth - inset / 2, frameMat); m.rotation.x = -tiltRad; }
-              else if (side === 'north') { m = box(0.5, slantLen, 0.45, width / 2 + along, midY, inset / 2, frameMat); m.rotation.x = tiltRad; }
-              else if (side === 'east') { m = box(0.45, slantLen, 0.5, width - inset / 2, midY, depth / 2 + along, frameMat); m.rotation.z = tiltRad; }
-              else { m = box(0.45, slantLen, 0.5, inset / 2, midY, depth / 2 + along, frameMat); m.rotation.z = -tiltRad; }
-              sgFrame(m);
+              const vis = b < bays && visible[b];
+              if (vis && runStart === null) runStart = b;
+              if (!vis && runStart !== null) {
+                beamRun(kneeH + 0.1, faceOut, alongAt(((runStart + b) / 2) / bays), (b - runStart) * bayLen + 0.5);
+                runStart = null;
+              }
+            }
+            // header beam per bay — each meets its own roof line
+            for (let b = 0; b < bays; b += 1) {
+              if (!visible[b]) continue;
+              const ins = gapOf(b) * Math.tan(tiltRad);
+              const headOut = side === 'south' ? depth - ins + 0.15 : side === 'north' ? ins - 0.15 : side === 'east' ? width - ins + 0.15 : ins - 0.15;
+              beamRun(kneeH + gapOf(b) - 0.2, headOut, alongAt((b + 0.5) / bays), bayLen + 0.1);
+            }
+            // slanted principal posts at the bay lines
+            for (let i = 0; i <= bays; i += 1) {
+              const near = [i - 1, i].filter((bb) => bb >= 0 && bb < bays && visible[bb]);
+              if (!near.length) continue;
+              sgFrame(slantedBox(alongAt(i / bays), 0.5, Math.min(...near.map(gapOf)), 0.45, frameMat));
             }
           }
         });
@@ -1894,14 +2028,41 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
                 const rS1 = (spanIsZ ? core.y + core.d : core.x + core.w) - fm.postW / 2;
                 const rB0 = (spanIsZ ? core.x : core.y) + fm.postW / 2;
                 const rB1 = (spanIsZ ? core.x + core.w : core.y + core.d) - fm.postW / 2;
+                // A porch tier bears a FLAT deck — the plan's porch ring rides
+                // topEave (elev2 + upThru) + DECK_LIFT, so the posts rise to
+                // that line and the plate beam kisses the deck slab. The
+                // sloped tierTopPlane is the ROOFED-tier law; following it
+                // here left the posts 1.6-4 ft short of the deck they carry.
+                // A tier wearing its OWN roof shape (per-storey override)
+                // bears on THE PLAN at each member's true point — the old
+                // tierTopPlane math describes the default shed only, and
+                // following it under a west-falling cap poked posts 3 ft
+                // through the roof.
+                const tierShapeHere = porchTier ? null : tierShapeOf(lv);
+                const bearPlan = (sp, atB) => {
+                  const px = spanIsZ ? atB : sp;
+                  const pz = spanIsZ ? sp : atB;
+                  return roofUnderAt(px, pz);
+                };
+                const bearAt = porchTier ? () => elev2 + upThru(lv)
+                  : tierShapeHere ? bearPlan
+                  : (sp) => tierTopPlane(sp, lv, p);
+                // a plate beam is one straight member — under a roof that
+                // slopes along its run it bears at its LOWEST clearance
+                const beamBear = (sp) => {
+                  if (!tierShapeHere) return bearAt(sp, (rB0 + rB1) / 2);
+                  let m = Infinity;
+                  for (let k = 0; k <= 8; k += 1) m = Math.min(m, bearPlan(sp, rB0 + ((rB1 - rB0) * k) / 8));
+                  return m;
+                };
                 const upBays = Math.max(1, Math.ceil((rB1 - rB0) / bay));
                 for (let i = 0; i <= upBays; i += 1) {
                   const at = rB0 + ((rB1 - rB0) * i) / upBays;
-                  postAt(rS0, at, Math.max(1, tierTopPlane(rS0, lv, p) - fm.plateH - floorY), fm.postW, floorY);
-                  postAt(rS1, at, Math.max(1, tierTopPlane(rS1, lv, p) - fm.plateH - floorY), fm.postW, floorY);
+                  postAt(rS0, at, Math.max(1, bearAt(rS0, at) - fm.plateH - floorY), fm.postW, floorY);
+                  postAt(rS1, at, Math.max(1, bearAt(rS1, at) - fm.plateH - floorY), fm.postW, floorY);
                 }
-                straight(rB0, rB1, tierTopPlane(rS0, lv, p) - fm.plateH / 2, rS0, fm.postW + 0.1, fm.plateH);
-                straight(rB0, rB1, tierTopPlane(rS1, lv, p) - fm.plateH / 2, rS1, fm.postW + 0.1, fm.plateH);
+                straight(rB0, rB1, beamBear(rS0) - fm.plateH / 2, rS0, fm.postW + 0.1, fm.plateH);
+                straight(rB0, rB1, beamBear(rS1) - fm.plateH / 2, rS1, fm.postW + 0.1, fm.plateH);
               }
             }
             if (!above) {
@@ -2430,31 +2591,50 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // the walking surface: a slab-thin patio at grade, a framed platform raised
           dp(box(ew0, dk.placement === 'grade' ? 0.25 : 0.35, ed0, ex0 + ew0 / 2, deckTopY, ey0 + ed0 / 2, deckMatD));
           const railTop = deckTopY + 3;
-          // steps come down the LONGEST open edge; the railing leaves a gap there
+          // stairs: resolveDeckStairs is the one answer (renderer + receipts +
+          // card). 'auto' = the old longest-open-edge rule down to the ground;
+          // a chosen edge runs to whatever is outside it — a lower (or higher)
+          // deck on another level, or the ground. The railing leaves a gap.
           let stepGap = null;
-          if (dk.needsSteps) {
-            let bestSeg = null; let bestSide = null;
-            for (const [side, segs] of Object.entries(dk.openSides)) {
-              for (const s of segs) {
-                if (!bestSeg || (s.a1 - s.a0) > (bestSeg.a1 - bestSeg.a0)) { bestSeg = s; bestSide = side; }
-              }
-            }
-            if (bestSeg && bestSeg.a1 - bestSeg.a0 >= 3) {
-              const mid = (bestSeg.a0 + bestSeg.a1) / 2;
-              const gapW = Math.min(4, bestSeg.a1 - bestSeg.a0);
-              stepGap = { side: bestSide, a0: mid - gapW / 2, a1: mid + gapW / 2 };
-              // treads marching outward and down from the deck edge to the ground
-              const stepsN = Math.max(2, Math.ceil(deckTopY / 0.65));
-              const stepH = deckTopY / stepsN;
-              const horiz = bestSide === 'north' || bestSide === 'south';
-              const edgeAt = bestSide === 'north' ? ey0 : bestSide === 'south' ? ey0 + ed0 : bestSide === 'west' ? ex0 : ex0 + ew0;
-              const outDir = (bestSide === 'north' || bestSide === 'west') ? -1 : 1;
+          {
+            const st = resolveDeckStairs(spec, element, dk);
+            if (st && !st.blocked) {
+              stepGap = { side: st.side, a0: st.gapA0, a1: st.gapA1 };
+              const hiTop = Math.max(deckTopY, st.targetTop);
+              const stepsN = st.treads;
+              const stepH = st.rise / stepsN;
+              const horiz = st.side === 'north' || st.side === 'south';
+              const edgeAt = st.side === 'north' ? ey0 : st.side === 'south' ? ey0 + ed0 : st.side === 'west' ? ex0 : ex0 + ew0;
+              const outDir = (st.side === 'north' || st.side === 'west') ? -1 : 1;
+              // descending AWAY from whichever surface is higher: outward when
+              // this deck is higher, inward onto this deck when the target is
+              const marchDir = st.up ? -outDir : outDir;
               for (let s = 1; s <= stepsN; s += 1) {
-                const topY = deckTopY - s * stepH + stepH / 2;
-                const off = edgeAt + outDir * (s * 0.9 - 0.45);
+                const topY = hiTop - s * stepH + stepH / 2;
+                const off = edgeAt + marchDir * (s * 0.9 - 0.45);
                 dp(horiz
-                  ? box(gapW - 0.3, stepH, 0.9, mid, topY, off, deckMatD)
-                  : box(0.9, stepH, gapW - 0.3, off, topY, mid, deckMatD));
+                  ? box(st.gapW - 0.3, stepH, 0.9, st.mid, topY, off, deckMatD)
+                  : box(0.9, stepH, st.gapW - 0.3, off, topY, st.mid, deckMatD));
+              }
+              // a tall run gets sloped handrails down both sides
+              if (st.rise >= 3.5) {
+                const runLenH = stepsN * 0.9;
+                const railLen = Math.hypot(runLenH, st.rise);
+                const angle = Math.atan2(st.rise, runLenH);
+                // sign: the rail must descend toward the march direction
+                const railCtrY = hiTop - st.rise / 2 + 3;
+                const railCtrOff = edgeAt + marchDir * (runLenH / 2);
+                [st.gapA0 + 0.12, st.gapA1 - 0.12].forEach((railAt) => {
+                  let rm;
+                  if (horiz) {
+                    rm = box(0.15, 0.15, railLen, railAt, railCtrY, railCtrOff, railMatD);
+                    rm.rotation.x = (marchDir > 0 ? 1 : -1) * angle;
+                  } else {
+                    rm = box(railLen, 0.15, 0.15, railCtrOff, railCtrY, railAt, railMatD);
+                    rm.rotation.z = (marchDir > 0 ? -1 : 1) * angle;
+                  }
+                  dp(rm);
+                });
               }
             }
           }
@@ -3064,7 +3244,13 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           if (seg.kind === 'deckShed' || seg.kind === 'deckGable') return; // rendered below, round houses included
           const segPitch = (seg.level || 1) > 1 ? (tierPitchOf(seg.level) ?? pitchNow) : pitchNow;
           let mesh = null;
-          if (seg.legacy && !['shed', 'flat'].includes(roofSpec.roofType)) {
+          if (seg.shape === 'gable') {
+            // a storey's own gable ridge — same builder the plan law mirrors
+            mesh = makeGableSegment(seg.rect, seg.eave, segPitch, seg.o, roofMat);
+          } else if (seg.shape === 'shed' || seg.shape === 'flat') {
+            // planar per-storey pieces render straight off the plan surface
+            mesh = makeShedPiece(seg.rect, seg.o, seg.topAt, roofMat);
+          } else if (seg.legacy && !['shed', 'flat'].includes(roofSpec.roofType)) {
             // the classic one-rectangle gable/hip keeps its long-proven mesh;
             // the plan models this exact shape, so caps and frame agree
             mesh = makeRoof(width, depth, wallHeight, spec.shell.roofPitch, roofMat, roofSpec, seg.o);
@@ -3719,6 +3905,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         if (!object) return;
         callbacksRef.current.onSelectRoom(id);
         renderer.domElement.setPointerCapture(event.pointerId);
+        controls.enabled = false; // grabbing an object must not also orbit the camera
         if (!raycaster.ray.intersectPlane(floorPlane, dragPoint)) return;
         const anchor = {
           nw: { x: object.x + object.w, z: object.y + object.d },
@@ -3758,6 +3945,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           return;
         }
         renderer.domElement.setPointerCapture(event.pointerId);
+        controls.enabled = false;
         if (!raycaster.ray.intersectPlane(floorPlane, dragPoint)) return;
         const horiz = opening.wall === 'north' || opening.wall === 'south';
         const run = horiz ? Number(spec.shell.widthFt) : Number(spec.shell.depthFt);
@@ -3777,6 +3965,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           return;
         }
         renderer.domElement.setPointerCapture(event.pointerId);
+        controls.enabled = false;
         if (!raycaster.ray.intersectPlane(floorPlane, dragPoint)) return;
         const horiz = side === 'north' || side === 'south';
         const outSign = side === 'south' || side === 'east' ? 1 : -1;
@@ -3795,6 +3984,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         return;
       }
       renderer.domElement.setPointerCapture(event.pointerId);
+      controls.enabled = false;
       if (!raycaster.ray.intersectPlane(floorPlane, dragPoint)) return;
       const footprint = hit.object.userData.footprint || { w: 1, d: 1 };
       dragState = {
@@ -3821,7 +4011,6 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       if (!dragState.began) {
         dragState.began = true;
         callbacksRef.current.onMoveStart();
-        controls.enabled = false;
         renderer.domElement.style.cursor = dragState.mode === 'resize' ? 'nwse-resize' : 'grabbing';
       }
       dragState.moved = true;
@@ -3912,12 +4101,15 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     }
 
     function onPointerUp(event) {
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      const finished = dragState;
-      dragState = null;
+      // Recover BEFORE the dragState guard: pointerdown may have captured the
+      // pointer and disabled orbit, then bailed without ever creating a drag
+      // (floor-plane miss) — the camera must never stay locked.
       controls.enabled = true;
       renderer.domElement.style.cursor = '';
       if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      const finished = dragState;
+      dragState = null;
       callbacksRef.current.onDimensionPreview(null);
       if (finished.mode === 'openingSlide') {
         if (finished.moved && Number.isFinite(finished.finalAlong)) callbacksRef.current.onMoveEnd(finished.id, finished.finalAlong, 0);
@@ -4039,7 +4231,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       composer.dispose();
       renderer.dispose();
     };
-  }, [spec, selectedRoom, layers]);
+  }, [spec, selectedRoom, layers, context]);
 
   if (!webglAvailable()) {
     // Say WHY, and fix what's one click fixable. ?no3d is a testing switch —

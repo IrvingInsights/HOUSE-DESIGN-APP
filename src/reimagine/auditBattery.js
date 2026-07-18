@@ -121,12 +121,49 @@ const LEGACY_SIDES_GABLE_96 = {
   frame: { type: 'timber', storeyTypes: {} }
 };
 
+// The rev-435 shape WITH the ☀ greenhouse: south 2-ft kneewall + slanted sun
+// glazing on a 17/10 stepped shed. Two real bugs live here: the ☀ preset once
+// synced the kneewall into the shell (flipping the roof and zeroing the glass
+// gap — "where did my greenhouse go?"), and the band once rose full-length to
+// one eave height, floating dark fins through the low west wing roof. The
+// audit must stay 0 AND the glazing must actually render (expect below) —
+// an invisible greenhouse is a failure even when nothing pierces.
+const GREENHOUSE_SETBACK_SHED = {
+  ...structuredClone(LEGACY_SETBACK_SHED),
+  projectName: 'battery: rev-435 + south greenhouse',
+  walls: {
+    north: { assembly: 'straw-bale' },
+    south: { assembly: 'straw-bale', heightFt: 2, sunGlazing: true, sunGlazingTiltDeg: 30 },
+    east: { assembly: 'straw-bale' },
+    west: { assembly: 'straw-bale' }
+  }
+};
+
+// The rev-435 shape with PER-STOREY roof choices (update 109): the ring over
+// storey 2 wears its own GABLE ridge, the tower cap is a SHED falling west
+// with its own overhang. Every piece must stay under the one-roof law —
+// walls, frame, and glazing all judged against the overridden plan.
+const PER_STOREY_ROOFS = (() => {
+  const d = structuredClone(LEGACY_SETBACK_SHED);
+  d.projectName = 'battery: rev-435 + per-storey roofs';
+  d.elements = d.elements.map((el) => {
+    if (el.id === 'storey-2-extent') return { ...el, roofShape: 'gable', roofPitch: 0.25 };
+    if (el.id === 'storey-3-extent') return { ...el, roofShape: 'shed', roofFall: 'west', roofOverhangFt: 3 };
+    return el;
+  });
+  return d;
+})();
+
 // Every battery design. The seed and the bundled starters join at run time
 // (they live in their own modules); each entry here is a shape the audit has
-// actually caught a real bug on, or the fresh control for one.
+// actually caught a real bug on, or the fresh control for one. `expect`
+// lists mesh tags that MUST be present in the rendered scene — absence is a
+// failure (that's how a silently-culled greenhouse gets caught).
 export const AUDIT_BATTERY_SPECS = [
   { name: 'legacy set-back shed (rev-435 shape)', spec: LEGACY_SETBACK_SHED },
   { name: 'legacy 96-ft porch tier', spec: LEGACY_PORCH_TIER_96 },
   { name: 'fresh 17/10 shed, 3 storeys', spec: FRESH_TALL_SHED },
-  { name: '96-ft gable with legacy side heights', spec: LEGACY_SIDES_GABLE_96 }
+  { name: '96-ft gable with legacy side heights', spec: LEGACY_SIDES_GABLE_96 },
+  { name: 'rev-435 + south greenhouse', spec: GREENHOUSE_SETBACK_SHED, expect: ['sunGlazingBand'] },
+  { name: 'rev-435 + per-storey roofs', spec: PER_STOREY_ROOFS }
 ];

@@ -846,6 +846,59 @@ export function resolveDeck(spec, el) {
   return { surfaceKey, placement, railKey, roofKey, topFt, needsSteps, area, openSides: open.sides, openLf: open.openLf, railLf, level };
 }
 
+// WHERE A DECK'S STAIRS RUN — one resolved answer for the renderer, the
+// receipts, and the deck card. `el.deckStairs` is 'auto' (the old rule:
+// level-1 raised decks over 1.5 ft get steps down their longest open edge),
+// 'none', or a named edge. A named edge probes just outside it for what the
+// steps land on: a neighboring deck on another level (deck→deck stairs, up
+// or down), or the ground. Returns null when there's nothing to climb, and
+// { blocked: true } when the named side leans on the house or a same-level
+// deck (no open stretch to run from).
+export function resolveDeckStairs(spec, el, dkIn = null) {
+  const dk = dkIn || resolveDeck(spec, el);
+  const choice = ['none', 'north', 'south', 'east', 'west'].includes(el.deckStairs) ? el.deckStairs : 'auto';
+  if (choice === 'none') return null;
+  const pickLongest = (sidesObj, onlySide = null) => {
+    let best = null; let bestSide = null;
+    for (const [side, segs] of Object.entries(sidesObj)) {
+      if (onlySide && side !== onlySide) continue;
+      for (const s of segs) {
+        if (!best || (s.a1 - s.a0) > (best.a1 - best.a0)) { best = s; bestSide = side; }
+      }
+    }
+    return best ? { seg: best, side: bestSide } : null;
+  };
+  const pick = choice === 'auto'
+    ? (dk.needsSteps ? pickLongest(dk.openSides) : null)
+    : pickLongest(dk.openSides, choice);
+  if (!pick) return choice === 'auto' ? null : { blocked: true, side: choice };
+  if (pick.seg.a1 - pick.seg.a0 < 3) return choice === 'auto' ? null : { blocked: true, side: choice };
+  const side = pick.side;
+  const mid = (pick.seg.a0 + pick.seg.a1) / 2;
+  const gapW = Math.min(4, pick.seg.a1 - pick.seg.a0);
+  // what the steps land on: probe a couple of feet outside the edge midpoint
+  const ex = Number(el.x) || 0; const ey = Number(el.y) || 0;
+  const ew = Math.max(1, Number(el.w) || 10); const ed = Math.max(1, Number(el.d) || 8);
+  const probe = side === 'north' ? [mid, ey - 2] : side === 'south' ? [mid, ey + ed + 2]
+    : side === 'west' ? [ex - 2, mid] : [ex + ew + 2, mid];
+  let target = 'grade'; let targetTop = 0; let targetName = 'the ground';
+  for (const o of (spec.elements || [])) {
+    if (o.category !== 'deck' || o.id === el.id) continue;
+    const ox = Number(o.x) || 0; const oy = Number(o.y) || 0;
+    const ow = Math.max(1, Number(o.w) || 10); const od = Math.max(1, Number(o.d) || 8);
+    if (probe[0] < ox || probe[0] > ox + ow || probe[1] < oy || probe[1] > oy + od) continue;
+    const oTop = resolveDeck(spec, o).topFt;
+    // the CLOSEST other walking level wins (usually the one deck under/over)
+    if (target === 'grade' || Math.abs(oTop - dk.topFt) < Math.abs(targetTop - dk.topFt)) {
+      target = 'deck'; targetTop = oTop; targetName = o.name || 'the other deck';
+    }
+  }
+  const rise = Math.abs(dk.topFt - targetTop);
+  if (rise < 0.8) return choice === 'auto' ? null : { blocked: true, side: choice, flat: true };
+  const treads = Math.max(2, Math.ceil(rise / 0.65));
+  return { side, mid, gapA0: mid - gapW / 2, gapA1: mid + gapW / 2, gapW, rise, targetTop, target, targetName, up: targetTop > dk.topFt, treads };
+}
+
 // Interior fixtures & equipment that live inside the house as placed objects —
 // draggable in the 2D plan and rendered in 3D. The heater name follows the
 // chosen heat source so "the heater" is a real object you can position.
@@ -2925,6 +2978,21 @@ export function applyStructuredDesignPlan(currentSpec, plan) {
         target.level = lvl;
         if (lvl > Number(next.shell.storeys || 1)) next.shell.storeys = lvl;
         target.z = lvl >= 2 ? storeyElevationFt(next.shell, lvl) : 0;
+      } else if (operation.field === 'roofPitch') {
+        // Mirror of bim-core: per-storey roof steepness, clamped; blank clears.
+        const v = Number(operation.value);
+        if (Number.isFinite(v) && v > 0) target.roofPitch = clamp(v, 0.02, 1.5);
+        else delete target.roofPitch;
+      } else if (operation.field === 'roofShape') {
+        if (['shed', 'gable', 'flat'].includes(operation.value)) target.roofShape = operation.value;
+        else delete target.roofShape;
+      } else if (operation.field === 'roofFall') {
+        if (['north', 'south', 'east', 'west'].includes(operation.value)) target.roofFall = operation.value;
+        else delete target.roofFall;
+      } else if (operation.field === 'roofOverhangFt') {
+        const ov = Number(operation.value);
+        if (Number.isFinite(ov) && ov > 0) target.roofOverhangFt = clamp(ov, 0, 12);
+        else delete target.roofOverhangFt;
       } else if (operation.field) target[operation.field] = operation.value;
       changedIds.push(target.id);
       actions.push(operationDescription({ ...operation, name: target.name }, next));
@@ -3843,7 +3911,7 @@ export function deriveDesign(spec, wallSections) {
   // deck are free — that's the wraparound), a roof over it, steps down when
   // the floor sits high. Every bucket becomes its own receipt line below.
   const deckBuckets = { surface: new Map(), rail: new Map(), roof: new Map() };
-  let deckStepsCount = 0; let deckCarbon = 0;
+  let deckStepsCount = 0; let deckStepsCost = 0; let deckCarbon = 0;
   for (const el of (spec.elements || []).filter((e) => e.category === 'deck')) {
     const dk = resolveDeck(spec, el);
     const s = DECK_SURFACES[dk.surfaceKey];
@@ -3864,12 +3932,18 @@ export function deriveDesign(spec, wallSections) {
       fb.area += dk.area; deckBuckets.roof.set(dk.roofKey, fb);
       deckCarbon += dk.area * rf.carbonPsf;
     }
-    if (dk.needsSteps) deckStepsCount += 1;
+    // stairs: 'auto' keeps the old level-1 rule; a chosen edge runs anywhere
+    // (deck→deck between levels, or down to the ground), priced by the climb
+    const st = resolveDeckStairs(spec, el, dk);
+    if (st && !st.blocked) {
+      deckStepsCount += 1;
+      deckStepsCost += DECK_STEPS_COST * Math.max(1, st.rise / 3.5);
+    }
   }
   const deckCost = [...deckBuckets.surface.values()].reduce((s, b) => s + b.area * b.rate, 0)
     + [...deckBuckets.rail.values()].reduce((s, b) => s + b.lf * b.rate, 0)
     + [...deckBuckets.roof.values()].reduce((s, b) => s + b.area * b.rate, 0)
-    + deckStepsCount * DECK_STEPS_COST;
+    + deckStepsCost;
   const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => {
     if (!outdoorItemPresent(spec, item)) return sum;
     if (item.key === 'greenhouse') {
@@ -4062,7 +4136,7 @@ export function deriveDesign(spec, wallSections) {
     for (const b of deckBuckets.roof.values()) {
       lines.push(rline(`Deck roof — ${b.label.split(' —')[0].toLowerCase()}`, b.area * b.rate, b.area, 'sf covered', b.rate, 'posts and a light metal roof over the deck'));
     }
-    if (deckStepsCount > 0) lines.push(rline('Deck steps', deckStepsCount * DECK_STEPS_COST, deckStepsCount, deckStepsCount === 1 ? 'stair' : 'stairs', DECK_STEPS_COST, 'the deck floor sits more than 1½ ft up, so steps come down to the ground', true));
+    if (deckStepsCount > 0) lines.push(rline('Deck steps', deckStepsCost, deckStepsCount, deckStepsCount === 1 ? 'stair' : 'stairs', null, 'each run priced by its climb — deck to ground, or deck to deck between levels', true));
     costReceipts.outdoors = lines;
   }
   { // walls
