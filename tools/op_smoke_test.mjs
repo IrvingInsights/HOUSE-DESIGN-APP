@@ -228,6 +228,24 @@ ok(!('sillFt' in r.spec.openings[0]), 'a negative/blank sill clears the override
   ok(s2.elements.find((el) => el.id === plate.id).roofPitch === 1.5, 'plate roofPitch clamps');
   s2 = apply(s2, [{ type: 'update_object', targetId: plate.id, field: 'roofPitch', value: 0 }]).spec;
   ok(!('roofPitch' in s2.elements.find((el) => el.id === plate.id)), 'roofPitch 0 clears back to the whole-roof pitch');
+  // full roof controls per storey: shape / fall / overhang on the plate —
+  // valid values stick, junk clears back to the automatic law
+  s2 = apply(s2, [
+    { type: 'update_object', targetId: plate.id, field: 'roofShape', value: 'gable' },
+    { type: 'update_object', targetId: plate.id, field: 'roofFall', value: 'west' },
+    { type: 'update_object', targetId: plate.id, field: 'roofOverhangFt', value: 20 }
+  ]).spec;
+  let p2 = s2.elements.find((el) => el.id === plate.id);
+  ok(p2.roofShape === 'gable' && p2.roofFall === 'west' && p2.roofOverhangFt === 12,
+    'plate roofShape/roofFall set; overhang clamps to 12');
+  s2 = apply(s2, [
+    { type: 'update_object', targetId: plate.id, field: 'roofShape', value: 'dome' },
+    { type: 'update_object', targetId: plate.id, field: 'roofFall', value: 'up' },
+    { type: 'update_object', targetId: plate.id, field: 'roofOverhangFt', value: 0 }
+  ]).spec;
+  p2 = s2.elements.find((el) => el.id === plate.id);
+  ok(!('roofShape' in p2) && !('roofFall' in p2) && !('roofOverhangFt' in p2),
+    'junk shape/fall and zero overhang clear back to auto');
 }
 
 // fixture on an upper floor keeps its level + elevation

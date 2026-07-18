@@ -2451,6 +2451,21 @@ export function applyBimOperations(currentSpec, plan) {
         const v = Number(operation.value);
         if (Number.isFinite(v) && v > 0) target.roofPitch = clamp(v, 0.02, 1.5);
         else delete target.roofPitch;
+      } else if (operation.field === 'roofShape') {
+        // Per-storey roof SHAPE on a floor plate: how this storey's piece of
+        // the roof plan builds. 'wing' (or blank) = the automatic lean-to.
+        if (['shed', 'gable', 'flat'].includes(operation.value)) target.roofShape = operation.value;
+        else delete target.roofShape;
+      } else if (operation.field === 'roofFall') {
+        // Which way a per-storey SHED piece falls (its LOW side).
+        if (['north', 'south', 'east', 'west'].includes(operation.value)) target.roofFall = operation.value;
+        else delete target.roofFall;
+      } else if (operation.field === 'roofOverhangFt') {
+        // This storey's own eave reach past its walls; blank/zero = the
+        // whole-roof overhangs.
+        const ov = Number(operation.value);
+        if (Number.isFinite(ov) && ov > 0) target.roofOverhangFt = clamp(ov, 0, 12);
+        else delete target.roofOverhangFt;
       } else if (operation.field) target[operation.field] = operation.value;
       changedIds.push(target.id);
       actions.push(operationDescription({ ...operation, name: target.name }, next));

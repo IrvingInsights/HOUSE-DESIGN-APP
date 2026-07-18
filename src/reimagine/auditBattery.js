@@ -139,6 +139,21 @@ const GREENHOUSE_SETBACK_SHED = {
   }
 };
 
+// The rev-435 shape with PER-STOREY roof choices (update 109): the ring over
+// storey 2 wears its own GABLE ridge, the tower cap is a SHED falling west
+// with its own overhang. Every piece must stay under the one-roof law —
+// walls, frame, and glazing all judged against the overridden plan.
+const PER_STOREY_ROOFS = (() => {
+  const d = structuredClone(LEGACY_SETBACK_SHED);
+  d.projectName = 'battery: rev-435 + per-storey roofs';
+  d.elements = d.elements.map((el) => {
+    if (el.id === 'storey-2-extent') return { ...el, roofShape: 'gable', roofPitch: 0.25 };
+    if (el.id === 'storey-3-extent') return { ...el, roofShape: 'shed', roofFall: 'west', roofOverhangFt: 3 };
+    return el;
+  });
+  return d;
+})();
+
 // Every battery design. The seed and the bundled starters join at run time
 // (they live in their own modules); each entry here is a shape the audit has
 // actually caught a real bug on, or the fresh control for one. `expect`
@@ -149,5 +164,6 @@ export const AUDIT_BATTERY_SPECS = [
   { name: 'legacy 96-ft porch tier', spec: LEGACY_PORCH_TIER_96 },
   { name: 'fresh 17/10 shed, 3 storeys', spec: FRESH_TALL_SHED },
   { name: '96-ft gable with legacy side heights', spec: LEGACY_SIDES_GABLE_96 },
-  { name: 'rev-435 + south greenhouse', spec: GREENHOUSE_SETBACK_SHED, expect: ['sunGlazingBand'] }
+  { name: 'rev-435 + south greenhouse', spec: GREENHOUSE_SETBACK_SHED, expect: ['sunGlazingBand'] },
+  { name: 'rev-435 + per-storey roofs', spec: PER_STOREY_ROOFS }
 ];

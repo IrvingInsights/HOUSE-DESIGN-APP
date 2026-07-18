@@ -2978,6 +2978,21 @@ export function applyStructuredDesignPlan(currentSpec, plan) {
         target.level = lvl;
         if (lvl > Number(next.shell.storeys || 1)) next.shell.storeys = lvl;
         target.z = lvl >= 2 ? storeyElevationFt(next.shell, lvl) : 0;
+      } else if (operation.field === 'roofPitch') {
+        // Mirror of bim-core: per-storey roof steepness, clamped; blank clears.
+        const v = Number(operation.value);
+        if (Number.isFinite(v) && v > 0) target.roofPitch = clamp(v, 0.02, 1.5);
+        else delete target.roofPitch;
+      } else if (operation.field === 'roofShape') {
+        if (['shed', 'gable', 'flat'].includes(operation.value)) target.roofShape = operation.value;
+        else delete target.roofShape;
+      } else if (operation.field === 'roofFall') {
+        if (['north', 'south', 'east', 'west'].includes(operation.value)) target.roofFall = operation.value;
+        else delete target.roofFall;
+      } else if (operation.field === 'roofOverhangFt') {
+        const ov = Number(operation.value);
+        if (Number.isFinite(ov) && ov > 0) target.roofOverhangFt = clamp(ov, 0, 12);
+        else delete target.roofOverhangFt;
       } else if (operation.field) target[operation.field] = operation.value;
       changedIds.push(target.id);
       actions.push(operationDescription({ ...operation, name: target.name }, next));

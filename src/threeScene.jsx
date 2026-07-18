@@ -406,6 +406,18 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         const v = Number(elP?.roofPitch);
         return Number.isFinite(v) && v > 0 ? v : null;
       };
+      // …and its own roof SHAPE, fall direction, and overhang (update 109:
+      // full roof controls per storey). Null = the automatic law (a lean-to
+      // wing on a stepped ring; the whole-roof shape on the top tier).
+      const tierFieldOf = (lv, field) => {
+        if (lv <= 1) return null;
+        const elP = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === lv);
+        return elP ? elP[field] : null;
+      };
+      const tierShapeOf = (lv) => { const v = tierFieldOf(lv, 'roofShape'); return ['shed', 'gable', 'flat'].includes(v) ? v : null; };
+      const tierFallOf = (lv) => { const v = tierFieldOf(lv, 'roofFall'); return ['north', 'south', 'east', 'west'].includes(v) ? v : null; };
+      const tierOverhangOf = (lv) => { const v = Number(tierFieldOf(lv, 'roofOverhangFt')); return Number.isFinite(v) && v > 0 ? clamp(v, 0, 12) : null; };
+      const OPPOSITE_SIDE = { north: 'south', south: 'north', east: 'west', west: 'east' };
       const basementH = basementInfo(spec.shell).heightFt;
       const wallHeight = roofSpec.highWallHeightFt + storeyLift;
       // The shed's fall AXIS (from the engine's one roofProfile): 'ns' slopes
@@ -530,11 +542,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             east: [rect.x + rect.w + probe, rect.y + rect.d / 2]
           };
           const out = {};
+          // a storey with its OWN overhang reaches that far past its walls on
+          // every outward side (courtesy joints at neighbors stay tight)
+          const tOv = tierOverhangOf(segLevel);
           for (const side of WALL_SIDES) {
             const [px, py] = probes[side];
             if (!isUpper && coveredAbove(px, py, segLevel)) out[side] = 0.35;
             else if (insideFp(px, py)) out[side] = 0.05;
-            else out[side] = oAll[side];
+            else out[side] = tOv ?? oAll[side];
           }
           return out;
         };
@@ -556,7 +571,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           segments.push({ rect: fullRect, eave: wallHeight, kind: 'full', upper: true, level: storeyTiers.length, tierY0: 0, tierX0: 0, legacy: true });
         } else if (steps) {
           const top = storeyTiers[storeyTiers.length - 1];
-          segments.push({ rect: top.rect, eave: top.topEave, kind: 'full', upper: true, level: top.level, tierY0: top.rect.y, tierX0: top.rect.x });
+          segments.push({ rect: top.rect, eave: top.topEave, kind: 'full', upper: true, level: top.level, tierY0: top.rect.y, tierX0: top.rect.x, tiered: true });
           for (let i = storeyTiers.length - 2; i >= 0; i -= 1) {
             const below = storeyTiers[i];
             const above = storeyTiers[i + 1];
@@ -568,7 +583,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               ring.forEach((rect) => porchRings.push({ rect, level: below.level, topEave: below.topEave, hostRect: below.rect }));
               continue;
             }
-            ring.forEach((rect) => segments.push({ rect, eave: below.topEave, aboveTop: above.topEave, kind: 'wing', highSide: touchSide(rect, above.rect), level: below.level, tierDrop: storeyLift - upThru(below.level), tierY0: below.rect.y, tierX0: below.rect.x }));
+            ring.forEach((rect) => segments.push({ rect, eave: below.topEave, aboveTop: above.topEave, kind: 'wing', highSide: touchSide(rect, above.rect), level: below.level, tierDrop: storeyLift - upThru(below.level), tierY0: below.rect.y, tierX0: below.rect.x, tiered: true }));
           }
         } else {
           decomposeFootprint(fpPoly).forEach((rect) => segments.push({ rect, eave: wallHeight, kind: 'full', upper: true, level: storeyTiers.length }));
@@ -592,7 +607,53 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const Z0 = seg.rect.y - o.north, Z1 = seg.rect.y + seg.rect.d + o.south;
           seg.covers = (px, pz) => px >= X0 - 0.01 && px <= X1 + 0.01 && pz >= Z0 - 0.01 && pz <= Z1 + 0.01;
           const segPitch = (seg.level || 1) > 1 ? (tierPitchOf(seg.level) ?? pitchNow) : pitchNow;
-          if (seg.kind === 'wing' && roofSpec.roofType === 'shed') {
+          // PER-STOREY SHAPE OVERRIDE (stepped tiers only): the plate's own
+          // roofShape replaces this piece's automatic law. The topAt written
+          // here is the SAME law the mesh builder renders (gable pieces go to
+          // makeGableSegment, planar ones to makeShedPiece), so plan and mesh
+          // stay coordinate-identical and the one-roof law holds.
+          const tierShape = seg.tiered && (seg.level || 1) > 1 ? tierShapeOf(seg.level) : null;
+          if (tierShape === 'flat') {
+            const yF = seg.eave + JOINTS.EAVE_BEARING;
+            seg.topAt = () => yF;
+            seg.stopBearing = JOINTS.EAVE_BEARING;
+            seg.shape = 'flat';
+          } else if (tierShape === 'gable') {
+            // exact makeGableSegment law (ridge along the longer axis)
+            const base = seg.eave + JOINTS.EAVE_BEARING;
+            const spanX = X1 - X0, spanZ = Z1 - Z0;
+            const ridgeY = base + (Math.min(spanX, spanZ) / 2) * segPitch;
+            if (spanX >= spanZ) {
+              const cz = (Z0 + Z1) / 2;
+              seg.topAt = (px, pz) => base + (ridgeY - base) * Math.max(0, 1 - Math.abs(pz - cz) / Math.max(0.01, spanZ / 2));
+              seg.ridge = { axis: 'x', at: cz, y: ridgeY, base };
+            } else {
+              const cxs = (X0 + X1) / 2;
+              seg.topAt = (px) => base + (ridgeY - base) * Math.max(0, 1 - Math.abs(px - cxs) / Math.max(0.01, spanX / 2));
+              seg.ridge = { axis: 'z', at: cxs, y: ridgeY, base };
+            }
+            seg.stopBearing = JOINTS.EAVE_BEARING;
+            seg.shape = 'gable';
+          } else if (tierShape === 'shed') {
+            // one plane falling toward the chosen low side (default: away
+            // from the storey above on a wing, north on a top tier)
+            const fall = tierFallOf(seg.level) || (seg.kind === 'wing' && seg.highSide ? OPPOSITE_SIDE[seg.highSide] : 'north');
+            const high = OPPOSITE_SIDE[fall];
+            const run = (high === 'north' || high === 'south') ? (Z1 - Z0) : (X1 - X0);
+            let rise = Math.max(0.1, run * segPitch);
+            if (seg.kind === 'wing' && high === seg.highSide && Number.isFinite(seg.aboveTop)) {
+              // rising toward the storey above → still tucks under it
+              rise = Math.max(0.5, Math.min(rise, seg.aboveTop - seg.eave - 0.5));
+            }
+            const lowY = seg.eave + JOINTS.EAVE_BEARING;
+            seg.topAt = (px, pz) => (
+              high === 'north' ? lowY + ((Z1 - pz) / (Z1 - Z0)) * rise
+              : high === 'south' ? lowY + ((pz - Z0) / (Z1 - Z0)) * rise
+              : high === 'west' ? lowY + ((X1 - px) / (X1 - X0)) * rise
+              : lowY + ((px - X0) / (X1 - X0)) * rise);
+            seg.stopBearing = JOINTS.EAVE_BEARING;
+            seg.shape = 'shed';
+          } else if (seg.kind === 'wing' && roofSpec.roofType === 'shed') {
             seg.topAt = shedPlaneFor(seg);
             seg.stopBearing = JOINTS.ROOF_BEARING;
           } else if (seg.kind === 'wing') {
@@ -1972,15 +2033,36 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
                 // that line and the plate beam kisses the deck slab. The
                 // sloped tierTopPlane is the ROOFED-tier law; following it
                 // here left the posts 1.6-4 ft short of the deck they carry.
-                const bearAt = porchTier ? () => elev2 + upThru(lv) : (sp) => tierTopPlane(sp, lv, p);
+                // A tier wearing its OWN roof shape (per-storey override)
+                // bears on THE PLAN at each member's true point — the old
+                // tierTopPlane math describes the default shed only, and
+                // following it under a west-falling cap poked posts 3 ft
+                // through the roof.
+                const tierShapeHere = porchTier ? null : tierShapeOf(lv);
+                const bearPlan = (sp, atB) => {
+                  const px = spanIsZ ? atB : sp;
+                  const pz = spanIsZ ? sp : atB;
+                  return roofUnderAt(px, pz);
+                };
+                const bearAt = porchTier ? () => elev2 + upThru(lv)
+                  : tierShapeHere ? bearPlan
+                  : (sp) => tierTopPlane(sp, lv, p);
+                // a plate beam is one straight member — under a roof that
+                // slopes along its run it bears at its LOWEST clearance
+                const beamBear = (sp) => {
+                  if (!tierShapeHere) return bearAt(sp, (rB0 + rB1) / 2);
+                  let m = Infinity;
+                  for (let k = 0; k <= 8; k += 1) m = Math.min(m, bearPlan(sp, rB0 + ((rB1 - rB0) * k) / 8));
+                  return m;
+                };
                 const upBays = Math.max(1, Math.ceil((rB1 - rB0) / bay));
                 for (let i = 0; i <= upBays; i += 1) {
                   const at = rB0 + ((rB1 - rB0) * i) / upBays;
-                  postAt(rS0, at, Math.max(1, bearAt(rS0) - fm.plateH - floorY), fm.postW, floorY);
-                  postAt(rS1, at, Math.max(1, bearAt(rS1) - fm.plateH - floorY), fm.postW, floorY);
+                  postAt(rS0, at, Math.max(1, bearAt(rS0, at) - fm.plateH - floorY), fm.postW, floorY);
+                  postAt(rS1, at, Math.max(1, bearAt(rS1, at) - fm.plateH - floorY), fm.postW, floorY);
                 }
-                straight(rB0, rB1, bearAt(rS0) - fm.plateH / 2, rS0, fm.postW + 0.1, fm.plateH);
-                straight(rB0, rB1, bearAt(rS1) - fm.plateH / 2, rS1, fm.postW + 0.1, fm.plateH);
+                straight(rB0, rB1, beamBear(rS0) - fm.plateH / 2, rS0, fm.postW + 0.1, fm.plateH);
+                straight(rB0, rB1, beamBear(rS1) - fm.plateH / 2, rS1, fm.postW + 0.1, fm.plateH);
               }
             }
             if (!above) {
@@ -3162,7 +3244,13 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           if (seg.kind === 'deckShed' || seg.kind === 'deckGable') return; // rendered below, round houses included
           const segPitch = (seg.level || 1) > 1 ? (tierPitchOf(seg.level) ?? pitchNow) : pitchNow;
           let mesh = null;
-          if (seg.legacy && !['shed', 'flat'].includes(roofSpec.roofType)) {
+          if (seg.shape === 'gable') {
+            // a storey's own gable ridge — same builder the plan law mirrors
+            mesh = makeGableSegment(seg.rect, seg.eave, segPitch, seg.o, roofMat);
+          } else if (seg.shape === 'shed' || seg.shape === 'flat') {
+            // planar per-storey pieces render straight off the plan surface
+            mesh = makeShedPiece(seg.rect, seg.o, seg.topAt, roofMat);
+          } else if (seg.legacy && !['shed', 'flat'].includes(roofSpec.roofType)) {
             // the classic one-rectangle gable/hip keeps its long-proven mesh;
             // the plan models this exact shape, so caps and frame agree
             mesh = makeRoof(width, depth, wallHeight, spec.shell.roofPitch, roofMat, roofSpec, seg.o);

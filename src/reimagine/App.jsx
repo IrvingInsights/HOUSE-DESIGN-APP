@@ -55,7 +55,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 108 · Jul 18';
+const UPDATE_STAMP = 'update 109 · Jul 18';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -3292,22 +3292,57 @@ function UpperRoofControls({ spec, level, floors, onOps }) {
   }
   const mainPitch = Number(spec.shell.roofPitch || 0.32);
   const ownPitch = Number(plate.roofPitch) > 0 ? Number(plate.roofPitch) : mainPitch;
+  const setPlate = (field, value) => onOps([{ type: 'update_object', targetId: plate.id, name: plate.name, field, value }]);
+  const ownShape = ['shed', 'gable', 'flat'].includes(plate.roofShape) ? plate.roofShape : '';
+  const ownFall = ['north', 'south', 'east', 'west'].includes(plate.roofFall) ? plate.roofFall : '';
+  const ownOverhang = Number(plate.roofOverhangFt) > 0 ? Number(plate.roofOverhangFt) : 0;
   return (
     <div className="rz-found">
-      <div className="rz-shape-note" style={{ marginTop: 0 }}>The roof over the <b>{lab.toLowerCase()}</b>. The whole-house shape, insulation, overhangs, and gutters live under Ground.</div>
-      <label className="rz-field rz-field-num">
-        <span>Roof steepness over this floor</span>
-        <NumInput
-          value={Math.round(ownPitch * 12 * 10) / 10}
-          min={0.5} max={18} step={0.5} unit="/12"
-          onCommit={(v) => onOps([{ type: 'update_object', targetId: plate.id, name: plate.name, field: 'roofPitch', value: clamp(v / 12, 0.02, 1.5) }])}
-        />
+      <div className="rz-shape-note" style={{ marginTop: 0 }}>The roof over the <b>{lab.toLowerCase()}</b> — its own shape, steepness, fall, and overhang. Insulation and gutters stay whole-house, under Ground.</div>
+      <label className="rz-field">
+        <span>Shape over this floor</span>
+        <select value={ownShape} onChange={(e) => setPlate('roofShape', e.target.value)}>
+          <option value="">Auto — follows the whole-house roof</option>
+          <option value="shed">Shed — one slope, pick which way it falls</option>
+          <option value="gable">Gable — its own little ridge</option>
+          <option value="flat">Flat — near-level cap</option>
+        </select>
       </label>
-      {Number(plate.roofPitch) > 0 && (
+      {ownShape === 'shed' && (
+        <label className="rz-field">
+          <span>Which way it falls</span>
+          <select value={ownFall} onChange={(e) => setPlate('roofFall', e.target.value)}>
+            <option value="">Auto — away from the storey above</option>
+            <option value="north">Falls north</option>
+            <option value="south">Falls south</option>
+            <option value="east">Falls east</option>
+            <option value="west">Falls west</option>
+          </select>
+        </label>
+      )}
+      {ownShape !== 'flat' && (
+        <label className="rz-field rz-field-num">
+          <span>Roof steepness over this floor</span>
+          <NumInput
+            value={Math.round(ownPitch * 12 * 10) / 10}
+            min={0.5} max={18} step={0.5} unit="/12"
+            onCommit={(v) => setPlate('roofPitch', clamp(v / 12, 0.02, 1.5))}
+          />
+        </label>
+      )}
+      {Number(plate.roofPitch) > 0 && ownShape !== 'flat' && (
         <button type="button" className="rz-fresh" style={{ alignSelf: 'flex-start' }}
-          onClick={() => onOps([{ type: 'update_object', targetId: plate.id, name: plate.name, field: 'roofPitch', value: 0 }])}
+          onClick={() => setPlate('roofPitch', 0)}
         >match the main roof ({Math.round(mainPitch * 12 * 10) / 10}/12)</button>
       )}
+      <label className="rz-field rz-field-num">
+        <span>Overhang past this floor's walls{ownOverhang ? '' : ' — auto'}</span>
+        <NumInput
+          value={ownOverhang}
+          min={0} max={12} step={0.5} unit="ft"
+          onCommit={(v) => setPlate('roofOverhangFt', v)}
+        />
+      </label>
       {floors > level && (
         <label className="rz-field">
           <span>Top of this floor, where the floor above steps back</span>
