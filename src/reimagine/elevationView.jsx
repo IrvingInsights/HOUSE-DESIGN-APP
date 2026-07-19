@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { OPENING_TYPES, openingVerticalBand, storeyElevationFt, storeyHeightFt } from '../../backend/bim-core.mjs';
-import { resolveWallSide, upperPlateRect } from '../engine.js';
+import { resolveWallSide, upperPlateRect, resolveDeck } from '../engine.js';
 
 // ElevationView — the chosen wall drawn face-on, from OUTSIDE the house, so
 // doors and windows can be placed the way you'd sketch them on paper: slide
@@ -16,7 +16,7 @@ import { resolveWallSide, upperPlateRect } from '../engine.js';
 const snapHalf = (v) => Math.round(v * 2) / 2;
 const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
-export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSizeAlong, onContext = null, onWallHeight = null, onPickWall = null }) {
+export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSizeAlong, onContext = null, onWallHeight = null, onPickWall = null, onSelectId = null, onMoveObject = null }) {
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
   const shell = spec.shell || {};
@@ -131,6 +131,35 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   }
 
   const openings = (spec.openings || []).map((o, i) => ({ o, i })).filter(({ o }) => o.wall === wall);
+  // Decks that stand against THIS wall (touching it or just outside it, and
+  // overlapping its run) show face-on: the walking slab at its true height,
+  // its railing, draggable along the wall — the numeric twin of the plan
+  // drag. Tapping opens the same deck card every other view opens.
+  const wallDecks = (spec.elements || []).filter((el) => {
+    if (el.category !== 'deck') return false;
+    const ex = Number(el.x) || 0; const ey = Number(el.y) || 0;
+    const ew = Number(el.w) || 10; const ed = Number(el.d) || 8;
+    const near = wall === 'south' ? ey + ed >= depth - 0.75
+      : wall === 'north' ? ey <= 0.75
+      : wall === 'east' ? ex + ew >= width - 0.75
+      : ex <= 0.75;
+    if (!near) return false;
+    const s0 = horiz ? ex : ey; const s1 = horiz ? ex + ew : ey + ed;
+    return s1 > 0.1 && s0 < run - 0.1;
+  }).map((el) => {
+    const dk = resolveDeck(spec, el);
+    return { el, topFt: dk.topFt, railed: dk.railKey !== 'none' };
+  });
+
+  function startDeckDrag(event, el) {
+    if (!onMoveObject) return;
+    event.stopPropagation();
+    event.preventDefault();
+    try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
+    const { fx } = toFeet(event);
+    if (onSelectId) onSelectId(el.id);
+    setDrag({ deck: { id: el.id, origAlong: horiz ? (Number(el.x) || 0) : (Number(el.y) || 0), x: Number(el.x) || 0, y: Number(el.y) || 0 }, startFx: fx, ghostAlong: null });
+  }
   const sillOf = (o) => {
     const prof = OPENING_TYPES[o.type] || OPENING_TYPES.window;
     return Number.isFinite(Number(o.sillFt)) ? Number(o.sillFt) : prof.sill;
@@ -163,6 +192,12 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
   function onPointerMove(event) {
     if (!drag) return;
+    if (drag.deck) {
+      const { fx } = toFeet(event);
+      const dAlong = (flipX ? -1 : 1) * (fx - drag.startFx);
+      setDrag((d) => (d ? { ...d, ghostAlong: snapHalf(d.deck.origAlong + dAlong) } : d));
+      return;
+    }
     if (drag.wallShape) {
       const { fy } = toFeet(event);
       const dUp = drag.startFy - fy;
@@ -199,6 +234,14 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
   function onPointerUp() {
     if (!drag) return;
+    if (drag.deck) {
+      const { deck, ghostAlong } = drag;
+      setDrag(null);
+      if (ghostAlong == null || Math.abs(ghostAlong - deck.origAlong) < 0.01) return;
+      if (horiz) onMoveObject(deck.id, ghostAlong, deck.y);
+      else onMoveObject(deck.id, deck.x, ghostAlong);
+      return;
+    }
     if (drag.wallShape) {
       const { wallShape, ghostH } = drag;
       setDrag(null);
@@ -313,6 +356,39 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
                     {(o.label || prof.label)} — {Math.round(w * 10) / 10}′ wide · bottom {Math.round(sill * 10) / 10}′ above its floor{isClamped ? ' · pulled to fit its wall' : ''}
                   </text>
                 </g>
+              )}
+            </g>
+          );
+        })}
+
+        {/* decks against this wall: the slab at its true height + railing —
+            drag it along the wall; tap for its card (surface, roof, steps) */}
+        {wallDecks.map(({ el, topFt, railed }) => {
+          const isGhost = drag?.deck?.id === el.id && drag.ghostAlong != null;
+          const alongNow = isGhost ? drag.ghostAlong : (horiz ? (Number(el.x) || 0) : (Number(el.y) || 0));
+          const len = horiz ? (Number(el.w) || 10) : (Number(el.d) || 8);
+          const dx0 = flipX ? run - alongNow - len : alongNow;
+          const sel = String(selectedId || '') === String(el.id);
+          const railN = Math.max(1, Math.round(len / 4));
+          return (
+            <g key={`k${el.id}`}>
+              <rect x={dx0} y={Y(topFt)} width={len} height={0.45}
+                fill="#c9a06b" stroke={sel ? '#3C6472' : '#8a6a48'} strokeWidth={sel ? 0.2 : 0.1}
+                opacity={isGhost ? 0.75 : 1}
+                style={{ cursor: onMoveObject ? 'move' : 'pointer' }}
+                onPointerDown={(e) => startDeckDrag(e, el)} />
+              {railed && (
+                <g pointerEvents="none">
+                  <line x1={dx0 + 0.2} y1={Y(topFt + 3)} x2={dx0 + len - 0.2} y2={Y(topFt + 3)} stroke="#8a6a48" strokeWidth={0.12} />
+                  {Array.from({ length: railN + 1 }, (_, i) => dx0 + 0.2 + ((len - 0.4) * i) / railN).map((px, i) => (
+                    <line key={i} x1={px} y1={Y(topFt)} x2={px} y2={Y(topFt + 3)} stroke="#8a6a48" strokeWidth={0.09} />
+                  ))}
+                </g>
+              )}
+              {sel && (
+                <text x={dx0 + len / 2} y={Y(topFt) - 0.6} textAnchor="middle" fontSize="1.05" fill="#22251F" fontWeight="600" pointerEvents="none">
+                  {el.name || 'Deck'} — {Math.round(len * 10) / 10}′ along this wall, floor at {Math.round(topFt * 10) / 10}′
+                </text>
               )}
             </g>
           );

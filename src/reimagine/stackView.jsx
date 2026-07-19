@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { storeyElevationFt, storeyHeightFt, basementInfo } from '../../backend/bim-core.mjs';
-import { upperPlateRect, floorLabel } from '../engine.js';
+import { upperPlateRect, floorLabel, resolveDeck } from '../engine.js';
 
 // StackView — the STOREYS drawn as blocks you can grab, the way the Wall
 // view draws one wall. Two kinds of face:
@@ -24,7 +24,7 @@ const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const capWord = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
 const HANDLE = { fill: '#3C6472', stroke: '#fff', strokeWidth: 0.12 };
 
-export function StackView({ spec, floors, hasBasement, activeFloor, basementLevel, onSelectFloor, onShapeStorey, onFloorHeight, onBasementHeight }) {
+export function StackView({ spec, floors, hasBasement, activeFloor, basementLevel, onSelectFloor, onShapeStorey, onFloorHeight, onBasementHeight, selectedId = null, onSelectId = null, onMoveObject = null, onResizeObject = null }) {
   const svgRef = useRef(null);
   const [face, setFace] = useState('top');
   const [drag, setDrag] = useState(null);
@@ -40,6 +40,18 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
 
   // Every storey's plan rectangle (the ground block is the shell itself).
   const rectOf = (lv) => (lv === 1 ? { x: 0, y: 0, w: width, d: depth } : (upperPlateRect(spec, lv) || { x: 0, y: 0, w: width, d: depth }));
+  // Decks ride along in both faces — the same objects the Plan and 3D show,
+  // tappable here too (the tap opens the same deck card; drags commit through
+  // the same placement law, so a wraparound join or a clamp behaves alike
+  // everywhere). Each carries its walking-surface height from resolveDeck.
+  const decks = (spec.elements || []).filter((e) => e.category === 'deck').map((e) => {
+    const dk = resolveDeck(spec, e);
+    return {
+      id: e.id, name: e.name || 'Deck', level: dk.level,
+      rect: { x: Number(e.x) || 0, y: Number(e.y) || 0, w: Math.max(1, Number(e.w) || 10), d: Math.max(1, Number(e.d) || 8) },
+      topFt: dk.topFt, railed: dk.railKey !== 'none'
+    };
+  });
   const storeyList = [];
   for (let lv = 1; lv <= floors; lv += 1) {
     const h = storeyHeightFt(shell, lv);
@@ -72,11 +84,47 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
     setDrag({ lv, mode, startFx: fx, startFy: fy, orig, ghost: null });
   }
 
+  // Deck drags: same pointer grammar, looser clamps (a deck lives OUTSIDE
+  // the walls; the placement law judges the final spot on commit).
+  function startDeckDrag(event, deck, mode) {
+    event.stopPropagation();
+    event.preventDefault();
+    try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
+    const { fx, fy } = toFeet(event);
+    if (onSelectId) onSelectId(deck.id);
+    setDrag({ deckId: deck.id, mode, startFx: fx, startFy: fy, orig: { rect: deck.rect }, ghost: null });
+  }
+  const deckGhost = (r) => ({
+    x: clampN(snapHalf(r.x), -48, width + 48), y: clampN(snapHalf(r.y), -48, depth + 48),
+    w: clampN(snapHalf(r.w), 2, 60), d: clampN(snapHalf(r.d), 2, 60)
+  });
+
   function onPointerMove(event) {
     if (!drag) return;
     const { fx, fy } = toFeet(event);
     const o = drag.orig;
     let ghost = null;
+    if (drag.deckId) {
+      const r = o.rect;
+      const dxT = fx - drag.startFx;
+      const dyT = fy - drag.startFy;
+      const dA = (flipX ? -1 : 1) * dxT; // side faces: along the face axis
+      if (drag.mode === 'kslide') {
+        ghost = { rect: deckGhost(top
+          ? { ...r, x: r.x + dxT, y: r.y + dyT }
+          : (horiz ? { ...r, x: r.x + dA } : { ...r, y: r.y + dA })) };
+      } else if (drag.mode === 'ke') ghost = { rect: deckGhost({ ...r, w: r.w + dxT }) };
+      else if (drag.mode === 'ks') ghost = { rect: deckGhost({ ...r, d: r.d + dyT }) };
+      else if (drag.mode === 'kw') { const x1 = r.x + r.w; const nx = clampN(snapHalf(r.x + dxT), x1 - 60, x1 - 2); ghost = { rect: { ...r, x: nx, w: x1 - nx } }; }
+      else if (drag.mode === 'kn') { const y1 = r.y + r.d; const ny = clampN(snapHalf(r.y + dyT), y1 - 60, y1 - 2); ghost = { rect: { ...r, y: ny, d: y1 - ny } }; }
+      else if (drag.mode === 'kend') ghost = { rect: deckGhost(horiz ? { ...r, w: r.w + dA } : { ...r, d: r.d + dA }) };
+      else { // 'kstart' — the far edge stays put, along this face's axis
+        if (horiz) { const x1 = r.x + r.w; const nx = clampN(snapHalf(r.x + dA), x1 - 60, x1 - 2); ghost = { rect: { ...r, x: nx, w: x1 - nx } }; }
+        else { const y1 = r.y + r.d; const ny = clampN(snapHalf(r.y + dA), y1 - 60, y1 - 2); ghost = { rect: { ...r, y: ny, d: y1 - ny } }; }
+      }
+      setDrag((d) => (d ? { ...d, ghost } : d));
+      return;
+    }
     if (drag.mode === 'height' || drag.mode === 'deepen') {
       const dUp = drag.startFy - fy;
       ghost = drag.mode === 'height'
@@ -120,9 +168,16 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
 
   function onPointerUp() {
     if (!drag) return;
-    const { lv, mode, orig, ghost } = drag;
+    const { lv, deckId, mode, orig, ghost } = drag;
     setDrag(null);
     if (!ghost) return;
+    if (deckId) {
+      const a = orig.rect; const b = ghost.rect;
+      if (Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.y) < 0.01 && Math.abs(a.w - b.w) < 0.01 && Math.abs(a.d - b.d) < 0.01) return;
+      if (Math.abs(a.w - b.w) < 0.01 && Math.abs(a.d - b.d) < 0.01) { if (onMoveObject) onMoveObject(deckId, b.x, b.y); }
+      else if (onResizeObject) onResizeObject(deckId, b.x, b.y, b.w, b.d);
+      return;
+    }
     if (mode === 'height') { if (Math.abs(ghost.h - orig.h) > 0.01) onFloorHeight(lv, ghost.h); return; }
     if (mode === 'deepen') { if (Math.abs(ghost.h - orig.h) > 0.01) onBasementHeight(ghost.h); return; }
     if (ghost.rect) {
@@ -152,7 +207,12 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
   // ───────────────────────── TOP face: the floors as a map ─────────────────
   if (top) {
     const pad = 4.2;
-    const vb = `${-pad} ${-pad} ${width + pad * 2} ${depth + pad * 2}`;
+    // the map covers the house AND every deck around it
+    const tx0 = Math.min(0, ...decks.map((k) => k.rect.x)) - pad;
+    const tx1 = Math.max(width, ...decks.map((k) => k.rect.x + k.rect.w)) + pad;
+    const ty0 = Math.min(0, ...decks.map((k) => k.rect.y)) - pad;
+    const ty1 = Math.max(depth, ...decks.map((k) => k.rect.y + k.rect.d)) + pad;
+    const vb = `${tx0} ${ty0} ${tx1 - tx0} ${ty1 - ty0}`;
     return (
       <div className="planWrap rz-elev-wrap">
         {faceBar}
@@ -166,7 +226,7 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
           onContextMenu={(event) => event.preventDefault()}
         >
           {/* the site under the house */}
-          <rect x={-pad} y={-pad} width={width + pad * 2} height={depth + pad * 2} fill="#e6dfcd" opacity="0.4" />
+          <rect x={tx0} y={ty0} width={tx1 - tx0} height={ty1 - ty0} fill="#e6dfcd" opacity="0.4" />
           {storeyList.map((b) => {
             const isDrag = drag && drag.lv === b.lv && drag.ghost?.rect;
             const r = isDrag ? drag.ghost.rect : b.rect;
@@ -246,6 +306,40 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
               </g>
             );
           })}
+          {/* decks — the same objects the Plan shows, tappable and draggable
+              here; the tap opens the deck's own card with every option */}
+          {decks.map((k) => {
+            const isDrag = drag && drag.deckId === k.id && drag.ghost?.rect;
+            const r = isDrag ? drag.ghost.rect : k.rect;
+            const sel = String(selectedId || '') === String(k.id);
+            // the picked floor's decks lead; other floors' decks stay faint
+            // so the storey map underneath keeps reading
+            const mine = k.level === Math.max(1, activeFloor);
+            return (
+              <g key={k.id} opacity={mine || sel ? 1 : 0.3}>
+                <rect x={r.x} y={r.y} width={r.w} height={r.d}
+                  fill="#c9a06b" opacity={isDrag ? 0.7 : 0.85}
+                  stroke={sel ? '#3C6472' : '#8a6a48'} strokeWidth={sel ? 0.24 : 0.12} strokeLinejoin="round"
+                  style={{ cursor: 'move' }}
+                  onPointerDown={(e) => startDeckDrag(e, k, 'kslide')} />
+                <text x={r.x + r.w / 2} y={r.y + r.d / 2 + 0.3} textAnchor="middle" fontSize="0.95" fill="#5a4632" pointerEvents="none">
+                  {k.name} — {Math.round(r.w * 10) / 10} × {Math.round(r.d * 10) / 10}′
+                </text>
+                {sel && (
+                  <g>
+                    <rect x={r.x - 0.45} y={r.y + r.d / 2 - 0.45} width={0.9} height={0.9} rx={0.18} {...HANDLE}
+                      style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDeckDrag(e, k, 'kw')} />
+                    <rect x={r.x + r.w - 0.45} y={r.y + r.d / 2 - 0.45} width={0.9} height={0.9} rx={0.18} {...HANDLE}
+                      style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDeckDrag(e, k, 'ke')} />
+                    <rect x={r.x + r.w / 2 - 0.45} y={r.y - 0.45} width={0.9} height={0.9} rx={0.18} {...HANDLE}
+                      style={{ cursor: 'ns-resize' }} onPointerDown={(e) => startDeckDrag(e, k, 'kn')} />
+                    <rect x={r.x + r.w / 2 - 0.45} y={r.y + r.d - 0.45} width={0.9} height={0.9} rx={0.18} {...HANDLE}
+                      style={{ cursor: 'ns-resize' }} onPointerDown={(e) => startDeckDrag(e, k, 'ks')} />
+                  </g>
+                )}
+              </g>
+            );
+          })}
           {/* bearings — same map convention as the Plan */}
           <text x={width / 2} y={-1.4} textAnchor="middle" fontSize="1.3" fill="#6b6f66" pointerEvents="none">▲ N</text>
           <text x={width / 2} y={depth + 2.4} textAnchor="middle" fontSize="1.15" fill="#6b6f66" pointerEvents="none">South</text>
@@ -276,7 +370,15 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
   const [leftEnd, rightEnd] = cornerEnds[face] || ['', ''];
   const pad = 3.2;
   const soil = hasBasement ? basementH + 2.2 : 2.4;
-  const vb = `${-pad} ${-2.2} ${run + pad * 2} ${maxTop + 2.2 + soil + 2.4}`;
+  // the face covers the house AND every deck sticking past its ends
+  const deckSpans = decks.map((k) => {
+    const s0r = horiz ? k.rect.x : k.rect.y;
+    const s1r = horiz ? k.rect.x + k.rect.w : k.rect.y + k.rect.d;
+    return flipX ? [run - s1r, run - s0r] : [s0r, s1r];
+  });
+  const vx0 = Math.min(0, ...deckSpans.map(([a]) => a)) - pad;
+  const vx1 = Math.max(run, ...deckSpans.map(([, b]) => b)) + pad;
+  const vb = `${vx0} ${-2.2} ${vx1 - vx0} ${maxTop + 2.2 + soil + 2.4}`;
 
   return (
     <div className="planWrap rz-elev-wrap">
@@ -367,6 +469,44 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
         {blocks.filter((b) => !b.basement && b.lv > 1).map((b) => (
           <line key={`fl${b.lv}`} x1={-1} y1={Y(b.y0)} x2={run + 1} y2={Y(b.y0)} stroke="#9a937f" strokeWidth={0.07} strokeDasharray="0.8 0.6" pointerEvents="none" />
         ))}
+
+        {/* decks in elevation: a slab at its walking height with its railing —
+            drag it along this face, pull a handle to size it, tap for its card */}
+        {decks.map((k) => {
+          const isDrag = drag && drag.deckId === k.id && drag.ghost?.rect;
+          const r = isDrag ? drag.ghost.rect : k.rect;
+          const s0r = horiz ? r.x : r.y;
+          const s1r = horiz ? r.x + r.w : r.y + r.d;
+          const dx0 = flipX ? run - s1r : s0r;
+          const len = s1r - s0r;
+          const sel = String(selectedId || '') === String(k.id);
+          const railN = Math.max(1, Math.round(len / 4));
+          return (
+            <g key={`k${k.id}`}>
+              <rect x={dx0} y={Y(k.topFt)} width={len} height={0.45}
+                fill="#c9a06b" stroke={sel ? '#3C6472' : '#8a6a48'} strokeWidth={sel ? 0.2 : 0.1}
+                opacity={isDrag ? 0.75 : 1}
+                style={{ cursor: 'move' }} onPointerDown={(e) => startDeckDrag(e, k, 'kslide')} />
+              {k.railed && (
+                <g pointerEvents="none">
+                  <line x1={dx0 + 0.2} y1={Y(k.topFt + 3)} x2={dx0 + len - 0.2} y2={Y(k.topFt + 3)} stroke="#8a6a48" strokeWidth={0.12} />
+                  {Array.from({ length: railN + 1 }, (_, i) => dx0 + 0.2 + ((len - 0.4) * i) / railN).map((px, i) => (
+                    <line key={i} x1={px} y1={Y(k.topFt)} x2={px} y2={Y(k.topFt + 3)} stroke="#8a6a48" strokeWidth={0.09} />
+                  ))}
+                </g>
+              )}
+              <text x={dx0 + len / 2} y={Y(k.topFt) + 1.4} textAnchor="middle" fontSize="0.9" fill="#5a4632" pointerEvents="none">{k.name}</text>
+              {sel && (
+                <g>
+                  <rect x={dx0 - 0.45} y={Y(k.topFt) - 0.25} width={0.9} height={0.9} rx={0.18} {...HANDLE}
+                    style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDeckDrag(e, k, flipX ? 'kend' : 'kstart')} />
+                  <rect x={dx0 + len - 0.45} y={Y(k.topFt) - 0.25} width={0.9} height={0.9} rx={0.18} {...HANDLE}
+                    style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDeckDrag(e, k, flipX ? 'kstart' : 'kend')} />
+                </g>
+              )}
+            </g>
+          );
+        })}
 
         {/* which corner is which */}
         <text x={0.2} y={Y(0) + (hasBasement ? basementH + 1.6 : 1.6)} fontSize="1.15" fill="#6b6f66" pointerEvents="none">{leftEnd}</text>
