@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { storeyElevationFt, storeyHeightFt, basementInfo } from '../../backend/bim-core.mjs';
 import { upperPlateRect, floorLabel, resolveDeck } from '../engine.js';
+import { buildFaceLaw } from './faceLaw.js';
 
 // StackView — the STOREYS drawn as blocks you can grab, the way the Wall
 // view draws one wall. Two kinds of face:
@@ -364,7 +365,26 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
     const y0 = storeyElevationFt(shell, b.lv);
     blocks.push({ lv: b.lv, name: b.name, s0, s1, y0, y1: y0 + b.h, rect: b.rect, setsBack: b.lv > 1 && (s1 - s0 < run - 0.05 || s0 > 0.05) });
   });
-  const maxTop = Math.max(...blocks.map((b) => b.y1), 8);
+  // THE FACE LAW — the same wall-top math the 3D scene builds from, so the
+  // side faces show the storeys' TRUE shape (shed rakes, tier tops climbing
+  // with the roof, caps under upper floors, attached lean-to planes) instead
+  // of flat data boxes that disagreed with the model.
+  const law = buildFaceLaw(spec, face);
+  const lawCuts = [...new Set([0, run, ...law.tiers.flatMap((c) => [c.s0, c.s1])])]
+    .filter((t) => t >= 0 && t <= run).sort((a, b2) => a - b2);
+  // sampled per INTERVAL with a hair of inset — a cut sits exactly on a
+  // plate edge, where the plane itself answers null
+  const roofLinePts = [];
+  for (let ci = 0; ci < lawCuts.length - 1; ci += 1) {
+    const t0 = lawCuts[ci]; const t1 = lawCuts[ci + 1];
+    if (t1 - t0 < 0.05) continue;
+    const eps = Math.min(0.02, (t1 - t0) / 4);
+    if (law.roofAt((t0 + t1) / 2) == null) continue;
+    const ya = law.roofAt(t0 + eps); const yb = law.roofAt(t1 - eps);
+    if (ya != null) roofLinePts.push([t0, ya]);
+    if (yb != null) roofLinePts.push([t1, yb]);
+  }
+  const maxTop = Math.max(...blocks.map((b) => b.y1), ...lawCuts.map((t) => law.wallTopAt(t)), ...roofLinePts.map(([, y]) => y), 8);
   const Y = (v) => maxTop - v; // feet measure up; paper draws down
   const cornerEnds = { south: ['West end', 'East end'], north: ['East end', 'West end'], east: ['South end', 'North end'], west: ['North end', 'South end'] };
   const [leftEnd, rightEnd] = cornerEnds[face] || ['', ''];
@@ -409,8 +429,36 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
           const canSlide = !b.basement && b.lv > 1;
           const midY = Y(y1) + (y1 - y0) / 2;
           const sideOrig = { s0: b.s0, s1: b.s1, h: b.y1 - b.y0, rect: b.rect };
+          // the block's TRUE top on this face (the law's line) — a drag ghost
+          // stays a plain box; the committed block wears its real shape
+          const XX = (t) => (flipX ? run - t : t);
+          const lawTier = !b.basement && b.lv > 1 ? law.tiers.find((tb) => tb.lv === b.lv) : null;
+          const topF = b.basement || isDrag ? null : (b.lv === 1 ? law.groundTopAt : (lawTier ? lawTier.topAt : null));
+          const shapePts = topF ? (() => {
+            const tc = lawCuts.filter((t) => t >= s0 - 0.01 && t <= s1 + 0.01);
+            const pts = [];
+            for (let ci = 0; ci < tc.length - 1; ci += 1) {
+              const t0 = tc[ci]; const t1 = tc[ci + 1];
+              if (t1 - t0 < 0.02) continue;
+              const eps = Math.min(0.02, (t1 - t0) / 4);
+              pts.push([t0, Math.max(y0 + 0.5, topF(t0 + eps))], [t1, Math.max(y0 + 0.5, topF(t1 - eps))]);
+            }
+            if (!pts.length) return null;
+            return [[s0, y0], ...pts, [s1, y0]].map(([t, v]) => `${XX(t)},${Y(v)}`).join(' ');
+          })() : null;
           return (
             <g key={b.lv}>
+              {shapePts ? (
+                <polygon
+                  points={shapePts}
+                  fill="#f4efe3"
+                  stroke={sel ? '#3C6472' : '#4a4f47'}
+                  strokeWidth={sel ? 0.24 : 0.14}
+                  strokeLinejoin="round"
+                  style={{ cursor: canSlide ? 'move' : 'pointer' }}
+                  onPointerDown={(e) => (canSlide ? startDrag(e, b.lv, 'slide', sideOrig) : onSelectFloor(b.lv))}
+                />
+              ) : (
               <rect
                 x={x0} y={Y(y1)} width={len} height={y1 - y0}
                 fill={b.basement ? '#e3ddcd' : '#f4efe3'}
@@ -422,6 +470,7 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
                 style={{ cursor: canSlide ? 'move' : 'pointer' }}
                 onPointerDown={(e) => (canSlide ? startDrag(e, b.lv, 'slide', sideOrig) : onSelectFloor(b.lv))}
               />
+              )}
               {/* name + the numbers this face can read (length × height) */}
               <text x={x0 + len / 2} y={midY - 0.2} textAnchor="middle" fontSize="1.25" fill="#22251F" fontWeight="600" pointerEvents="none">
                 {b.name} — {Math.round(len * 10) / 10} × {Math.round(h * 10) / 10}′
@@ -469,6 +518,13 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
         {blocks.filter((b) => !b.basement && b.lv > 1).map((b) => (
           <line key={`fl${b.lv}`} x1={-1} y1={Y(b.y0)} x2={run + 1} y2={Y(b.y0)} stroke="#9a937f" strokeWidth={0.07} strokeDasharray="0.8 0.6" pointerEvents="none" />
         ))}
+
+        {/* the attached lean-to roof crossing this face — the same plane the
+            3D wears, so the stack reads like the model */}
+        {roofLinePts.length >= 2 && (
+          <polyline points={roofLinePts.map(([t, y]) => `${flipX ? run - t : t},${Y(y)}`).join(' ')}
+            fill="none" stroke="#7f8c89" strokeWidth={0.26} strokeLinecap="round" pointerEvents="none" opacity="0.9" />
+        )}
 
         {/* decks in elevation: a slab at its walking height with its railing —
             drag it along this face, pull a handle to size it, tap for its card */}
