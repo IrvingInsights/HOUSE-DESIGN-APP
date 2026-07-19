@@ -184,6 +184,21 @@ const KNEEWALL_OPENINGS = (() => {
   return d;
 })();
 
+// LIVE FUZZ — seeded random designs (the same generator the node proof runs
+// 300+ of) rendered through the REAL 3D view: seam audit, floating-opening
+// law, finite meshes. Deterministic seeds so a failure replays exactly; any
+// failure gets pinned above as a named design forever.
+import { generateFuzzDesign } from './designFuzz.js';
+export function fuzzBatterySpecs(count = 12, seed = 4242) {
+  const out = [];
+  for (let n = 0; n < count; n += 1) {
+    const s = seed + n * 9973;
+    const { spec, threw } = generateFuzzDesign(s);
+    if (!threw) out.push({ name: `fuzz #${s}`, spec });
+  }
+  return out;
+}
+
 // Every battery design. The seed and the bundled starters join at run time
 // (they live in their own modules); each entry here is a shape the audit has
 // actually caught a real bug on, or the fresh control for one. `expect`

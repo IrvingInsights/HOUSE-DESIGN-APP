@@ -30,7 +30,20 @@ revision snapshots. Public repo: github.com/IrvingInsights/HOUSE-DESIGN-APP.
 
 ## The verification tools (use them; they are the contract)
 
+- **`node tools/design_space_test.mjs` — THE CORRECTNESS GATE (2026-07-19).
+  300 seeded random designs built as random op sequences through the real
+  applier (`src/reimagine/designFuzz.js`), plus a damaged-legacy corpus,
+  held to invariants that must be true for ANY house (no throw, no NaN,
+  receipts sum, resolvers finite, heal converges, no unflagged floating
+  openings). Every failure prints its seed — replay with `--seed <n>
+  --count 1`. THE RULE: nothing ships unless this and the browser fuzz
+  battery (`await window.__nbSeamAuditBattery({deep:30})` on :5199) run
+  dry. When either finds a bug, fix the CLASS in engine/bim-core, never
+  patch the one design; seeds that caught real bugs are permanent (the
+  battery's fixed-seed fuzz set replays them every run).**
 - `node tools/op_smoke_test.mjs` — 113 checks; run after ANY bim-core edit.
+- `node tools/persistence_test.mjs` — the engine-side design store: atomic
+  saves, revision per save, corruption set-aside, project isolation.
 - `node tools/trace_repair_test.mjs` — 111 checks; run after planner edits.
 - `node tools/geom_core_test.mjs` — 41 checks; run after geometry work.
 - `node tools/trace_corpus_test.mjs [--only <name>]` — THE proof for the
