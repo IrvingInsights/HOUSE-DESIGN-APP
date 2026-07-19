@@ -1552,7 +1552,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const oIdx = Number(id.replace('opening-', ''));
             const opn = spec.openings?.[oIdx];
             const oProf = opn ? (OPENING_TYPES[opn.type] || OPENING_TYPES.window) : null;
-            if (opn && opn.wall !== 'roof' && !oProf.raked) {
+            // rotated parts (dormer roof planes, raked heads, tilted panes)
+            // follow their own build-time roof laws — same exemption the wall
+            // law documents. The axis-aligned assembly stays judged, which is
+            // what actually floats when a wall can't hold its window.
+            const oRotated = m.rotation.x !== 0 || m.rotation.y !== 0 || m.rotation.z !== 0;
+            if (opn && opn.wall !== 'roof' && !oProf.raked && !oRotated) {
               const oBand = openingVerticalBand(spec, opn, { roofUnderAt });
               // margin: casing + shade-eyebrow hood ride above the pane top
               if (bb.max.y > oBand.bandTopFt + 1.5) {
@@ -1674,9 +1679,15 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const a0 = alongAt(b / bays);
             const a1 = alongAt((b + 1) / bays);
             let top = Math.min(eaveH, Math.min(roofAtAlong(a0, 0), roofAtAlong(a1, 0)) + JOINTS.ROOF_SLACK);
-            for (let it = 0; it < 4; it += 1) {
+            // run to a TRUE fixed point — a fixed 4 passes stopped 0.05 ft
+            // short on a roof rising inward (each pass probes at the previous
+            // top's inset, slightly outside the final answer; the fuzz
+            // battery caught the sliver). Monotonic, so break on stillness.
+            for (let it = 0; it < 12; it += 1) {
+              const prev = top;
               const ins = Math.max(0, top - kneeH) * Math.tan(tiltRad);
               top = Math.min(top, Math.min(roofAtAlong(a0, ins), roofAtAlong(a1, ins)) + JOINTS.ROOF_SLACK);
+              if (prev - top < 0.01) break;
             }
             bayTops.push(top);
           }
@@ -1758,7 +1769,22 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               : side === 'north' ? [alongW, y, u]
               : side === 'east' ? [width - u, y, alongW]
               : [u, y, alongW]);
-            const v = [pt(y0, 0), pt(y1, 0), pt(y1, insOfEnd(y1)), pt(y0, insOfEnd(y0))];
+            // each top corner obeys the roof AT ITS OWN spot: on a roof
+            // rising inward, the wall-face corner (u=0) sits under a LOWER
+            // roof than the inset glass line — one shared top height poked
+            // 0.23 ft through at the band's run ends (fuzz #44134)
+            const roofAtU = (u) => {
+              const uu = Math.max(u, 0.15); // a hair inside the face plane
+              const px = side === 'east' ? width - uu : side === 'west' ? uu : alongW;
+              const pz = side === 'south' ? depth - uu : side === 'north' ? uu : alongW;
+              const r = roofUnderAt(px, pz);
+              return Number.isFinite(r) ? r : y1;
+            };
+            const yFace = Math.min(y1, roofAtU(0) + JOINTS.ROOF_SLACK);
+            let ySlant = y1;
+            for (let it = 0; it < 4; it += 1) ySlant = Math.min(ySlant, roofAtU(insOfEnd(ySlant)) + JOINTS.ROOF_SLACK);
+            if (Math.min(yFace, ySlant) - y0 < 0.3) return;
+            const v = [pt(y0, 0), pt(yFace, 0), pt(ySlant, insOfEnd(ySlant)), pt(y0, insOfEnd(y0))];
             const geo = new THREE.BufferGeometry();
             geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
               ...v[0], ...v[1], ...v[2], ...v[0], ...v[2], ...v[3]
@@ -1772,7 +1798,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             if (Math.abs(gapL - gapR) < 0.4) continue; // flush — nothing to close
             const yLo = kneeH + Math.min(gapL, gapR);
             const yHi = kneeH + Math.max(gapL, gapR);
-            const alongW = (horizNS ? width : depth) / 2 + alongAt(i / bays);
+            // the end face belongs to the TALLER bay — sit a hair inside it,
+            // never exactly on the boundary line, or the audit (rightly)
+            // judges its top against the SHORTER neighbor's roof piece
+            // (the live fuzz caught this at a west-band step, 0.05 ft over)
+            const alongW = (horizNS ? width : depth) / 2 + alongAt(i / bays) + (gapR > gapL ? 0.08 : -0.08);
             if (yHi - yLo >= 2.5 && insOfEnd((yLo + yHi) / 2) > 0.15) {
               const yMid = (yLo + yHi) / 2;
               endPane(yLo, yMid, alongW);   // the square-ish pane

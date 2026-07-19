@@ -19,7 +19,7 @@ import {
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms } from '../placement.js';
 import { STARTER_DESIGNS } from './starters.js';
-import { AUDIT_BATTERY_SPECS } from './auditBattery.js';
+import { AUDIT_BATTERY_SPECS, fuzzBatterySpecs } from './auditBattery.js';
 import '../styles.css';
 import './shell.css';
 
@@ -55,7 +55,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 112 · Jul 19';
+const UPDATE_STAMP = 'update 113 · Jul 19';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -883,13 +883,16 @@ export default function App() {
   // you were working on, and returns [{ name, problems }] — all must be [].
   // Run:  await window.__nbSeamAuditBattery()
   useEffect(() => {
-    window.__nbSeamAuditBattery = async () => {
+    window.__nbSeamAuditBattery = async (opts = {}) => {
       const restoreSpec = spec;
       const restoreView = viewMode;
       const cases = [
         { name: 'seed design', spec: seedSpec },
         ...STARTER_DESIGNS.map((st) => ({ name: `starter: ${st.name}`, spec: st.spec })),
-        ...AUDIT_BATTERY_SPECS
+        ...AUDIT_BATTERY_SPECS,
+        // seeded random designs through the REAL renderer — the node proof
+        // covers the engine; this covers the meshes. { deep: 100 } for more.
+        ...fuzzBatterySpecs(Number(opts.deep) || 12)
       ];
       // a render is "settled" when the scene has rebuilt the audit closure.
       // Timer-based on purpose: requestAnimationFrame starves in throttled /

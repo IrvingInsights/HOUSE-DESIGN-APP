@@ -336,6 +336,20 @@ r = apply(r.spec, [{ type: 'set_wall_side', wall: 'south', field: 'sunGlazing', 
 ok(r.spec.walls.south.heightFt === undefined && r.spec.shell.southWallHeightFt === 17,
   'glazing off removes the kneewall with it — the wall stands back up, the shell never moved');
 
+// roofProfile: the standing wall comes from the ACTIVE pair alone — a stale
+// wallHeightFt must never outrank a real shed pair (it once stacked storey 2
+// nineteen feet above an E5/W4 roof; the design-space fuzzer caught it)
+{
+  const p = roofProfile({ widthFt: 30, depthFt: 24, wallHeightFt: 24, southWallHeightFt: 24, northWallHeightFt: 24, eastWallHeightFt: 5, westWallHeightFt: 4, roofType: 'shed' });
+  ok(p.axis === 'ew' && p.highWallHeightFt === 5 && p.highSide === 'east', `stale base never outranks the shed pair (high ${p.highWallHeightFt}, axis ${p.axis})`);
+  const r2 = apply(freshSpec(), [
+    { type: 'set_shell', field: 'wallHeightFt', value: 24 },
+    { type: 'set_roof_profile', roofType: 'shed', eastWallHeightFt: 5, westWallHeightFt: 4 }
+  ]);
+  ok(r2.spec.shell.wallHeightFt === 5 && storeyElevationFt({ ...r2.spec.shell, storeys: 2 }, 2) <= 6.05,
+    `EW shed op re-syncs the standing wall (wallHeightFt ${r2.spec.shell.wallHeightFt}) so storeys stack on the real roof`);
+}
+
 // THE OPENING BAND LAW — one vertical-fit answer for renderers, checks, heal
 {
   const base = freshSpec();

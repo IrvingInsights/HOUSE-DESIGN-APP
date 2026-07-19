@@ -7,7 +7,15 @@ const DEFAULT_OUTDOOR_GRID_SIZE_FT = 240;
 const OUTDOOR_SPACE_TYPES = new Set(['outdoor', 'site', 'garden', 'animal', 'paddock', 'run', 'landscape', 'homestead', 'plant', 'water', 'earthwork']);
 
 export function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
+  // NaN-PROOF, always: garbage in (NaN, undefined, 'twelve') settles at the
+  // floor of the legal range instead of poisoning the spec. One NaN written
+  // into shell.widthFt once smeared NaN through every room the normalizer
+  // clamped against it — the design-space fuzzer found it in seconds. Ops
+  // should still REJECT junk explicitly where they can; this is the backstop
+  // that makes NaN structurally impossible through every clamped path.
+  const v = Number(value);
+  if (!Number.isFinite(v)) return min;
+  return Math.max(min, Math.min(max, v));
 }
 
 function padExtension(shell = {}) {
@@ -65,7 +73,12 @@ export function roofProfile(shell = {}) {
   const axis = roofType === 'shed' && Math.abs(eastWallHeightFt - westWallHeightFt) >= 0.05
     && Math.abs(southWallHeightFt - northWallHeightFt) < 0.05 ? 'ew' : 'ns';
   const hiPair = axis === 'ew' ? [eastWallHeightFt, westWallHeightFt] : [southWallHeightFt, northWallHeightFt];
-  const highWallHeightFt = Math.max(hiPair[0], hiPair[1], base);
+  // The standing wall comes from the ACTIVE pair alone. Folding `base` into
+  // this max let a stale wallHeightFt (24) outrank a real E5/W4 shed — the
+  // engine then stacked storey 2 nineteen feet above its own roof, and a
+  // fuzz window hovered in the open sky there. Unset pair fields already
+  // default to base above, so nothing legitimate is lost.
+  const highWallHeightFt = Math.max(hiPair[0], hiPair[1]);
   const lowWallHeightFt = Math.min(hiPair[0], hiPair[1]);
   const riseFt = Math.abs(hiPair[0] - hiPair[1]);
   const runFt = Number(axis === 'ew' ? shell.widthFt : shell.depthFt) || 0;
@@ -1503,7 +1516,12 @@ export function openingVerticalBand(spec, opening, { roofUnderAt = null } = {}) 
   };
   let level = Math.min(Math.max(1, Math.round(Number(opening.level || 1))), storeys);
   let dropped = false;
-  while (level > 1 && !spansHere(level)) { level -= 1; dropped = true; }
+  // a storey has a usable wall band here only if its plate spans this stretch
+  // AND its floor sits under the roof — a "2nd floor" above a 4-ft shed roof
+  // is open sky, and an opening there drops just like one past its plate
+  // (the live fuzz found a window hovering 5 ft over such a roof)
+  const storeyUsable = (lv) => lv <= 1 || (spansHere(lv) && storeyElevationFt(shell, lv) < roofAbs - 0.5);
+  while (level > 1 && !storeyUsable(level)) { level -= 1; dropped = true; }
   const floorY = storeyElevationFt(shell, level);
   const r = resolveWallSide(spec, side, level);
   const wallTopAbs = level === 1
@@ -1602,6 +1620,16 @@ export function applyBimOperations(currentSpec, plan) {
       }
       const field = operation.field || 'padExtensionFt';
       const numeric = Number(operation.value || operation.w);
+      // A DIMENSION field fed junk ('NaN', 'twelve', nothing) is REJECTED,
+      // not coerced — the clamp backstop would legalize it at the floor, but
+      // silently turning garbage into an 18-ft wall is how confusing designs
+      // are born. Non-dimension fields (gutters, notes…) pass through below.
+      const numericFields = new Set(['widthFt', 'depthFt', 'wallHeightFt', 'padExtensionFt', 'roofPitch', 'storeys', 'upperStoreyHeightFt']);
+      if (numericFields.has(field) && !Number.isFinite(numeric)) {
+        warnings.push(`"${operation.value}" isn't a number — the ${field} stays as it was.`);
+        rejectedOperations.push(operation);
+        continue;
+      }
       if (field === 'widthFt') {
         if (!scaleFootprintAxis(next, 'x', clamp(numeric, 18, 120))) next.shell.widthFt = clamp(numeric, 18, 120);
         // absorb a companion depth riding in the same op (planner shorthand)
