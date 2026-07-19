@@ -10,7 +10,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { FRAME_MEMBERS } from './frameDrawings.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
-  OPENING_TYPES, resolveFrameType, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, decomposeFootprint, subtractRect,
+  OPENING_TYPES, openingVerticalBand, resolveFrameType, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, decomposeFootprint, subtractRect,
   subtractRectFromFootprint, pointInFootprint, edgeForOpening, gradeElevationAt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, storeyElevationFt, storeyHeightFt,
   isRoundFootprint, clipRectToRoundShell
 } from '../backend/bim-core.mjs';
@@ -1543,6 +1543,28 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               }
             }
           }
+          // OPENINGS obey the band law — no window/door part may float in
+          // open air (above its wall's band AND above the roof). This is the
+          // "0 floating openings" definition, checked on real meshes for
+          // every battery design forever. Skylights and raked windows keep
+          // their own laws.
+          if (judge && /^opening-\d+$/.test(id)) {
+            const oIdx = Number(id.replace('opening-', ''));
+            const opn = spec.openings?.[oIdx];
+            const oProf = opn ? (OPENING_TYPES[opn.type] || OPENING_TYPES.window) : null;
+            if (opn && opn.wall !== 'roof' && !oProf.raked) {
+              const oBand = openingVerticalBand(spec, opn, { roofUnderAt });
+              // margin: casing + shade-eyebrow hood ride above the pane top
+              if (bb.max.y > oBand.bandTopFt + 1.5) {
+                const jx2 = (bb.min.x + bb.max.x) / 2;
+                const jz2 = (bb.min.z + bb.max.z) / 2;
+                const rTop = roofTopAtPt(jx2, jz2);
+                if (!Number.isFinite(rTop) || bb.max.y > rTop + JOINTS.ROOF_SLACK + 1.5) {
+                  problems.push({ check: 'opening-floating', id, over: Math.round((bb.max.y - oBand.bandTopFt) * 100) / 100, at: { x: Math.round(jx2 * 100) / 100, y: Math.round(bb.max.y * 100) / 100, z: Math.round(jz2 * 100) / 100, bandTop: Math.round(oBand.bandTopFt * 100) / 100 } });
+                }
+              }
+            }
+          }
           if (judge && id === 'frame-main') {
             // FRAME members too (posts, plates, rafters — rotated or not):
             // every corner of the member's true box, in world space, must sit
@@ -2934,12 +2956,24 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       if (layers.openings) spec.openings.forEach((opening, index) => {
         const size = opening.widthFt;
         const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
+        // THE BAND LAW (bim-core openingVerticalBand — the ONE answer shared
+        // with the wall view, the health checks, and the heal): the assembly
+        // lives inside its wall's REAL band. Kneewalls, glazed faces, storey
+        // plates, and the roof all constrain it here, ONCE — every part built
+        // below (casing, glass, muntins, eyebrow, dormer) follows. Raked
+        // windows and skylights keep their own laws.
+        const band = openingVerticalBand(spec, opening, { roofUnderAt });
         // Which storey the opening lives on lifts the whole assembly: a
-        // 2nd-floor window sits at that storey's floor elevation, not the ground.
-        const oLevel = opening.wall === 'roof' ? 1 : Number(opening.level || 1);
+        // 2nd-floor window sits at that storey's floor elevation, not the
+        // ground — and one hanging past its storey's plate drops to the
+        // highest wall that actually spans it (band.level).
+        const oLevel = opening.wall === 'roof' ? 1 : band.level;
         const baseY = storeyElevationFt(spec.shell, oLevel) + (oLevel === 1 && opening.wall !== 'roof' ? (sideReveal[opening.wall] || 0) : 0);
-        // per-opening sill override (set by dragging on the wall view)
-        const oSill = Number.isFinite(Number(opening.sillFt)) ? Number(opening.sillFt) : profile.sill;
+        // per-opening sill override (set by dragging on the wall view),
+        // band-clamped so nothing ever floats in open air
+        const oSill = band.skylight || band.raked
+          ? (Number.isFinite(Number(opening.sillFt)) ? Number(opening.sillFt) : profile.sill)
+          : band.fit.sillFt;
         const sill = baseY + oSill;
         // Plan position of the opening centre — used by raked height, the shade
         // eyebrow, and the dormer.
@@ -2950,7 +2984,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // gable peak instead of stopping square. Sample the roof at both ends of
         // the window and take the LOWER, so the square top never pokes through
         // the slope (the sloped cap frame follows the rake above it).
-        let openH = profile.h;
+        let openH = band.skylight || band.raked ? profile.h : band.fit.hFt;
         if (profile.raked && opening.wall !== 'roof') {
           const r0 = oHoriz ? roofUnderAt((Number(opening.x) || 0), oPz) : roofUnderAt(oPx, (Number(opening.y) || 0));
           const r1 = oHoriz ? roofUnderAt((Number(opening.x) || 0) + size, oPz) : roofUnderAt(oPx, (Number(opening.y) || 0) + size);

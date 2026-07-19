@@ -1076,6 +1076,21 @@ function normalizeRooms(spec) {
       return { ...opening, [axis]: along };
     });
   }
+  // …and openings fit their wall VERTICALLY (the band law). Conservative:
+  // only an EXPLICIT stored sillFt that pushes the opening out of its band
+  // gets pulled down, and only when lowering the sill alone makes it fit.
+  // Profile-default sills, raked windows, and skylights stay untouched —
+  // the renderer's own band clamp is the belt for what the heal leaves.
+  if (Array.isArray(spec.openings)) {
+    spec.openings = spec.openings.map((opening) => {
+      if (opening.wall === 'roof' || !Number.isFinite(Number(opening.sillFt))) return opening;
+      const band = openingVerticalBand(spec, opening);
+      if (band.skylight || band.raked || !band.clamped || band.reason === 'no-storey-here') return opening;
+      const fitsByLoweringSill = Math.abs(band.fit.hFt - (OPENING_TYPES[opening.type] || OPENING_TYPES.window).h) < 0.05;
+      if (!fitsByLoweringSill || Math.abs(band.fit.sillFt - Number(opening.sillFt)) < 0.05) return opening;
+      return { ...opening, sillFt: band.fit.sillFt };
+    });
+  }
 }
 
 function detectIssues(spec) {
@@ -1107,6 +1122,20 @@ function detectIssues(spec) {
   if ((spec.shell.roofType || 'gable') === 'shed' && roofProfile(spec.shell).riseFt < 0.5) {
     issues.push({ severity: 'warning', title: "Shed roof is flat — it won't drain", owner: 'Engineer', fix: 'Give the shed a high eave and a low one (set_roof_profile with different wall heights on opposite sides — north/south or east/west); high south draining north is the solar classic.' });
   }
+  // Openings must fit their walls vertically (the band law — mirrors engine.js).
+  (spec.openings || []).forEach((opening, oi) => {
+    const bandChk = openingVerticalBand(spec, opening);
+    if (!bandChk.clamped) return;
+    const label = opening.label || (OPENING_TYPES[opening.type] || OPENING_TYPES.window).label;
+    issues.push({
+      severity: bandChk.reason !== 'no-storey-here' && bandChk.bandTopFt - bandChk.floorY < 1.5 ? 'critical' : 'warning',
+      title: bandChk.reason === 'no-storey-here' ? `${label} hangs past its floor` : `${label} sits above its wall`,
+      owner: 'Architect', fixId: 'fit-opening', openingIndex: oi,
+      fix: bandChk.reason === 'no-storey-here'
+        ? `Its floor doesn't reach this stretch of the ${opening.wall} wall — it's drawn on the wall below; slide it to where its floor stands or move it down a floor.`
+        : `The ${opening.wall} wall is only ${Math.round((bandChk.wallTopFt - bandChk.floorY) * 10) / 10} ft tall there — it's drawn pulled down to fit; lower its sill, raise the wall, or move it.`
+    });
+  });
   const glazedOffSouth = WALL_SIDES.filter((side) => { const r = resolveWallSide(spec, side); return !r.omitted && side !== 'south' && (r.assemblyKey === 'glazed' || r.sunGlazing); });
   if (naturalApproach && glazedOffSouth.length) issues.push({ severity: 'warning', title: `Glass wall faces ${glazedOffSouth.join(' + ')} — little solar gain, big heat leak`, owner: 'Natural Builder', fix: 'A glazed wall earns its keep facing south. Off-south glass loses heat all winter for little gain — face it south, or accept the heat cost knowingly.' });
   const basementBedroom = basementInfo(spec.shell).present && spec.rooms.find((room) => Number(room.level || 1) === BASEMENT_LEVEL && room.type === 'sleeping');
@@ -1413,6 +1442,91 @@ export function storeyElevationFt(shell, lvl) {
   let y = 0;
   for (let k = 1; k < level; k += 1) y += storeyHeightFt(shell, k);
   return y;
+}
+
+// ── THE OPENING BAND LAW ────────────────────────────────────────────────────
+// Where a door or window may actually live, vertically, on ITS wall — the ONE
+// answer the 3D scene, the wall view, the health checks, and the heal all
+// share. A wall shrunk to a greenhouse kneewall, an upper-storey window
+// hanging past its storey's plate, a sill dragged above the eave: every one
+// of those used to render floating in open air, because each renderer placed
+// openings from the storey floor alone. The law:
+//   • the wall band runs from the storey floor to that wall's own height;
+//   • a GLAZED side's band climbs to the roof (the glass wall IS the band);
+//   • where the roof plane MEETS the wall (eaves, gable faces within reach)
+//     the space under the roof is enclosed — clerestories may live there;
+//   • a roof far above a low wall is OPEN AIR — nothing may live in it;
+//   • an upper-level opening outside its storey's plate has NO wall at all —
+//     it drops to the highest lower storey that spans its stretch of wall;
+//   • raked gable windows keep their own law (they self-clamp to the roof).
+// `fit` is where the opening actually goes: sill lowered first, height
+// shortened last (floor 1 ft) — never deleted, never floating. Callers that
+// know the real roof pass `roofUnderAt(px,pz)`; spec-level callers get a
+// deliberately GENEROUS roof bound so checks never false-flag a design the
+// renderer covers with roof.
+export function openingVerticalBand(spec, opening, { roofUnderAt = null } = {}) {
+  const shell = spec?.shell || {};
+  const profile = OPENING_TYPES[opening?.type] || OPENING_TYPES.window;
+  const storeys = Math.max(1, Math.ceil(Number(shell.storeys) || 1));
+  const oSill = Number.isFinite(Number(opening?.sillFt)) ? Number(opening.sillFt) : profile.sill;
+  const oH = Math.max(0.5, Number(profile.h) || 4);
+  if (!opening || opening.wall === 'roof' || profile.raked) {
+    return { skylight: opening?.wall === 'roof', raked: Boolean(profile.raked), clamped: false, level: Math.min(Math.max(1, Number(opening?.level || 1)), storeys), fit: { sillFt: oSill, hFt: oH, level: Number(opening?.level || 1) }, reason: '' };
+  }
+  const side = WALL_SIDES.includes(opening.wall) ? opening.wall : 'south';
+  const width = Number(shell.widthFt) || 36;
+  const depth = Number(shell.depthFt) || 28;
+  const w = Math.max(0.5, Number(opening.widthFt) || profile.defaultW || 3);
+  const horiz = side === 'north' || side === 'south';
+  const a0 = Number(horiz ? opening.x : opening.y) || 0;
+  // generous fallback roof ceiling (top storey walls + full ridge + margin)
+  const conservativeRoof = storeyElevationFt(shell, storeys) + storeyHeightFt(shell, storeys)
+    + Math.max(width, depth) * Math.max(0.02, Number(shell.roofPitch) || 0.32) + 4;
+  const roofAbs = (() => {
+    if (typeof roofUnderAt !== 'function') return conservativeRoof;
+    const pz = side === 'south' ? depth : side === 'north' ? 0 : (a0 + w / 2);
+    const px = side === 'east' ? width : side === 'west' ? 0 : (a0 + w / 2);
+    const e0 = horiz ? roofUnderAt(a0, pz) : roofUnderAt(px, a0);
+    const e1 = horiz ? roofUnderAt(a0 + w, pz) : roofUnderAt(px, a0 + w);
+    const r = Math.min(Number(e0), Number(e1));
+    return Number.isFinite(r) ? r : conservativeRoof;
+  })();
+  // which storey's wall actually spans this stretch? (centre-point test)
+  const spansHere = (lv) => {
+    if (lv <= 1) return true;
+    const el = (spec.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === lv);
+    if (!el) return true; // full-footprint storey
+    const lo = horiz ? (Number(el.x) || 0) : (Number(el.y) || 0);
+    const hi = lo + Math.max(1, Number(horiz ? el.w : el.d) || (horiz ? width : depth));
+    const c = a0 + w / 2;
+    return c > lo - 0.1 && c < hi + 0.1;
+  };
+  let level = Math.min(Math.max(1, Math.round(Number(opening.level || 1))), storeys);
+  let dropped = false;
+  while (level > 1 && !spansHere(level)) { level -= 1; dropped = true; }
+  const floorY = storeyElevationFt(shell, level);
+  const r = resolveWallSide(spec, side, level);
+  const wallTopAbs = level === 1
+    ? Math.max(1, Number(r.heightFt) || Number(shell.wallHeightFt) || 10)
+    : floorY + storeyHeightFt(shell, level);
+  const glazed = level === 1 && Boolean(r.sunGlazing);
+  const roofMeetsWall = roofAbs - wallTopAbs <= 2.5;
+  let bandTopAbs = glazed || roofMeetsWall ? Math.max(wallTopAbs, roofAbs) : wallTopAbs;
+  bandTopAbs = Math.min(bandTopAbs, roofAbs + 0.5);
+  const bandTopRel = Math.max(1, bandTopAbs - floorY);
+  let sillFit = oSill;
+  let hFit = oH;
+  if (sillFit + hFit > bandTopRel + 0.05) {
+    sillFit = Math.max(0, bandTopRel - hFit);
+    if (sillFit + hFit > bandTopRel + 0.05) hFit = Math.max(1, bandTopRel - sillFit);
+  }
+  const clamped = dropped || Math.abs(sillFit - oSill) > 0.05 || Math.abs(hFit - oH) > 0.05;
+  return {
+    floorY, wallTopFt: wallTopAbs, bandTopFt: bandTopAbs, level, glazed,
+    fit: { sillFt: sillFit, hFt: hFit, level },
+    clamped,
+    reason: dropped ? 'no-storey-here' : clamped ? 'over-band' : ''
+  };
 }
 
 // True when a set_shell op is dimension shorthand the w/d path must honor:

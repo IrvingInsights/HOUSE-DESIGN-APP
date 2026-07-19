@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { OPENING_TYPES, storeyElevationFt, storeyHeightFt } from '../../backend/bim-core.mjs';
+import { OPENING_TYPES, openingVerticalBand, storeyElevationFt, storeyHeightFt } from '../../backend/bim-core.mjs';
 import { resolveWallSide, upperPlateRect } from '../engine.js';
 
 // ElevationView — the chosen wall drawn face-on, from OUTSIDE the house, so
@@ -265,18 +265,29 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
           const prof = OPENING_TYPES[o.type] || OPENING_TYPES.window;
           const isGhost = drag?.idx === i && drag.ghost;
           const along = isGhost ? drag.ghost.along : alongOf(o);
-          const sill = isGhost ? drag.ghost.sill : sillOf(o);
+          // THE BAND LAW (same helper the 3D scene and health checks use):
+          // the static drawing shows the opening where it will actually be
+          // BUILT — clamped into its wall's real band, never floating. A
+          // clamped one draws with a dashed amber edge (the flags card says
+          // why in words). The drag ghost stays free — clamping happens at
+          // commit and on the next render.
+          const band = isGhost ? null : openingVerticalBand(spec, o);
+          const sill = isGhost ? drag.ghost.sill : (band && !band.skylight && !band.raked ? band.fit.sillFt : sillOf(o));
+          const drawH = !isGhost && band && !band.skylight && !band.raked ? band.fit.hFt : prof.h;
           const w = isGhost ? drag.ghost.w : (Number(o.widthFt) || 3);
-          const bottom = storeyElevationFt(shell, Number(o.level || 1)) + sill;
+          const drawLevel = !isGhost && band && !band.skylight && !band.raked ? band.level : Number(o.level || 1);
+          const bottom = storeyElevationFt(shell, drawLevel) + sill;
+          const isClamped = Boolean(band && band.clamped);
           const sel = String(selectedId || '') === `opening-${i}`;
           const drawX = flipX ? run - along - w : along;
           return (
             <g key={i}>
               <rect
-                x={drawX} y={Y(bottom + prof.h)} width={w} height={prof.h}
+                x={drawX} y={Y(bottom + drawH)} width={w} height={drawH}
                 fill={prof.glazed ? '#c4dbe8' : '#b98f61'}
-                stroke={sel ? '#3C6472' : '#5d6157'}
-                strokeWidth={sel ? 0.24 : 0.13}
+                stroke={isClamped ? '#c28a2e' : sel ? '#3C6472' : '#5d6157'}
+                strokeDasharray={isClamped ? '0.5 0.3' : undefined}
+                strokeWidth={sel ? 0.24 : isClamped ? 0.2 : 0.13}
                 opacity={isGhost ? 0.8 : 1}
                 style={{ cursor: 'move' }}
                 onPointerDown={(e) => startDrag(e, i, 'move')}
@@ -288,18 +299,18 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
                 }}
               />
               {/* a center mullion so glazing reads as a window */}
-              {prof.glazed && prof.h > 1.2 && (
-                <line x1={drawX + w / 2} y1={Y(bottom + prof.h) + 0.15} x2={drawX + w / 2} y2={Y(bottom) - 0.15} stroke="#7c96a5" strokeWidth={0.07} pointerEvents="none" />
+              {prof.glazed && drawH > 1.2 && (
+                <line x1={drawX + w / 2} y1={Y(bottom + drawH) + 0.15} x2={drawX + w / 2} y2={Y(bottom) - 0.15} stroke="#7c96a5" strokeWidth={0.07} pointerEvents="none" />
               )}
               {sel && (
                 <g>
                   {/* side handles — pull to widen; the labels live in feet */}
-                  <rect x={drawX - 0.45} y={Y(bottom + prof.h / 2) - 0.45} width={0.9} height={0.9} rx={0.18} fill="#3C6472" stroke="#fff" strokeWidth={0.1}
+                  <rect x={drawX - 0.45} y={Y(bottom + drawH / 2) - 0.45} width={0.9} height={0.9} rx={0.18} fill="#3C6472" stroke="#fff" strokeWidth={0.1}
                     style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDrag(e, i, flipX ? 'end' : 'start')} />
-                  <rect x={drawX + w - 0.45} y={Y(bottom + prof.h / 2) - 0.45} width={0.9} height={0.9} rx={0.18} fill="#3C6472" stroke="#fff" strokeWidth={0.1}
+                  <rect x={drawX + w - 0.45} y={Y(bottom + drawH / 2) - 0.45} width={0.9} height={0.9} rx={0.18} fill="#3C6472" stroke="#fff" strokeWidth={0.1}
                     style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDrag(e, i, flipX ? 'start' : 'end')} />
-                  <text x={drawX + w / 2} y={Y(bottom + prof.h) - 0.5} textAnchor="middle" fontSize="1.1" fill="#22251F" fontWeight="600" pointerEvents="none">
-                    {(o.label || prof.label)} — {Math.round(w * 10) / 10}′ wide · bottom {Math.round(sill * 10) / 10}′ above its floor
+                  <text x={drawX + w / 2} y={Y(bottom + drawH) - 0.5} textAnchor="middle" fontSize="1.1" fill="#22251F" fontWeight="600" pointerEvents="none">
+                    {(o.label || prof.label)} — {Math.round(w * 10) / 10}′ wide · bottom {Math.round(sill * 10) / 10}′ above its floor{isClamped ? ' · pulled to fit its wall' : ''}
                   </text>
                 </g>
               )}

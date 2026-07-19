@@ -154,6 +154,36 @@ const PER_STOREY_ROOFS = (() => {
   return d;
 })();
 
+// Daniel's rev-681 shape: windows on a glazed kneewall, oversized openings,
+// clerestories on a level whose plate doesn't reach them (his screenshot's
+// floating-window stack). The band law must pull every one of these into a
+// real wall — the audit's 'opening-floating' check holds them there forever.
+const KNEEWALL_OPENINGS = (() => {
+  const d = structuredClone(LEGACY_SETBACK_SHED);
+  d.projectName = 'battery: glazed kneewall + oversized openings';
+  d.walls = {
+    north: { assembly: 'straw-bale' },
+    south: { assembly: 'straw-bale', heightFt: 2, sunGlazing: true, sunGlazingTiltDeg: 30 },
+    east: { assembly: 'straw-bale' },
+    west: { assembly: 'straw-bale' }
+  };
+  d.openings = [
+    // on the glazed kneewall — live in the glass band, sill above the knee
+    { type: 'picture', wall: 'south', x: 1, widthFt: 6, label: 'Kneewall picture', level: 1 },
+    { type: 'french', wall: 'south', x: 9, widthFt: 7, label: 'Kneewall french', level: 1 },
+    // level-2 clerestory OUTSIDE the storey-2 plate (plate x14-27 on rev-435
+    // shape... x2 is past it) — must DROP to the ground wall, never float
+    { type: 'clerestory', wall: 'south', x: 2.5, widthFt: 6, label: 'Orphan clerestory', level: 2, sillFt: 3.5 },
+    // a sill dragged absurdly high on a normal wall — pulled down to fit
+    { type: 'window', wall: 'north', x: 6, widthFt: 5, label: 'Sky-high sill', level: 1, sillFt: 14 },
+    // an eyebrow window (hood + brackets ride the clamp too)
+    { type: 'window', wall: 'east', y: 6, widthFt: 5, label: 'Shaded window', level: 1, shadeFt: 2 },
+    // a legit clerestory under the tower's own wall band — untouched
+    { type: 'clerestory', wall: 'south', x: 20, widthFt: 5, label: 'True clerestory', level: 2, sillFt: 3 }
+  ];
+  return d;
+})();
+
 // Every battery design. The seed and the bundled starters join at run time
 // (they live in their own modules); each entry here is a shape the audit has
 // actually caught a real bug on, or the fresh control for one. `expect`
@@ -165,5 +195,6 @@ export const AUDIT_BATTERY_SPECS = [
   { name: 'fresh 17/10 shed, 3 storeys', spec: FRESH_TALL_SHED },
   { name: '96-ft gable with legacy side heights', spec: LEGACY_SIDES_GABLE_96 },
   { name: 'rev-435 + south greenhouse', spec: GREENHOUSE_SETBACK_SHED, expect: ['sunGlazingBand'] },
-  { name: 'rev-435 + per-storey roofs', spec: PER_STOREY_ROOFS }
+  { name: 'rev-435 + per-storey roofs', spec: PER_STOREY_ROOFS },
+  { name: 'glazed kneewall + oversized openings', spec: KNEEWALL_OPENINGS, expect: ['sunGlazingBand'] }
 ];

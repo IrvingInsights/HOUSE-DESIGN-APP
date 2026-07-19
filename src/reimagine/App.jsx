@@ -4,7 +4,7 @@ import { PlanView } from '../planView.jsx';
 import { ElevationView } from './elevationView.jsx';
 import {
   applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
-  INSULATION_TYPES, resolveInsulation, OPENING_TYPES,
+  INSULATION_TYPES, resolveInsulation, OPENING_TYPES, openingVerticalBand,
   FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS, storeyHeightFt, storeyElevationFt,
   footprintPolygon, polygonArea, footprintBounds, footprintEdges, roofProfile
 } from '../../backend/bim-core.mjs';
@@ -55,7 +55,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 110 · Jul 18';
+const UPDATE_STAMP = 'update 111 · Jul 18';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1202,6 +1202,23 @@ export default function App() {
                 {f.title}
               </div>
               {f.fix && <div className="rz-flags-fix">{f.fix}</div>}
+              {/* one-tap remedies — the first fixId the reimagine card supports */}
+              {f.fixId === 'fit-opening' && Number.isFinite(f.openingIndex) && (() => {
+                const op = spec.openings?.[f.openingIndex];
+                if (!op) return null;
+                const bandFix = openingVerticalBand(spec, op);
+                if (!bandFix.clamped) return null;
+                return (
+                  <button type="button" className="rz-fresh" style={{ alignSelf: 'flex-start', marginTop: 4 }}
+                    onClick={() => {
+                      const ops = [{ type: 'update_object', targetId: `opening-${f.openingIndex}`, field: 'sillFt', value: bandFix.fit.sillFt }];
+                      if (bandFix.fit.level !== Number(op.level || 1)) ops.push({ type: 'update_object', targetId: `opening-${f.openingIndex}`, field: 'level', value: bandFix.fit.level });
+                      applyOps(ops);
+                    }}>
+                    Settle it where it's drawn
+                  </button>
+                );
+              })()}
             </div>
           ))}
           <div className="rz-flags-foot">These are advice, not stop signs — the model keeps working either way.</div>
