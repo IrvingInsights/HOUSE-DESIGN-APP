@@ -63,17 +63,25 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
     .filter((t) => t >= 0 && t <= run).sort((a, b) => a - b);
   // the attached lean-to crossing this face (drawn as a roof line): sampled
   // per INTERVAL with a hair of inset — a cut sits exactly on a plate edge,
-  // where the plane itself answers null
-  const roofLine = [];
+  // where the plane itself answers null. SEGMENTED so wings on opposite
+  // sides of a storey never bridge with a phantom line across its face.
+  const roofLineSegs = [];
+  let roofSeg = [];
   for (let ci = 0; ci < cuts.length - 1; ci += 1) {
     const t0 = cuts[ci]; const t1 = cuts[ci + 1];
     if (t1 - t0 < 0.05) continue;
     const eps = Math.min(0.02, (t1 - t0) / 4);
-    if (law.roofAt((t0 + t1) / 2) == null) continue;
+    if (law.roofAt((t0 + t1) / 2) == null) {
+      if (roofSeg.length >= 2) roofLineSegs.push(roofSeg);
+      roofSeg = [];
+      continue;
+    }
     const ya = law.roofAt(t0 + eps); const yb = law.roofAt(t1 - eps);
-    if (ya != null) roofLine.push([t0, ya]);
-    if (yb != null) roofLine.push([t1, yb]);
+    if (ya != null) roofSeg.push([t0, ya]);
+    if (yb != null) roofSeg.push([t1, yb]);
   }
+  if (roofSeg.length >= 2) roofLineSegs.push(roofSeg);
+  const roofLine = roofLineSegs.flat();
   const maxTop = Math.max(...cuts.map((t) => topAt(t)), ...setBack.map((c) => c.y1), ...roofLine.map(([, y]) => y));
   const Y = (v) => maxTop - v; // feet measure up; paper draws down
   const X = (t) => (flipX ? run - t : t);
@@ -245,7 +253,16 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
   const pad = 3.2;
   const soil = 2.4;
-  const vb = `${-pad} ${-2.2} ${run + pad * 2} ${maxTop + 2.2 + soil + 2.4}`;
+  // the face covers the wall AND every deck sticking past its ends (a deck
+  // 8 ft west of the house was clipped mid-slab before)
+  const deckSpansEl = wallDecks.map(({ el }) => {
+    const s0d = horiz ? (Number(el.x) || 0) : (Number(el.y) || 0);
+    const s1d = s0d + (horiz ? (Number(el.w) || 10) : (Number(el.d) || 8));
+    return flipX ? [run - s1d, run - s0d] : [s0d, s1d];
+  });
+  const vx0 = Math.min(0, ...deckSpansEl.map(([a]) => a)) - pad;
+  const vx1 = Math.max(run, ...deckSpansEl.map(([, b]) => b)) + pad;
+  const vb = `${vx0} ${-2.2} ${vx1 - vx0} ${maxTop + 2.2 + soil + 2.4}`;
 
   return (
     <div className="planWrap rz-elev-wrap">
@@ -281,11 +298,12 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
         <polygon points={facePts} fill="#f4efe3" stroke="#4a4f47" strokeWidth={0.16} strokeLinejoin="round" />
 
         {/* the attached lean-to roof crossing this face — same plane the 3D
-            builds, so the 2D face finally shows the roof the model wears */}
-        {roofLine.length >= 2 && (
-          <polyline points={roofLine.map(([t, y]) => `${X(t)},${Y(y)}`).join(' ')}
+            builds, so the 2D face finally shows the roof the model wears
+            (one polyline per contiguous wing; gaps stay gaps) */}
+        {roofLineSegs.map((segPts, si) => (
+          <polyline key={`rl${si}`} points={segPts.map(([t, y]) => `${X(t)},${Y(y)}`).join(' ')}
             fill="none" stroke="#7f8c89" strokeWidth={0.26} strokeLinecap="round" pointerEvents="none" opacity="0.9" />
-        )}
+        ))}
 
         {/* floor lines — where each upper storey's floor sits */}
         {Array.from({ length: storeys - 1 }, (_, k) => k + 2).map((lv) => {
