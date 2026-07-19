@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ThreeScene, webglAvailable } from '../threeScene.jsx';
 import { PlanView } from '../planView.jsx';
 import { ElevationView } from './elevationView.jsx';
+import { StackView } from './stackView.jsx';
 import {
   applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
   INSULATION_TYPES, resolveInsulation, OPENING_TYPES, openingVerticalBand,
@@ -32,11 +33,11 @@ import './siteTable.css';
 // so each chapter looks and acts like what it's for.
 const CHAPTERS = [
   { id: 'shape', label: 'Shape', view: 'plan', planContext: 'shell', greet: (d) => `Shape the whole building — a plain rectangle, an L, T, U, or round — or pick any room or element from the dropdown to size just that one. Right now the house is ${fmtNum(d.floor)} sq ft.` },
-  { id: 'storeys', label: 'Storeys', view: 'plan', planContext: 'rooms', greet: (d) => `How the house stacks — ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'} right now. Add a floor, give each its own size and height, sink a basement — and jump from any floor straight to its rooms, its walls, or its roof.` },
+  { id: 'storeys', label: 'Storeys', view: 'storeys', planContext: 'rooms', greet: (d) => `How the house stacks — ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'} right now, drawn face-on in the Storeys view: drag a floor's top edge for height, its side handles for size. Add a floor, sink a basement — and jump from any floor straight to its rooms, its walls, or its roof.` },
   { id: 'rooms', label: 'Rooms', view: 'plan', planContext: 'rooms', greet: () => 'Lay the rooms out flat, from above. Use the Floor selector (top left) to add a floor or switch between them — each floor keeps its own rooms and its own outline. Drag a room to move it, a corner to resize.' },
   { id: 'foundation', label: 'Foundation', view: 'plan', planContext: 'foundation', greet: () => 'What the house sits on. Pick the main type below — and the foundation doesn’t have to match the rooms: drop extra footings and drag them under whatever they carry, even outside the walls.' },
   { id: 'walls', label: 'Walls', view: '3d', planContext: 'shell', greet: () => 'The walls themselves — how tall they stand and what they’re made of. Set all four at once, or one side, one floor, or one section of a wall at a time.' },
-  { id: 'frame', label: 'Frame', view: '3d', greet: () => 'What holds the roof up. Load-bearing walls carry it themselves — the usual choice for bale and cob — or a timber frame, posts and beams, or stick framing stands inside the walls.' },
+  { id: 'frame', label: 'Frame', view: 'frame', greet: () => 'What holds the roof up. Load-bearing walls carry it themselves — the usual choice for bale and cob — or a timber frame, posts and beams, or stick framing stands inside the walls. The Frame view shows just the bones on their foundation.' },
   { id: 'roof', label: 'Roof', view: '3d', greet: () => 'Choose how the roof sheds weather and sun. Pick the shape, how steep it runs, what insulates it, and how far it reaches past the walls.' },
   { id: 'openings', label: 'Openings', view: 'wall', planContext: 'windows', greet: () => 'Place doors and windows where light and paths want them. Slide them along their wall.' },
   { id: 'systems', label: 'Systems', view: '3d', greet: () => 'Heat, water, power, waste — the working parts. Each shows its own receipts.' },
@@ -56,7 +57,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 117 · Jul 19';
+const UPDATE_STAMP = 'update 118 · Jul 19';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -617,7 +618,9 @@ export default function App() {
   // to pull in.
   const pickStorey = (f) => {
     setActiveFloor(f);
-    setViewMode('plan');
+    // the Stack view holds its own storey-in-hand — only jump to the plan
+    // when the user isn't already in a view that shows the pick
+    if (viewMode !== 'storeys') setViewMode('plan');
     if (f <= 1 || f === BASEMENT_LEVEL) { setSelectedId(null); return; }
     const plate = (spec.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === f);
     if (plate) { setSelectedId(plate.id); return; }
@@ -625,24 +628,41 @@ export default function App() {
     const made = (report?.spec?.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === f);
     if (made) setSelectedId(made.id);
   };
-  const resizeFloor = (level, w, d) => {
+  // Shape a storey in ONE dispatch: place AND size (the Stack view drags
+  // both). Ground floor IS the shell; an upper floor is its extent plate —
+  // made on the spot if the storey covered the whole footprint. Rooms on the
+  // floor are pulled in to fit, so the outline keeps what you set.
+  const shapeStorey = (level, x, y, w, d) => {
     const W = clamp(Number(w), 8, 96);
     const D = clamp(Number(d), 8, 80);
-    if (level === 1) { resizeShell(W, D); return; }
+    if (level === 1 || level === BASEMENT_LEVEL) { resizeShell(W, D); return; }
     const plate = (spec.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === level);
-    if (!plate) return;
-    const px = Number(plate.x) || 0;
-    const py = Number(plate.y) || 0;
-    const ops = [{ type: 'resize_object', targetId: plate.id, name: plate.name, w: W, d: D, h: Number(plate.h) || 0.4 }];
+    const nx = clamp(Number(x) || 0, 0, Math.max(0, (Number(spec.shell.widthFt) || W) - W));
+    const ny = clamp(Number(y) || 0, 0, Math.max(0, (Number(spec.shell.depthFt) || D) - D));
+    const ops = [];
+    if (!plate) {
+      ops.push({ type: 'add_element', name: `Storey ${level} extent`, category: 'floor', level, x: nx, y: ny, w: W, d: D, h: 0.4 });
+    } else {
+      if (Math.abs(nx - (Number(plate.x) || 0)) > 0.01 || Math.abs(ny - (Number(plate.y) || 0)) > 0.01) {
+        ops.push({ type: 'move_object', targetId: plate.id, name: plate.name, x: nx, y: ny });
+      }
+      ops.push({ type: 'resize_object', targetId: plate.id, name: plate.name, w: W, d: D, h: Number(plate.h) || 0.4 });
+    }
     (spec.rooms || []).filter((r) => Number(r.level || 1) === level).forEach((r) => {
       const nw = Math.min(Number(r.w), W);
       const nd = Math.min(Number(r.d), D);
-      const nx = clamp(Number(r.x), px, px + W - nw);
-      const ny = clamp(Number(r.y), py, py + D - nd);
+      const rx = clamp(Number(r.x), nx, nx + W - nw);
+      const ry = clamp(Number(r.y), ny, ny + D - nd);
       if (nw !== Number(r.w) || nd !== Number(r.d)) ops.push({ type: 'resize_object', targetId: r.id, name: r.name, w: nw, d: nd, h: Number(r.h) || 0.22 });
-      if (nx !== Number(r.x) || ny !== Number(r.y)) ops.push({ type: 'move_object', targetId: r.id, name: r.name, x: nx, y: ny });
+      if (rx !== Number(r.x) || ry !== Number(r.y)) ops.push({ type: 'move_object', targetId: r.id, name: r.name, x: rx, y: ry });
     });
     applyOps(ops);
+  };
+  const resizeFloor = (level, w, d) => {
+    if (level === 1) { shapeStorey(1, 0, 0, w, d); return; }
+    const plate = (spec.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === level);
+    if (!plate) return;
+    shapeStorey(level, Number(plate.x) || 0, Number(plate.y) || 0, w, d);
   };
   // One height knob per floor. On level walls the ground number moves the
   // walls too; on a shed-shaped house it pins where the 2nd floor starts and
@@ -1275,6 +1295,18 @@ export default function App() {
             onWallHeight={shapeWallHeight}
             onPickWall={setOpenWall}
           />
+        ) : viewMode === 'storeys' ? (
+          <StackView
+            spec={spec}
+            floors={floors}
+            hasBasement={hasBasement}
+            basementLevel={BASEMENT_LEVEL}
+            activeFloor={activeFloor}
+            onSelectFloor={setActiveFloor}
+            onShapeStorey={shapeStorey}
+            onFloorHeight={setFloorHeight}
+            onBasementHeight={(v) => setShellField('basementHeightFt', String(v))}
+          />
         ) : viewMode === 'plan' ? (
           <PlanView
             spec={spec}
@@ -1293,8 +1325,10 @@ export default function App() {
           <ThreeScene
             spec={spec}
             selectedRoom={selectedId}
-            layers={timelineOpen ? timelineLayers : (MODEL_SHOW_PRESETS[modelShow] || undefined)}
-            context={activeChapter === 'frame' && !timelineOpen ? 'frame' : null}
+            layers={timelineOpen ? timelineLayers
+              : viewMode === 'frame' ? MODEL_SHOW_PRESETS.bones
+              : (MODEL_SHOW_PRESETS[modelShow] || undefined)}
+            context={!timelineOpen && (viewMode === 'frame' || activeChapter === 'frame') ? 'frame' : null}
             viewRequest={viewRequest}
             onSelectRoom={timelineOpen ? () => {} : setSelectedId}
             onMoveEnd={(id, x, y) => {
@@ -1310,7 +1344,7 @@ export default function App() {
         )}
         {/* compass — always know which way you're looking; north tracks the
             camera so the south face (the solar face) is never a guess */}
-        {viewMode === '3d' && !timelineOpen && <Compass heading={heading} />}
+        {(viewMode === '3d' || viewMode === 'frame') && !timelineOpen && <Compass heading={heading} />}
       </div>
 
       {/* SURFACE 5b — one-line status strip (whole-house facts) */}
@@ -1460,9 +1494,11 @@ export default function App() {
               </>
             )}
             <button className={viewMode === 'wall' ? 'on' : ''} onClick={() => setViewMode('wall')}>Wall</button>
+            <button className={viewMode === 'storeys' ? 'on' : ''} title="The floors face-on — drag a top edge for height, side handles for size" onClick={() => setViewMode('storeys')}>Storeys</button>
             <button className={viewMode === 'plan' ? 'on' : ''} onClick={() => setViewMode('plan')}>Plan</button>
             <button className={viewMode === '3d' ? 'on' : ''} onClick={() => setViewMode('3d')}>3D</button>
-            {viewMode === '3d' && webglOK && (
+            <button className={viewMode === 'frame' ? 'on' : ''} title="Just the bones — the frame standing on its foundation" onClick={() => setViewMode('frame')}>Frame</button>
+            {(viewMode === '3d' || viewMode === 'frame') && webglOK && (
               <>
                 <span className="st-dock-sep" />
                 {[['iso', 'Corner'], ['top', 'Top'], ['front', 'Front'], ['side', 'Side']].map(([mode, label]) => (
@@ -1540,10 +1576,12 @@ export default function App() {
           view while it's open */}
       {!timelineOpen && <div className="rz-views">
         <button className={viewMode === 'wall' ? 'on' : ''} title="The chosen wall face-on — drag its top edge to change the height, and drag doors and windows right on it" onClick={() => setViewMode('wall')}>Wall</button>
+        <button className={viewMode === 'storeys' ? 'on' : ''} title="The floors face-on — drag a top edge for height, side handles for size, a set-back floor to slide it" onClick={() => setViewMode('storeys')}>Storeys</button>
         <button className={viewMode === 'plan' ? 'on' : ''} onClick={() => setViewMode('plan')}>Plan</button>
         <button className={viewMode === '3d' ? 'on' : ''} onClick={() => setViewMode('3d')}>3D</button>
-        {viewMode === '3d' && webglOK && <span className="rz-views-sep" />}
-        {viewMode === '3d' && webglOK && [['iso', 'Corner'], ['top', 'Top'], ['front', 'Front'], ['side', 'Side']].map(([mode, label]) => (
+        <button className={viewMode === 'frame' ? 'on' : ''} title="Just the bones — the frame standing on its foundation" onClick={() => setViewMode('frame')}>Frame</button>
+        {(viewMode === '3d' || viewMode === 'frame') && webglOK && <span className="rz-views-sep" />}
+        {(viewMode === '3d' || viewMode === 'frame') && webglOK && [['iso', 'Corner'], ['top', 'Top'], ['front', 'Front'], ['side', 'Side']].map(([mode, label]) => (
           <button key={mode} onClick={() => setViewRequest({ mode, n: Date.now() })}>{label}</button>
         ))}
         {viewMode === '3d' && <span className="rz-views-sep" />}
