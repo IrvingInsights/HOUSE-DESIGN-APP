@@ -6,7 +6,7 @@ import {
   applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
   INSULATION_TYPES, resolveInsulation, OPENING_TYPES, openingVerticalBand,
   FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS, storeyHeightFt, storeyElevationFt,
-  footprintPolygon, polygonArea, footprintBounds, footprintEdges, roofProfile
+  footprintPolygon, polygonArea, footprintBounds, footprintEdges, roofProfile, snapPlatesToShell
 } from '../../backend/bim-core.mjs';
 import {
   seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS,
@@ -56,7 +56,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 116 · Jul 19';
+const UPDATE_STAMP = 'update 117 · Jul 19';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -128,7 +128,10 @@ const PROJECT_QS = '?project=reimagine';
 // already places every storey plate at the engine's elevation — this makes the
 // SAVED DATA say the same thing, so an old design loads exactly as tight as a
 // fresh one. Runs at every door a spec comes in through (storage, shelf,
-// pasted code, file, starter); it never touches anything a person typed.
+// pasted code, file, starter). It corrects one typed slip: a storey edge
+// stopped a hair short of the shell (17.5 + 18 on a 36' house) snaps flush —
+// the sliver it left built a two-storey wall fin under a floating ribbon of
+// roof (snapPlatesToShell, the same law the ops path applies).
 function healLoadedSpec(specIn) {
   if (!specIn?.shell) return specIn;
   (specIn.elements || []).forEach((el) => {
@@ -136,6 +139,7 @@ function healLoadedSpec(specIn) {
     const want = storeyElevationFt(specIn.shell, Number(el.level));
     if (Number.isFinite(want) && Math.abs(Number(el.z || 0) - want) > 0.05) el.z = want;
   });
+  snapPlatesToShell(specIn);
   return specIn;
 }
 function loadStoredSpec() {

@@ -955,6 +955,28 @@ function upsertRoom(spec, room) {
 // Whoever edits a shared check should decide, per change, whether it belongs to
 // both layers. FOLLOW-UP (reimagining spec §6/§10): fully unify these by relocating
 // deriveDesign into a shared lower module so one detectIssues can serve both.
+// A storey-extent edge within SNAP_FT of the shell edge snaps flush to it.
+// 17.5 + 18 = 35.5 on a 36-foot house is a slip of the keypad, not a design —
+// and the sliver it leaves builds real geometry: a full-roofline wall fin and
+// a floating ribbon of wing roof over six inches of "ground floor". Exported
+// so the load-time heal (App.jsx healLoadedSpec) can apply the same law to
+// designs saved before this fix existed.
+const PLATE_SNAP_FT = 1.5;
+export function snapPlatesToShell(spec) {
+  const shellW = Number(spec?.shell?.widthFt) || 0;
+  const shellD = Number(spec?.shell?.depthFt) || 0;
+  if (shellW <= 0 || shellD <= 0) return spec;
+  for (const plate of (spec.elements || []).filter((el) => el?.category === 'floor' && Number(el.level || 1) >= 2)) {
+    const x0 = Number(plate.x) || 0; const y0 = Number(plate.y) || 0;
+    const x1 = x0 + (Number(plate.w) || 0); const y1 = y0 + (Number(plate.d) || 0);
+    if (x0 > 0 && x0 < PLATE_SNAP_FT) { plate.x = 0; plate.w = Math.round(x1 * 10) / 10; }
+    if (x1 < shellW && shellW - x1 < PLATE_SNAP_FT) plate.w = Math.round((shellW - (Number(plate.x) || 0)) * 10) / 10;
+    if (y0 > 0 && y0 < PLATE_SNAP_FT) { plate.y = 0; plate.d = Math.round(y1 * 10) / 10; }
+    if (y1 < shellD && shellD - y1 < PLATE_SNAP_FT) plate.d = Math.round((shellD - (Number(plate.y) || 0)) * 10) / 10;
+  }
+  return spec;
+}
+
 function normalizeRooms(spec) {
   // Self-healing reconciliations — corrupt or legacy-era stored values that
   // disagree with the engine's own derived truth get pulled back in line:
@@ -1029,6 +1051,13 @@ function normalizeRooms(spec) {
       plate.w = Math.round(Math.max(1, nw) * 10) / 10; plate.d = Math.round(Math.max(1, nd) * 10) / 10;
     }
   }
+  // A storey plate that stops a HAIR short of the shell edge is a mistyped
+  // number, not a step: "from west 17.5, W 18" on a 36' house leaves a
+  // 6-inch sliver of "ground floor" along the east wall — whose wall then
+  // rises to the full roofline as a two-storey fin wearing a floating
+  // ribbon of roof. No real step is thinner than SNAP_FT (nothing can stand,
+  // walk, or drain on it), so an edge that close to the shell snaps flush.
+  snapPlatesToShell(spec);
 
   const roomMargin = Math.max(16, padExtension(spec.shell));
   spec.rooms = spec.rooms.map((room) => {
