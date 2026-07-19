@@ -1,0 +1,217 @@
+/* ==== THE SITE TABLE — Daniel's Claude Design Direction 2, applied ====
+   The model is a scale model on a work table: every surface floats over the
+   full-bleed canvas as translucent paper panels. Chapters run as a numbered
+   strip across the top; the active chapter's everyday controls sit in one
+   slim toolbar beneath it (the full control set stays one "More" tap away);
+   money lives on the table in a persistent receipts ledger; floors + views +
+   show filter merge into one bottom dock.
+   Fonts: the app's own drafting hand (var(--font-ui)) — Daniel kept it
+   deliberately; the prototype's typefaces were not adopted. */
+
+.st-panel {
+  background: rgba(251, 250, 246, 0.9);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(219, 217, 206, 0.7);
+  box-shadow: 0 8px 30px rgba(30, 40, 30, 0.12);
+}
+
+/* ── chapter strip ─────────────────────────────────────────────────────── */
+.st-strip {
+  position: absolute; top: 52px; left: 50%; transform: translateX(-50%);
+  width: min(1400px, calc(100vw - 32px));
+  border-radius: 18px; padding: 8px 16px; z-index: 6;
+}
+.st-strip-row { display: flex; align-items: center; gap: 2px; overflow-x: auto; }
+.st-chapter {
+  border: none; background: transparent; cursor: pointer; font: inherit;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 4px 9px; border-radius: 10px; color: var(--muted, #868a7c);
+  white-space: nowrap; flex: 0 0 auto;
+}
+.st-chapter:hover { background: rgba(226, 236, 238, 0.5); }
+.st-chapter-num {
+  position: relative; width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+  background: rgba(226, 236, 238, 0.7); color: var(--accent, #3c6472);
+}
+.st-chapter.active .st-chapter-num { background: var(--accent, #3c6472); color: #fff; }
+.st-chapter-label { font-size: 11px; }
+.st-chapter.active .st-chapter-label { color: var(--ink, #22251f); font-weight: 700; }
+.st-chapter-dot {
+  position: absolute; top: -2px; right: -2px; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--warn, #a9781f); border: 2px solid #fbfaf6;
+}
+.st-strip-sep { width: 1px; align-self: stretch; background: #dbd9ce; margin: 2px 10px; flex: 0 0 auto; }
+.st-strip-flags {
+  border: none; background: transparent; cursor: pointer; font: inherit;
+  font-size: 13px; color: var(--warn, #a9781f); font-weight: 600;
+  text-decoration: underline dotted; text-underline-offset: 3px; white-space: nowrap;
+}
+.st-strip-clear { font-size: 13px; color: var(--good, #3e7b53); font-weight: 600; white-space: nowrap; }
+.st-strip-total { font-size: 13px; color: var(--muted2, #565a4f); white-space: nowrap; margin-left: 2px; }
+.st-strip-total b { color: var(--ink, #22251f); cursor: pointer; }
+
+/* flags popover drops from the strip's right edge */
+.st-flags {
+  position: absolute; top: 62px; right: 0; width: 340px;
+  border-radius: 14px; padding: 12px 14px; z-index: 7;
+  box-shadow: 0 14px 44px rgba(30, 40, 30, 0.18);
+}
+.st-flags-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.st-flags-head b { font-size: 14.5px; color: var(--ink, #22251f); }
+.st-flags-x { border: none; background: transparent; font-size: 17px; cursor: pointer; color: var(--muted2, #565a4f); }
+.st-flag { padding: 8px 2px; border-top: 1px solid rgba(219, 217, 206, 0.6); }
+.st-flag-title { display: flex; align-items: baseline; gap: 7px; font-size: 13.5px; font-weight: 600; color: var(--ink, #22251f); }
+.st-flag-title .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn, #a9781f); flex: 0 0 auto; }
+.st-flag-fix { margin: 4px 0 0 14px; font-size: 12px; color: var(--muted2, #565a4f); }
+.st-flag-btn {
+  margin: 6px 0 0 14px; font: inherit; font-size: 12px; font-weight: 700;
+  color: #fff; background: var(--accent, #3c6472); border: none; border-radius: 9px;
+  padding: 5px 10px; cursor: pointer;
+}
+.st-flags-foot { margin-top: 8px; font-size: 11px; color: var(--muted, #868a7c); }
+
+/* ── the quick toolbar (active chapter's everyday controls) ────────────── */
+.st-toolbar {
+  position: absolute; top: 128px; left: 50%; transform: translateX(-50%);
+  width: min(1400px, calc(100vw - 32px)); border-radius: 14px;
+  padding: 0 14px; z-index: 5; min-height: 54px;
+  display: flex; align-items: center; gap: 14px;
+  overflow-x: auto; overflow-y: hidden;
+}
+.st-toolbar-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--muted, #868a7c); flex: 0 0 auto;
+}
+.st-tool-group { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+.st-pill {
+  border: 1px solid #dbd9ce; background: #fff; border-radius: 9px;
+  padding: 6px 11px; font: inherit; font-size: 13px; font-weight: 600;
+  color: var(--ink, #22251f); cursor: pointer; white-space: nowrap; flex: 0 0 auto;
+}
+.st-pill:hover { border-color: var(--accent, #3c6472); }
+.st-pill.on { background: var(--accent, #3c6472); border-color: var(--accent, #3c6472); color: #fff; }
+.st-pill small { display: block; font-weight: 400; font-size: 10.5px; color: var(--muted, #868a7c); }
+.st-pill.on small { color: rgba(255, 255, 255, 0.8); }
+.st-chip {
+  font-size: 13px; padding: 6px 10px; background: rgba(226, 236, 238, 0.45);
+  border-radius: 9px; color: var(--ink, #22251f); white-space: nowrap; flex: 0 0 auto;
+}
+.st-num { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted2, #565a4f); flex: 0 0 auto; }
+.st-num input {
+  width: 58px; font: inherit; font-weight: 600; color: var(--ink, #22251f);
+  padding: 5px 8px; border: 1px solid #dbd9ce; border-radius: 9px; background: #fff;
+}
+.st-stepper {
+  width: 28px; height: 28px; border-radius: 8px; border: 1px solid #dbd9ce;
+  background: #fff; color: var(--accent, #3c6472); font-size: 16px; cursor: pointer; flex: 0 0 auto;
+}
+.st-more {
+  margin-left: auto; flex: 0 0 auto;
+  border: 1px dashed var(--accent, #3c6472); color: var(--accent, #3c6472);
+  background: transparent; border-radius: 9px; padding: 6px 11px;
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.st-more.on { background: var(--accent, #3c6472); color: #fff; border-style: solid; }
+.st-toolbar-note { font-size: 12.5px; color: var(--muted, #868a7c); white-space: nowrap; flex: 0 0 auto; }
+
+/* the full chapter controls, one tap away — same components as ever */
+.st-morepanel {
+  position: absolute; top: 178px; left: 50%; transform: translateX(-50%);
+  width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 290px);
+  border-radius: 16px; z-index: 8; overflow-y: auto; padding: 14px 16px;
+}
+.st-morepanel-greet { font-size: 13px; color: var(--muted2, #565a4f); margin-bottom: 10px; }
+.st-morepanel .rz-found { border: none; background: transparent; padding: 0; box-shadow: none; }
+
+/* ── receipts ledger — money on the table, always ──────────────────────── */
+.st-receipts {
+  position: absolute; top: 196px; right: 16px; bottom: 88px; width: 264px;
+  border-radius: 16px; display: flex; flex-direction: column; z-index: 4;
+}
+.st-receipts-head {
+  padding: 12px 16px 6px; font-size: 12px; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--muted, #868a7c); font-weight: 600;
+}
+.st-receipts-body { flex: 1; overflow-y: auto; padding: 0 14px; }
+.st-receipt { padding: 7px 0; border-top: 1px dashed rgba(219, 217, 206, 0.6); cursor: pointer; }
+.st-receipt-row { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink, #22251f); }
+.st-receipt-math { color: var(--muted, #868a7c); margin-top: 1px; font-size: 11.5px; }
+.st-receipts-foot { border-top: 1px solid rgba(219, 217, 206, 0.7); padding: 9px 16px 12px; }
+.st-receipts-sweat { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted2, #565a4f); }
+.st-receipts-sweat b { color: var(--good, #3e7b53); }
+.st-receipts-total { display: flex; justify-content: space-between; font-size: 15.5px; font-weight: 700; margin-top: 5px; color: var(--ink, #22251f); cursor: pointer; }
+@media (max-width: 1120px) { .st-receipts { display: none; } }
+
+/* ── the bottom dock: floors · views · show ────────────────────────────── */
+.st-dock {
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+  z-index: 5; display: flex; align-items: center; gap: 2px;
+  padding: 5px; border-radius: 12px;
+}
+.st-dock button {
+  border: none; background: transparent; font: inherit; font-size: 13px;
+  color: var(--muted2, #565a4f); padding: 6px 11px; border-radius: 9px;
+  cursor: pointer; white-space: nowrap;
+}
+.st-dock button:hover { background: rgba(226, 236, 238, 0.5); }
+.st-dock button.on { background: var(--accent, #3c6472); color: #fff; font-weight: 700; }
+.st-dock-sep { width: 1px; align-self: stretch; background: #dbd9ce; margin: 2px 6px; }
+.st-dock select {
+  border: none; background: transparent; font: inherit; font-size: 13px;
+  color: var(--muted2, #565a4f); cursor: pointer; padding: 6px 6px;
+}
+
+/* watch it build — bottom right, evergreen */
+.st-build {
+  position: absolute; bottom: 16px; right: 16px; z-index: 6;
+  border: none; background: var(--accent, #3c6472); color: #fff; font: inherit;
+  font-size: 13px; font-weight: 700; padding: 9px 16px; border-radius: 11px;
+  cursor: pointer; white-space: nowrap; box-shadow: 0 8px 30px rgba(30, 40, 30, 0.16);
+}
+
+/* top-left utility row (undo/redo + shelf + look toggle live here) */
+.st-topleft {
+  position: absolute; top: 10px; left: 16px; z-index: 7;
+  display: flex; align-items: center; gap: 6px;
+}
+.st-topleft .st-mini {
+  border: 1px solid rgba(219, 217, 206, 0.7); background: rgba(251, 250, 246, 0.88);
+  backdrop-filter: blur(10px); border-radius: 8px; padding: 4px 9px;
+  font: inherit; font-size: 11.5px; color: var(--muted2, #565a4f); cursor: pointer; white-space: nowrap;
+}
+.st-topleft .st-mini:disabled { opacity: 0.4; cursor: default; }
+.st-stamp-chip { font-size: 10.5px; color: var(--muted, #868a7c); padding: 4px 6px; white-space: nowrap; }
+
+/* ── site mode re-frames the CLASSIC surfaces (same components, new home) ──
+   The old left Trail becomes the "More" panel: hidden until the toolbar's
+   More ▾, its chapter nav / build button / stamp suppressed (the strip, the
+   dock, and the top-left row carry those now) — but every chapter control
+   and the designs shelf inside it are exactly the ones classic uses. */
+.st-look .rz-status { display: none; }        /* the strip carries the facts */
+.st-look .rz-views { display: none; }         /* the dock carries the views  */
+.st-look .rz-greet-card { display: none; }    /* the model speaks for itself */
+.st-look .rz-flags-card { display: none; }    /* the strip's popover instead */
+.st-look .rz-history { display: none; }       /* undo/redo live top-left row */
+.st-look .rz-floors,
+.st-look .rz-floors-shifted { display: none; }/* floors live in the dock     */
+
+.st-look .rz-trail { display: none; }
+.st-look.st-more-open .rz-trail {
+  display: flex; flex-direction: column;
+  position: absolute; top: 196px; left: 50%; transform: translateX(-50%);
+  right: auto; bottom: auto;
+  width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 290px);
+  background: rgba(251, 250, 246, 0.94);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(219, 217, 206, 0.7);
+  box-shadow: 0 14px 44px rgba(30, 40, 30, 0.18);
+  border-radius: 16px; z-index: 8; padding: 6px 4px;
+}
+.st-look.st-more-open .rz-trail .rz-chapters-top { display: none; }
+.st-look.st-more-open .rz-trail .rz-build-btn { display: none; }
+.st-look.st-more-open .rz-trail .rz-stamp { display: none; }
+.st-look.st-more-open .rz-trail .rz-trail-toggle { display: none; }
+.st-look.st-more-open .rz-trail-body { flex: 1; min-height: 0; overflow-y: auto; }
