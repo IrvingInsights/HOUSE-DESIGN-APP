@@ -56,7 +56,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 114 · Jul 19';
+const UPDATE_STAMP = 'update 115 · Jul 19';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1328,8 +1328,8 @@ export default function App() {
             <span className="st-stamp-chip">{UPDATE_STAMP}</span>
           </div>
 
-          <div className="st-strip st-panel">
-            <div className="st-strip-row">
+          <div className="st-rail st-panel">
+            <div className="st-rail-list">
               {CHAPTERS.map((c, i) => (
                 <button key={c.id} className={`st-chapter ${c.id === activeChapter ? 'active' : ''}`}
                   onClick={() => { goChapter(c); setMoreOpen(false); }}>
@@ -1340,11 +1340,11 @@ export default function App() {
                   <span className="st-chapter-label">{c.label}</span>
                 </button>
               ))}
-              <span className="st-strip-sep" />
+            </div>
+            <div className="st-rail-foot">
               {flags.length === 0
                 ? <span className="st-strip-clear">all clear</span>
                 : <button className="st-strip-flags" onClick={() => setFlagsPopOpen((v) => !v)}>Worth a look ({flags.length})</button>}
-              <span className="st-strip-sep" />
               <span className="st-strip-total">So far <b onClick={() => setBudgetOpen(true)}>{fmtMoney(derived.total)}</b></span>
             </div>
             {flagsPopOpen && flags.length > 0 && (
