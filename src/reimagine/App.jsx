@@ -56,7 +56,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 115 · Jul 19';
+const UPDATE_STAMP = 'update 116 · Jul 19';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -343,6 +343,7 @@ export default function App() {
   const applyOps = (operations) => {
     const report = applyBimOperations(spec, { operations });
     if (report?.spec) commitSpec(report.spec);
+    return report; // callers may need the new spec (e.g. select what was just made)
   };
   const undo = () => {
     if (!undoStack.length) return;
@@ -605,6 +606,21 @@ export default function App() {
   // fiddly. Ground floor IS the shell; an upper floor is its extent plate. Any
   // rooms on an upper floor are pulled in to fit the new outline, so the plate
   // keeps the size you set instead of snapping back out to cover them.
+  // Storeys chapter: pick a storey and get its OUTLINE in hand — the ground
+  // storey's outline is the footprint (plan flips to edge-dragging), an upper
+  // storey selects its extent plate (drag it, or its corners); a storey that
+  // covers the whole footprint gets its own outline made on the spot, ready
+  // to pull in.
+  const pickStorey = (f) => {
+    setActiveFloor(f);
+    setViewMode('plan');
+    if (f <= 1 || f === BASEMENT_LEVEL) { setSelectedId(null); return; }
+    const plate = (spec.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === f);
+    if (plate) { setSelectedId(plate.id); return; }
+    const report = applyOps([{ type: 'add_element', name: `Storey ${f} extent`, category: 'floor', level: f, x: 0, y: 0, w: Number(spec.shell.widthFt) || 36, d: Number(spec.shell.depthFt) || 28, h: 0.4 }]);
+    const made = (report?.spec?.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === f);
+    if (made) setSelectedId(made.id);
+  };
   const resizeFloor = (level, w, d) => {
     const W = clamp(Number(w), 8, 96);
     const D = clamp(Number(d), 8, 80);
@@ -1231,7 +1247,13 @@ export default function App() {
   // you see and drag it (rooms context); otherwise it edits the building
   // footprint (shell context).
   const targetIsObject = selectedId && (spec.rooms.some((r) => r.id === selectedId) || (spec.elements || []).some((e) => e.id === selectedId));
-  const planContext = activeChapter === 'shape' && targetIsObject ? 'rooms' : (chapter.planContext || null);
+  // In Storeys with the GROUND storey picked, the plan edits the footprint
+  // edges — the ground storey's outline IS the footprint (Daniel: picking a
+  // storey should put its outline in hand). Upper storeys keep the rooms
+  // context, where their extent plates drag by border and corners.
+  const planContext = activeChapter === 'shape' && targetIsObject ? 'rooms'
+    : activeChapter === 'storeys' && activeFloor <= 1 ? 'shell'
+    : (chapter.planContext || null);
 
   return (
     <div className={`rz-root${lookMode === 'site' ? ' st-look' : ''}${lookMode === 'site' && moreOpen ? ' st-more-open' : ''}`}>
@@ -1392,6 +1414,8 @@ export default function App() {
               onCladding={setAllCladding}
               onJump={jumpTo}
               onMore={() => setMoreOpen(true)}
+              activeFloor={activeFloor}
+              onPickStorey={pickStorey}
             />
             <button className={`st-more ${moreOpen ? 'on' : ''}`} onClick={() => setMoreOpen((v) => !v)}>
               {moreOpen ? '× Close' : 'More ▾'}
@@ -3988,10 +4012,10 @@ function chapterFlagged(flags, chapterId) {
 }
 
 function SiteQuickRow({
-  chapter, spec, derived, floors, openWall,
+  chapter, spec, derived, floors, openWall, activeFloor,
   onShape, onSizeShell, onAddFloor, onRemoveFloor, onAddRoomPreset,
   onFoundation, onSelectWall, onFrame, onRoofType, onPitch, onShedFall,
-  onAddOpening, onCladding, onJump, onMore
+  onAddOpening, onCladding, onJump, onMore, onPickStorey
 }) {
   const shell = spec.shell || {};
   if (chapter === 'shape') {
@@ -4019,9 +4043,16 @@ function SiteQuickRow({
       <>
         <span className="st-toolbar-label">Storeys</span>
         <button className="st-stepper" onClick={onRemoveFloor} disabled={floors <= 1}>−</button>
-        <span className="st-chip"><b>{floors}</b> storey{floors === 1 ? '' : 's'}</span>
+        <span className="st-chip"><b>{floors}</b></span>
         <button className="st-stepper" onClick={onAddFloor} disabled={floors >= 3}>+</button>
-        <span className="st-toolbar-note">Each floor keeps its own rooms and outline.</span>
+        <span className="st-tool-group">
+          {Array.from({ length: floors }, (_, i) => i + 1).map((f) => (
+            <button key={f} className={`st-pill ${activeFloor === f ? 'on' : ''}`}
+              title={f <= 1 ? 'Pick up the ground outline — drag its edges on the plan' : 'Pick up this storey’s outline — drag it, or its corners, on the plan'}
+              onClick={() => onPickStorey(f)}>{floorLabel(spec, f)}</button>
+          ))}
+        </span>
+        <span className="st-toolbar-note">pick a storey — its outline is in your hand on the plan</span>
       </>
     );
   }
