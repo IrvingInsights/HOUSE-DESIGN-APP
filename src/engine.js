@@ -4,7 +4,7 @@ import {
   resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint, pointInFootprint,
   isRoundFootprint, ellipseArea, ellipsePerimeter, rectRoundOverlapArea,
   basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt, storeyHeightFt,
-  scoreTraceSpecChecks,
+  scoreTraceSpecChecks, openingVerticalBand,
   // Single source of truth for the per-wall assembly model — no longer duplicated here.
   WALL_SIDES, WALL_ASSEMBLIES, wallAssemblyKeyFromText, resolveWallSide,
   // Single source of truth for the roof profile (incl. the shed's fall AXIS:
@@ -3424,6 +3424,30 @@ export function detectIssues(spec) {
       issues.push({ severity: 'critical', title: strays.length === 1 ? `${strays[0].name} sits outside the walls` : `${strays.length} ground-floor rooms sit outside the walls`, owner: 'Architect', system: 'shell', fixId: 'enclose-rooms', fix: 'The shell only covers part of the ground floor. Grow the walls to take these rooms in — an upper storey can still cover just the core: resize its Storey extent (2nd-floor group in the selector, or drag it on the 2nd-floor Plan), and the roof steps down over the rest.' });
     }
   }
+
+  // Openings must FIT their walls vertically (the band law). A window on a
+  // wall shrunk to a kneewall, or hanging past its storey's plate, renders
+  // pulled into the nearest real wall — this names it in plain words.
+  (spec.openings || []).forEach((opening, oi) => {
+    const bandChk = openingVerticalBand(spec, opening);
+    if (!bandChk.clamped) return;
+    const label = opening.label || (OPENING_TYPES[opening.type] || OPENING_TYPES.window).label;
+    const wallWord = `${opening.wall} wall`;
+    if (bandChk.reason === 'no-storey-here') {
+      issues.push({
+        severity: 'warning', title: `${label} hangs past its floor`, owner: 'Architect', system: 'windows',
+        fixId: 'fit-opening', openingIndex: oi,
+        fix: `It's marked for floor ${Number(opening.level || 1)}, but that floor doesn't reach this stretch of the ${wallWord}. It's drawn on the wall below for now — slide it along the wall to where its floor stands, or move it down a floor.`
+      });
+    } else {
+      issues.push({
+        severity: bandChk.bandTopFt - bandChk.floorY < 1.5 ? 'critical' : 'warning',
+        title: `${label} sits above its wall`, owner: 'Architect', system: 'windows',
+        fixId: 'fit-opening', openingIndex: oi,
+        fix: `The ${wallWord} is only ${Math.round((bandChk.wallTopFt - bandChk.floorY) * 10) / 10} ft tall there. It's drawn pulled down to fit — lower its sill, raise the wall, or move it to a taller wall.`
+      });
+    }
+  });
 
   if (conditionedArea > shellArea * 1.08) {
     issues.push({ severity: 'critical', title: 'Room program exceeds shell area', owner: 'Architect', system: 'rooms', fix: 'Reduce room footprints or enlarge the shell before issuing drawings.' });

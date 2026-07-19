@@ -9,7 +9,8 @@ import {
   applyBimOperations, footprintPolygon, polygonArea, hasCustomFootprint, hasSegmentedFootprint,
   WALL_ASSEMBLIES, FRAME_TYPES, FLOORING_TYPES, SUBFLOOR_TYPES, OPENING_TYPES,
   gradeElevationAt, maxFoundationExposureFt, resolveWallSide, footprintEdges,
-  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, storeyElevationFt, storeyHeightFt, roofProfile
+  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, storeyElevationFt, storeyHeightFt, roofProfile,
+  openingVerticalBand
 } from '../backend/bim-core.mjs';
 
 function near(a, b, eps = 0.01) { return Math.abs(a - b) <= eps; }
@@ -215,7 +216,9 @@ ok(r.spec.openings[0].x === 12, 'update_object slides an opening along its wall 
 r = apply(freshSpec(), [{ type: 'update_object', targetId: 'opening-0', field: 'sillFt', value: 6 }]);
 ok(r.spec.openings[0].sillFt === 6, 'update_object sets a per-opening sill height', String(r.spec.openings[0].sillFt));
 r = apply(r.spec, [{ type: 'update_object', targetId: 'opening-0', field: 'sillFt', value: 99 }]);
-ok(r.spec.openings[0].sillFt === 24, 'sillFt clamps to a sane ceiling', String(r.spec.openings[0].sillFt));
+// the op clamps to 24, and the band-law heal then pulls the sill down to
+// where the window actually FITS its 10ft wall (sill 6 + 4ft window = top)
+ok(r.spec.openings[0].sillFt === 6, 'a sky-high sill settles where the window fits its wall (band law)', String(r.spec.openings[0].sillFt));
 r = apply(r.spec, [{ type: 'update_object', targetId: 'opening-0', field: 'sillFt', value: -1 }]);
 ok(!('sillFt' in r.spec.openings[0]), 'a negative/blank sill clears the override (back to the type default)');
 // per-storey roof pitch on a floor plate (the tower's flatter cap): set, clamp, clear
@@ -332,6 +335,35 @@ ok(r.spec.walls.south.heightFt === 2 && r.spec.shell.southWallHeightFt === 17 &&
 r = apply(r.spec, [{ type: 'set_wall_side', wall: 'south', field: 'sunGlazing', value: false }]);
 ok(r.spec.walls.south.heightFt === undefined && r.spec.shell.southWallHeightFt === 17,
   'glazing off removes the kneewall with it — the wall stands back up, the shell never moved');
+
+// THE OPENING BAND LAW — one vertical-fit answer for renderers, checks, heal
+{
+  const base = freshSpec();
+  // (1) window on a GLAZED 2ft kneewall: the band climbs to the roof — fits
+  const glz = structuredClone(base);
+  glz.walls = { south: { heightFt: 2, sunGlazing: true } };
+  const b1 = openingVerticalBand(glz, { type: 'window', wall: 'south', x: 6, widthFt: 5, sillFt: 3 });
+  ok(!b1.clamped && b1.glazed && b1.bandTopFt > 10, 'band law: glazed kneewall band climbs to the roof — window lives in the glass');
+  // (2) window on a BARE 2ft kneewall under a high roof: open air — clamps into the wall
+  const bare = structuredClone(base);
+  bare.walls = { south: { heightFt: 2 } };
+  const b2 = openingVerticalBand(bare, { type: 'window', wall: 'south', x: 6, widthFt: 5, sillFt: 3 }, { roofUnderAt: () => 15 });
+  ok(b2.clamped && b2.fit.sillFt === 0 && b2.fit.hFt <= 2.05, 'band law: bare kneewall clamps the window into the wall (never floats)');
+  // (3) level-2 opening OUTSIDE its storey plate drops to the wall below
+  const stepped = structuredClone(base);
+  stepped.shell.storeys = 2;
+  stepped.elements = [{ id: 'p2', category: 'floor', level: 2, x: 20, y: 0, w: 16, d: 28 }];
+  const b3 = openingVerticalBand(stepped, { type: 'clerestory', wall: 'south', x: 2, widthFt: 6, level: 2, sillFt: 3 }, { roofUnderAt: () => 22 });
+  ok(b3.clamped && b3.level === 1 && b3.reason === 'no-storey-here', 'band law: off-plate upper opening drops to the ground wall');
+  // (4) normal window on a normal wall with the roof at the eave — untouched
+  const b4 = openingVerticalBand(base, { type: 'window', wall: 'north', x: 6, widthFt: 5 }, { roofUnderAt: () => 10.2 });
+  ok(!b4.clamped && b4.fit.sillFt === OPENING_TYPES.window.sill, 'band law: a fitting window is untouched');
+  // (5) heal: an explicit sky-high sill on a plain wall pulls down via normalizeRooms
+  const healSpec = structuredClone(base);
+  healSpec.openings = [{ type: 'window', wall: 'north', x: 6, widthFt: 5, sillFt: 14 }];
+  const healed = apply(healSpec, [{ type: 'set_shell', field: 'widthFt', value: 36 }]);
+  ok(Number(healed.spec.openings[0].sillFt) <= 6.05, `heal: absurd stored sill pulls down to fit its wall (got ${healed.spec.openings[0].sillFt})`);
+}
 r = apply(freshSpec(), [{ type: 'set_frame', field: 'baySpacingFt', value: '6' }]);
 ok(r.spec.frame.baySpacingFt === 6, 'set_frame baySpacingFt');
 // segment resize: notch the south wall into 3, then set the middle's length + start
