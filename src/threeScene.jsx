@@ -1644,7 +1644,13 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         WALL_SIDES.forEach((side) => {
           const rSg = wallResolved[side];
           if (!rSg.sunGlazing || rSg.omitted || omittedWalls.has(side)) return;
-          if (!layers[`wall${titleCase(side)}`]) return;
+          // The GLASS follows its wall's layer; the TIMBER that carries it
+          // follows the Frame layer — so the bones view shows the greenhouse
+          // skeleton standing with the rest of the frame. (One gate for both
+          // made the whole greenhouse vanish from the raising view.)
+          const sgWallOn = Boolean(layers[`wall${titleCase(side)}`]);
+          const sgFrameOn = layers.frame !== false;
+          if (!sgWallOn && !sgFrameOn) return;
           const kneeH = rSg.heightFt;
           // STEPPED RULE (same as walls/frame/roof): with a PARTIAL upper
           // storey the perimeter eave is GROUND height — the lift happens
@@ -1716,16 +1722,18 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             else { m = box(thick, slant, alongLen, ins / 2, yC, depth / 2 + alongCenter, mat); m.rotation.z = -tiltRad; }
             return m;
           };
-          for (let b = 0; b < bays; b += 1) {
-            if (!visible[b]) continue;
-            const pane = bandPart(slantedBox(alongAt((b + 0.5) / bays), bayLen - 0.06, gapOf(b), 0.14, bandGlassMat));
-            roomMeshes.push(pane);
-          }
-          // thin glazing stops at the bay lines, riding the shorter neighbour
-          for (let i = 0; i <= bays; i += 1) {
-            const near = [i - 1, i].filter((bb) => bb >= 0 && bb < bays && visible[bb]);
-            if (!near.length) continue;
-            bandPart(slantedBox(alongAt(i / bays), 0.3, Math.min(...near.map(gapOf)), 0.24, frameMat));
+          if (sgWallOn) {
+            for (let b = 0; b < bays; b += 1) {
+              if (!visible[b]) continue;
+              const pane = bandPart(slantedBox(alongAt((b + 0.5) / bays), bayLen - 0.06, gapOf(b), 0.14, bandGlassMat));
+              roomMeshes.push(pane);
+            }
+            // thin glazing stops at the bay lines, riding the shorter neighbour
+            for (let i = 0; i <= bays; i += 1) {
+              const near = [i - 1, i].filter((bb) => bb >= 0 && bb < bays && visible[bb]);
+              if (!near.length) continue;
+              bandPart(slantedBox(alongAt(i / bays), 0.3, Math.min(...near.map(gapOf)), 0.24, frameMat));
+            }
           }
           // HEAVY greenhouse framing — with a structural frame chosen, the
           // slanted glazing is CARRIED, not floating: principal slanted posts
@@ -1800,7 +1808,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             geo.computeVertexNormals();
             bandPart(new THREE.Mesh(geo, bandGlassMat));
           };
-          for (let i = 0; i <= bays; i += 1) {
+          for (let i = 0; sgWallOn && i <= bays; i += 1) {
             const gapL = i > 0 && visible[i - 1] ? gapOf(i - 1) : 0;
             const gapR = i < bays && visible[i] ? gapOf(i) : 0;
             if (Math.abs(gapL - gapR) < 0.4) continue; // flush — nothing to close
@@ -1874,9 +1882,15 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         const straight = (b0, b1, y, at, w, h) => framePart(spanIsZ
           ? box(b1 - b0, h, w, (b0 + b1) / 2, y, at, frameMat)
           : box(w, h, b1 - b0, at, y, (b0 + b1) / 2, frameMat));
-        const postAt = (a, at, h, pw, yBase = 0) => framePart(spanIsZ
-          ? box(pw, h, pw, at, yBase + h / 2, a, frameMat)
-          : box(pw, h, pw, a, yBase + h / 2, at, frameMat));
+        // every post's plan point + vertical run, so later members can ask
+        // "does something already carry this spot through this height?"
+        const placedPosts = [];
+        const postAt = (a, at, h, pw, yBase = 0) => {
+          placedPosts.push(spanIsZ ? [at, a, yBase, yBase + h] : [a, at, yBase, yBase + h]);
+          return framePart(spanIsZ
+            ? box(pw, h, pw, at, yBase + h / 2, a, frameMat)
+            : box(pw, h, pw, a, yBase + h / 2, at, frameMat));
+        };
 
         const span = spanIsZ ? depth : width;
         const bayRun = spanIsZ ? width : depth;
@@ -2115,6 +2129,47 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               for (let j = 1; j < jCount; j += 1) {
                 straight(pB0, pB1, floorY + 0.28, pS0 + ((pS1 - pS0) * j) / jCount, 0.34, 0.55);
               }
+              // UNDER-DECK POSTS — a set-back storey's deck edge used to hang
+              // in open air where it lands mid-footprint (the 2nd floor's rim
+              // spanned the whole ground floor with nothing beneath it; a
+              // porch tier had no legs at all). Every tier edge now stands on
+              // posts: stations every bay around its perimeter, each dropping
+              // to the nearest floor below that point (the ground, or the
+              // tier it stands on). A station already carried through the
+              // same height — a ground bent, a lower tier's roof post on the
+              // same line — is skipped, so posts stack instead of doubling.
+              const floorOfLv = (l) => (l === 1 ? 0 : (anySetback ? elev2 : baseWallFt) + upAbove(l));
+              const baseUnder = (bx, bz) => {
+                let base = 0;
+                frameTiers.forEach((t2) => {
+                  if (t2.lv >= lv) return;
+                  const r2 = t2.p;
+                  if (bx >= r2.x - 0.05 && bx <= r2.x + r2.w + 0.05 && bz >= r2.y - 0.05 && bz <= r2.y + r2.d + 0.05) {
+                    base = Math.max(base, floorOfLv(t2.lv));
+                  }
+                });
+                return base;
+              };
+              const ex0 = p.x + fm.postW / 2; const ex1 = p.x + p.w - fm.postW / 2;
+              const ez0 = p.y + fm.postW / 2; const ez1 = p.y + p.d - fm.postW / 2;
+              const edgeStations = [];
+              const alongEdge = (a0, a1, fx) => {
+                const n = Math.max(1, Math.ceil((a1 - a0) / bay));
+                for (let i = 0; i <= n; i += 1) edgeStations.push(fx(a0 + ((a1 - a0) * i) / n));
+              };
+              alongEdge(ex0, ex1, (x) => [x, ez0]);
+              alongEdge(ex0, ex1, (x) => [x, ez1]);
+              alongEdge(ez0, ez1, (z) => [ex0, z]);
+              alongEdge(ez0, ez1, (z) => [ex1, z]);
+              edgeStations.forEach(([sx, sz]) => {
+                const base = baseUnder(sx, sz);
+                const hPost = floorY - base;
+                if (hPost < 1.5) return;
+                const carried = placedPosts.some(([qx, qz, qy0, qy1]) =>
+                  Math.hypot(qx - sx, qz - sz) < 1.3 && Math.min(qy1, floorY) - Math.max(qy0, base) > hPost * 0.5);
+                if (carried) return;
+                postAt(spanIsZ ? sz : sx, spanIsZ ? sx : sz, hPost, fm.postW, base);
+              });
               // posts + plate beams to THIS tier's own top — around the part
               // of the plate that carries STRUCTURE. On a PORCH tier the ring
               // is an open deck (the roof plan says open sky there): posts at
