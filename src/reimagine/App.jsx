@@ -57,7 +57,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 126 · Jul 19';
+const UPDATE_STAMP = 'update 127 · Jul 19';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -3113,29 +3113,13 @@ function StoreysControls({ spec, floors, hasBasement, activeFloor, onSelectFloor
                     <label>From north<NumInput value={py} min={0} max={80} step={0.5} unit="" onCommit={(v) => onOps([{ type: 'move_object', targetId: plate.id, name: plate.name, x: px, y: v }])} /></label>
                   </div>
                 )}
+                {/* ONE CHAPTER, ONE JOB: how each step is COVERED (roofed
+                    low, climbing, an open porch) is a ROOF decision — it
+                    lives on this floor's roof card, one "roof ›" hop away.
+                    Storeys keeps the geometry: size, place, height. */}
                 <div className="rz-storey-btnrow">
                   <button type="button" className="rz-storey-outline-btn" onClick={() => onSelectPlate(plate.id)}
                     title="Select this floor's outline on the plan — drag it, or its corners, by hand">✥ outline on plan</button>
-                  {floors > lvl && (
-                    <select
-                      title="Where the floor above steps back, what covers the step: a sloped roof, or an open walk-out porch with a railing"
-                      value={plate.topTreatment === 'porch' ? 'porch' : 'roof'}
-                      onChange={(e) => onOps([{ type: 'update_object', targetId: plate.id, name: plate.name, field: 'topTreatment', value: e.target.value === 'porch' ? 'porch' : 'roof' }])}
-                    >
-                      <option value="roof">step above: roofed</option>
-                      <option value="porch">step above: open porch</option>
-                    </select>
-                  )}
-                  {setsBack && (
-                    <select
-                      title="The step BELOW this floor — where this floor stands back from the one under it: a roof that rides low over that step, or one that climbs to this floor's top in one unbroken plane"
-                      value={plate.stepBelow === 'roof-top' ? 'roof-top' : 'low'}
-                      onChange={(e) => onOps([{ type: 'update_object', targetId: plate.id, name: plate.name, field: 'stepBelow', value: e.target.value === 'roof-top' ? 'roof-top' : '' }])}
-                    >
-                      <option value="low">roof below: rides low</option>
-                      <option value="roof-top">roof below: climbs to this floor&rsquo;s top</option>
-                    </select>
-                  )}
                 </div>
               </div>
             )}
@@ -3144,7 +3128,7 @@ function StoreysControls({ spec, floors, hasBasement, activeFloor, onSelectFloor
           </React.Fragment>
         );
       })}
-      <div className="rz-shape-note">A smaller upper floor makes a step in the building — the Roof chapter decides how each step is covered, and “step above” here switches roof or porch. Heights are floor-to-floor.</div>
+      <div className="rz-shape-note">A smaller upper floor makes a step in the building — how each step is covered (roofed low, a roof climbing to the floor’s top, or an open porch) lives on that floor’s <b>roof ›</b> card. Heights here are floor-to-floor.</div>
     </div>
   );
 }
@@ -3530,11 +3514,13 @@ function WallsControls({ spec, floors, level = 1, wallSections, onAllWalls, onSh
     const uResolved = WALL_SIDES.map((s) => resolveWallSide(spec, s, level));
     return (
       <div className="rz-found">
-        <label className="rz-field rz-field-num">
-          <span>{floorName} — floor height</span>
-          <NumInput value={Math.round(storeyHeightFt(spec.shell, level) * 10) / 10} min={7} max={16} step={0.5}
-            onCommit={(v) => onFloorHeight(level, v)} />
-        </label>
+        {/* ONE CHAPTER, ONE JOB: floor-to-floor height is STOREY geometry —
+            it lives in Storeys (and the Storeys view's top-edge drag). Walls
+            here are construction; they fill whatever height the storey has. */}
+        <div className="rz-shape-note" style={{ marginTop: 0 }}>
+          {floorName} stands {Math.round(storeyHeightFt(spec.shell, level) * 10) / 10}′ floor-to-floor — set that in{' '}
+          <button type="button" className="rz-storey-link-inline" onClick={() => onJump && onJump('storeys', level)}>Storeys ›</button>. The walls below fill it.
+        </div>
         <label className="rz-field">
           <span>{floorName} — wall system (all sides)</span>
           <select value={u.wallVal} onChange={(e) => { if (e.target.value !== '__mixed') onUpperWalls(level, 'assembly', e.target.value); }}>
@@ -3938,6 +3924,18 @@ function UpperRoofControls({ spec, level, floors, onOps }) {
           >
             <option value="roof">Roofed — a sloped roof covers the step</option>
             <option value="porch">Open porch — a walkable deck with a railing</option>
+          </select>
+        </label>
+      )}
+      {(Number(plate.w) < (Number(spec.shell.widthFt) || 36) - 0.05 || Number(plate.d) < (Number(spec.shell.depthFt) || 28) - 0.05 || Number(plate.x) > 0.05 || Number(plate.y) > 0.05) && (
+        <label className="rz-field">
+          <span>The roof over the step BELOW this floor</span>
+          <select
+            value={plate.stepBelow === 'roof-top' ? 'roof-top' : 'low'}
+            onChange={(e) => onOps([{ type: 'update_object', targetId: plate.id, name: plate.name, field: 'stepBelow', value: e.target.value === 'roof-top' ? 'roof-top' : '' }])}
+          >
+            <option value="low">Rides low over the lower floor</option>
+            <option value="roof-top">Climbs to this floor&rsquo;s top — one unbroken plane</option>
           </select>
         </label>
       )}
