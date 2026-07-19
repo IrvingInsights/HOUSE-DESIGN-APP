@@ -57,7 +57,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 127 · Jul 19';
+const UPDATE_STAMP = 'update 128 · Jul 19';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1707,6 +1707,17 @@ export default function App() {
                     }}
                   >＋ Patio — stone terrace on the ground (12 × 10 ft)</button>
                 )}
+                <button
+                  type="button"
+                  className="rz-floorbar-outline"
+                  title="A real interior wall between rooms (rooms themselves are floor zones — they don't build walls). Drops mid-plan with a 3 ft doorway; drag it into place, stretch it along its run, tap it to pick stud, cob, or adobe"
+                  onClick={() => {
+                    const W = Number(spec.shell.widthFt) || 36;
+                    const D = Number(spec.shell.depthFt) || 28;
+                    const lvl = activeFloor >= 1 ? activeFloor : 1;
+                    applyOps([{ type: 'add_element', name: 'Interior wall', category: 'partition', construction: 'framed', x: Math.round(W / 2 - 5), y: Math.round(D / 2), w: 10, d: 0.45, level: lvl, widthFt: 3 }]);
+                  }}
+                >＋ Interior wall — a partition with a doorway (10 ft)</button>
                 <div className="rz-shape-note">Tap a placed deck to pick its surface, railing, roof, and how it sits. Two decks pushed together join into one wraparound.</div>
                 {roomNote && <div className="rz-shape-note">{roomNote}</div>}
                 <div className="rz-shape-note">Tap a room on the plan to rename or remove it (or press Delete). Right-click for more.</div>
