@@ -3663,7 +3663,33 @@ export function detectIssues(spec) {
       if (pitchA > 1.05) issues.push({ severity: 'warning', title: 'The attached roof below this storey is steeper than 12:12', owner: 'Engineer', system: 'roof', fix: 'A lean-to steeper than 45° sheds weather well but is hard to build and walk. Widen the step it covers, or lower the storey it attaches to.' });
     }
   });
-  // 9. Wide openings in load-bearing natural walls need real lintels.
+  // 9. A greenhouse that is only a floor zone — no glass anywhere. The glass
+  // used to depend on a geometric ACCIDENT (the room poking >1.5 ft past a
+  // wall grew the annex); when the house deepened, the greenhouse silently
+  // un-built — Daniel "kept losing the greenhouse". It can still un-build
+  // (geometry is geometry), but never silently: this flags it, with a
+  // one-tap remedy (glaze the face it sits against) wired in the flags card.
+  {
+    const widthPr = Number(shellPr.widthFt) || 36;
+    const depthPr = Number(shellPr.depthFt) || 28;
+    (spec.rooms || []).filter((room) => room.type === 'plant' && Number(room.level || 1) === 1).forEach((room) => {
+      const rx = Number(room.x) || 0; const ry = Number(room.y) || 0;
+      const rw = Number(room.w) || 0; const rd = Number(room.d) || 0;
+      const pokes = Math.max(ry + rd - depthPr, -ry, rx + rw - widthPr, -rx) > 1.5;
+      const covered = (spec.elements || []).some((e) => e.category === 'greenhouse'
+        && e.x < rx + rw && e.x + e.w > rx && e.y < ry + rd && e.y + e.d > ry);
+      const glazedNear = WALL_SIDES.some((side) => {
+        const r = resolveWallSide(spec, side);
+        if (!r.sunGlazing || r.omitted) return false;
+        const gap = side === 'south' ? depthPr - (ry + rd) : side === 'north' ? ry : side === 'east' ? widthPr - (rx + rw) : rx;
+        return gap < 4;
+      });
+      if (!pokes && !covered && !glazedNear) {
+        issues.push({ severity: 'warning', title: `${room.name || 'The greenhouse'} has no glass — it’s only a floor zone right now`, owner: 'Natural Builder', system: 'walls', fixId: 'greenhouse-glass', roomId: room.id, fix: 'A greenhouse needs a glazed face. Give the wall it sits against slanted sun glass (one tap below), or drag the room a couple of feet past the wall and the glazed annex builds itself.' });
+      }
+    });
+  }
+  // 10. Wide openings in load-bearing natural walls need real lintels.
   (spec.openings || []).forEach((opening) => {
     if (opening.wall === 'roof') return;
     const r = resolveWallSide(spec, opening.wall, Number(opening.level || 1));

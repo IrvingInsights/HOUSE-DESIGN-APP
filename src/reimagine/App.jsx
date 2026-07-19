@@ -57,7 +57,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 125 · Jul 19';
+const UPDATE_STAMP = 'update 126 · Jul 19';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1545,7 +1545,13 @@ export default function App() {
                 {f.title}
               </div>
               {f.fix && <div className="rz-flags-fix">{f.fix}</div>}
-              {/* one-tap remedies — the first fixId the reimagine card supports */}
+              {/* one-tap remedies */}
+              {f.fixId === 'greenhouse-glass' && (
+                <button type="button" className="rz-fresh" style={{ alignSelf: 'flex-start', marginTop: 4 }}
+                  onClick={() => makeGreenhouseSouth()}>
+                  ☀ Give it the south glass — 2 ft kneewall + slanted glazing
+                </button>
+              )}
               {f.fixId === 'fit-opening' && Number.isFinite(f.openingIndex) && (() => {
                 const op = spec.openings?.[f.openingIndex];
                 if (!op) return null;
