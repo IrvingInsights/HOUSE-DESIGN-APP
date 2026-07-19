@@ -3592,6 +3592,87 @@ export function detectIssues(spec) {
   if (naturalApproach && hasSouthGlass && derivedForChecks.winterShadeFrac > 0.33) {
     issues.push({ severity: 'warning', title: `South overhang shades ${Math.round(derivedForChecks.winterShadeFrac * 100)}% of the winter sun`, owner: 'Designer', system: 'roof', fixId: 'reduce-south-overhang', fix: `At your latitude the winter noon sun sits at ${Math.round(derivedForChecks.sunWinterDeg)}° — the ${overhangCheck.south.toFixed(1)} ft south overhang casts that much shadow on your solar glass. Trim it, or raise the south wall.` });
   }
+  // ── STANDARD BUILDING PRACTICES — the encyclopedic sweep over everything
+  // the newer controls can shape: hand-edited frames, custom members, storey
+  // stacks, decks, and per-storey roofs. Every freedom the app grants gets a
+  // practice that judges it — plain-language, rule-of-thumb numbers, always
+  // "confirm with your engineer/inspector" territory, never a hard stop.
+  const floorsPr = floorCount(spec);
+  const shellPr = spec.shell || {};
+  // 1. Hand-removed skeleton pieces: something must still carry their load.
+  const removedPr = (spec.frame?.removedMembers || []).length;
+  if (removedPr > 0) {
+    issues.push({ severity: removedPr > 3 ? 'critical' : 'warning', title: `${removedPr} piece${removedPr === 1 ? '' : 's'} removed from the frame skeleton`, owner: 'Engineer', system: 'frame', fix: 'Every removed post or beam carried something. Make sure a wall, your own post, or a beam takes over its load — or bring the pieces back (Frame chapter → “Bring back all removed pieces”).' });
+  }
+  // 2. Bent/bay spacing beyond timber norms.
+  const frameKeyPr = resolveFrameType(spec, 1);
+  const bayPr = Number(spec.frame?.baySpacingFt) || 8;
+  if (frameKeyPr !== 'load-bearing' && bayPr > 12) {
+    issues.push({ severity: 'warning', title: `Post bays are ${bayPr}′ apart — beyond common timber practice`, owner: 'Engineer', system: 'frame', fix: 'Timber bents usually stand 8–12 ft apart; wider bays need engineered beams. Tighten the bay spacing on the Frame page, or plan for heavier timbers with an engineer.' });
+  }
+  // 3. Two storeys of load-bearing natural wall: beyond the usual envelope.
+  const naturalGroundPr = WALL_SIDES.some((side) => { const r = resolveWallSide(spec, side); return !r.omitted && ['straw-bale', 'cob', 'cordwood', 'light-straw-clay'].includes(r.assemblyKey); });
+  if (frameKeyPr === 'load-bearing' && naturalGroundPr && floorsPr >= 3) {
+    issues.push({ severity: 'warning', title: 'Three storeys on load-bearing natural walls', owner: 'Engineer', system: 'frame', fix: 'Load-bearing bale/cob practice is one to two storeys. Three wants a structural frame carrying the floors, with the natural wall as enclosure — pick a frame on the Frame page.' });
+  }
+  // 4. Hand-placed members: spans and slenderness.
+  (spec.elements || []).forEach((el) => {
+    if (el.category === 'beam') {
+      const span = Math.max(Number(el.w) || 0, Number(el.d) || 0);
+      if (span > 16) issues.push({ severity: 'warning', title: `${el.name || 'A beam'} spans ${Math.round(span)}′ — beyond common timber spans`, owner: 'Engineer', system: 'frame', fix: 'Solid timber beams commonly span 12–16 ft. Add a post under the middle (Frame page → ＋ Post), or plan an engineered beam.' });
+    }
+    if (el.category === 'post') {
+      const hP = Number(el.h) || 0; const wP = Math.min(Number(el.w) || 0.7, Number(el.d) || 0.7);
+      if (wP > 0 && hP / wP > 30) issues.push({ severity: 'warning', title: `${el.name || 'A post'} is very slender (${Math.round(hP)}′ tall on ${(wP * 12).toFixed(0)}″)`, owner: 'Engineer', system: 'frame', fix: 'A free-standing post beyond ~30:1 height-to-width wants bracing or a fatter section. Shorten it, thicken it, or brace it into the frame.' });
+    }
+  });
+  // 5. Habitable storey heights.
+  for (let lv = 1; lv <= floorsPr; lv += 1) {
+    const hLv = storeyHeightFt(shellPr, lv);
+    if (hLv < 7) issues.push({ severity: 'warning', title: `${lv === 1 ? 'The ground floor' : `Storey ${lv}`} is only ${Math.round(hLv * 10) / 10}′ floor-to-floor`, owner: 'Architect', system: 'shell', fix: 'Habitable rooms want about 7 ft of clear ceiling after the floor build-up. Raise this storey in the Storeys view (drag its top edge).' });
+  }
+  // 6. An upper storey overhanging its support.
+  for (let lv = 3; lv <= floorsPr; lv += 1) {
+    const pU = upperPlateRect(spec, lv); const pB = upperPlateRect(spec, lv - 1);
+    if (!pU || !pB) continue;
+    const over = Math.max(pB.x - pU.x, pB.y - pU.y, (pU.x + pU.w) - (pB.x + pB.w), (pU.y + pU.d) - (pB.y + pB.d), 0);
+    if (over > 2) issues.push({ severity: 'warning', title: `Storey ${lv} overhangs the floor below by ${Math.round(over * 10) / 10}′`, owner: 'Engineer', system: 'shell', fix: 'A floor cantilevering more than ~2 ft past its support needs engineered framing. Slide the storey back over the one below (Storeys view), or put posts under the overhang (Frame page → ＋ Post).' });
+  }
+  // 7. Decks: railings above 30″, and a way down.
+  (spec.elements || []).filter((el) => el.category === 'deck').forEach((el) => {
+    const dk = resolveDeck(spec, el);
+    if (dk.topFt >= 2.5 && dk.railKey === 'none') {
+      issues.push({ severity: 'critical', title: `${el.name || 'A deck'} stands ${Math.round(dk.topFt * 10) / 10}′ up with no railing`, owner: 'Engineer', system: 'rooms', fix: 'A walking surface more than 30″ above the ground needs a guard (36″+ railing). Tap the deck and pick a railing.' });
+    }
+    if (dk.topFt >= 1.5 && String(el.deckStairs || 'auto') === 'none') {
+      issues.push({ severity: 'warning', title: `${el.name || 'A deck'} has no steps down`, owner: 'Architect', system: 'rooms', fix: 'Tap the deck and give its steps an edge — or plan its only door back into the house knowingly.' });
+    }
+  });
+  // 8. Per-storey and attached roofs that won't drain (or are extreme).
+  (spec.elements || []).filter((el) => el.category === 'floor' && Number(el.level || 1) >= 2).forEach((el) => {
+    const tp = Number(el.roofPitch);
+    if (Number.isFinite(tp) && tp > 0 && tp < 0.02) {
+      issues.push({ severity: 'warning', title: `${floorLabel(spec, Number(el.level))}’s own roof is nearly flat`, owner: 'Engineer', system: 'roof', fix: 'Give it at least ¼″ per foot of fall (≈ 0.02) so water leaves — set the pitch on that floor’s roof card.' });
+    }
+    if (el.stepBelow === 'roof-top') {
+      const p = upperPlateRect(spec, Number(el.level));
+      const runW = Math.max(0.5, Math.min(p?.x ?? 1, 96));
+      const prof2 = roofProfile(shellPr);
+      const rise = (storeyElevationFt(shellPr, Number(el.level)) + storeyHeightFt(shellPr, Number(el.level))) - (prof2.roofType === 'shed' ? Math.min(prof2.westWallHeightFt, prof2.eastWallHeightFt, prof2.southWallHeightFt, prof2.northWallHeightFt) : prof2.highWallHeightFt);
+      const pitchA = runW > 0 ? rise / runW : 0;
+      if (pitchA > 1.05) issues.push({ severity: 'warning', title: 'The attached roof below this storey is steeper than 12:12', owner: 'Engineer', system: 'roof', fix: 'A lean-to steeper than 45° sheds weather well but is hard to build and walk. Widen the step it covers, or lower the storey it attaches to.' });
+    }
+  });
+  // 9. Wide openings in load-bearing natural walls need real lintels.
+  (spec.openings || []).forEach((opening) => {
+    if (opening.wall === 'roof') return;
+    const r = resolveWallSide(spec, opening.wall, Number(opening.level || 1));
+    const wide = Number(opening.widthFt) || 0;
+    if (!r.omitted && ['straw-bale', 'cob', 'cordwood', 'light-straw-clay'].includes(r.assemblyKey) && frameKeyPr === 'load-bearing' && wide > 6) {
+      issues.push({ severity: 'warning', title: `A ${Math.round(wide)}′ opening in the load-bearing ${opening.wall} wall`, owner: 'Engineer', system: 'windows', fix: 'Openings over ~6 ft in a load-bearing natural wall need an engineered lintel or a post each side. Narrow it, split it in two, or add posts (Frame page → ＋ Post).' });
+    }
+  });
+
   if (issues.length === 0) {
     issues.push({ severity: 'pass', title: 'Schematic passes current council checks', owner: 'Project Manager', fix: 'Ready for PE/architect review, structural sizing, jurisdictional code check, and stamped drawing development.' });
   }
