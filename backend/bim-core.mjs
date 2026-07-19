@@ -1095,8 +1095,9 @@ function normalizeRooms(spec) {
   }
   if (Array.isArray(spec.elements)) {
     spec.elements = spec.elements.map((element) => {
-      // Partitions are legitimately thin — don't fatten a 0.45' stud wall to 1'.
-      const minDim = element.category === 'partition' ? 0.3 : 1;
+      // Partitions are legitimately thin — don't fatten a 0.45' stud wall to
+      // 1'. Hand-placed posts and beams are timber-thin the same way.
+      const minDim = element.category === 'partition' || element.category === 'post' || element.category === 'beam' ? 0.3 : 1;
       const resized = {
         ...element,
         w: clamp(Number(element.w) || 1, minDim, spec.shell.widthFt + 48),
@@ -2221,6 +2222,24 @@ export function applyBimOperations(currentSpec, plan) {
       if (operation.field === 'baySpacingFt') {
         next.frame.baySpacingFt = clamp(Number(operation.value) || 8, 4, 16);
         actions.push(`Set frame bay spacing to ${next.frame.baySpacingFt}'.`);
+        continue;
+      }
+      // Hand-removal of a DERIVED member: the value is the member's stable
+      // geometry key (the scene stamps one on every skeleton piece). Undo
+      // works through the normal snapshot stack; "restoreMembers" clears the
+      // whole list — the one-tap "bring back everything I removed".
+      if (operation.field === 'removeMember') {
+        const key = String(operation.value || '');
+        if (key.startsWith('fm:')) {
+          next.frame.removedMembers = [...new Set([...(next.frame.removedMembers || []), key])];
+          actions.push('Removed a frame member.');
+        }
+        continue;
+      }
+      if (operation.field === 'restoreMembers') {
+        const n = (next.frame.removedMembers || []).length;
+        next.frame.removedMembers = [];
+        actions.push(`Brought back ${n} removed frame member${n === 1 ? '' : 's'}.`);
         continue;
       }
       const value = FRAME_TYPES[operation.value] ? operation.value : 'load-bearing';

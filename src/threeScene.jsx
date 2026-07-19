@@ -2728,6 +2728,15 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const ghHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
           mesh = box(element.w, hIn, element.d, element.x + element.w / 2, elevation + hIn / 2, element.y + element.d / 2, ghHandle);
           elementHeight = hIn;
+        } else if (element.category === 'post' || element.category === 'beam') {
+          // A HAND-PLACED frame member — the same timber as the derived
+          // skeleton, standing (post) or lying (beam). Its h is its height,
+          // its z its bottom, so a post can run ground→deck or floor→plate
+          // and a beam can sit at any bearing height. Draggable on the plan
+          // like any element; the card sets its height and bottom.
+          mesh = box(element.w, elementHeight, element.d,
+            element.x + element.w / 2, elevation + elementHeight / 2, element.y + element.d / 2, frameMat);
+          mesh.userData.customFrame = true;
         } else if (element.category === 'deck') {
           // A deck or patio, drawn from the SAME resolveDeck() answer the
           // receipts price: surface material, raised vs at-grade, railing
@@ -2969,7 +2978,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const canopyPart = (m) => { m.userData.roomId = element.id; m.userData.generated = true; group.add(m); };
           [[element.x + 0.4, element.y + 0.4], [element.x + element.w - 0.4, element.y + 0.4],
             [element.x + 0.4, element.y + element.d - 0.4], [element.x + element.w - 0.4, element.y + element.d - 0.4]]
-            .forEach(([pxp, pzp]) => canopyPart(box(0.42, eave - deckTop, 0.42, pxp, deckTop + (eave - deckTop) / 2, pzp, frameMat)));
+            .forEach(([pxp, pzp]) => { const p = box(0.42, eave - deckTop, 0.42, pxp, deckTop + (eave - deckTop) / 2, pzp, frameMat); p.userData.frameMember = true; canopyPart(p); });
           const cxm = element.x + element.w / 2;
           const czm = element.y + element.d / 2;
           const ow = 0.9;
@@ -3571,6 +3580,30 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         group.add(grid);
       }
       }
+
+      // ── MEMBER IDENTITY & HAND-REMOVAL ─────────────────────────────────
+      // Every derived frame member (the skeleton, a deck's canopy posts)
+      // gets a STABLE key from its resting geometry — rounded center +
+      // rounded size. spec.frame.removedMembers lists the keys the person
+      // has taken out: those members simply don't stand. If the design
+      // shifts so a member's geometry changes, its key changes too and the
+      // removal quietly expires — self-healing, no orphaned tombstones.
+      const removedMembers = new Set((spec.frame && spec.frame.removedMembers) || []);
+      const doomedMembers = [];
+      group.traverse((n) => {
+        if (!n.isMesh) return;
+        const isFrameMember = String(n.userData?.roomId || '') === 'frame-main' || n.userData?.frameMember;
+        if (!isFrameMember) return;
+        const g = n.geometry?.parameters || {};
+        const r1 = (v) => Math.round((Number(v) || 0) * 10) / 10;
+        n.userData.memberKey = `fm:${r1(n.position.x)},${r1(n.position.y)},${r1(n.position.z)}:${r1(g.width)}x${r1(g.height)}x${r1(g.depth)}`;
+        if (removedMembers.has(n.userData.memberKey)) doomedMembers.push(n);
+      });
+      doomedMembers.forEach((n) => {
+        n.parent?.remove(n);
+        const i = roomMeshes.indexOf(n);
+        if (i >= 0) roomMeshes.splice(i, 1);
+      });
 
       // Direction markers ON the model — the least ambiguous compass there is.
       // Placed by the SAME axes as everything else: north is −z, south +z (the
@@ -4322,7 +4355,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const hit = raycaster.intersectObjects(targets, false)[0];
       const id = hit?.object?.userData?.roomId;
       if (!id) return;
-      callbacksRef.current.onContext(String(id), event.clientX, event.clientY);
+      // A frame member right-clicked names ITSELF (its stable key rides
+      // along), so the app can offer "remove this piece" — the left-click
+      // still selects the whole skeleton as one.
+      const mk = hit?.object?.userData?.memberKey;
+      callbacksRef.current.onContext(mk ? `frame-member:${mk}` : String(id), event.clientX, event.clientY);
     }
 
     let rafId = 0;

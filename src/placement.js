@@ -90,8 +90,19 @@ export function fitShellToRooms(spec) {
   if (spec.shell.footprint) return null;
   const rooms = (spec.rooms || []).filter((r) => Number(r.level || 1) === 1 && !OUTDOOR_TYPES.has(r.type));
   if (!rooms.length) return null;
+  // The walls must hug EVERYTHING the building carries — not just the
+  // ground-floor rooms. An upper storey's extent plate (and its rooms)
+  // genuinely needs its footprint even where the ground floor is open:
+  // judged by level-1 rooms alone, a 3-storey house whose 2nd floor spans
+  // the full depth read as "walls stand past the rooms", and the one-tap
+  // fit collapsed the whole design — the shell shrank to the ground rooms
+  // and every upper plate was clamped down with it.
+  const upperFootprints = [
+    ...(spec.elements || []).filter((el) => el.category === 'floor' && Number(el.level || 1) >= 2),
+    ...(spec.rooms || []).filter((r) => Number(r.level || 1) >= 2 && !OUTDOOR_TYPES.has(r.type))
+  ];
   let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
-  rooms.forEach((r) => {
+  [...rooms, ...upperFootprints].forEach((r) => {
     minX = Math.min(minX, Number(r.x) || 0);
     minY = Math.min(minY, Number(r.y) || 0);
     maxX = Math.max(maxX, (Number(r.x) || 0) + (Number(r.w) || 0));
