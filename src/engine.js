@@ -3360,6 +3360,54 @@ export function repairNorthBandRooms(spec) {
   return bandRooms;
 }
 
+// ── THE SUNSPACE WALL LAW ───────────────────────────────────────────────────
+// A greenhouse is separated from the living space by a wall — standard
+// practice the app UNDERSTANDS by itself (Daniel: "it does not understand
+// that there is an interior wall behind a greenhouse"). DERIVED, not placed:
+// every interior-facing edge of a level-1 plant room (more than 2 ft from
+// its matching exterior wall) grows a cob thermal-mass wall with a doorway.
+// Both the plan and the 3D consume THIS list, so the wall exists everywhere
+// or nowhere. A real partition the person placed along that edge wins — the
+// derived wall stands down. Tapping a derived wall selects its room.
+export function sunspacePartitions(spec) {
+  const shell = spec.shell || {};
+  const W = Number(shell.widthFt) || 36;
+  const D = Number(shell.depthFt) || 28;
+  const out = [];
+  (spec.rooms || []).filter((r) => r.type === 'plant' && Number(r.level || 1) === 1).forEach((room) => {
+    const rx = Number(room.x) || 0; const ry = Number(room.y) || 0;
+    const rw = Number(room.w) || 0; const rd = Number(room.d) || 0;
+    if (rw < 3 || rd < 3) return;
+    // a room poking outside grows the glazed annex instead — out there the
+    // exterior wall IS the separation
+    if (Math.max(ry + rd - D, -ry, rx + rw - W, -rx) > 1.5) return;
+    const t = 0.7;
+    const edges = [
+      { side: 'north', gap: ry, rect: { x: rx, y: ry, w: rw, d: t } },
+      { side: 'south', gap: D - (ry + rd), rect: { x: rx, y: ry + rd - t, w: rw, d: t } },
+      { side: 'west', gap: rx, rect: { x: rx, y: ry, w: t, d: rd } },
+      { side: 'east', gap: W - (rx + rw), rect: { x: rx + rw - t, y: ry, w: t, d: rd } }
+    ];
+    edges.forEach(({ side, gap, rect }) => {
+      if (gap <= 2) return; // against (or near) the shell — the shell is the wall
+      const covered = (spec.elements || []).some((e) => e.category === 'partition'
+        && Number(e.x) < rect.x + rect.w + 0.75 && Number(e.x) + Number(e.w) > rect.x - 0.75
+        && Number(e.y) < rect.y + rect.d + 0.75 && Number(e.y) + Number(e.d) > rect.y - 0.75);
+      if (covered) return;
+      const along = (side === 'north' || side === 'south') ? rect.w : rect.d;
+      out.push({
+        id: room.id, // tapping the wall selects its room
+        synthetic: true,
+        name: `${room.name || 'Greenhouse'} wall`,
+        category: 'partition', construction: 'cob', level: 1,
+        ...rect, h: 0,
+        doorWFt: 3, doorAtFt: Math.max(0.5, along / 2 - 1.5)
+      });
+    });
+  });
+  return out;
+}
+
 export function detectIssues(spec) {
   const issues = [];
 
@@ -3655,12 +3703,18 @@ export function detectIssues(spec) {
       issues.push({ severity: 'warning', title: `${floorLabel(spec, Number(el.level))}’s own roof is nearly flat`, owner: 'Engineer', system: 'roof', fix: 'Give it at least ¼″ per foot of fall (≈ 0.02) so water leaves — set the pitch on that floor’s roof card.' });
     }
     if (el.stepBelow === 'roof-top') {
+      // the steepest attached plane = the NARROWEST real step around the
+      // plate (west inset alone false-flagged every east/south step)
       const p = upperPlateRect(spec, Number(el.level));
-      const runW = Math.max(0.5, Math.min(p?.x ?? 1, 96));
-      const prof2 = roofProfile(shellPr);
-      const rise = (storeyElevationFt(shellPr, Number(el.level)) + storeyHeightFt(shellPr, Number(el.level))) - (prof2.roofType === 'shed' ? Math.min(prof2.westWallHeightFt, prof2.eastWallHeightFt, prof2.southWallHeightFt, prof2.northWallHeightFt) : prof2.highWallHeightFt);
-      const pitchA = runW > 0 ? rise / runW : 0;
-      if (pitchA > 1.05) issues.push({ severity: 'warning', title: 'The attached roof below this storey is steeper than 12:12', owner: 'Engineer', system: 'roof', fix: 'A lean-to steeper than 45° sheds weather well but is hard to build and walk. Widen the step it covers, or lower the storey it attaches to.' });
+      const wPr = Number(shellPr.widthFt) || 36; const dPr = Number(shellPr.depthFt) || 28;
+      const insets = p ? [p.x, wPr - (p.x + p.w), p.y, dPr - (p.y + p.d)].filter((g) => g > 0.75) : [];
+      if (insets.length) {
+        const runW = Math.min(...insets);
+        const prof2 = roofProfile(shellPr);
+        const rise = (storeyElevationFt(shellPr, Number(el.level)) + storeyHeightFt(shellPr, Number(el.level))) - (prof2.roofType === 'shed' ? Math.min(prof2.westWallHeightFt, prof2.eastWallHeightFt, prof2.southWallHeightFt, prof2.northWallHeightFt) : prof2.highWallHeightFt);
+        const pitchA = runW > 0 ? rise / runW : 0;
+        if (pitchA > 1.05) issues.push({ severity: 'warning', title: 'The attached roof below this storey is steeper than 12:12', owner: 'Engineer', system: 'roof', fix: 'A lean-to steeper than 45° sheds weather well but is hard to build and walk. Widen the step it covers, or lower the storey it attaches to.' });
+      }
     }
   });
   // 9. A greenhouse that is only a floor zone — no glass anywhere. The glass

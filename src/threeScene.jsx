@@ -17,7 +17,7 @@ import {
 import {
   DEFAULT_OUTDOOR_GRID_SIZE_FT, clamp, padExtension, sitePadRect, objectBounds, titleCase, roofProfile, storeyInfo,
   upperPlateRect, resolveOverhangs, FOUNDATION_RUN_TYPES, DEFAULT_MODEL_LAYERS, siteOf, utilitiesOf, getSpecialBimObjects, wallAssemblyProfile,
-  WALL_SIDES, resolveWallSide, resolveDeck, resolveDeckStairs
+  WALL_SIDES, resolveWallSide, resolveDeck, resolveDeckStairs, sunspacePartitions
 } from './engine.js';
 
 // Some browsers run with graphics acceleration (WebGL) turned off — locked-
@@ -2550,7 +2550,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           x: best.rect.x, y: best.rect.y, w: best.rect.w, d: best.rect.d, h: 0
         });
       });
-      [...(spec.elements || []), ...plantAnnexes].forEach((element) => {
+      [...(spec.elements || []), ...plantAnnexes, ...sunspacePartitions(spec)].forEach((element) => {
         if (!layers.elements || (layers.hiddenCats || []).includes(element.category || 'custom')) return;
         let elementHeight = element.h || 1.2;
         let elevation = Number(element.z || 0);

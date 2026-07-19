@@ -961,7 +961,10 @@ function upsertRoom(spec, room) {
 // a floating ribbon of wing roof over six inches of "ground floor". Exported
 // so the load-time heal (App.jsx healLoadedSpec) can apply the same law to
 // designs saved before this fix existed.
-const PLATE_SNAP_FT = 1.5;
+// 0.6: catches the keypad-slip class (17.5 + 18 leaving a 6″ sliver) while a
+// deliberate 1 ft step — reachable from the Stack view's half-foot drags —
+// survives (review finding: 1.5 silently rewrote sub-1.5 ft placements).
+const PLATE_SNAP_FT = 0.6;
 export function snapPlatesToShell(spec) {
   const shellW = Number(spec?.shell?.widthFt) || 0;
   const shellD = Number(spec?.shell?.depthFt) || 0;

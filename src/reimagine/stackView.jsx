@@ -137,8 +137,15 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
         const len = o.s1 - o.s0;
         const s0 = clampN(snapHalf(o.s0 + dAlong), 0, run - len);
         ghost = { s0, s1: s0 + len };
-      } else if (drag.mode === 'end') ghost = { s0: o.s0, s1: clampN(snapHalf(o.s1 + dAlong), o.s0 + 8, run) };
-      else ghost = { s0: clampN(snapHalf(o.s0 + dAlong), 0, o.s1 - 8), s1: o.s1 };
+      } else if (drag.mode === 'end') {
+        // the GROUND floor grows the shell itself — its end handle may pull
+        // past the current run (engine minimum 18′, maximums 96′/80′); an
+        // upper storey stays within the footprint (review finding: growth
+        // was advertised but every clamp stopped at the current size)
+        const maxEnd = drag.lv === 1 ? (horiz ? 96 : 80) : run;
+        const minLen = drag.lv === 1 ? 18 : 8;
+        ghost = { s0: o.s0, s1: clampN(snapHalf(o.s1 + dAlong), o.s0 + minLen, maxEnd) };
+      } else ghost = { s0: clampN(snapHalf(o.s0 + dAlong), 0, o.s1 - 8), s1: o.s1 };
     } else {
       // top-face: free move / edge pulls, in plain plan feet (no mirror)
       const dx = fx - drag.startFx;
@@ -151,9 +158,9 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
           w: r.w, d: r.d
         } };
       } else if (drag.mode === 'te') {
-        ghost = { rect: { ...r, w: clampN(snapHalf(r.w + dx), 8, width - r.x) } };
+        ghost = { rect: { ...r, w: clampN(snapHalf(r.w + dx), drag.lv === 1 ? 18 : 8, drag.lv === 1 ? 96 : width - r.x) } };
       } else if (drag.mode === 'ts') {
-        ghost = { rect: { ...r, d: clampN(snapHalf(r.d + dy), 8, depth - r.y) } };
+        ghost = { rect: { ...r, d: clampN(snapHalf(r.d + dy), drag.lv === 1 ? 18 : 8, drag.lv === 1 ? 80 : depth - r.y) } };
       } else if (drag.mode === 'tw') {
         const x1 = r.x + r.w;
         const nx = clampN(snapHalf(r.x + dx), 0, x1 - 8);
@@ -373,17 +380,26 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
   const lawCuts = [...new Set([0, run, ...law.tiers.flatMap((c) => [c.s0, c.s1])])]
     .filter((t) => t >= 0 && t <= run).sort((a, b2) => a - b2);
   // sampled per INTERVAL with a hair of inset — a cut sits exactly on a
-  // plate edge, where the plane itself answers null
-  const roofLinePts = [];
+  // plate edge, where the plane itself answers null. SEGMENTED: a skipped
+  // interval ends the current run, so two wings on opposite sides of a
+  // storey never get bridged by a phantom straight line across its face.
+  const roofLineSegs = [];
+  let roofSeg = [];
   for (let ci = 0; ci < lawCuts.length - 1; ci += 1) {
     const t0 = lawCuts[ci]; const t1 = lawCuts[ci + 1];
     if (t1 - t0 < 0.05) continue;
     const eps = Math.min(0.02, (t1 - t0) / 4);
-    if (law.roofAt((t0 + t1) / 2) == null) continue;
+    if (law.roofAt((t0 + t1) / 2) == null) {
+      if (roofSeg.length >= 2) roofLineSegs.push(roofSeg);
+      roofSeg = [];
+      continue;
+    }
     const ya = law.roofAt(t0 + eps); const yb = law.roofAt(t1 - eps);
-    if (ya != null) roofLinePts.push([t0, ya]);
-    if (yb != null) roofLinePts.push([t1, yb]);
+    if (ya != null) roofSeg.push([t0, ya]);
+    if (yb != null) roofSeg.push([t1, yb]);
   }
+  if (roofSeg.length >= 2) roofLineSegs.push(roofSeg);
+  const roofLinePts = roofLineSegs.flat();
   const maxTop = Math.max(...blocks.map((b) => b.y1), ...lawCuts.map((t) => law.wallTopAt(t)), ...roofLinePts.map(([, y]) => y), 8);
   const Y = (v) => maxTop - v; // feet measure up; paper draws down
   const cornerEnds = { south: ['West end', 'East end'], north: ['East end', 'West end'], east: ['South end', 'North end'], west: ['North end', 'South end'] };
@@ -504,10 +520,17 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
                   basement follows the ground floor, so it has none) */}
               {!b.basement && sel && (
                 <g>
-                  <rect x={x0 - 0.45} y={midY - 0.45} width={0.9} height={0.9} rx={0.18} {...HANDLE}
-                    style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDrag(e, b.lv, (flipX ? 'end' : 'start'), sideOrig)} />
-                  <rect x={x0 + len - 0.45} y={midY - 0.45} width={0.9} height={0.9} rx={0.18} {...HANDLE}
-                    style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDrag(e, b.lv, (flipX ? 'start' : 'end'), sideOrig)} />
+                  {/* the ground floor is anchored at its origin — its west/
+                      north edge can't move, so only the growing end gets a
+                      handle (the other silently shifted the OPPOSITE edge) */}
+                  {(b.lv > 1 || flipX) && (
+                    <rect x={x0 - 0.45} y={midY - 0.45} width={0.9} height={0.9} rx={0.18} {...HANDLE}
+                      style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDrag(e, b.lv, (flipX ? 'end' : 'start'), sideOrig)} />
+                  )}
+                  {(b.lv > 1 || !flipX) && (
+                    <rect x={x0 + len - 0.45} y={midY - 0.45} width={0.9} height={0.9} rx={0.18} {...HANDLE}
+                      style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDrag(e, b.lv, (flipX ? 'start' : 'end'), sideOrig)} />
+                  )}
                 </g>
               )}
             </g>
@@ -520,11 +543,12 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
         ))}
 
         {/* the attached lean-to roof crossing this face — the same plane the
-            3D wears, so the stack reads like the model */}
-        {roofLinePts.length >= 2 && (
-          <polyline points={roofLinePts.map(([t, y]) => `${flipX ? run - t : t},${Y(y)}`).join(' ')}
+            3D wears, so the stack reads like the model (one polyline per
+            contiguous wing; gaps stay gaps) */}
+        {roofLineSegs.map((segPts, si) => (
+          <polyline key={`rl${si}`} points={segPts.map(([t, y]) => `${flipX ? run - t : t},${Y(y)}`).join(' ')}
             fill="none" stroke="#7f8c89" strokeWidth={0.26} strokeLinecap="round" pointerEvents="none" opacity="0.9" />
-        )}
+        ))}
 
         {/* decks in elevation: a slab at its walking height with its railing —
             drag it along this face, pull a handle to size it, tap for its card */}
