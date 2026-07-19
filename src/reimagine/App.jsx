@@ -57,7 +57,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 121 · Jul 19';
+const UPDATE_STAMP = 'update 122 · Jul 19';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -74,7 +74,7 @@ const PHASE_SHORT = {
 const PHASE_REVEALS = {
   'site-prep': { layers: { pad: true }, cats: ['earthwork', 'site'] },
   foundation: { layers: { foundation: true }, cats: ['foundation'] },
-  framing: { layers: { frame: true, upperFloors: true }, cats: ['floor', 'structure', 'loft', 'tower'] },
+  framing: { layers: { frame: true, upperFloors: true }, cats: ['floor', 'structure', 'loft', 'tower', 'post', 'beam'] },
   walls: { layers: { wallNorth: true, wallSouth: true, wallEast: true, wallWest: true, openings: true }, cats: ['wall', 'partition', 'greenhouse'] },
   roofing: { layers: { roof: true }, cats: ['roof', 'chimney'] },
   utilities: { cats: ['water', 'power', 'waste'] },
@@ -1787,6 +1787,22 @@ export default function App() {
                 modelShow={modelShow}
                 onModelShow={(v) => { setModelShow(v); setViewMode('3d'); }}
                 onJump={jumpTo}
+                removedCount={(spec.frame?.removedMembers || []).length}
+                onRestoreMembers={() => applyOps([{ type: 'set_frame', field: 'restoreMembers', value: '' }])}
+                onAddMember={(kind) => {
+                  // a fresh post/beam lands mid-plan on the picked floor —
+                  // drag it on the plan; height and bottom live on its card
+                  const W = Number(spec.shell.widthFt) || 36;
+                  const D = Number(spec.shell.depthFt) || 28;
+                  const lvl = Math.max(1, activeFloor);
+                  const zBase = lvl > 1 ? storeyElevationFt(spec.shell, lvl) : 0;
+                  const hPost = storeyHeightFt(spec.shell, lvl);
+                  const report = kind === 'post'
+                    ? applyOps([{ type: 'add_element', name: 'Post', category: 'post', x: Math.round(W / 2) - 0.35, y: Math.round(D / 2) - 0.35, w: 0.7, d: 0.7, h: hPost, z: zBase, level: lvl }])
+                    : applyOps([{ type: 'add_element', name: 'Beam', category: 'beam', x: Math.round(W / 2) - 4, y: Math.round(D / 2) - 0.35, w: 8, d: 0.7, h: 0.6, z: zBase + hPost - 0.6, level: lvl }]);
+                  const made = (report?.spec?.elements || []).slice(-1)[0];
+                  if (made) setSelectedId(made.id);
+                }}
               />
             )}
             {activeChapter === 'roof' && (
@@ -2110,6 +2126,18 @@ export default function App() {
                 onResize={(w, d) => resizeObject(el.id, Number(el.x) || 0, Number(el.y) || 0, w, d)}
               />
             )}
+            {el && (el.category === 'post' || el.category === 'beam') && (
+              <>
+                <div className="rz-run-size rz-card-size">
+                  <label>Tall<NumInput value={Math.round((Number(el.h) || 1) * 10) / 10} min={0.3} max={40} step={0.5} unit="" onCommit={(v) => applyOps([{ type: 'resize_object', targetId: el.id, name: el.name, w: Number(el.w) || 0.7, d: Number(el.d) || 0.7, h: v }])} /></label>
+                  <span className="rz-run-x">·</span>
+                  <label>Bottom at<NumInput value={Math.round((Number(el.z) || 0) * 10) / 10} min={-12} max={40} step={0.5} unit="ft" onCommit={(v) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'z', value: v }])} /></label>
+                </div>
+                <div className="rz-shape-note">{el.category === 'post'
+                  ? 'Your own timber post — it stands from its bottom up its height. Under a deck, set the height to reach the deck floor; on an upper storey, the bottom is that floor’s elevation.'
+                  : 'Your own timber beam — it lies at its bottom height; stretch Width or Depth to run it along the span it carries.'}</div>
+              </>
+            )}
             {el && el.category === 'deck' && (() => {
               // THE DECK CARD — every deck option in one place, priced live
               // in the Budget receipts. resolveDeck is the same answer the
@@ -2383,6 +2411,27 @@ export default function App() {
               <button onClick={() => { setModelShow((v) => (v === 'noroof' ? 'all' : 'noroof')); closeMenu(); }}>
                 {modelShow === 'noroof' ? 'Put the roof back on' : 'Lift the roof off (peek inside)'}
               </button>
+            </Menu>
+          );
+        }
+
+        // One PIECE of the frame (right-clicked): remove just it, or bring
+        // back everything removed. The id carries the member's stable
+        // geometry key, stamped by the scene on every skeleton piece.
+        if (idStr.startsWith('frame-member:')) {
+          const mKey = idStr.replace('frame-member:', '');
+          const removedN = (spec.frame?.removedMembers || []).length;
+          return (
+            <Menu title="This frame piece" h={200}>
+              <button className="rz-ctx-danger" onClick={() => { applyOps([{ type: 'set_frame', field: 'removeMember', value: mKey }]); closeMenu(); }}>
+                Remove this piece (Ctrl+Z brings it back)
+              </button>
+              {removedN > 0 && (
+                <button onClick={() => { applyOps([{ type: 'set_frame', field: 'restoreMembers', value: '' }]); closeMenu(); }}>
+                  Bring back all {removedN} removed piece{removedN === 1 ? '' : 's'}
+                </button>
+              )}
+              <button onClick={() => { setActiveChapter('frame'); closeMenu(); }}>Frame settings…</button>
             </Menu>
           );
         }
@@ -3699,7 +3748,7 @@ function WallSideFields({ side, spec, onWallSide, level = 1 }) {
 // upper storey's own frame, and how far apart the posts stand. With
 // load-bearing walls the timeline builds walls first, then the roof; with a
 // frame it roofs early so straw goes in dry.
-function FrameControls({ spec, floors, onFrame, onBaySpacing, modelShow, onModelShow, onJump }) {
+function FrameControls({ spec, floors, onFrame, onBaySpacing, modelShow, onModelShow, onJump, onAddMember = null, removedCount = 0, onRestoreMembers = null }) {
   const frameVal = resolveFrameType(spec, 1);
   const upperLevels = Array.from({ length: Math.max(0, Math.ceil(floors) - 1) }, (_, k) => k + 2);
   const anyFramed = frameVal !== 'load-bearing' || upperLevels.some((lv) => resolveFrameType(spec, lv) !== 'load-bearing');
@@ -3735,6 +3784,25 @@ function FrameControls({ spec, floors, onFrame, onBaySpacing, modelShow, onModel
           <span>Post spacing (bay)</span>
           <NumInput value={Math.round((Number(spec.frame?.baySpacingFt) || 8) * 10) / 10} min={4} max={16} step={0.5} onCommit={onBaySpacing} />
         </label>
+      )}
+      {/* hand-placed members + hand-removed skeleton pieces — the frame is
+          derived, but every piece of it answers to you */}
+      {onAddMember && (
+        <>
+          <div className="rz-found-head">Your own pieces</div>
+          <div className="rz-open-quick">
+            <button type="button" title="A timber post of your own — lands mid-plan on the picked floor; drag it on the plan, set its height and bottom on its card" onClick={() => onAddMember('post')}>＋ Post</button>
+            <button type="button" title="A timber beam of your own — drag it on the plan, set its height and bottom on its card" onClick={() => onAddMember('beam')}>＋ Beam</button>
+          </div>
+          <div className="rz-shape-note">
+            Right-click any piece of the built-in skeleton (in 3D or the Frame view) to remove just that piece — a deck's posts too. Your own posts and beams are dragged on the plan and edited on their cards like everything else.
+          </div>
+          {removedCount > 0 && onRestoreMembers && (
+            <button type="button" className="rz-floorbar-outline" onClick={onRestoreMembers}>
+              Bring back all {removedCount} removed piece{removedCount === 1 ? '' : 's'}
+            </button>
+          )}
+        </>
       )}
       <label className="rz-field">
         <span>🦴 Seeing</span>
