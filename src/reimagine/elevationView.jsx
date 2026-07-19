@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { OPENING_TYPES, openingVerticalBand, storeyElevationFt, storeyHeightFt } from '../../backend/bim-core.mjs';
 import { resolveWallSide, upperPlateRect, resolveDeck } from '../engine.js';
+import { buildFaceLaw } from './faceLaw.js';
 
 // ElevationView — the chosen wall drawn face-on, from OUTSIDE the house, so
 // doors and windows can be placed the way you'd sketch them on paper: slide
@@ -37,56 +38,43 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   const width = Number(shell.widthFt) || 24;
   const depth = Number(shell.depthFt) || 24;
   const elevOf = (lv) => storeyElevationFt(shell, lv);
+  // THE FACE LAW — the same wall-top math the 3D scene builds from (shed
+  // rakes, tier tops that climb with the roof, storey caps, the attached
+  // lean-to of "roof below: climbs to this floor's top"). Before this, the
+  // face drew flat storey tops and the 2D and 3D disagreed.
+  const law = buildFaceLaw(spec, wall);
   // Each upper storey shows on this wall only where its own outline stands:
   // TOUCHING the wall = the face steps up there ("built up only where the
   // second storey is"); SET BACK from it = drawn faint behind the face.
-  const touching = [];
-  const setBack = [];
-  for (let lv = 2; lv <= storeys; lv += 1) {
-    const h = storeyHeightFt(shell, lv);
-    if (h <= 0) continue;
-    const r = upperPlateRect(spec, lv) || { x: 0, y: 0, w: width, d: depth };
-    const touches = wall === 'north' ? r.y <= 0.05
-      : wall === 'south' ? r.y + r.d >= depth - 0.05
-      : wall === 'west' ? r.x <= 0.05
-      : r.x + r.w >= width - 0.05;
-    const s0 = clampN(horiz ? r.x : r.y, 0, run);
-    const s1 = clampN(horiz ? r.x + r.w : r.y + r.d, 0, run);
-    if (s1 - s0 < 0.1) continue;
-    (touches ? touching : setBack).push({ lv, s0, s1, y0: elevOf(lv), y1: elevOf(lv) + h });
-  }
-  const groundProfileAt = (t) => {
-    if (roofType === 'shed' && shedEW) {
-      if (wall === 'east') return hE;
-      if (wall === 'west') return hW;
-      // north/south walls rake from the west end to the east end; t runs in
-      // plan x here (flipX only mirrors the drawing, not the measurement)
-      return hW + (hE - hW) * (t / run);
-    }
-    if (roofType === 'shed') {
-      if (wall === 'south') return hS;
-      if (wall === 'north') return hN;
-      return hN + (hS - hN) * (t / run); // east/west walls rake from the north end to the south end
-    }
-    return groundH;
-  };
+  const touching = law.tiers.filter((b) => b.touches).map((b) => ({ lv: b.lv, s0: b.s0, s1: b.s1, y0: b.floorY, y1: b.topAt((b.s0 + b.s1) / 2) }));
+  const setBack = law.tiers.filter((b) => !b.touches).map((b) => ({ lv: b.lv, s0: b.s0, s1: b.s1, y0: b.floorY, y1: b.topAt((b.s0 + b.s1) / 2) }));
+  const groundProfileAt = (t) => law.groundTopAt(t);
   const gableRise = roofType === 'gable' && horiz && storeys === 1 ? (Number(shell.depthFt) || 24) * pitch : 0;
-  // the face's top edge: ground profile, capped at a covering storey's floor,
-  // then raised by every storey standing on this stretch of the wall
+  // the face's top edge — the law's silhouette, plus the classic gable peak
   const topAt = (t) => {
-    const covers = touching.filter((c) => t > c.s0 - 0.01 && t < c.s1 + 0.01);
-    let g = groundProfileAt(t);
-    if (covers.length) g = Math.min(g, Math.min(...covers.map((c) => c.y0)));
-    let v = Math.max(g, ...covers.map((c) => c.y1));
+    let v = law.wallTopAt(t);
     if (gableRise > 0) {
       const half = run / 2;
       v += gableRise * (1 - Math.abs(t - half) / half); // the gable peak, mid-wall
     }
     return v;
   };
-  const cuts = [...new Set([0, run, run / 2, ...touching.flatMap((c) => [c.s0, c.s1])])]
+  const cuts = [...new Set([0, run, run / 2, ...law.tiers.flatMap((c) => [c.s0, c.s1])])]
     .filter((t) => t >= 0 && t <= run).sort((a, b) => a - b);
-  const maxTop = Math.max(...cuts.map((t) => topAt(t)), ...setBack.map((c) => c.y1));
+  // the attached lean-to crossing this face (drawn as a roof line): sampled
+  // per INTERVAL with a hair of inset — a cut sits exactly on a plate edge,
+  // where the plane itself answers null
+  const roofLine = [];
+  for (let ci = 0; ci < cuts.length - 1; ci += 1) {
+    const t0 = cuts[ci]; const t1 = cuts[ci + 1];
+    if (t1 - t0 < 0.05) continue;
+    const eps = Math.min(0.02, (t1 - t0) / 4);
+    if (law.roofAt((t0 + t1) / 2) == null) continue;
+    const ya = law.roofAt(t0 + eps); const yb = law.roofAt(t1 - eps);
+    if (ya != null) roofLine.push([t0, ya]);
+    if (yb != null) roofLine.push([t1, yb]);
+  }
+  const maxTop = Math.max(...cuts.map((t) => topAt(t)), ...setBack.map((c) => c.y1), ...roofLine.map(([, y]) => y));
   const Y = (v) => maxTop - v; // feet measure up; paper draws down
   const X = (t) => (flipX ? run - t : t);
 
@@ -291,6 +279,13 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
         {/* the wall face */}
         <polygon points={facePts} fill="#f4efe3" stroke="#4a4f47" strokeWidth={0.16} strokeLinejoin="round" />
+
+        {/* the attached lean-to roof crossing this face — same plane the 3D
+            builds, so the 2D face finally shows the roof the model wears */}
+        {roofLine.length >= 2 && (
+          <polyline points={roofLine.map(([t, y]) => `${X(t)},${Y(y)}`).join(' ')}
+            fill="none" stroke="#7f8c89" strokeWidth={0.26} strokeLinecap="round" pointerEvents="none" opacity="0.9" />
+        )}
 
         {/* floor lines — where each upper storey's floor sits */}
         {Array.from({ length: storeys - 1 }, (_, k) => k + 2).map((lv) => {
