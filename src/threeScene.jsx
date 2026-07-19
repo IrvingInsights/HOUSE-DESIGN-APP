@@ -1061,10 +1061,18 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const edgeZ = side === 'north' ? p.y : side === 'south' ? p.y + p.d : p.y + p.d / 2;
             const edgeX = side === 'west' ? p.x : side === 'east' ? p.x + p.w : p.x + p.w / 2;
             const probeZ = side === 'north' ? p.y + 0.3 : side === 'south' ? p.y + p.d - 0.3 : edgeZ;
-            const exposedNS = anySetback && (side === 'north' || side === 'south')
-              && !coveredJustAbove(level, edgeX, probeZ) && !ringIsPorch(level);
+            const probeX = side === 'west' ? p.x + 0.3 : side === 'east' ? p.x + p.w - 0.3 : edgeX;
+            // EVERY exposed side rises to meet its own tier roof — not just
+            // north/south. Under an east/west-falling shed, the HIGH side's
+            // wall (east on an east-high shed) is flat but sits a full
+            // rise above the storey height; stopping it at elevAt+uH left a
+            // storey-tall open band under the tower's roof — a pergola of
+            // bare rafters where a wall belongs. tierWallTop already answers
+            // for all four sides (flat sides get their constant eave, sloped
+            // sides their mid-rake, non-shed roofs their plain storey top).
+            const exposed = anySetback && !coveredJustAbove(level, probeX, probeZ) && !ringIsPorch(level);
             const yTop = anySetback
-              ? (exposedNS ? tierWallTop(level, edgeX, edgeZ) : elevAt(level) + uH)
+              ? (exposed ? tierWallTop(level, edgeX, edgeZ) : elevAt(level) + uH)
               : groundH + upAbove(level) + uH;
             const yBot = anySetback ? bandSeatY(level, edgeX, edgeZ) : groundH + upAbove(level);
             const bH = yTop - yBot;
@@ -3513,6 +3521,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // Placed by the SAME axes as everything else: north is −z, south +z (the
       // solar face, where the sun and the deeper south overhang are), east +x,
       // west −x. A big south overhang sits right next to the 'S' disc.
+      // The discs are DEPTH-TESTED: the house hides the far side's marker.
+      // Drawn always-on-top, the 'W' disc shone THROUGH the building from the
+      // east and appeared to label the near face as west — the whole model
+      // read as mirrored, and a storey placed "from west 17.5" looked like it
+      // sat on the wrong side. Occlusion is the cue that makes a ground
+      // marker readable: the letter you can see is on the side you're facing.
       if (showCompass) {
         const oh = resolveOverhangs(spec.shell);
         const dirMark = (letter, wx, wz, rgb) => {
@@ -3525,7 +3539,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           ctx.fillStyle = rgb; ctx.font = 'bold 78px system-ui, sans-serif';
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.fillText(letter, 64, 70);
-          const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthTest: false }));
+          const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthTest: true }));
           sprite.scale.set(3.2, 3.2, 1);
           sprite.position.set(wx, 2.2, wz);
           sprite.renderOrder = 999;
