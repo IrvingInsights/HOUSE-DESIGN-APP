@@ -61,7 +61,7 @@ say('');
 // --- 1. unit suites (free, seconds) ------------------------------------------
 say('## 1. Unit suites');
 let unitsGreen = true;
-for (const suite of ['op_smoke_test.mjs', 'trace_repair_test.mjs', 'geom_core_test.mjs']) {
+for (const suite of ['op_smoke_test.mjs', 'trace_repair_test.mjs', 'geom_core_test.mjs', 'persistence_test.mjs']) {
   const { code, out } = run([`tools/${suite}`], suite);
   const tail = (out.trim().split('\n').pop() || '').trim();
   const green = code === 0;

@@ -55,7 +55,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 111 · Jul 18';
+const UPDATE_STAMP = 'update 112 · Jul 19';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -118,6 +118,9 @@ function scrubLayers(schedule, scrubWeek, spec) {
 // browser's local storage (this machine only), and the app picks it back up
 // on the next open. Losing an hour of design to a refresh is not a thing.
 const STORE_KEY = 'rz.design.v1';
+// The engine-side design store's project id — the reimagine app's own folder
+// (.data/projects/reimagine), separate from the classic console's.
+const PROJECT_QS = '?project=reimagine';
 // Designs saved under an older stacking model can carry floor-plate z values
 // the engine no longer agrees with (before update 101 the ground storey height
 // was the LOWEST wall; now it is the standing wall height). The renderer
@@ -152,6 +155,14 @@ function loadStoredSpec() {
 // progress. Ten slots, oldest falls off.
 const BACKUPS_KEY = 'rz.design.backups.v1';
 const BACKUPS_MAX = 10;
+// savedAt arrives as epoch-ms (this app) or a display string (older backend
+// saves) — render either without caring which.
+function fmtSavedAt(v) {
+  const n = Number(v);
+  if (Number.isFinite(n) && n > 1e11) return new Date(n).toLocaleString();
+  return v ? String(v) : '';
+}
+
 function loadBackups() {
   try { const a = JSON.parse(localStorage.getItem(BACKUPS_KEY) || '[]'); return Array.isArray(a) ? a.filter((b) => b && b.spec && b.spec.shell) : []; } catch { return []; }
 }
@@ -213,6 +224,18 @@ export default function App() {
   const [viewRequest, setViewRequest] = useState({ mode: 'iso', n: 1 });
   const [designs, setDesigns] = useState(loadDesigns); // the keepsake shelf
   const [designsOpen, setDesignsOpen] = useState(false);
+  // the engine's revision history (every save on this computer), fetched when
+  // the shelf opens
+  const [serverHistory, setServerHistory] = useState([]);
+  useEffect(() => {
+    if (!designsOpen) return undefined;
+    let alive = true;
+    fetch(`/api/projects/current${PROJECT_QS}`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => { if (alive && Array.isArray(j?.revisions)) setServerHistory(j.revisions); })
+      .catch(() => { if (alive) setServerHistory([]); });
+    return () => { alive = false; };
+  }, [designsOpen]);
   // When a dropped room settles somewhere OTHER than where it was dropped,
   // this note says so and why — the app explains its refusals instead of
   // silently snapping (and the numbers double as a diagnostic to report).
@@ -741,14 +764,93 @@ export default function App() {
     return () => clearInterval(id);
   }, [viewMode, timelineOpen]);
 
-  // autosave the design to this browser (debounced — never per keystroke).
-  // GUARDED: before writing, whatever a DIFFERENT source put in the slot
-  // since our last write (another window of the app, an older session) goes
-  // into the backups ring instead of being silently erased — and every half
-  // hour a copy of our own progress joins it. Restore from the shelf.
+  // ── ONE SOURCE OF TRUTH: the app's own engine keeps the design on THIS
+  // COMPUTER (.data/projects/reimagine — atomic writes, a revision snapshot
+  // of EVERY save). The browser copy stays as the instant-load offline cache.
+  // This ends the two-address / two-window trap for good: every window of the
+  // app, at any address, reads and writes the same file.
   const lastWriteRef = useRef(0);
   const lastOwnBackupRef = useRef(Date.now());
   const autosaveOffRef = useRef(false); // the audit battery cycles canned designs — never save those
+  const backendReadyRef = useRef(false);
+  const [backendDown, setBackendDown] = useState(false);
+  const [staleOffer, setStaleOffer] = useState(null); // {spec, savedAt} from another window
+  const serverSave = async (specToSave) => {
+    const body = { spec: specToSave, savedAt: Date.now(), projectName: specToSave.projectName, revision: specToSave.revision };
+    const r = await fetch(`/api/projects/current/save${PROJECT_QS}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error('save failed');
+    return r.json();
+  };
+  // Server-first reconcile on open: adopt a newer server copy, push up a
+  // newer local one, and MIGRATE this browser's old saves the first time a
+  // fresh store comes up (backups oldest-first, shelf, working design last —
+  // local keys are kept as the offline cache and raw rescue material).
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/projects/current${PROJECT_QS}`, { cache: 'no-store' });
+        const j = await r.json();
+        if (!alive) return;
+        backendReadyRef.current = true;
+        setBackendDown(false);
+        const serverSpec = j?.state?.spec;
+        const serverAt = Number(j?.state?.savedAt) || 0;
+        const localRaw = localStorage.getItem(STORE_KEY);
+        const local = localRaw ? JSON.parse(localRaw) : null;
+        const localAt = Number(local?.savedAt) || 0;
+        if (serverSpec && (!local?.spec || serverAt > localAt) && JSON.stringify(serverSpec) !== JSON.stringify(local?.spec)) {
+          setSpec(healLoadedSpec(structuredClone(serverSpec))); // the engine's copy is newest — use it
+        } else if (!serverSpec) {
+          // fresh store: move this browser's history in, oldest first
+          for (const b of [...loadBackups()].reverse()) { try { await serverSave(b.spec); } catch { /* keep going */ } }
+          for (const d of [...loadDesigns()].reverse()) { try { await serverSave(d.spec); } catch { /* keep going */ } }
+          if (local?.spec) await serverSave(local.spec);
+        } else if (local?.spec && localAt > serverAt) {
+          await serverSave(local.spec); // this browser is ahead — push up
+        }
+      } catch {
+        if (alive) { backendReadyRef.current = false; setBackendDown(true); }
+      }
+    })();
+    return () => { alive = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // While the engine is off: quiet banner + knock-back poll; flush on return.
+  useEffect(() => {
+    if (!backendDown) return undefined;
+    const timer = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/projects/current${PROJECT_QS}`, { cache: 'no-store' });
+        if (!r.ok) return;
+        backendReadyRef.current = true;
+        setBackendDown(false);
+        await serverSave(spec);
+      } catch { /* still down */ }
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [backendDown, spec]); // eslint-disable-line react-hooks/exhaustive-deps
+  // On focus: if another window advanced the design, OFFER it — never silently
+  // swap under the user's cursor. Either choice loses nothing (revisions).
+  useEffect(() => {
+    const onFocus = async () => {
+      if (!backendReadyRef.current || autosaveOffRef.current) return;
+      try {
+        const r = await fetch(`/api/projects/current${PROJECT_QS}`, { cache: 'no-store' });
+        const j = await r.json();
+        const sSpec = j?.state?.spec;
+        const sAt = Number(j?.state?.savedAt) || 0;
+        if (sSpec && sAt > lastWriteRef.current + 500 && JSON.stringify(sSpec) !== JSON.stringify(spec)) {
+          setStaleOffer({ spec: sSpec, savedAt: sAt });
+        }
+      } catch { /* offline — the banner path handles it */ }
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [spec]); // eslint-disable-line react-hooks/exhaustive-deps
+  // autosave (debounced — never per keystroke): browser cache first, then
+  // WRITE-THROUGH to the engine. The backups ring still guards the browser
+  // slot (another window, an older session); every half hour a copy of your
+  // own progress joins it.
   useEffect(() => {
     const timer = setTimeout(() => {
       if (autosaveOffRef.current) return;
@@ -769,9 +871,12 @@ export default function App() {
           lastOwnBackupRef.current = now;
         }
       } catch { /* storage full/blocked — in-memory still works */ }
+      if (backendReadyRef.current) {
+        serverSave(spec).catch(() => { backendReadyRef.current = false; setBackendDown(true); });
+      }
     }, 400);
     return () => clearTimeout(timer);
-  }, [spec]);
+  }, [spec]); // eslint-disable-line react-hooks/exhaustive-deps
   // THE LIVE SEAM AUDIT BATTERY — console-only, no UI. Renders each canned
   // design (src/reimagine/auditBattery.js + the seed + every starter) in the
   // REAL 3D view, runs window.__nbSeamAudit on the real meshes, restores what
@@ -822,7 +927,14 @@ export default function App() {
       } finally {
         setSpec(restoreSpec);
         setViewMode(restoreView);
-        autosaveOffRef.current = false;
+        // Persist the RESTORED design explicitly, and keep autosave suspended
+        // long enough that the last canned design's still-pending debounce
+        // timer can never fire after the flag clears (it did once: a battery
+        // spec briefly became the store's "current design"). The explicit
+        // writes below make the hand-off deterministic either way.
+        try { localStorage.setItem(STORE_KEY, JSON.stringify({ spec: restoreSpec, savedAt: Date.now() })); } catch { /* fine */ }
+        if (backendReadyRef.current) { try { await serverSave(restoreSpec); } catch { /* engine off — cache has it */ } }
+        setTimeout(() => { autosaveOffRef.current = false; }, 1200);
       }
       return results;
     };
@@ -907,8 +1019,9 @@ export default function App() {
   const applyUpdateNow = async () => {
     setUpdate('applying');
     // flush the working design NOW — the reload below must never race the
-    // debounced autosave
+    // debounced autosave (browser cache + the engine store, best effort)
     try { localStorage.setItem(STORE_KEY, JSON.stringify({ spec, savedAt: Date.now() })); } catch { /* fine */ }
+    if (backendReadyRef.current) { try { await serverSave(spec); } catch { /* revisions have the last save */ } }
     try {
       const r = await fetch('/api/update/apply', { method: 'POST' });
       const j = await r.json();
@@ -1622,6 +1735,35 @@ export default function App() {
                       </>
                     );
                   })()}
+                  {/* ENGINE HISTORY — every save keeps a copy on this computer
+                      (.data), no matter which window or address wrote it.
+                      Restoring is safe: what you have now is snapshotted too. */}
+                  {serverHistory.length > 0 && (
+                    <>
+                      <div className="rz-found-head">Every save, kept on this computer</div>
+                      {serverHistory.map((rv) => (
+                        <div key={rv.file} className="rz-designs-item">
+                          <button className="rz-designs-open" title="Bring this saved moment back — your current design is kept too" onClick={async () => {
+                            try {
+                              const r = await fetch(`/api/projects/current/restore${PROJECT_QS}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file: rv.file }) });
+                              const j = await r.json();
+                              if (!j.ok || !j.state?.spec) throw new Error('restore failed');
+                              snapshotBeforeReplace();
+                              commitSpec(healLoadedSpec(structuredClone(j.state.spec)));
+                              setSelectedId(null);
+                              setSaveFlash('That moment is back — what you had is on the shelf.');
+                            } catch {
+                              setSaveFlash('Couldn’t reach the design engine — try again in a moment.');
+                            }
+                            setTimeout(() => setSaveFlash(null), 3000);
+                          }}>
+                            <b>{(rv.projectName || 'Design').trim()} — save #{rv.revision}</b>
+                            <small>{fmtSavedAt(rv.savedAt || rv.updatedAt)}</small>
+                          </button>
+                        </div>
+                      ))}
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -1873,6 +2015,32 @@ export default function App() {
               <button className="rz-update-later" onClick={() => setUpdate(null)}>Later</button>
             </>
           )}
+        </div>
+      )}
+
+      {/* the design engine is off — saves fall back to this browser only */}
+      {backendDown && !update && (
+        <div className="rz-update">
+          <span>Saving to this browser only for now — the design engine is off. It reconnects by itself.</span>
+        </div>
+      )}
+
+      {/* another window moved the design forward — OFFER it, never swap
+          silently. Either choice loses nothing: the engine keeps a revision
+          of every save. */}
+      {staleOffer && (
+        <div className="rz-update">
+          <span>This design changed in another window — use that one?</span>
+          <button onClick={() => {
+            snapshotBeforeReplace();
+            commitSpec(healLoadedSpec(structuredClone(staleOffer.spec)));
+            setSelectedId(null);
+            setStaleOffer(null);
+          }}>Use it</button>
+          <button className="rz-update-later" onClick={() => {
+            setStaleOffer(null);
+            if (backendReadyRef.current) serverSave(spec).catch(() => {});
+          }}>Keep mine</button>
         </div>
       )}
 

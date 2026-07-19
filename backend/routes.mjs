@@ -50,6 +50,22 @@ async function runBimApply(payload) {
   return { ok: true, plan, report, state: nextState };
 }
 
+// Which project a /api/projects/current* call is about. The store layer has
+// always been projectId-parameterized; this surfaces it as ?project=<id> so
+// the reimagine app keeps its own designs ('reimagine') while the classic
+// console keeps 'current-project' — their save envelopes differ, and sharing
+// one folder would corrupt each other's state. Slug-sanitized; default
+// unchanged so every existing caller behaves exactly as before.
+function projectIdFrom(req) {
+  try {
+    const raw = new URL(req.url, 'http://localhost').searchParams.get('project') || '';
+    const slug = raw.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40);
+    return slug || DEFAULT_PROJECT_ID;
+  } catch {
+    return DEFAULT_PROJECT_ID;
+  }
+}
+
 export async function handleApiRoute(req, res, pathname) {
   // Self-update: check GitHub for newer work / apply it. The frontend shows a
   // one-tap "Update now" chip so nobody has to restart anything by hand.
@@ -69,27 +85,29 @@ export async function handleApiRoute(req, res, pathname) {
   }
 
   if (req.method === 'GET' && pathname === '/api/projects/current') {
-    const state = await loadProjectState(DEFAULT_PROJECT_ID);
+    const projectId = projectIdFrom(req);
+    const state = await loadProjectState(projectId);
     const nextState = state?.spec
       ? { ...state, projectBrain: ensureProjectBrain(state.projectBrain, state.spec) }
       : state;
     sendJson(res, 200, {
-      projectId: DEFAULT_PROJECT_ID,
+      projectId,
       state: nextState,
-      revisions: await loadProjectRevisions(DEFAULT_PROJECT_ID, 12)
+      revisions: await loadProjectRevisions(projectId, 12)
     });
     return true;
   }
 
   if (req.method === 'GET' && pathname === '/api/projects/current/designs') {
-    sendJson(res, 200, { designs: await listDesigns(DEFAULT_PROJECT_ID) });
+    sendJson(res, 200, { designs: await listDesigns(projectIdFrom(req)) });
     return true;
   }
 
   if (req.method === 'POST' && pathname === '/api/projects/current/restore') {
     try {
       const payload = await readJson(req);
-      const result = await restoreRevision(payload?.file, DEFAULT_PROJECT_ID);
+      const projectId = projectIdFrom(req);
+      const result = await restoreRevision(payload?.file, projectId);
       sendJson(res, 200, { ok: true, projectId: result.projectId, state: result.state });
     } catch (error) {
       sendJson(res, 400, { ok: false, error: String(error?.message || error) });
@@ -99,8 +117,9 @@ export async function handleApiRoute(req, res, pathname) {
 
   if (req.method === 'POST' && pathname === '/api/projects/current/save') {
     const payload = await readJson(req);
+    const projectId = projectIdFrom(req);
     const normalized = payload?.spec ? { ...payload, projectBrain: ensureProjectBrain(payload.projectBrain, payload.spec) } : payload;
-    const result = await saveProjectState(normalized, { projectId: DEFAULT_PROJECT_ID });
+    const result = await saveProjectState(normalized, { projectId });
     sendJson(res, 200, {
       ok: true,
       projectId: result.projectId,
