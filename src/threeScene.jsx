@@ -466,6 +466,15 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         const elP = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === lv);
         return elP?.topTreatment === 'porch';
       };
+      // stepBelow: 'roof-top' on a storey's plate — the wing roofing the step
+      // BELOW this storey climbs all the way to this storey's TOP, one
+      // unbroken plane from the upper wall's top down to the low eave
+      // (Daniel: "attach the west draining roof to the top of the second
+      // storey"). Its own field: topTreatment already means the step ABOVE.
+      const wingAttachesTop = (lv) => {
+        const elP = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === lv);
+        return elP?.stepBelow === 'roof-top';
+      };
       const oAll = resolveOverhangs(spec.shell);
       const pitchNow = Number(spec.shell.roofPitch || 0.32);
       const fullRect = { x: 0, y: 0, w: width, d: depth };
@@ -583,7 +592,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               ring.forEach((rect) => porchRings.push({ rect, level: below.level, topEave: below.topEave, hostRect: below.rect }));
               continue;
             }
-            ring.forEach((rect) => segments.push({ rect, eave: below.topEave, aboveTop: above.topEave, kind: 'wing', highSide: touchSide(rect, above.rect), level: below.level, tierDrop: storeyLift - upThru(below.level), tierY0: below.rect.y, tierX0: below.rect.x, tiered: true }));
+            ring.forEach((rect) => segments.push({ rect, eave: below.topEave, aboveTop: above.topEave, aboveLevel: above.level, kind: 'wing', highSide: touchSide(rect, above.rect), level: below.level, tierDrop: storeyLift - upThru(below.level), tierY0: below.rect.y, tierX0: below.rect.x, tiered: true }));
           }
         } else {
           decomposeFootprint(fpPoly).forEach((rect) => segments.push({ rect, eave: wallHeight, kind: 'full', upper: true, level: storeyTiers.length }));
@@ -653,6 +662,29 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               : lowY + ((px - X0) / (X1 - X0)) * rise);
             seg.stopBearing = JOINTS.EAVE_BEARING;
             seg.shape = 'shed';
+          } else if (seg.kind === 'wing' && Number.isFinite(seg.aboveTop) && wingAttachesTop(seg.aboveLevel)) {
+            // ATTACHED LEAN-TO: the wing's HIGH edge rides the TOP of the
+            // storey it leans on, and one unbroken plane falls to the wing's
+            // own outer eave — no band of bare upper wall above a low wing.
+            // The pitch is implied by the attachment (rise / the wing's run).
+            // The LOW edge is the wall the plane actually lands on — sampled
+            // at the wing's outer edge (on a shed that's the raw profile
+            // there; seg.eave is the whole TIER's top, which on a legacy
+            // shed ground tier is the HIGH wall — anchoring there drew the
+            // plane dead flat at the second storey's top).
+            const highA = seg.aboveTop;
+            const [oxA, ozA] = seg.highSide === 'east' ? [seg.rect.x, seg.rect.y + seg.rect.d / 2]
+              : seg.highSide === 'west' ? [seg.rect.x + seg.rect.w, seg.rect.y + seg.rect.d / 2]
+              : seg.highSide === 'south' ? [seg.rect.x + seg.rect.w / 2, seg.rect.y]
+              : [seg.rect.x + seg.rect.w / 2, seg.rect.y + seg.rect.d];
+            const lowA = Math.min(highA - 0.5,
+              (roofSpec.roofType === 'shed' ? shedEaveAt(oxA, ozA) : seg.eave) + JOINTS.EAVE_BEARING);
+            seg.topAt = (px, pz) => (
+              seg.highSide === 'north' ? lowA + ((Z1 - pz) / (Z1 - Z0)) * (highA - lowA)
+              : seg.highSide === 'south' ? lowA + ((pz - Z0) / (Z1 - Z0)) * (highA - lowA)
+              : seg.highSide === 'west' ? lowA + ((X1 - px) / (X1 - X0)) * (highA - lowA)
+              : lowA + ((px - X0) / (X1 - X0)) * (highA - lowA));
+            seg.stopBearing = JOINTS.EAVE_BEARING;
           } else if (seg.kind === 'wing' && roofSpec.roofType === 'shed') {
             seg.topAt = shedPlaneFor(seg);
             seg.stopBearing = JOINTS.ROOF_BEARING;

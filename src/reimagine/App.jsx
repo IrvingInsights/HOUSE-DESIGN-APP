@@ -57,7 +57,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 122 · Jul 19';
+const UPDATE_STAMP = 'update 123 · Jul 19';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -3118,6 +3118,16 @@ function StoreysControls({ spec, floors, hasBasement, activeFloor, onSelectFloor
                     >
                       <option value="roof">step above: roofed</option>
                       <option value="porch">step above: open porch</option>
+                    </select>
+                  )}
+                  {setsBack && (
+                    <select
+                      title="The step BELOW this floor — where this floor stands back from the one under it: a roof that rides low over that step, or one that climbs to this floor's top in one unbroken plane"
+                      value={plate.stepBelow === 'roof-top' ? 'roof-top' : 'low'}
+                      onChange={(e) => onOps([{ type: 'update_object', targetId: plate.id, name: plate.name, field: 'stepBelow', value: e.target.value === 'roof-top' ? 'roof-top' : '' }])}
+                    >
+                      <option value="low">roof below: rides low</option>
+                      <option value="roof-top">roof below: climbs to this floor&rsquo;s top</option>
                     </select>
                   )}
                 </div>
