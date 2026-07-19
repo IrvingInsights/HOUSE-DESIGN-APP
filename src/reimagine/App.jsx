@@ -22,6 +22,7 @@ import { STARTER_DESIGNS } from './starters.js';
 import { AUDIT_BATTERY_SPECS, fuzzBatterySpecs } from './auditBattery.js';
 import '../styles.css';
 import './shell.css';
+import './siteTable.css';
 
 // The Trail — the spine of the app. Shape comes FIRST (settle the footprint),
 // then Rooms fill it, then everything the shell implies. One chapter open at a
@@ -55,7 +56,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 113 · Jul 19';
+const UPDATE_STAMP = 'update 114 · Jul 19';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -218,6 +219,15 @@ export default function App() {
   // 3D "Show" filter: see just part of the build (frame on its foundation,
   // the house without its roof) — the same layer system the Time Machine uses.
   const [modelShow, setModelShow] = useState('all');
+  // THE SITE TABLE — Daniel's chosen Claude Design direction (Jul 2026): the
+  // chapters run as a strip across the top, the model owns the center, money
+  // sits on the table. 'classic' keeps the left-Trail look one tap away.
+  const [lookMode, setLookMode] = useState(() => {
+    try { return localStorage.getItem('rz.look.v1') === 'classic' ? 'classic' : 'site'; } catch { return 'site'; }
+  });
+  const setLook = (v) => { setLookMode(v); try { localStorage.setItem('rz.look.v1', v); } catch { /* fine */ } };
+  const [moreOpen, setMoreOpen] = useState(false); // the full chapter controls, one tap from the quick toolbar
+  const [flagsPopOpen, setFlagsPopOpen] = useState(false);
   // Entering the Frame chapter shows the bones; leaving restores what was
   // shown before. Picking from the Show dropdown by hand wins over both.
   const preFrameShowRef = useRef(null);
@@ -1224,7 +1234,7 @@ export default function App() {
   const planContext = activeChapter === 'shape' && targetIsObject ? 'rooms' : (chapter.planContext || null);
 
   return (
-    <div className="rz-root">
+    <div className={`rz-root${lookMode === 'site' ? ' st-look' : ''}${lookMode === 'site' && moreOpen ? ' st-more-open' : ''}`}>
       {/* SURFACE 1 — the Model / Plan, center stage and full-bleed */}
       <div className="rz-model">
         {viewMode === 'wall' ? (
@@ -1301,6 +1311,153 @@ export default function App() {
             >{flags.length} to look at</button>
           )}
       </div>
+
+      {/* ═══ THE SITE TABLE (Daniel's Claude Design Direction 2) ═══
+          Chapters as a strip across the top; the active chapter's everyday
+          controls in one slim toolbar (the FULL controls stay one "More" tap
+          away — the Trail itself becomes that panel); receipts on the table;
+          floors + views + show in one bottom dock. Classic stays one tap
+          away, and both looks drive the SAME state and handlers. */}
+      {lookMode === 'site' && !timelineOpen && (
+        <>
+          <div className="st-topleft">
+            <button className="st-mini" disabled={!undoStack.length} title="Undo (Ctrl+Z)" onClick={undo}>↶</button>
+            <button className="st-mini" disabled={!redoStack.length} title="Redo (Ctrl+Y)" onClick={redo}>↷</button>
+            <button className="st-mini" title="Your saved designs, backups, and starters" onClick={() => { setMoreOpen(true); setDesignsOpen(true); }}>≡ designs</button>
+            <button className="st-mini" title="Back to the left-bar look" onClick={() => setLook('classic')}>Classic look</button>
+            <span className="st-stamp-chip">{UPDATE_STAMP}</span>
+          </div>
+
+          <div className="st-strip st-panel">
+            <div className="st-strip-row">
+              {CHAPTERS.map((c, i) => (
+                <button key={c.id} className={`st-chapter ${c.id === activeChapter ? 'active' : ''}`}
+                  onClick={() => { goChapter(c); setMoreOpen(false); }}>
+                  <span className="st-chapter-num">
+                    {i + 1}
+                    {chapterFlagged(flags, c.id) && <span className="st-chapter-dot" />}
+                  </span>
+                  <span className="st-chapter-label">{c.label}</span>
+                </button>
+              ))}
+              <span className="st-strip-sep" />
+              {flags.length === 0
+                ? <span className="st-strip-clear">all clear</span>
+                : <button className="st-strip-flags" onClick={() => setFlagsPopOpen((v) => !v)}>Worth a look ({flags.length})</button>}
+              <span className="st-strip-sep" />
+              <span className="st-strip-total">So far <b onClick={() => setBudgetOpen(true)}>{fmtMoney(derived.total)}</b></span>
+            </div>
+            {flagsPopOpen && flags.length > 0 && (
+              <div className="st-flags st-panel">
+                <div className="st-flags-head">
+                  <b>Worth a look</b>
+                  <button className="st-flags-x" onClick={() => setFlagsPopOpen(false)}>×</button>
+                </div>
+                {[...flags].sort((a, b) => (a.severity === 'critical' ? -1 : 1) - (b.severity === 'critical' ? -1 : 1)).map((f, i) => (
+                  <div key={i} className="st-flag">
+                    <div className="st-flag-title"><span className="dot" />{f.title}</div>
+                    {f.fix && <div className="st-flag-fix">{f.fix}</div>}
+                    {f.fixId === 'fit-opening' && Number.isFinite(f.openingIndex) && (() => {
+                      const op = spec.openings?.[f.openingIndex];
+                      if (!op) return null;
+                      const bandFix = openingVerticalBand(spec, op);
+                      if (!bandFix.clamped) return null;
+                      return (
+                        <button type="button" className="st-flag-btn" onClick={() => {
+                          const ops = [{ type: 'update_object', targetId: `opening-${f.openingIndex}`, field: 'sillFt', value: bandFix.fit.sillFt }];
+                          if (bandFix.fit.level !== Number(op.level || 1)) ops.push({ type: 'update_object', targetId: `opening-${f.openingIndex}`, field: 'level', value: bandFix.fit.level });
+                          applyOps(ops);
+                        }}>Settle it where it's drawn</button>
+                      );
+                    })()}
+                  </div>
+                ))}
+                <div className="st-flags-foot">Advice, not stop signs — the model keeps working either way.</div>
+              </div>
+            )}
+          </div>
+
+          <div className="st-toolbar st-panel">
+            <SiteQuickRow
+              chapter={activeChapter} spec={spec} derived={derived} floors={floors}
+              onShape={setShape} onSizeShell={resizeShell}
+              onAddFloor={addFloor} onRemoveFloor={removeFloor}
+              onAddRoomPreset={addRoomPreset}
+              onFoundation={chooseFoundation}
+              onSelectWall={(side) => { setSelectedId(`wall-${side}`); setViewMode('3d'); }}
+              onFrame={setFrame}
+              onRoofType={setRoofType} onPitch={setRoofPitch} onShedFall={setShedFall}
+              onAddOpening={(type) => addOpening(openWall, type, Math.max(1, activeFloor))}
+              openWall={openWall}
+              onCladding={setAllCladding}
+              onJump={jumpTo}
+              onMore={() => setMoreOpen(true)}
+            />
+            <button className={`st-more ${moreOpen ? 'on' : ''}`} onClick={() => setMoreOpen((v) => !v)}>
+              {moreOpen ? '× Close' : 'More ▾'}
+            </button>
+          </div>
+
+          <div className="st-receipts st-panel">
+            <div className="st-receipts-head">Receipts</div>
+            <div className="st-receipts-body">
+              {COST_ROWS.map(({ key, label }) => {
+                const amount = Number(derived.cost?.[key]) || 0;
+                if (amount <= 0) return null;
+                const firstLine = (derived.receipts?.systems?.[key] || [])[0];
+                return (
+                  <div key={key} className="st-receipt" title="Tap for the full budget, every line opened to its math" onClick={() => setBudgetOpen(true)}>
+                    <div className="st-receipt-row"><span>{label}</span><b>{fmtMoney(amount)}</b></div>
+                    {firstLine && <div className="st-receipt-math">{firstLine.qty ? `${fmtNum(firstLine.qty)} ${firstLine.unit || ''}`.trim() : (firstLine.note || '').slice(0, 42)}</div>}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="st-receipts-foot">
+              {(derived.receipts?.sweat || []).length > 0 && (
+                <div className="st-receipts-sweat"><span>Sweat equity</span><b>−{fmtMoney(Math.abs((derived.receipts.sweat).reduce((s, l) => s + (Number(l.amount) || 0), 0)))}</b></div>
+              )}
+              <div className="st-receipts-total" onClick={() => setBudgetOpen(true)}><span>Total</span><span>{fmtMoney(derived.total)}</span></div>
+            </div>
+          </div>
+
+          <div className="st-dock st-panel">
+            {floors > 1 && (
+              <>
+                {hasBasement && <button className={activeFloor === BASEMENT_LEVEL ? 'on' : ''} onClick={() => setActiveFloor(BASEMENT_LEVEL)}>Basement</button>}
+                {Array.from({ length: floors }, (_, i) => i + 1).map((f) => (
+                  <button key={f} className={activeFloor === f ? 'on' : ''} onClick={() => setActiveFloor(f)}>{floorLabel(spec, f)}</button>
+                ))}
+                <span className="st-dock-sep" />
+              </>
+            )}
+            <button className={viewMode === 'wall' ? 'on' : ''} onClick={() => setViewMode('wall')}>Wall</button>
+            <button className={viewMode === 'plan' ? 'on' : ''} onClick={() => setViewMode('plan')}>Plan</button>
+            <button className={viewMode === '3d' ? 'on' : ''} onClick={() => setViewMode('3d')}>3D</button>
+            {viewMode === '3d' && webglOK && (
+              <>
+                <span className="st-dock-sep" />
+                {[['iso', 'Corner'], ['top', 'Top'], ['front', 'Front'], ['side', 'Side']].map(([mode, label]) => (
+                  <button key={mode} onClick={() => setViewRequest({ mode, n: Date.now() })}>{label}</button>
+                ))}
+              </>
+            )}
+            {viewMode === '3d' && (
+              <>
+                <span className="st-dock-sep" />
+                <select value={modelShow} title="See just part of the build" onChange={(e) => setModelShow(e.target.value)}>
+                  <option value="all">Show: everything</option>
+                  <option value="bones">Show: frame & foundation</option>
+                  <option value="frame">Show: just the frame</option>
+                  <option value="noroof">Show: no roof</option>
+                </select>
+              </>
+            )}
+          </div>
+
+          <button className="st-build" onClick={openTimeline}>▶ Watch it build</button>
+        </>
+      )}
 
       {/* The flags card — every "to look at" opens to its plain-language
           reason AND its fix. Same honesty rule as the receipts: never show a
@@ -1773,7 +1930,9 @@ export default function App() {
 
           </div>
           {/* pinned OUTSIDE the scrolling body so the version is always visible */}
-          <div className="rz-stamp">{UPDATE_STAMP}</div>
+          <div className="rz-stamp">{UPDATE_STAMP}{lookMode === 'classic' && (
+            <button type="button" className="rz-storey-link-inline" style={{ marginLeft: 8 }} title="Try the new Site Table look — chapters across the top, the model center stage" onClick={() => setLook('site')}>✨ new look</button>
+          )}</div>
       </aside>
 
       {/* SURFACE 4a — the Budget sheet: the first live Sheet. Every line opens
@@ -3812,3 +3971,179 @@ function Compass({ heading }) {
 
 const round1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
 const prettyId = (id) => String(id || '').replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+// ── THE SITE TABLE's quick toolbar ──────────────────────────────────────────
+// One slim row of the active chapter's EVERYDAY controls, straight from
+// Daniel's chosen Claude Design direction. Depth never lost: the full chapter
+// controls (the old Trail, unchanged) open behind the "More ▾" button, and
+// tapping things on the model itself opens their cards as always.
+const FLAG_CHAPTER = {
+  shell: 'shape', rooms: 'rooms', foundation: 'foundation', walls: 'walls',
+  frame: 'frame', roof: 'roof', windows: 'openings', water: 'systems',
+  power: 'systems', heat: 'systems', waste: 'systems', systems: 'systems',
+  flooring: 'finishes', finishes: 'finishes', budget: 'finishes'
+};
+function chapterFlagged(flags, chapterId) {
+  return (flags || []).some((f) => FLAG_CHAPTER[f.system] === chapterId);
+}
+
+function SiteQuickRow({
+  chapter, spec, derived, floors, openWall,
+  onShape, onSizeShell, onAddFloor, onRemoveFloor, onAddRoomPreset,
+  onFoundation, onSelectWall, onFrame, onRoofType, onPitch, onShedFall,
+  onAddOpening, onCladding, onJump, onMore
+}) {
+  const shell = spec.shell || {};
+  if (chapter === 'shape') {
+    const fp = shell.footprint;
+    const active = fp === 'round' ? 'round' : Array.isArray(fp) || typeof fp === 'string' && fp ? '' : 'rect';
+    return (
+      <>
+        <span className="st-toolbar-label">Shape</span>
+        <span className="st-tool-group">
+          {[['rect', 'Rectangle'], ['l', 'L'], ['t', 'T'], ['u', 'U'], ['round', 'Round']].map(([k, label]) => (
+            <button key={k} className={`st-pill ${active === k ? 'on' : ''}`} onClick={() => onShape(k)}>{label}</button>
+          ))}
+        </span>
+        <label className="st-num">Width
+          <input key={`w${shell.widthFt}`} defaultValue={Math.round(Number(shell.widthFt) || 0)} onBlur={(e) => onSizeShell(e.target.value, shell.depthFt)} onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }} />
+        </label>
+        <label className="st-num">Depth
+          <input key={`d${shell.depthFt}`} defaultValue={Math.round(Number(shell.depthFt) || 0)} onBlur={(e) => onSizeShell(shell.widthFt, e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }} />
+        </label>
+      </>
+    );
+  }
+  if (chapter === 'storeys') {
+    return (
+      <>
+        <span className="st-toolbar-label">Storeys</span>
+        <button className="st-stepper" onClick={onRemoveFloor} disabled={floors <= 1}>−</button>
+        <span className="st-chip"><b>{floors}</b> storey{floors === 1 ? '' : 's'}</span>
+        <button className="st-stepper" onClick={onAddFloor} disabled={floors >= 3}>+</button>
+        <span className="st-toolbar-note">Each floor keeps its own rooms and outline.</span>
+      </>
+    );
+  }
+  if (chapter === 'rooms') {
+    const level = 1; // chips show the ground plan at a glance; the dock switches floors
+    const chips = (spec.rooms || []).filter((r) => Number(r.level || 1) === level).slice(0, 5);
+    return (
+      <>
+        <span className="st-toolbar-label">Rooms</span>
+        {chips.map((r) => (
+          <span key={r.id} className="st-chip">{r.name} <b>{Math.round((Number(r.w) || 0) * (Number(r.d) || 0))} sf</b></span>
+        ))}
+        {(spec.rooms || []).length > chips.length && <span className="st-toolbar-note">+{(spec.rooms || []).length - chips.length} more</span>}
+        <button className="st-pill" onClick={onMore}>+ add room</button>
+      </>
+    );
+  }
+  if (chapter === 'foundation') {
+    const current = utilitiesOf(spec).foundationType || 'rubble';
+    return (
+      <>
+        <span className="st-toolbar-label">Foundation</span>
+        <span className="st-tool-group">
+          {[['rubble', 'Rubble trench', 'stone + stem wall'], ['stemwall', 'Stem wall', 'concrete on footing'], ['slab', 'Slab', 'insulated pour'], ['basement', 'Basement', 'full storey down']].map(([k, label, note]) => (
+            <button key={k} className={`st-pill ${current === k ? 'on' : ''}`} onClick={() => onFoundation(k)}>{label}<small>{note}</small></button>
+          ))}
+        </span>
+      </>
+    );
+  }
+  if (chapter === 'walls') {
+    const south = resolveWallSide(spec, 'south');
+    return (
+      <>
+        <span className="st-toolbar-label">Walls</span>
+        <span className="st-tool-group">
+          {WALL_SIDES.map((s) => (
+            <button key={s} className="st-pill" title={`${WALL_SIDE_LABELS[s]} wall — tap it on the model, or here`} onClick={() => onSelectWall(s)}>{s[0].toUpperCase() + s.slice(1)}</button>
+          ))}
+        </span>
+        <span className="st-chip">{south.assembly.label} — R{south.assembly.rValue}</span>
+      </>
+    );
+  }
+  if (chapter === 'frame') {
+    const current = resolveFrameType(spec, 1);
+    return (
+      <>
+        <span className="st-toolbar-label">Frame</span>
+        <span className="st-tool-group">
+          {Object.entries(FRAME_TYPES).map(([k, f]) => (
+            <button key={k} className={`st-pill ${current === k ? 'on' : ''}`} onClick={() => onFrame(k)}>{f.green ? '🌿 ' : ''}{f.label}</button>
+          ))}
+        </span>
+      </>
+    );
+  }
+  if (chapter === 'roof') {
+    const roofType = shell.roofType || 'gable';
+    const prof = roofProfile(shell);
+    const pitchTwelfths = Math.round((Number(shell.roofPitch) || 0.32) * 12);
+    return (
+      <>
+        <span className="st-toolbar-label">Roof</span>
+        <span className="st-tool-group">
+          {[['gable', 'Gable'], ['shed', 'Shed'], ['hip', 'Hip'], ['flat', 'Flat']].map(([k, label]) => (
+            <button key={k} className={`st-pill ${roofType === k ? 'on' : ''}`} onClick={() => onRoofType(k)}>{label}</button>
+          ))}
+        </span>
+        {roofType === 'shed'
+          ? <span className="st-chip">falls {prof.lowSide || 'north'} · {round1(prof.riseFt)} ft</span>
+          : roofType !== 'flat' && (
+            <label className="st-num">Pitch
+              <input type="range" min="1" max="14" value={pitchTwelfths} onChange={(e) => onPitch(clamp(Number(e.target.value) / 12, 0.02, 1.5))} style={{ accentColor: '#3c6472', width: 90 }} />
+              <span className="st-chip">{pitchTwelfths}/12</span>
+            </label>
+          )}
+      </>
+    );
+  }
+  if (chapter === 'openings') {
+    const counts = { win: 0, door: 0, sky: 0 };
+    (spec.openings || []).forEach((o) => {
+      const p = OPENING_TYPES[o.type] || OPENING_TYPES.window;
+      if (p.roof) counts.sky += 1; else if (p.entry) counts.door += 1; else counts.win += 1;
+    });
+    return (
+      <>
+        <span className="st-toolbar-label">Openings</span>
+        <button className="st-pill" onClick={() => onAddOpening('window')}>+ Window <small>{counts.win} placed</small></button>
+        <button className="st-pill" onClick={() => onAddOpening('door')}>+ Door <small>{counts.door} placed</small></button>
+        <button className="st-pill" onClick={() => onAddOpening('skylight')}>+ Skylight <small>{counts.sky} placed</small></button>
+        <span className="st-toolbar-note">on the {WALL_SIDE_LABELS[openWall] || openWall} wall — tap one on the model to edit it</span>
+      </>
+    );
+  }
+  if (chapter === 'systems') {
+    const u = utilitiesOf(spec);
+    const heatName = { rocket_mass: 'Rocket mass heater', masonry: 'Masonry heater', wood_stove: 'Wood stove', minisplit: 'Mini-split' }[u.heatSource] || u.heatSource;
+    const waterName = { well: 'Drilled well', catchment: 'Rain catchment', municipal: 'Municipal' }[u.waterSource] || u.waterSource;
+    const powerName = { offgrid: 'Off-grid solar', hybrid: 'Grid-tied solar', grid: 'Grid' }[u.powerMode] || u.powerMode;
+    return (
+      <>
+        <span className="st-toolbar-label">Systems</span>
+        <button className="st-chip" style={{ border: 'none', cursor: 'pointer', font: 'inherit' }} onClick={onMore}>Heat — {heatName}</button>
+        <button className="st-chip" style={{ border: 'none', cursor: 'pointer', font: 'inherit' }} onClick={onMore}>Water — {waterName}</button>
+        <button className="st-chip" style={{ border: 'none', cursor: 'pointer', font: 'inherit' }} onClick={onMore}>Power — {powerName}</button>
+      </>
+    );
+  }
+  if (chapter === 'finishes') {
+    const south = resolveWallSide(spec, 'south');
+    return (
+      <>
+        <span className="st-toolbar-label">Finishes</span>
+        <span className="st-tool-group">
+          {Object.values(CLADDING_TYPES).slice(0, 6).map((c) => (
+            <button key={c.key} className={`st-pill ${south.cladding === c.key ? 'on' : ''}`} onClick={() => onCladding(c.key)}>{c.green ? '🌿 ' : ''}{c.label}</button>
+          ))}
+        </span>
+      </>
+    );
+  }
+  return <span className="st-toolbar-label">{chapter}</span>;
+}
