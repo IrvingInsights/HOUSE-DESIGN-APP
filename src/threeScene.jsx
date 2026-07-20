@@ -1749,23 +1749,33 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             }
             return cap;
           };
+          // On a MULTI-storey house the glass face tops out at the GROUND
+          // storey's ceiling — a sunspace is a ground-floor room, not a
+          // curtain wall (Daniel: "the slant goes to the 2nd floor — it
+          // should not"). A single-storey design keeps the classic
+          // climb-to-the-eave clerestory. Where the roofline stands HIGHER
+          // than the glass ceiling (the wedge under an attached lean-to),
+          // plain wall fills the gap — bayWallTops carries that upper line.
+          const glassCeil = Math.ceil(storeys) > 1 ? elev2 : Infinity;
           const bayTops = [];
+          const bayWallTops = [];
           for (let b = 0; b < bays; b += 1) {
             const a0 = alongAt(b / bays);
             const a1 = alongAt((b + 1) / bays);
-            let top = Math.min(eaveH, Math.min(roofAtAlong(a0, 0), roofAtAlong(a1, 0)) + JOINTS.ROOF_SLACK,
+            let topRoof = Math.min(eaveH, Math.min(roofAtAlong(a0, 0), roofAtAlong(a1, 0)) + JOINTS.ROOF_SLACK,
               glazeCapAt(a0 + 0.1), glazeCapAt(a1 - 0.1));
             // run to a TRUE fixed point — a fixed 4 passes stopped 0.05 ft
             // short on a roof rising inward (each pass probes at the previous
             // top's inset, slightly outside the final answer; the fuzz
             // battery caught the sliver). Monotonic, so break on stillness.
             for (let it = 0; it < 12; it += 1) {
-              const prev = top;
-              const ins = Math.max(0, top - kneeH) * Math.tan(tiltRad);
-              top = Math.min(top, Math.min(roofAtAlong(a0, ins), roofAtAlong(a1, ins)) + JOINTS.ROOF_SLACK);
-              if (prev - top < 0.01) break;
+              const prev = topRoof;
+              const ins = Math.max(0, Math.min(topRoof, glassCeil) - kneeH) * Math.tan(tiltRad);
+              topRoof = Math.min(topRoof, Math.min(roofAtAlong(a0, ins), roofAtAlong(a1, ins)) + JOINTS.ROOF_SLACK);
+              if (prev - topRoof < 0.01) break;
             }
-            bayTops.push(top);
+            bayTops.push(Math.min(topRoof, glassCeil));
+            bayWallTops.push(topRoof);
           }
           const visible = bayTops.map((t) => t - kneeH >= 1.5);
           if (!visible.some(Boolean)) return; // no headroom anywhere on this wall
@@ -1795,6 +1805,21 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               const near = [i - 1, i].filter((bb) => bb >= 0 && bb < bays && visible[bb]);
               if (!near.length) continue;
               bandPart(slantedBox(alongAt(i / bays), 0.3, Math.min(...near.map(gapOf)), 0.24, frameMat));
+            }
+            // plain WALL fills from the glass ceiling up to a HIGHER roofline
+            // (the wedge under an attached lean-to) — bay by bay, in the
+            // wall's own material, so the face is glass below and wall above
+            // instead of glass climbing to the 2nd floor.
+            for (let b = 0; b < bays; b += 1) {
+              const yBot = visible[b] ? bayTops[b] : kneeH;
+              const hWall = bayWallTops[b] - yBot;
+              if (hWall < 0.3) continue;
+              const alongCenter = alongAt((b + 0.5) / bays);
+              const tWall = rSg.thicknessFt || 0.7;
+              const m = horizNS
+                ? box(bayLen - 0.02, hWall, tWall, width / 2 + alongCenter, yBot + hWall / 2, side === 'south' ? depth - tWall / 2 : tWall / 2, wallMatFor(side))
+                : box(tWall, hWall, bayLen - 0.02, side === 'east' ? width - tWall / 2 : tWall / 2, yBot + hWall / 2, depth / 2 + alongCenter, wallMatFor(side));
+              bandPart(m);
             }
           }
           // HEAVY greenhouse framing — with a structural frame chosen, the
