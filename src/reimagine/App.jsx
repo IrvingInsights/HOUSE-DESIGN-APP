@@ -57,7 +57,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 134 · Jul 19';
+const UPDATE_STAMP = 'update 135 · Jul 19';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -748,8 +748,8 @@ export default function App() {
     const plan = planNewRoomPlacements(spec, [preset], level);
     if (!plan.ops.length) return;
     applyOps(plan.ops);
-    setRoomNote(plan.grew
-      ? `Added the ${plan.names[0]} and grew the house to ${plan.newW} × ${plan.newD} ft to fit it — your other rooms stayed put.`
+    setRoomNote((plan.unplaced || []).length
+      ? `Added the ${plan.names[0]} — no free floor, so it landed mid-plan overlapping. Drag rooms apart, shrink something, or grow the Shape; the walls and foundation stayed exactly where you set them.`
       : `Added the ${plan.names[0]}${level !== 1 ? ` on the ${floorLabel(spec, level).toLowerCase()}` : ''}.`);
   };
   const removeObject = (obj) => {
