@@ -1101,34 +1101,39 @@ export function planNewRoomPlacements(spec, newRooms, level = 1) {
   // Only rooms on the SAME floor collide — each storey packs independently.
   const virtualRooms = (spec.rooms || []).filter((r) => Number(r.level || 1) === level).map((r) => ({ x: Number(r.x), y: Number(r.y), w: Number(r.w), d: Number(r.d) }));
   const taken = new Set((spec.rooms || []).map((r) => r.name));
-  let shellW = Number(spec.shell.widthFt);
-  let shellD = Number(spec.shell.depthFt);
+  const shellW = Number(spec.shell.widthFt);
+  const shellD = Number(spec.shell.depthFt);
   const startW = shellW;
   const startD = shellD;
   const addOps = [];
   const names = [];
+  const unplaced = [];
   for (const nr of newRooms) {
     let name = nr.name;
     let n = 2;
     while (taken.has(name)) { name = `${nr.name} ${n}`; n += 1; }
     taken.add(name);
     names.push(name);
-    const fpForSpots = hasCustomFootprint(spec) && shellW === Number(spec.shell.widthFt) && shellD === Number(spec.shell.depthFt) ? footprintPolygon(spec) : null;
+    const fpForSpots = hasCustomFootprint(spec) ? footprintPolygon(spec) : null;
     let spot = findFreeSpot(shellW, shellD, virtualRooms, nr.w, nr.d, fpForSpots);
+    let fit = true;
     if (!spot) {
-      if (nr.w > shellW - 2) shellW = clamp(Math.ceil(nr.w + 2), 18, 120);
-      const bottom = virtualRooms.length ? Math.max(...virtualRooms.map((r) => r.y + r.d)) : 1;
-      const y = Math.round((bottom + 0.5) * 2) / 2;
-      shellD = clamp(Math.max(shellD, Math.ceil(y + nr.d + 1)), 18, 80);
-      spot = { x: 1, y };
+      // NEVER grow the shell — or the foundation under it — because a room
+      // was added; the walls are the person's decision (Daniel: "Stop
+      // bumping out the foundation when i add a room"). No free floor =
+      // the room lands mid-plan, overlapping, clearly the person's to
+      // resolve: drag rooms apart, shrink something, or grow the Shape.
+      fit = false;
+      spot = {
+        x: Math.max(0.5, Math.round(((shellW - nr.w) / 2) * 2) / 2),
+        y: Math.max(0.5, Math.round(((shellD - nr.d) / 2) * 2) / 2)
+      };
     }
     virtualRooms.push({ x: spot.x, y: spot.y, w: nr.w, d: nr.d });
+    if (!fit) unplaced.push(name);
     addOps.push({ type: 'add_room', name, category: nr.type, w: nr.w, d: nr.d, x: spot.x, y: spot.y, level });
   }
-  const growOps = [];
-  if (shellW !== startW) growOps.push({ type: 'set_shell', field: 'widthFt', value: String(shellW) });
-  if (shellD !== startD) growOps.push({ type: 'set_shell', field: 'depthFt', value: String(shellD) });
-  return { ops: [...growOps, ...addOps], names, grew: growOps.length > 0, newW: shellW, newD: shellD };
+  return { ops: addOps, names, grew: false, unplaced, newW: startW, newD: startD };
 }
 
 // Interior partitions implied by the room layout: where two rooms on one floor
