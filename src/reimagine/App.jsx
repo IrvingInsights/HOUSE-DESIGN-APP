@@ -57,7 +57,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 137 · Jul 19';
+const UPDATE_STAMP = 'update 138 · Jul 20';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1450,7 +1450,11 @@ export default function App() {
               onAddFloor={addFloor} onRemoveFloor={removeFloor}
               onAddRoomPreset={addRoomPreset}
               onFoundation={chooseFoundation}
-              onSelectWall={(side) => { setSelectedId(`wall-${side}`); setViewMode('3d'); }}
+              onSelectWall={(side) => {
+                const lv = Math.max(1, activeFloor);
+                setSelectedId(`wall-${side}${lv > 1 ? (lv === 2 ? '-u' : `-u${lv}`) : ''}`);
+                setViewMode('3d');
+              }}
               onFrame={setFrame}
               onRoofType={setRoofType} onPitch={setRoofPitch} onShedFall={setShedFall}
               onAddOpening={(type) => addOpening(openWall, type, Math.max(1, activeFloor))}
@@ -1460,6 +1464,9 @@ export default function App() {
               onMore={() => setMoreOpen(true)}
               activeFloor={activeFloor}
               onPickStorey={pickStorey}
+              onPlaceOutdoorPad={placeOutdoorPad} onPlacePad={placeSlabPad} onPlaceRun={placeFoundationRun}
+              fitInfo={fitWorthIt ? fitPreview : null} onFitWalls={fitWalls}
+              onPickWall={setOpenWall} onGreenhouse={makeGreenhouseSouth}
             />
             <button className={`st-more ${moreOpen ? 'on' : ''}`} onClick={() => setMoreOpen((v) => !v)}>
               {moreOpen ? '× Close' : 'More ▾'}
@@ -3056,7 +3063,7 @@ function StoreysControls({ spec, floors, hasBasement, activeFloor, onSelectFloor
   // onW/onD null = the size is not this row's to edit (the basement follows
   // the ground floor) — show the numbers as plain text, never a dead input.
   const row = (lvl, name, w, d, h, sizeMin, onW, onD) => (
-    <div className={`rz-storey-row${activeFloor === lvl ? ' on' : ''}`}>
+    <div className={`rz-storey-row${activeFloor === lvl ? ' on' : ''}`} data-cap="cap-storeys-numbers">
       <button type="button" className="rz-storey-name" title="Show this floor on the plan" onClick={() => onSelectFloor(lvl)}>{name}</button>
       <div className="rz-run-size">
         {onW && onD ? (
@@ -3183,7 +3190,7 @@ function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAd
           </button>
         ))}
       </div>
-      <label className="rz-field">
+      <label className="rz-field" data-cap="cap-openings-fancy">
         <span>Something fancier</span>
         <select
           value=""
@@ -3239,7 +3246,7 @@ function SystemsControls({ spec, derived, onUtility }) {
           <option value="town">Town main — simplest</option>
         </select>
       </label>
-      <label className="rz-field rz-field-num">
+      <label className="rz-field rz-field-num" data-cap="cap-systems-tank">
         <span>Storage tank</span>
         <NumInput value={Number(u.tankGal) || 0} min={0} max={50000} step={100} unit="gal" onCommit={(v) => onUtility('tankGal', v)} />
       </label>
@@ -3328,7 +3335,7 @@ function FinishesControls({ spec, derived, onFlooring, onSubfloor, onCladding, o
   const claddingMixed = new Set(claddingVals).size > 1;
   return (
     <div className="rz-found">
-      <div className="rz-found-head">Colors</div>
+      <div className="rz-found-head" data-cap="cap-finishes-colors">Colors</div>
       <FinishColorSelect spec={spec} field="wallColorHex" label="Walls — plaster / limewash tint" onShell={onShell} />
       <FinishColorSelect spec={spec} field="roofColorHex" label="Roof color" onShell={onShell} />
       <FinishColorSelect spec={spec} field="floorColorHex" label="Floor color" onShell={onShell} />
@@ -3369,7 +3376,7 @@ function FinishesControls({ spec, derived, onFlooring, onSubfloor, onCladding, o
       </label>
       <div className="rz-shape-note">Sets every wall's outer face at once. To give one wall its own look, tap it in the Shell chapter (wall by wall).</div>
 
-      <div className="rz-found-head" style={{ marginTop: 12 }}>New or salvaged</div>
+      <div className="rz-found-head" style={{ marginTop: 12 }} data-cap="cap-finishes-reclaimed">New or salvaged</div>
       {RECLAIMED_ITEMS.map((item) => (
         <label key={item.key} className="rz-nowall">
           <input type="checkbox" checked={Boolean(reclaimed[item.key])} onChange={(e) => onReclaimed(item.key, e.target.checked)} />
@@ -3461,7 +3468,7 @@ function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, on
       </div>
 
       {runs.length > 0 && (
-        <div className="rz-found-list">
+        <div className="rz-found-list" data-cap="cap-foundation-run-list">
           {runs.map((el) => (
             <div key={el.id} className={`rz-found-run ${selectedId === el.id ? 'sel' : ''}`}>
               <div className="rz-found-run-top">
@@ -3656,7 +3663,7 @@ function WallsControls({ spec, floors, level = 1, wallSections, onAllWalls, onSh
         <div className="rz-shape-note">A round wall has no straight sections — its construction is set per side (the N/S/E/W quarters above).</div>
       ) : (
         <>
-          <label className="rz-field">
+          <label className="rz-field" data-cap="cap-walls-split">
             <span>Split a wall into three sections</span>
             <select value="" onChange={(e) => { if (e.target.value) onSplitWall(e.target.value); }}>
               <option value="">Pick a wall to split…</option>
@@ -4062,7 +4069,7 @@ function DrainageControls({ spec, derived, roofType, onGutters, onDischarge }) {
     ? `the low (${drainage.lowEave}) eave`
     : roofType === 'gable' ? 'both long eaves' : 'the eaves';
   return (
-    <div className="rz-drainage">
+    <div className="rz-drainage" data-cap="cap-roof-drainage">
       <div className="rz-found-head">Drainage — where the water goes</div>
       <label className="rz-field">
         <span>Gutters</span>
@@ -4156,7 +4163,9 @@ function SiteQuickRow({
   chapter, spec, derived, floors, openWall, activeFloor,
   onShape, onSizeShell, onAddFloor, onRemoveFloor, onAddRoomPreset,
   onFoundation, onSelectWall, onFrame, onRoofType, onPitch, onShedFall,
-  onAddOpening, onCladding, onJump, onMore, onPickStorey
+  onAddOpening, onCladding, onJump, onMore, onPickStorey,
+  onPlaceOutdoorPad, onPlacePad, onPlaceRun, fitInfo, onFitWalls,
+  onPickWall, onGreenhouse
 }) {
   const shell = spec.shell || {};
   if (chapter === 'shape') {
@@ -4165,35 +4174,44 @@ function SiteQuickRow({
     return (
       <>
         <span className="st-toolbar-label">Shape</span>
-        <span className="st-tool-group">
+        <span className="st-tool-group" data-cap="cap-shape-outline">
           {[['rect', 'Rectangle'], ['l', 'L'], ['t', 'T'], ['u', 'U'], ['round', 'Round']].map(([k, label]) => (
             <button key={k} className={`st-pill ${active === k ? 'on' : ''}`} onClick={() => onShape(k)}>{label}</button>
           ))}
         </span>
-        <label className="st-num">Width
+        <label className="st-num" data-cap="cap-shape-size">Width
           <input key={`w${shell.widthFt}`} defaultValue={Math.round(Number(shell.widthFt) || 0)} onBlur={(e) => onSizeShell(e.target.value, shell.depthFt)} onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }} />
         </label>
         <label className="st-num">Depth
           <input key={`d${shell.depthFt}`} defaultValue={Math.round(Number(shell.depthFt) || 0)} onBlur={(e) => onSizeShell(shell.widthFt, e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }} />
         </label>
+        {fitInfo && onFitWalls && (
+          <button className="st-pill" data-cap="cap-shape-fit-walls" title="Pull the walls in to hug the rooms — undoes the slack a big drag left behind"
+            onClick={onFitWalls}>Fit walls to rooms<small>{fitInfo.W}′ × {fitInfo.D}′</small></button>
+        )}
       </>
     );
   }
   if (chapter === 'storeys') {
+    const hasBasement = basementInfo(shell).present;
     return (
       <>
         <span className="st-toolbar-label">Storeys</span>
-        <button className="st-stepper" onClick={onRemoveFloor} disabled={floors <= 1}>−</button>
+        <button className="st-stepper" data-cap="cap-storeys-count" onClick={onRemoveFloor} disabled={floors <= 1}>−</button>
         <span className="st-chip"><b>{floors}</b></span>
         <button className="st-stepper" onClick={onAddFloor} disabled={floors >= 3}>+</button>
-        <span className="st-tool-group">
+        <span className="st-tool-group" data-cap="cap-storeys-pick">
           {Array.from({ length: floors }, (_, i) => i + 1).map((f) => (
             <button key={f} className={`st-pill ${activeFloor === f ? 'on' : ''}`}
               title={f <= 1 ? 'Pick up the ground outline — drag its edges on the plan' : 'Pick up this storey’s outline — drag it, or its corners, on the plan'}
               onClick={() => onPickStorey(f)}>{floorLabel(spec, f)}</button>
           ))}
         </span>
-        <span className="st-toolbar-note">pick a storey — its outline is in your hand on the plan</span>
+        <button className={`st-pill ${hasBasement ? 'on' : ''}`} data-cap="cap-storeys-basement"
+          title="A full storey below grade — it IS the foundation choice"
+          onClick={() => onFoundation(hasBasement ? (utilitiesOf(spec).foundationType || 'rubble') : 'basement')}>
+          Basement<small>{hasBasement ? 'built — tap to remove' : 'dig one below'}</small></button>
+        <button className="st-pill" data-cap="cap-more-storeys" onClick={onMore}>+ more…<small>each floor’s numbers</small></button>
       </>
     );
   }
@@ -4207,20 +4225,38 @@ function SiteQuickRow({
           <span key={r.id} className="st-chip">{r.name} <b>{Math.round((Number(r.w) || 0) * (Number(r.d) || 0))} sf</b></span>
         ))}
         {(spec.rooms || []).length > chips.length && <span className="st-toolbar-note">+{(spec.rooms || []).length - chips.length} more</span>}
-        <button className="st-pill" onClick={onMore}>+ add room</button>
+        <button className="st-pill" data-cap="cap-more-rooms" onClick={onMore}>+ add room<small>stairs · decks too</small></button>
       </>
     );
   }
   if (chapter === 'foundation') {
-    const current = utilitiesOf(spec).foundationType || 'rubble';
+    const current = basementInfo(shell).present ? 'basement' : (utilitiesOf(spec).foundationType || 'rubble');
     return (
       <>
         <span className="st-toolbar-label">Foundation</span>
-        <span className="st-tool-group">
+        <span className="st-tool-group" data-cap="cap-foundation-main-type">
           {[['rubble', 'Rubble trench', 'stone + stem wall'], ['stemwall', 'Stem wall', 'concrete on footing'], ['slab', 'Slab', 'insulated pour'], ['basement', 'Basement', 'full storey down']].map(([k, label, note]) => (
             <button key={k} className={`st-pill ${current === k ? 'on' : ''}`} onClick={() => onFoundation(k)}>{label}<small>{note}</small></button>
           ))}
         </span>
+        <span className="st-tool-group" data-cap="cap-foundation-outdoor-pad">
+          {OUTDOOR_PADS.map((pad) => (
+            <button key={pad.name} className="st-pill" title={`A ${pad.w}×${pad.d} ft slab pad — lands beside the house, drag it anywhere`}
+              onClick={() => onPlaceOutdoorPad(pad)}>+ {pad.name}<small>{pad.w} × {pad.d} ft</small></button>
+          ))}
+        </span>
+        <button className="st-pill" data-cap="cap-foundation-slab" title={FOUNDATION_RUN_TYPES.slabpad.note}
+          onClick={onPlacePad}>+ Slab — any size<small>2 ft past the house</small></button>
+        <span className="st-tool-group" data-cap="cap-foundation-run">
+          {FOUNDATION_RUN_PRESETS.map((preset) => {
+            const t = FOUNDATION_RUN_TYPES[preset.construction];
+            return (
+              <button key={preset.construction} className="st-pill" title={`${t.label} — ${t.note}`}
+                onClick={() => onPlaceRun(preset)}>+ {preset.name}<small>${Math.round(t.costLf + t.stemCostLfFt * preset.h)}/ft</small></button>
+            );
+          })}
+        </span>
+        <button className="st-pill" data-cap="cap-more-foundation" onClick={onMore}>+ more…<small>sizes · stem height · list</small></button>
       </>
     );
   }
@@ -4229,12 +4265,15 @@ function SiteQuickRow({
     return (
       <>
         <span className="st-toolbar-label">Walls</span>
-        <span className="st-tool-group">
+        <span className="st-tool-group" data-cap="cap-walls-side">
           {WALL_SIDES.map((s) => (
-            <button key={s} className="st-pill" title={`${WALL_SIDE_LABELS[s]} wall — tap it on the model, or here`} onClick={() => onSelectWall(s)}>{s[0].toUpperCase() + s.slice(1)}</button>
+            <button key={s} className="st-pill" title={`${WALL_SIDE_LABELS[s]} wall${activeFloor > 1 ? ` — floor ${activeFloor}` : ''} — tap it on the model, or here`} onClick={() => onSelectWall(s)}>{s[0].toUpperCase() + s.slice(1)}</button>
           ))}
         </span>
         <span className="st-chip">{south.assembly.label} — R{south.assembly.rValue}</span>
+        <button className="st-pill" data-cap="cap-walls-greenhouse" title="Kneewall + slanted glass on the south face — the sun trap"
+          onClick={onGreenhouse}>☀ Greenhouse south</button>
+        <button className="st-pill" data-cap="cap-more-walls" onClick={onMore}>+ more…<small>heights · split a wall</small></button>
       </>
     );
   }
@@ -4243,11 +4282,12 @@ function SiteQuickRow({
     return (
       <>
         <span className="st-toolbar-label">Frame</span>
-        <span className="st-tool-group">
+        <span className="st-tool-group" data-cap="cap-frame-type">
           {Object.entries(FRAME_TYPES).map(([k, f]) => (
             <button key={k} className={`st-pill ${current === k ? 'on' : ''}`} onClick={() => onFrame(k)}>{f.green ? '🌿 ' : ''}{f.label}</button>
           ))}
         </span>
+        <button className="st-pill" data-cap="cap-more-frame" onClick={onMore}>+ more…<small>per-floor · bay spacing</small></button>
       </>
     );
   }
@@ -4258,19 +4298,30 @@ function SiteQuickRow({
     return (
       <>
         <span className="st-toolbar-label">Roof</span>
-        <span className="st-tool-group">
+        <span className="st-tool-group" data-cap="cap-roof-shape">
           {[['gable', 'Gable'], ['shed', 'Shed'], ['hip', 'Hip'], ['flat', 'Flat']].map(([k, label]) => (
             <button key={k} className={`st-pill ${roofType === k ? 'on' : ''}`} onClick={() => onRoofType(k)}>{label}</button>
           ))}
         </span>
         {roofType === 'shed'
-          ? <span className="st-chip">falls {prof.lowSide || 'north'} · {round1(prof.riseFt)} ft</span>
+          ? (
+            <>
+              <span className="st-tool-group" data-cap="cap-roof-shed-fall">
+                {[['north', 'N'], ['south', 'S'], ['east', 'E'], ['west', 'W']].map(([k, label]) => (
+                  <button key={k} className={`st-pill ${(prof.lowSide || 'north') === k ? 'on' : ''}`} title={`Rain runs to the ${k} side — that wall goes low`}
+                    onClick={() => onShedFall(k, Math.max(2, round1(prof.riseFt) || 2))}>↓ {label}<small>falls {k}</small></button>
+                ))}
+              </span>
+              <span className="st-chip">{round1(prof.riseFt)} ft fall</span>
+            </>
+          )
           : roofType !== 'flat' && (
-            <label className="st-num">Pitch
+            <label className="st-num" data-cap="cap-roof-pitch">Pitch
               <input type="range" min="1" max="14" value={pitchTwelfths} onChange={(e) => onPitch(clamp(Number(e.target.value) / 12, 0.02, 1.5))} style={{ accentColor: '#3c6472', width: 90 }} />
               <span className="st-chip">{pitchTwelfths}/12</span>
             </label>
           )}
+        <button className="st-pill" data-cap="cap-more-roof" onClick={onMore}>+ more…<small>insulation · overhang · gutters</small></button>
       </>
     );
   }
@@ -4283,10 +4334,16 @@ function SiteQuickRow({
     return (
       <>
         <span className="st-toolbar-label">Openings</span>
-        <button className="st-pill" onClick={() => onAddOpening('window')}>+ Window <small>{counts.win} placed</small></button>
+        <span className="st-tool-group" data-cap="cap-openings-wall">
+          {WALL_SIDES.map((s) => (
+            <button key={s} className={`st-pill ${openWall === s ? 'on' : ''}`} title={`Put the next opening on the ${WALL_SIDE_LABELS[s]} wall`}
+              onClick={() => onPickWall(s)}>{s[0].toUpperCase() + s.slice(1)}</button>
+          ))}
+        </span>
+        <button className="st-pill" data-cap="cap-openings-add" onClick={() => onAddOpening('window')}>+ Window <small>{counts.win} placed</small></button>
         <button className="st-pill" onClick={() => onAddOpening('door')}>+ Door <small>{counts.door} placed</small></button>
         <button className="st-pill" onClick={() => onAddOpening('skylight')}>+ Skylight <small>{counts.sky} placed</small></button>
-        <span className="st-toolbar-note">on the {WALL_SIDE_LABELS[openWall] || openWall} wall — tap one on the model to edit it</span>
+        <button className="st-pill" data-cap="cap-more-openings" onClick={onMore}>fancier…<small>french · raked · dormers</small></button>
       </>
     );
   }
@@ -4295,12 +4352,14 @@ function SiteQuickRow({
     const heatName = { rocket_mass: 'Rocket mass heater', masonry: 'Masonry heater', wood_stove: 'Wood stove', minisplit: 'Mini-split' }[u.heatSource] || u.heatSource;
     const waterName = { well: 'Drilled well', catchment: 'Rain catchment', municipal: 'Municipal' }[u.waterSource] || u.waterSource;
     const powerName = { offgrid: 'Off-grid solar', hybrid: 'Grid-tied solar', grid: 'Grid' }[u.powerMode] || u.powerMode;
+    const wasteName = { septic: 'Septic + leach field', composting: 'Composting + greywater', reedbed: 'Reed bed' }[u.wasteMethod] || u.wasteMethod;
     return (
       <>
         <span className="st-toolbar-label">Systems</span>
-        <button className="st-chip" style={{ border: 'none', cursor: 'pointer', font: 'inherit' }} onClick={onMore}>Heat — {heatName}</button>
-        <button className="st-chip" style={{ border: 'none', cursor: 'pointer', font: 'inherit' }} onClick={onMore}>Water — {waterName}</button>
-        <button className="st-chip" style={{ border: 'none', cursor: 'pointer', font: 'inherit' }} onClick={onMore}>Power — {powerName}</button>
+        <button className="st-chip" data-cap="cap-systems-heat" style={{ border: 'none', cursor: 'pointer', font: 'inherit' }} onClick={onMore}>Heat — {heatName}</button>
+        <button className="st-chip" data-cap="cap-systems-water" style={{ border: 'none', cursor: 'pointer', font: 'inherit' }} onClick={onMore}>Water — {waterName}</button>
+        <button className="st-chip" data-cap="cap-systems-waste" style={{ border: 'none', cursor: 'pointer', font: 'inherit' }} onClick={onMore}>Waste — {wasteName}</button>
+        <button className="st-chip" data-cap="cap-systems-power" style={{ border: 'none', cursor: 'pointer', font: 'inherit' }} onClick={onMore}>Power — {powerName}</button>
       </>
     );
   }
@@ -4309,11 +4368,13 @@ function SiteQuickRow({
     return (
       <>
         <span className="st-toolbar-label">Finishes</span>
-        <span className="st-tool-group">
-          {Object.values(CLADDING_TYPES).slice(0, 6).map((c) => (
+        <span className="st-tool-group" data-cap="cap-finishes-cladding">
+          {Object.values(CLADDING_TYPES).map((c) => (
             <button key={c.key} className={`st-pill ${south.cladding === c.key ? 'on' : ''}`} onClick={() => onCladding(c.key)}>{c.green ? '🌿 ' : ''}{c.label}</button>
           ))}
         </span>
+        <button className="st-chip" data-cap="cap-finishes-floor" style={{ border: 'none', cursor: 'pointer', font: 'inherit' }} onClick={onMore}>Floor — {FLOORING_TYPES[resolveFlooring(spec)]?.label || '—'}</button>
+        <button className="st-pill" data-cap="cap-more-finishes" onClick={onMore}>+ more…<small>colors · salvaged</small></button>
       </>
     );
   }

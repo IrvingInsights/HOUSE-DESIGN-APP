@@ -86,10 +86,18 @@
 .st-toolbar {
   position: absolute; top: 52px; left: 156px; right: 296px;
   border-radius: 14px;
-  padding: 0 14px; z-index: 5; min-height: 54px;
-  display: flex; align-items: center; gap: 14px;
-  overflow-x: auto; overflow-y: hidden;
+  padding: 6px 14px; z-index: 5; min-height: 54px;
+  display: flex; align-items: center; gap: 4px 12px;
+  /* WRAP, never hide: a sideways scroller buries controls (the update-114
+     lesson). Control-heavy chapters wrap to a second visible row; anything
+     past ~2 rows scrolls vertically with the next row peeking as the cue. */
+  flex-wrap: wrap;
+  overflow-x: hidden; overflow-y: auto;
+  max-height: 190px;
 }
+/* Inside the wrapping toolbar a group must not wrap as one solid block
+   (that stacked one group per row) — let its pills pack the rows densely. */
+.st-toolbar .st-tool-group { display: contents; }
 @media (max-width: 1120px) { .st-toolbar { right: 16px; } }
 .st-toolbar-label {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
@@ -207,6 +215,10 @@
 .st-look .rz-history { display: none; }       /* undo/redo live top-left row */
 .st-look .rz-floors,
 .st-look .rz-floors-shifted { display: none; }/* floors live in the dock     */
+
+/* the self-update chip sits at top:60 in classic — dead center over the site
+   toolbar. Down by the dock instead, where nothing else lives. */
+.st-look .rz-update { top: auto; bottom: 72px; }
 
 .st-look .rz-trail { display: none; }
 .st-look.st-more-open .rz-trail {
