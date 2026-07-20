@@ -265,7 +265,7 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
               floor drawn later. Each label sits at the first spot of its
               floor that no HIGHER floor covers — center first, then the
               west/east quarters, then the north/south strips. */}
-          {storeyList.map((b) => {
+          {(() => { const placedLabels = []; return storeyList.map((b) => {
             const isDrag = drag && drag.lv === b.lv && drag.ghost?.rect;
             const r = isDrag ? drag.ghost.rect : b.rect;
             const covered = (px, py) => storeyList.some((o) => {
@@ -280,7 +280,13 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
               [r.x + r.w / 2, r.y + 1.7],
               [r.x + r.w / 2, r.y + r.d - 2.6]
             ];
-            const [lx, ly] = spots.find(([px, py]) => !covered(px, py)) || spots[0];
+            let [lx, ly] = spots.find(([px, py]) => !covered(px, py)) || spots[0];
+            // a FULL-footprint storey covers every candidate below it — both
+            // labels then fell back to dead center and printed over each
+            // other (Daniel's garbled "2Gd dhadr" screenshot). Colliding
+            // labels now stack downward, one clear line each.
+            while (placedLabels.some(([qx, qy]) => Math.abs(qx - lx) < 12 && Math.abs(qy - ly) < 2.4)) ly += 2.8;
+            placedLabels.push([lx, ly]);
             return (
               <g key={`t${b.lv}`} pointerEvents="none">
                 <text x={lx} y={ly - 0.2} textAnchor="middle" fontSize="1.25" fill="#22251F" fontWeight="600">
@@ -293,7 +299,7 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
                 )}
               </g>
             );
-          })}
+          }); })()}
           {/* edge handles, drawn AFTER every block so the picked floor's
               handles never hide under a floor drawn later. The ground floor
               grows from its east/south edges (the west/north corner is
