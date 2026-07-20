@@ -186,6 +186,12 @@ export function resolveWallSide(spec, side, level = 1, edgeKey = null) {
     if (!seg) return base;
     const segAssemblyKey = seg.assembly && WALL_ASSEMBLIES[seg.assembly] ? seg.assembly : base.assemblyKey;
     const segAssembly = WALL_ASSEMBLIES[segAssemblyKey] || base.assembly;
+    // A sun-glazed SECTION resolves exactly like a sun-glazed side: its
+    // heightFt IS the kneewall (glass climbs from there to the roof), so
+    // every consumer of the glazed-side convention — wall builders, the
+    // glazing band, cost, solar — works per-section with no special cases.
+    // The side's own height/roof math never sees this (read-time only).
+    const segGlazed = Boolean(seg.sunGlazing);
     return {
       ...base,
       assemblyKey: segAssemblyKey,
@@ -194,6 +200,11 @@ export function resolveWallSide(spec, side, level = 1, edgeKey = null) {
       interiorFinish: seg.interiorFinish || base.interiorFinish,
       exteriorFinish: seg.exteriorFinish || base.exteriorFinish,
       cladding: CLADDING_TYPES[seg.cladding] ? seg.cladding : base.cladding,
+      ...(segGlazed ? {
+        sunGlazing: true,
+        sunGlazingTiltDeg: Number(seg.sunGlazingTiltDeg ?? base.sunGlazingTiltDeg ?? 30),
+        heightFt: Number(seg.kneewallFt ?? 2)
+      } : {}),
       segmentKey: edgeKey
     };
   };
@@ -1822,9 +1833,13 @@ export function applyBimOperations(currentSpec, plan) {
       if (segMatch) {
         const segKey = segMatch[1];
         const field = operation.field;
-        const constructionFields = ['assembly', 'thicknessFt', 'cladding', 'interiorFinish', 'exteriorFinish'];
+        // Construction fields PLUS sun glazing — a SECTION of a wall can be
+        // the slanted-glass sun face (kneewall below, tilted glass to the
+        // roof) while the rest of the side stays bale (Daniel: "make part of
+        // this S face slanted glass"). Height/omit stay side-level.
+        const constructionFields = ['assembly', 'thicknessFt', 'cladding', 'interiorFinish', 'exteriorFinish', 'sunGlazing', 'sunGlazingTiltDeg', 'kneewallFt'];
         if (!constructionFields.includes(field)) {
-          warnings.push(`Wall sections take construction fields only (assembly, thickness, finishes) — ${field} applies to the whole side. Target the side (north/south/east/west) instead.`);
+          warnings.push(`Wall sections take construction and glazing fields only — ${field} applies to the whole side. Target the side (north/south/east/west) instead.`);
           rejectedOperations.push(operation);
           continue;
         }
@@ -1835,11 +1850,33 @@ export function applyBimOperations(currentSpec, plan) {
           actions.push(`Wall section ${segKey} matches its side again.`);
           continue;
         }
+        if (field === 'sunGlazing') {
+          const on = operation.value === true || String(operation.value) === 'true' || operation.value === 1 || operation.value === '1';
+          if (!on) {
+            // Un-glazing a section removes its glazing fields — it stands
+            // back up as plain wall in its own (or its side's) construction.
+            const seg = (next.wallSegments || {})[segKey];
+            if (seg) {
+              delete seg.sunGlazing; delete seg.sunGlazingTiltDeg; delete seg.kneewallFt;
+              if (Object.keys(seg).length === 0) delete next.wallSegments[segKey];
+              if (next.wallSegments && Object.keys(next.wallSegments).length === 0) delete next.wallSegments;
+            }
+            actions.push(`Wall section ${segKey} is plain wall again.`);
+            continue;
+          }
+          next.wallSegments ||= {};
+          next.wallSegments[segKey] ||= {};
+          next.wallSegments[segKey].sunGlazing = true;
+          actions.push(`Wall section ${segKey} is now a slanted-glass sun face.`);
+          continue;
+        }
         next.wallSegments ||= {};
         next.wallSegments[segKey] ||= {};
         if (field === 'assembly') next.wallSegments[segKey].assembly = WALL_ASSEMBLIES[operation.value] ? operation.value : 'framed';
         else if (field === 'thicknessFt') next.wallSegments[segKey].thicknessFt = clamp(Number(operation.value), 0.2, 3.5);
         else if (field === 'cladding') next.wallSegments[segKey].cladding = CLADDING_TYPES[operation.value] ? operation.value : 'render';
+        else if (field === 'sunGlazingTiltDeg') next.wallSegments[segKey].sunGlazingTiltDeg = clamp(Number(operation.value) || 0, 0, 45);
+        else if (field === 'kneewallFt') next.wallSegments[segKey].kneewallFt = clamp(Number(operation.value) || 2, 0.5, 8);
         else next.wallSegments[segKey][field] = String(operation.value || '');
         actions.push(`Set wall section ${segKey} ${field} to ${operation.value}.`);
         continue;
