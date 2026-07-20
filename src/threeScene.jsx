@@ -726,7 +726,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             // at eave + depth·pitch, the two slopes falling east and west to
             // eave + EAVE_BEARING at the overhang tips. Modeled EXACTLY.
             const base = wallHeight + JOINTS.EAVE_BEARING;
-            const apex = wallHeight + depth * segPitch; // = makeRoof's extrusion profile, exactly
+            // rise = HALF the slope span × pitch — a 4/12 gable rises 4 per
+            // 12 of RUN, and the run is eave-to-ridge (width/2 here; the
+            // ridge runs north–south at x = width/2). The old depth·pitch
+            // doubled the stated pitch and grew a whole phantom storey of
+            // attic ("the roof is creating an unwanted 3rd floor").
+            const apex = wallHeight + (width / 2) * segPitch; // = makeRoof's extrusion profile, exactly
             const cx = width / 2;
             seg.topAt = (px) => (px <= cx
               ? base + (apex - base) * Math.max(0, (px - X0) / Math.max(0.01, cx - X0))
@@ -2019,14 +2024,31 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           : roofSpec.highWallHeightFt);
         const hLead = eaveAtSpanPos(aLead) + liftPerim;
         const hTail = eaveAtSpanPos(aTail) + liftPerim;
-        const gRise = roofSpec.roofType === 'gable' ? depth * pitchF : 0;
+        const gRise = roofSpec.roofType === 'gable' ? (width / 2) * pitchF : 0;
         const hasBents = !fm.studs && fm.postW > 0;
         const bay = hasBents
           ? clamp(Number(spec.frame?.baySpacingFt) || fm.spacingFt || 8, 4, 16)
           : Math.max(1, fm.spacingFt || 16 / 12);
         const bays = Math.max(1, hasBents ? Math.ceil(bayRun / bay) : Math.round(bayRun / bay));
+        // THE FRAME RESPECTS ROOM SHAPES: a post station within snapping
+        // reach of a room boundary lands ON the boundary — posts belong in
+        // walls and corners, not the middle of a floor. Even spacing is the
+        // fallback where no boundary is near.
+        const roomEdgeSnap = (v, axis, level = 1, tol = 1.25) => {
+          let best = v; let bd = tol;
+          (spec.rooms || []).filter((r) => Number(r.level || 1) === level).forEach((r) => {
+            const es = axis === 'x'
+              ? [Number(r.x) || 0, (Number(r.x) || 0) + (Number(r.w) || 0)]
+              : [Number(r.y) || 0, (Number(r.y) || 0) + (Number(r.d) || 0)];
+            es.forEach((e) => { const dd = Math.abs(e - v); if (dd < bd) { bd = dd; best = e; } });
+          });
+          return best;
+        };
         const stations = [];
-        for (let i = 0; i <= bays; i += 1) stations.push(clamp((bayRun * i) / bays, fm.postW, bayRun - fm.postW));
+        for (let i = 0; i <= bays; i += 1) {
+          const raw = (bayRun * i) / bays;
+          stations.push(clamp(roomEdgeSnap(raw, spanIsZ ? 'x' : 'y'), fm.postW, bayRun - fm.postW));
+        }
 
         // Posts (bents) or studs at each station along BOTH bearing walls.
         const postH = (h) => Math.max(1, h - fm.plateH);
@@ -2240,14 +2262,19 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               const ex0 = p.x + fm.postW / 2; const ex1 = p.x + p.w - fm.postW / 2;
               const ez0 = p.y + fm.postW / 2; const ez1 = p.y + p.d - fm.postW / 2;
               const edgeStations = [];
-              const alongEdge = (a0, a1, fx) => {
+              // under-deck stations snap to the room boundaries of the floor
+              // they stand IN (lv−1), same law as the ground bents
+              const alongEdge = (a0, a1, fx, axis) => {
                 const n = Math.max(1, Math.ceil((a1 - a0) / bay));
-                for (let i = 0; i <= n; i += 1) edgeStations.push(fx(a0 + ((a1 - a0) * i) / n));
+                for (let i = 0; i <= n; i += 1) {
+                  const raw = a0 + ((a1 - a0) * i) / n;
+                  edgeStations.push(fx(clamp(axis ? roomEdgeSnap(raw, axis, Math.max(1, lv - 1)) : raw, a0, a1)));
+                }
               };
-              alongEdge(ex0, ex1, (x) => [x, ez0]);
-              alongEdge(ex0, ex1, (x) => [x, ez1]);
-              alongEdge(ez0, ez1, (z) => [ex0, z]);
-              alongEdge(ez0, ez1, (z) => [ex1, z]);
+              alongEdge(ex0, ex1, (x) => [x, ez0], 'x');
+              alongEdge(ex0, ex1, (x) => [x, ez1], 'x');
+              alongEdge(ez0, ez1, (z) => [ex0, z], 'y');
+              alongEdge(ez0, ez1, (z) => [ex1, z], 'y');
               edgeStations.forEach(([sx, sz]) => {
                 const base = baseUnder(sx, sz);
                 const hPost = floorY - base;
@@ -3105,7 +3132,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const cxm = element.x + element.w / 2;
           const czm = element.y + element.d / 2;
           const inside = cxm >= 0 && cxm <= width && czm >= 0 && czm <= depth;
-          const gRise = depth * Number(spec.shell.roofPitch || 0.32);
+          const gRise = (width / 2) * Number(spec.shell.roofPitch || 0.32);
           let flueTop;
           if (!inside) flueTop = elevation + elementHeight + 6;
           else if (roofSpec.roofType === 'shed') flueTop = shedEaveAt(cxm, czm) + storeyLift + 2.5;
@@ -4042,7 +4069,10 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     }
 
     function makeRoof(width, depth, wallHeight, pitch, material, roofSpec, overhangs) {
-      const rise = depth * pitch;
+      // gable rise = HALF the slope span × pitch (run = eave to ridge, and
+      // the extruded profile's ridge sits at width/2) — depth·pitch doubled
+      // the stated pitch into a phantom extra storey of attic
+      const rise = (width / 2) * pitch;
       const o = overhangs || { north: 1.6, south: 1.6, east: 1.6, west: 1.6 };
       if (roofSpec.roofType === 'shed') {
         // The walls' shed eave line includes the storey lift (the upper bands

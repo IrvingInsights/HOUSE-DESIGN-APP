@@ -49,7 +49,8 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   const touching = law.tiers.filter((b) => b.touches).map((b) => ({ lv: b.lv, s0: b.s0, s1: b.s1, y0: b.floorY, y1: b.topAt((b.s0 + b.s1) / 2) }));
   const setBack = law.tiers.filter((b) => !b.touches).map((b) => ({ lv: b.lv, s0: b.s0, s1: b.s1, y0: b.floorY, y1: b.topAt((b.s0 + b.s1) / 2) }));
   const groundProfileAt = (t) => law.groundTopAt(t);
-  const gableRise = roofType === 'gable' && horiz && storeys === 1 ? (Number(shell.depthFt) || 24) * pitch : 0;
+  // half the slope span × pitch — mirrors the 3D's corrected gable law
+  const gableRise = roofType === 'gable' && horiz && storeys === 1 ? ((Number(shell.widthFt) || 24) / 2) * pitch : 0;
   // the face's top edge — the law's silhouette, plus the classic gable peak
   const topAt = (t) => {
     let v = law.wallTopAt(t);
