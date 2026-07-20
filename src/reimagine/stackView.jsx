@@ -201,11 +201,15 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
   }
 
   const faceBar = (
-    <div className="rz-wallpick">
-      <span>{top
-        ? <>The <b>storeys</b> from straight above (north up) — drag a floor to slide it, pull an edge to resize. Heights live on the side faces.</>
-        : <>The <b>storeys</b> face-on, from the <b>{capWord(face)}</b> — drag a top edge ↕ for height, a side handle ↔ for size, a set-back floor ↔ to slide it.</>}
-      </span>
+    <div
+      className="rz-wallpick"
+      title={top
+        ? 'Straight above, north up. Drag a floor to slide it, pull an edge to resize — heights live on the side faces.'
+        : `Face-on from the ${face}. Drag a top edge ↕ for height, a side handle ↔ for size, a set-back floor ↔ to slide it.`}
+    >
+      {/* a few words only — the full how-to lives in the hover tip (the
+          long sentence grew the chip until it covered the plan itself) */}
+      <span>{top ? <><b>Top</b> · north up</> : <>From the <b>{capWord(face)}</b></>}</span>
       {['top', 'south', 'north', 'east', 'west'].map((s) => (
         <button key={s} type="button" className={s === face ? 'on' : ''} onClick={() => setFace(s)}>{capWord(s)}</button>
       ))}
