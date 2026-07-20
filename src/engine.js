@@ -3419,6 +3419,10 @@ export function sunspacePartitions(spec) {
       const along = (side === 'north' || side === 'south') ? rect.w : rect.d;
       out.push({
         id: room.id, // tapping the wall selects its room
+        // a room can grow one of these per free edge — the render key must be
+        // unique per WALL or React sees duplicate 'greenhouse' keys and may
+        // drop/duplicate children (planView keys on synKey || id)
+        synKey: `${room.id}::swall-${side}`,
         synthetic: true,
         name: `${room.name || 'Greenhouse'} wall`,
         category: 'partition', construction: 'cob', level: 1,
@@ -3761,7 +3765,7 @@ export function detectIssues(spec) {
         return gap < 4;
       });
       if (!pokes && !covered && !glazedNear) {
-        issues.push({ severity: 'warning', title: `${room.name || 'The greenhouse'} has no glass — it’s only a floor zone right now`, owner: 'Natural Builder', system: 'walls', fixId: 'greenhouse-glass', roomId: room.id, fix: 'A greenhouse needs a glazed face. Give the wall it sits against slanted sun glass (one tap below), or drag the room a couple of feet past the wall and the glazed annex builds itself.' });
+        issues.push({ severity: 'warning', title: `${room.name || 'The greenhouse'} has no glass — it’s only a floor zone right now`, owner: 'Natural Builder', system: 'walls', fixId: 'greenhouse-glass', roomId: room.id, fix: 'A greenhouse needs a glazed face. One tap below slides the room past the south wall so its own kneewall + slanted glass build over just its stretch — the house wall behind it keeps its own system and weather face.' });
       }
     });
   }

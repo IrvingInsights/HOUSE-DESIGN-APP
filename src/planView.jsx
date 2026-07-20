@@ -753,7 +753,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
           // Foundation view (drag them under whatever they carry).
           const isContextSubject = context === 'foundation' && raw.category === 'foundation';
           return (
-            <g key={raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
+            <g key={raw.synKey || raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
               <rect
                 x={el.x} y={el.y} width={w} height={d}
                 fill={PLAN_ELEMENT_HEX[raw.category] || '#8a7768'}
