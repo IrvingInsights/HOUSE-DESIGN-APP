@@ -267,8 +267,13 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   return (
     <div className="planWrap rz-elev-wrap">
       {onPickWall && (
-        <div className="rz-wallpick">
-          <span>Looking at the <b>{capWord(wall)} wall</b> from outside{onWallHeight ? ' — drag its top edge ↕ to change the height' : ''}.</span>
+        <div
+          className="rz-wallpick"
+          title={`Looking at the ${wall} wall from outside${onWallHeight ? ' — drag its top edge ↕ to change the height; drag doors and windows right on the face' : ''}.`}
+        >
+          {/* a few words only — the full how-to lives in the hover tip so
+              the chip never grows over the drawing */}
+          <span><b>{capWord(wall)} wall</b> · from outside</span>
           {['south', 'north', 'east', 'west'].map((s) => (
             <button key={s} type="button" className={s === wall ? 'on' : ''} onClick={() => onPickWall(s)}>{capWord(s)}</button>
           ))}
