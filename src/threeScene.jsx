@@ -1050,7 +1050,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       };
       // (ringIsPorch is defined with the roof plan above.)
       const pushSideBoxes = (side, totalH, thickness, place) => {
-        const groundH = Math.max(1, totalH - storeyLift);
+        // A SUN-GLAZED side's opaque wall IS its kneewall — the slanted glass
+        // fills from there to the roof. The shed profile heights ran the wall
+        // to full raked height THROUGH the glass ("where is the greenhouse").
+        const rKnee = resolveWallSide(spec, side, 1);
+        const kneeCap = rKnee.sunGlazing && Number(rKnee.heightFt) > 0 ? Number(rKnee.heightFt) : Infinity;
+        const groundH = Math.max(1, Math.min(totalH - storeyLift, kneeCap));
         // Where an upper storey stands ON this side (its extent touches the
         // side's edge), the ground wall stops at that storey's floor and the
         // storey's own wall carries on — "built up only where the second
@@ -1336,6 +1341,10 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const horizSide = side === 'north' || side === 'south';
           const runMax = horizSide ? width : depth;
           const plates = edgePlateInfo(side);
+          // A SUN-GLAZED side's opaque wall IS its kneewall — the raked
+          // profile ran the wall to full height straight through the glass.
+          const rKneeR = resolveWallSide(spec, side, 1);
+          const kneeCapR = rKneeR.sunGlazing && Number(rKneeR.heightFt) > 0 ? Number(rKneeR.heightFt) : Infinity;
           const bounds = [...new Set([0, runMax, ...plates.filter((p) => p.touches).flatMap((p) => [p.y0, p.y1])])].sort((a, b) => a - b);
           const meshes = [];
           for (let bi = 0; bi < bounds.length - 1; bi += 1) {
@@ -1350,7 +1359,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const eaveAlong = (aa) => (horizSide ? eaveLifted(aa, side === 'north' ? 0 : depth) : eaveLifted(side === 'west' ? 0 : width, aa));
             meshes.push(...wallRunMeshes({
               horizontal: horizSide, thickCenter, t: tSide, a0, a1,
-              hAt: (aa) => Math.max(1, anySetback ? Math.min(eaveAlong(aa) - storeyLift, capY) : eaveAlong(aa)),
+              hAt: (aa) => Math.max(1, Math.min(anySetback ? Math.min(eaveAlong(aa) - storeyLift, capY) : eaveAlong(aa), kneeCapR)),
               mat: wallMatFor(side), gaps: gapsFor(side), yBase: sideReveal[side]
             }));
           }
@@ -1720,11 +1729,32 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           };
           const bays = Math.max(2, Math.round(runLen / 4));
           const bayLen = runLen / bays;
+          // Where a STOREY stands on this stretch of the wall, the glass
+          // stops at that storey's floor — the upper wall is the storey's
+          // wall, not sunspace (unchecked, the bays climbed to the tier cap
+          // high above and stood glass through the 2nd storey's face).
+          const glazeCapAt = (along) => {
+            let cap = Infinity;
+            for (let lv = 2; lv <= Math.ceil(storeys); lv += 1) {
+              if (heightAt(lv) <= 0) continue;
+              const p = upperPlateRect(spec, lv) || { x: 0, y: 0, w: width, d: depth };
+              const touches = side === 'north' ? p.y <= 0.05
+                : side === 'south' ? p.y + p.d >= depth - 0.05
+                : side === 'west' ? p.x <= 0.05
+                : p.x + p.w >= width - 0.05;
+              if (!touches) continue;
+              const s0 = horizNS ? p.x : p.y; const s1 = horizNS ? p.x + p.w : p.y + p.d;
+              const c = (horizNS ? width : depth) / 2 + along;
+              if (c > s0 + 0.05 && c < s1 - 0.05) cap = Math.min(cap, elevAt(lv));
+            }
+            return cap;
+          };
           const bayTops = [];
           for (let b = 0; b < bays; b += 1) {
             const a0 = alongAt(b / bays);
             const a1 = alongAt((b + 1) / bays);
-            let top = Math.min(eaveH, Math.min(roofAtAlong(a0, 0), roofAtAlong(a1, 0)) + JOINTS.ROOF_SLACK);
+            let top = Math.min(eaveH, Math.min(roofAtAlong(a0, 0), roofAtAlong(a1, 0)) + JOINTS.ROOF_SLACK,
+              glazeCapAt(a0 + 0.1), glazeCapAt(a1 - 0.1));
             // run to a TRUE fixed point — a fixed 4 passes stopped 0.05 ft
             // short on a roof rising inward (each pass probes at the previous
             // top's inset, slightly outside the final answer; the fuzz
