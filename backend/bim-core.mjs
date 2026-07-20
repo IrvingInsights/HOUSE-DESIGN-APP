@@ -2607,6 +2607,27 @@ export function applyBimOperations(currentSpec, plan) {
       target.w = Math.max(minDim, Number(operation.w || target.w));
       target.d = Math.max(minDim, Number(operation.d || target.d));
       if (operation.h) target.h = Math.max(0.2, Number(operation.h));
+      // Shrinking a STOREY EXTENT pulls that floor's rooms inside the new
+      // outline RIGHT HERE, in the op — so every door (plan corner drag,
+      // Stack view, number boxes) keeps the size the person set. Before,
+      // only the number-box path pulled rooms; the plan drag left them
+      // outside and the covers-its-rooms heal grew the plate straight back
+      // ("it is forcing the 1st floor shape to match the 2nd" — stale
+      // rooms from an older, deeper house pinned the plate at full size).
+      if (target.category === 'floor' && Number(target.level || 1) >= 2) {
+        const px = Number(target.x) || 0; const py = Number(target.y) || 0;
+        const pw = Number(target.w) || 1; const pd = Number(target.d) || 1;
+        (next.rooms || []).filter((r) => Number(r.level || 1) === Number(target.level)).forEach((r) => {
+          const nw = Math.min(Number(r.w) || 1, pw);
+          const nd = Math.min(Number(r.d) || 1, pd);
+          const nx = clamp(Number(r.x) || 0, px, px + pw - nw);
+          const ny = clamp(Number(r.y) || 0, py, py + pd - nd);
+          if (nw !== Number(r.w)) r.w = nw;
+          if (nd !== Number(r.d)) r.d = nd;
+          if (nx !== Number(r.x)) r.x = nx;
+          if (ny !== Number(r.y)) r.y = ny;
+        });
+      }
       changedIds.push(target.id);
       actions.push(operationDescription({ ...operation, name: target.name }, next));
     } else if (operation.type === 'update_object') {
