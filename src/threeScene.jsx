@@ -1687,8 +1687,10 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // the top INTO the house so the footprint stays honest. Rect footprints
       // v1 (custom outlines: set the side low and ask — noted in TESTING.md).
       if (!customFp && !roundFp) {
-        WALL_SIDES.forEach((side) => {
-          const rSg = wallResolved[side];
+        // One glazed STRETCH of one side — the whole side (classic), or a
+        // single glazed SECTION of a split wall (aStart/aEnd along the side,
+        // measured from the side's center like alongAt always was).
+        const buildGlazedStretch = (side, rSg, aStart, aEnd, selectId) => {
           if (!rSg.sunGlazing || rSg.omitted || omittedWalls.has(side)) return;
           // The GLASS follows its wall's layer; the TIMBER that carries it
           // follows the Frame layer — so the bones view shows the greenhouse
@@ -1712,7 +1714,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               : (side === 'south' ? roofSpec.southWallHeightFt + liftSg : side === 'north' ? roofSpec.northWallHeightFt + liftSg : Math.max(roofSpec.northWallHeightFt, roofSpec.southWallHeightFt) + liftSg))
             : roofSpec.highWallHeightFt + liftSg;
           const tiltRad = clamp(Number(rSg.sunGlazingTiltDeg ?? 30), 0, 45) * Math.PI / 180;
-          const runLen = (side === 'north' || side === 'south' ? width : depth) - 1;
+          const runLen = aEnd - aStart;
+          if (runLen < 2) return;
           const horizNS = side === 'north' || side === 'south';
           // THE ROOF PLAN RULES THE BAND (the same law walls and frame obey):
           // the band is built in BAYS, and each bay climbs only as high as the
@@ -1721,7 +1724,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // Only bays with under 1.5 ft of climb are skipped — the old code
           // culled the WHOLE wall on one number (and rose full-length to one
           // eave height, floating fins through every lower tier roof).
-          const alongAt = (t) => runLen * t - runLen / 2;
+          const alongAt = (t) => aStart + runLen * t;
           // The glass LEANS INTO the house — its top edge sits gap·tan(tilt)
           // inside the wall face, where a falling roof is LOWER than at the
           // eave. Probe the roof at the top edge's true position and shrink
@@ -1786,7 +1789,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           if (!visible.some(Boolean)) return; // no headroom anywhere on this wall
           const gapOf = (b) => Math.max(0, bayTops[b] - kneeH);
           const bandGlassMat = new THREE.MeshStandardMaterial({ color: 0xcfe5ea, roughness: 0.1, metalness: 0.05, transparent: true, opacity: 0.36, side: THREE.DoubleSide, envMap: envTex, envMapIntensity: 0.85 });
-          const bandPart = (m) => { m.userData.roomId = `wall-${side}`; m.userData.wallSide = side; m.userData.generated = true; m.userData.sunGlazingBand = true; group.add(m); return m; };
+          const bandPart = (m) => { m.userData.roomId = selectId; m.userData.wallSide = side; m.userData.generated = true; m.userData.sunGlazingBand = true; group.add(m); return m; };
           // one slanted box, sized by its own bay's climb (gap)
           const slantedBox = (alongCenter, alongLen, gap, thick, mat) => {
             const slant = gap / Math.cos(tiltRad);
@@ -1929,6 +1932,28 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               endPane(yLo, yHi, alongW);    // too small to split — one pane
             }
           }
+        };
+        WALL_SIDES.forEach((side) => {
+          const rSg = wallResolved[side];
+          const sideLen = (side === 'north' || side === 'south') ? width : depth;
+          if (rSg.sunGlazing) {
+            // whole-side glazing — exactly the classic band, same run
+            buildGlazedStretch(side, rSg, -(sideLen - 1) / 2, (sideLen - 1) / 2, `wall-${side}`);
+            return;
+          }
+          if (!segFp) return;
+          // glazed SECTIONS of a split wall — one band per glazed segment,
+          // spanning just its stretch; the rest of the side stays opaque
+          footprintEdges(spec).forEach((edge) => {
+            if (edge.facing !== side) return;
+            const rSeg = resolveWallSide(spec, side, 1, edge.key);
+            if (!rSeg.sunGlazing || rSeg.omitted) return;
+            const horizE = side === 'north' || side === 'south';
+            const lo = horizE ? Math.min(edge.x0, edge.x1) : Math.min(edge.y0, edge.y1);
+            const hi = horizE ? Math.max(edge.x0, edge.x1) : Math.max(edge.y0, edge.y1);
+            const c = sideLen / 2;
+            buildGlazedStretch(side, rSeg, Math.max(lo, 0.5) - c, Math.min(hi, sideLen - 0.5) - c, `wall-${edge.key}`);
+          });
         });
       }
 

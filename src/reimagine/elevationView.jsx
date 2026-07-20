@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { OPENING_TYPES, openingVerticalBand, storeyElevationFt, storeyHeightFt } from '../../backend/bim-core.mjs';
+import { OPENING_TYPES, openingVerticalBand, storeyElevationFt, storeyHeightFt, footprintEdges, hasSegmentedFootprint } from '../../backend/bim-core.mjs';
 import { resolveWallSide, upperPlateRect, resolveDeck } from '../engine.js';
 import { buildFaceLaw } from './faceLaw.js';
 
@@ -49,6 +49,28 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   const touching = law.tiers.filter((b) => b.touches).map((b) => ({ lv: b.lv, s0: b.s0, s1: b.s1, y0: b.floorY, y1: b.topAt((b.s0 + b.s1) / 2) }));
   const setBack = law.tiers.filter((b) => !b.touches).map((b) => ({ lv: b.lv, s0: b.s0, s1: b.s1, y0: b.floorY, y1: b.topAt((b.s0 + b.s1) / 2) }));
   const groundProfileAt = (t) => law.groundTopAt(t);
+  // Sun-glazed stretches on THIS face — the whole side (classic) or glazed
+  // SECTIONS of a split wall. Drawn as slanted-glass bands so the Wall view
+  // finally shows the greenhouse face the 3D builds (it was 3D-only).
+  const glassCeilFace = storeys > 1 ? elevOf(2) : Infinity;
+  const glassStretches = (() => {
+    const out = [];
+    const rSide = resolveWallSide(spec, wall);
+    if (rSide.omitted) return out;
+    if (rSide.sunGlazing) {
+      out.push({ t0: 0.5, t1: run - 0.5, knee: Number(rSide.heightFt) || 2 });
+    } else if (hasSegmentedFootprint(spec)) {
+      footprintEdges(spec).forEach((edge) => {
+        if (edge.facing !== wall) return;
+        const r = resolveWallSide(spec, wall, 1, edge.key);
+        if (!r.sunGlazing || r.omitted) return;
+        const lo = horiz ? Math.min(edge.x0, edge.x1) : Math.min(edge.y0, edge.y1);
+        const hi = horiz ? Math.max(edge.x0, edge.x1) : Math.max(edge.y0, edge.y1);
+        out.push({ t0: Math.max(0.3, lo + 0.2), t1: Math.min(run - 0.3, hi - 0.2), knee: Number(r.heightFt) || 2 });
+      });
+    }
+    return out.filter((s) => s.t1 - s.t0 > 1.5);
+  })();
   // half the slope span × pitch — mirrors the 3D's corrected gable law
   const gableRise = roofType === 'gable' && horiz && storeys === 1 ? ((Number(shell.widthFt) || 24) / 2) * pitch : 0;
   // the face's top edge — the law's silhouette, plus the classic gable peak
@@ -302,6 +324,33 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
         {/* the wall face */}
         <polygon points={facePts} fill="#f4efe3" stroke="#4a4f47" strokeWidth={0.16} strokeLinejoin="round" />
+
+        {/* sun-glazed stretches: kneewall line, glass band up to the roofline
+            (or the 2nd floor on a multi-storey house), timber mullions */}
+        {glassStretches.map((s, si) => {
+          const steps = Math.max(6, Math.round((s.t1 - s.t0) / 1.5));
+          const topOfT = (t) => Math.min(groundProfileAt(t), glassCeilFace);
+          const topEdge = Array.from({ length: steps + 1 }, (_, k) => {
+            const t = s.t1 - ((s.t1 - s.t0) * k) / steps;
+            return `${X(t)},${Y(topOfT(t))}`;
+          }).join(' ');
+          const pts = `${X(s.t0)},${Y(s.knee)} ${X(s.t1)},${Y(s.knee)} ${topEdge}`;
+          const bays = Math.max(2, Math.round((s.t1 - s.t0) / 4));
+          return (
+            <g key={`sg${si}`} pointerEvents="none">
+              <polygon points={pts} fill="#bcd8e0" fillOpacity="0.55" stroke="#6e93a0" strokeWidth={0.12} strokeLinejoin="round" />
+              {Array.from({ length: bays + 1 }, (_, k) => {
+                const t = s.t0 + ((s.t1 - s.t0) * k) / bays;
+                const yT = topOfT(t);
+                return yT - s.knee > 0.8
+                  ? <line key={k} x1={X(t)} y1={Y(s.knee)} x2={X(t)} y2={Y(yT)} stroke="#7c5c38" strokeWidth={0.22} />
+                  : null;
+              })}
+              <line x1={X(s.t0)} y1={Y(s.knee)} x2={X(s.t1)} y2={Y(s.knee)} stroke="#7c5c38" strokeWidth={0.28} />
+              <text x={(X(s.t0) + X(s.t1)) / 2} y={Y(s.knee) + 1.1} textAnchor="middle" fontSize="0.95" fill="#5d7d89">slanted sun glass</text>
+            </g>
+          );
+        })}
 
         {/* the attached lean-to roof crossing this face — same plane the 3D
             builds, so the 2D face finally shows the roof the model wears

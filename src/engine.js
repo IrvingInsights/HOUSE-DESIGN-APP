@@ -1878,6 +1878,8 @@ export function getWallSections(spec) {
         rValue: r.assembly.rValue,
         interiorFinish: r.interiorFinish,
         exteriorFinish: r.exteriorFinish,
+        sunGlazing: !upper && Boolean(r.sunGlazing),
+        sunGlazingTiltDeg: Number(r.sunGlazingTiltDeg ?? 30),
         note: `${r.assembly.label} (R≈${r.assembly.rValue}, ${r.thicknessFt.toFixed(2)}' thick); ${edge.lengthFt}' long, ${heightFt}' ${upper ? `on level ${level}` : 'high'}. One segment of the ${edge.facing}-facing walls — construction is shared across that facing. Move it in the Plan view.`
       };
     };
@@ -3975,6 +3977,25 @@ export function deriveDesign(spec, wallSections) {
     const area = ((side === 'north' || side === 'south' ? w : d) - 1) * (gapH / Math.cos(tilt * Math.PI / 180));
     return { side, tilt, area, glass: area * 0.9 };
   }).filter(Boolean);
+  // Sun-glazed SECTIONS: on a side that is NOT glazed whole, a split wall's
+  // glazed segment contributes its own band — its run, its kneewall (the
+  // section's resolved heightFt), its tilt. The side-level path above stays
+  // byte-identical for existing designs.
+  if (hasSegmentedFootprint(spec)) {
+    footprintEdges(spec).forEach((edge) => {
+      const rSide = resolveWallSide(spec, edge.facing);
+      if (rSide.sunGlazing) return; // whole side already counted above
+      const rSeg = resolveWallSide(spec, edge.facing, 1, edge.key);
+      if (!rSeg.sunGlazing || rSeg.omitted) return;
+      const gapH = Math.max(0, eaveForBand - rSeg.heightFt);
+      if (gapH < 1.5) return;
+      const tilt = clamp(Number(rSeg.sunGlazingTiltDeg ?? 30), 0, 45);
+      const run = Math.max(0, edge.lengthFt - 1);
+      if (run < 2) return;
+      const area = run * (gapH / Math.cos(tilt * Math.PI / 180));
+      sunBands.push({ side: edge.facing, tilt, area, glass: area * 0.9 });
+    });
+  }
   const southBandGlass = sunBands.filter((b) => b.side === 'south').reduce((sum, b) => sum + b.glass * (1 + Math.min(0.3, b.tilt / 100)), 0);
   const nonSouthBandGlass = sunBands.filter((b) => b.side !== 'south').reduce((sum, b) => sum + b.glass, 0);
   const bandFrameArea = sunBands.reduce((sum, b) => sum + b.area, 0);
