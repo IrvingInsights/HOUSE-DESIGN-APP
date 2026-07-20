@@ -19,7 +19,7 @@
     { "id": "foundation.run-sizing", "chapter": "foundation", "label": "Size or remove placed runs by the numbers", "marker": "cap-foundation-run-list", "site": "more", "classic": "FoundationControls" },
 
     { "id": "walls.pick-side", "chapter": "walls", "label": "Pick a wall side (on the active floor) to edit it", "marker": "cap-walls-side", "site": "quick" },
-    { "id": "walls.greenhouse", "chapter": "walls", "label": "Greenhouse south face — kneewall + slanted glazing", "marker": "cap-walls-greenhouse", "site": "quick" },
+    { "id": "walls.greenhouse", "chapter": "walls", "label": "Greenhouse — glass over its own stretch, wall behind keeps its face", "marker": "cap-walls-greenhouse", "site": "quick" },
     { "id": "walls.split", "chapter": "walls", "label": "Split a wall into sections with their own construction", "marker": "cap-walls-split", "site": "more", "classic": "WallsControls" },
 
     { "id": "frame.type", "chapter": "frame", "label": "Pick what holds the roof up", "marker": "cap-frame-type", "site": "quick" },

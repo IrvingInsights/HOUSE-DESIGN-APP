@@ -57,7 +57,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 139 · Jul 20';
+const UPDATE_STAMP = 'update 140 · Jul 20';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1215,6 +1215,48 @@ export default function App() {
     { type: 'set_wall_side', wall: 'south', field: 'sunGlazingTiltDeg', value: 30 },
     { type: 'set_wall_side', wall: 'south', field: 'heightFt', value: 2 }
   ]);
+  // The greenhouse the app PREFERS is a ROOM: a growing room standing past
+  // the south wall grows its own glazed annex (kneewall, timber, slanted
+  // glass) over exactly ITS stretch — and the house wall behind it keeps its
+  // own system and weather face (straw bale + lime render stays straw bale +
+  // lime render). makeGreenhouseSouth above is the OTHER design — the whole
+  // wall becomes kneewall + glass — and stays a deliberate WallCard choice.
+  const southPlantRoom = () => (spec.rooms || []).find((r) => r.type === 'plant' && Number(r.level || 1) === 1);
+  const roomPokesSouth = (room) => (Number(room.y) || 0) + (Number(room.d) || 0) > (Number(spec.shell.depthFt) || 24) + 1.5;
+  const glazeGreenhouseRoom = (room) => {
+    // The flag's "drag it a couple of feet past the wall", automated: keep
+    // its x, slide it south until 1.5 ft stays inside (the doorway) — the
+    // glazed annex builds over exactly its span.
+    const depth = Number(spec.shell.depthFt) || 24;
+    applyOps([{ type: 'move_object', targetId: room.id, name: room.name, x: Number(room.x) || 0, y: Math.max(0.5, depth - 1.5) }]);
+    setSelectedId(room.id);
+    setMoveNote({ text: `${room.name || 'The greenhouse'} now stands past the south wall — its kneewall, timber and slanted glass build over just that stretch, and the wall behind it keeps its own face. Ctrl+Z undoes it.` });
+  };
+  const addOrGlazeGreenhouse = () => {
+    const room = southPlantRoom();
+    if (!room) {
+      addRoomPreset(roomPresetFromName('greenhouse') || { name: 'Greenhouse', type: 'plant', w: 12, d: 8 });
+      return;
+    }
+    if (!roomPokesSouth(room)) { glazeGreenhouseRoom(room); return; }
+    setSelectedId(room.id);
+    setMoveNote({ text: `${room.name || 'The greenhouse'} already has its glass — tap it on the plan or the model to work with it.` });
+  };
+  // Recovery from the whole-wall glass when a greenhouse room exists: ONE
+  // batch turns the side glazing off (the engine stands the wall back up)
+  // and slides the room into the sun — bale face back, glass only where the
+  // greenhouse is.
+  const scopeGlassToGreenhouse = () => {
+    const room = southPlantRoom();
+    const depth = Number(spec.shell.depthFt) || 24;
+    const ops = [{ type: 'set_wall_side', wall: 'south', field: 'sunGlazing', value: false }];
+    if (room && !roomPokesSouth(room)) {
+      ops.push({ type: 'move_object', targetId: room.id, name: room.name, x: Number(room.x) || 0, y: Math.max(0.5, depth - 1.5) });
+    }
+    applyOps(ops);
+    if (room) setSelectedId(room.id);
+    setMoveNote({ text: 'The south wall stands back up in its own system and weather face — the glass now lives only on the greenhouse. Ctrl+Z undoes it.' });
+  };
   // --- finishes: floor, exterior cladding, reclaimed materials ---------------
   const setFlooring = (value) => applyOps([{ type: 'set_flooring', value }]);
   const setSubfloor = (value) => applyOps([{ type: 'set_flooring', field: 'subfloor', value }]);
@@ -1466,7 +1508,7 @@ export default function App() {
               onPickStorey={pickStorey}
               onPlaceOutdoorPad={placeOutdoorPad} onPlacePad={placeSlabPad} onPlaceRun={placeFoundationRun}
               fitInfo={fitWorthIt ? fitPreview : null} onFitWalls={fitWalls}
-              onPickWall={setOpenWall} onGreenhouse={makeGreenhouseSouth}
+              onPickWall={setOpenWall} onGreenhouse={addOrGlazeGreenhouse}
             />
             <button className={`st-more ${moreOpen ? 'on' : ''}`} onClick={() => setMoreOpen((v) => !v)}>
               {moreOpen ? '× Close' : 'More ▾'}
@@ -1553,12 +1595,15 @@ export default function App() {
               </div>
               {f.fix && <div className="rz-flags-fix">{f.fix}</div>}
               {/* one-tap remedies */}
-              {f.fixId === 'greenhouse-glass' && (
-                <button type="button" className="rz-fresh" style={{ alignSelf: 'flex-start', marginTop: 4 }}
-                  onClick={() => makeGreenhouseSouth()}>
-                  ☀ Give it the south glass — 2 ft kneewall + slanted glazing
-                </button>
-              )}
+              {f.fixId === 'greenhouse-glass' && (() => {
+                const ghRoom = (spec.rooms || []).find((r) => r.id === f.roomId) || southPlantRoom();
+                return (
+                  <button type="button" className="rz-fresh" style={{ alignSelf: 'flex-start', marginTop: 4 }}
+                    onClick={() => (ghRoom ? glazeGreenhouseRoom(ghRoom) : makeGreenhouseSouth())}>
+                    ☀ Slide it into the sun — glass over the greenhouse only
+                  </button>
+                );
+              })()}
               {f.fixId === 'fit-opening' && Number.isFinite(f.openingIndex) && (() => {
                 const op = spec.openings?.[f.openingIndex];
                 if (!op) return null;
@@ -1795,7 +1840,9 @@ export default function App() {
                     onShell={setShellField}
                     onWallSide={setWallSide}
                     onSplitWall={splitWallSide}
-                    onGreenhouse={makeGreenhouseSouth}
+                    onGreenhouse={addOrGlazeGreenhouse}
+                    onScopeGlass={scopeGlassToGreenhouse}
+                    hasSouthGreenhouseRoom={Boolean(southPlantRoom())}
                     onSelectWall={(side, lv) => { setSelectedId(`wall-${side}${Number(lv) > 1 ? (Number(lv) === 2 ? '-u' : `-u${lv}`) : ''}`); setViewMode('3d'); }}
                     onJump={jumpTo}
                   />
@@ -3502,7 +3549,7 @@ function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, on
 // every grain the engine knows: all four sides at once, one floor, one side,
 // or one SECTION of one side (split a wall, then mix a framed section beside
 // straw or cob infill). The timeline and every receipt follow along.
-function WallsControls({ spec, floors, level = 1, wallSections, onAllWalls, onShedHeights, onShedHeightsEW, onUpperWalls, onFloorHeight, onShell, onWallSide, onSplitWall, onGreenhouse, onSelectWall, onJump }) {
+function WallsControls({ spec, floors, level = 1, wallSections, onAllWalls, onShedHeights, onShedHeightsEW, onUpperWalls, onFloorHeight, onShell, onWallSide, onSplitWall, onGreenhouse, onScopeGlass, hasSouthGreenhouseRoom = false, onSelectWall, onJump }) {
   const [side, setSide] = useState('south');
   const resolved = WALL_SIDES.map((s) => resolveWallSide(spec, s));
   const wallKeys = new Set(resolved.map((r) => r.assemblyKey));
@@ -3633,11 +3680,17 @@ function WallsControls({ spec, floors, level = 1, wallSections, onAllWalls, onSh
       )}
       {/* the greenhouse classic, one tap — a low south kneewall with slanted
           glass rising to the eave (all three settings land together) */}
-      {!(southR.sunGlazing && southR.heightFt <= 4) && (
-        <button type="button" className="rz-floorbar-outline" onClick={onGreenhouse}
-          title="Sets the south wall to a 2 ft kneewall with slanted greenhouse glass above it — one tap, one undo">
-          ☀ Greenhouse south face — 2 ft kneewall + slanted glass
-        </button>
+      <button type="button" className="rz-floorbar-outline" onClick={onGreenhouse}
+        title="Adds (or slides) a greenhouse room past the south wall — its kneewall and slanted glass build over just its stretch, and the wall behind it keeps its own system and weather face">
+        ☀ Greenhouse — glass over its own stretch only
+      </button>
+      {southR.sunGlazing && hasSouthGreenhouseRoom && (
+        <div className="rz-shape-note rz-shape-warn">
+          Right now the WHOLE south wall is a glass face AND the greenhouse brings its own glass — two designs fighting.
+          <button type="button" className="rz-fresh" style={{ display: 'block', marginTop: 4 }} onClick={onScopeGlass}>
+            Keep the straw-bale wall — glass only at the greenhouse
+          </button>
+        </div>
       )}
       {/* ONE WALL AT A TIME — pick a side, get its full card inline: height,
           system, thickness, face, glazing, or no wall at all */}
@@ -3732,7 +3785,7 @@ function WallSideFields({ side, spec, onWallSide, level = 1 }) {
         <NumInput value={Math.round(r.thicknessFt * 10) / 10} min={0.2} max={3.5} step={0.1} onCommit={(v) => onWallSide(side, 'thicknessFt', v, level)} />
       </label>
       <label className="rz-field">
-        <span>Weather face (this wall)</span>
+        <span>{r.sunGlazing ? 'Weather face (the kneewall — the glass above wears no cladding)' : 'Weather face (this wall)'}</span>
         <select value={r.cladding || 'render'} onChange={(e) => onWallSide(side, 'cladding', e.target.value, level)}>
           {Object.values(CLADDING_TYPES).map((c) => (
             <option key={c.key} value={c.key}>{c.green ? '🌿 ' : ''}{c.label}</option>
@@ -3746,7 +3799,7 @@ function WallSideFields({ side, spec, onWallSide, level = 1 }) {
         <>
           <label className="rz-nowall">
             <input type="checkbox" checked={Boolean(r.sunGlazing)} onChange={(e) => onWallSide(side, 'sunGlazing', e.target.checked)} />
-            <span>Sun glazing — slanted greenhouse glass on this wall</span>
+            <span>Glass face — this WHOLE wall becomes kneewall + slanted glass (replaces the wall system above the kneewall; a greenhouse room brings its own glass, so leave this off to keep the {r.assembly.label.toLowerCase()} face)</span>
           </label>
           {r.sunGlazing && (
             <label className="rz-field rz-field-num">
@@ -4271,8 +4324,8 @@ function SiteQuickRow({
           ))}
         </span>
         <span className="st-chip">{south.assembly.label} — R{south.assembly.rValue}</span>
-        <button className="st-pill" data-cap="cap-walls-greenhouse" title="Kneewall + slanted glass on the south face — the sun trap"
-          onClick={onGreenhouse}>☀ Greenhouse south</button>
+        <button className="st-pill" data-cap="cap-walls-greenhouse" title="Adds (or slides) a greenhouse room past the south wall — its kneewall + slanted glass build over just its stretch; the wall behind keeps its own face"
+          onClick={onGreenhouse}>☀ Greenhouse<small>glass over its stretch</small></button>
         <button className="st-pill" data-cap="cap-more-walls" onClick={onMore}>+ more…<small>heights · split a wall</small></button>
       </>
     );
