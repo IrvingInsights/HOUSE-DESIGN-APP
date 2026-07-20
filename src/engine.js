@@ -1115,8 +1115,25 @@ export function planNewRoomPlacements(spec, newRooms, level = 1) {
     taken.add(name);
     names.push(name);
     const fpForSpots = hasCustomFootprint(spec) ? footprintPolygon(spec) : null;
-    let spot = findFreeSpot(shellW, shellD, virtualRooms, nr.w, nr.d, fpForSpots);
+    let spot = null;
     let fit = true;
+    // A GREENHOUSE lands ON THE SOLAR WALL, poking OUT — the glazed annex
+    // builds itself the moment the room exists. An interior plant room is
+    // only a floor zone, and adding one read as "it fails to add the
+    // greenhouse over and over": the room appeared, the GREENHOUSE didn't.
+    // 1.5 ft stays inside (the doorway); the rest stands past the south
+    // wall in the sun. Slides along the wall to a clear stretch; overlaps
+    // the wall band as a last resort (still glazed either way).
+    if (nr.type === 'plant' && level === 1 && !fpForSpots) {
+      const yGh = Math.max(0.5, shellD - 1.5);
+      let xGh = null;
+      for (let cx = 0.5; cx <= shellW - nr.w - 0.5; cx += 0.5) {
+        const clash = virtualRooms.some((r) => r.y + r.d > yGh - 0.01 && r.x < cx + nr.w && r.x + r.w > cx);
+        if (!clash) { xGh = cx; break; }
+      }
+      spot = { x: xGh == null ? Math.max(0.5, Math.round(((shellW - nr.w) / 2) * 2) / 2) : xGh, y: yGh };
+    }
+    if (!spot) spot = findFreeSpot(shellW, shellD, virtualRooms, nr.w, nr.d, fpForSpots);
     if (!spot) {
       // NEVER grow the shell — or the foundation under it — because a room
       // was added; the walls are the person's decision (Daniel: "Stop
