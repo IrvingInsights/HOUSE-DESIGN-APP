@@ -7,7 +7,7 @@ import {
   applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
   INSULATION_TYPES, resolveInsulation, OPENING_TYPES, openingVerticalBand,
   FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS, storeyHeightFt, storeyElevationFt,
-  footprintPolygon, polygonArea, footprintBounds, footprintEdges, splitSouthEdgeAt, roofProfile, snapPlatesToShell
+  footprintPolygon, polygonArea, footprintBounds, footprintEdges, hasSegmentedFootprint, splitSouthEdgeAt, roofProfile, snapPlatesToShell
 } from '../../backend/bim-core.mjs';
 import {
   seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS,
@@ -36,10 +36,9 @@ const CHAPTERS = [
   { id: 'storeys', label: 'Storeys', view: 'storeys', planContext: 'rooms', greet: (d) => `How the house stacks — ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'} right now, drawn face-on in the Storeys view: drag a floor's top edge for height, its side handles for size. Add a floor, sink a basement — and jump from any floor straight to its rooms, its walls, or its roof.` },
   { id: 'rooms', label: 'Rooms', view: 'plan', planContext: 'rooms', greet: () => 'Lay the rooms out flat, from above. Use the Floor selector (top left) to add a floor or switch between them — each floor keeps its own rooms and its own outline. Drag a room to move it, a corner to resize.' },
   { id: 'foundation', label: 'Foundation', view: 'plan', planContext: 'foundation', greet: () => 'What the house sits on. Pick the main type below — and the foundation doesn’t have to match the rooms: drop extra footings and drag them under whatever they carry, even outside the walls.' },
-  { id: 'walls', label: 'Walls', view: '3d', planContext: 'shell', greet: () => 'The walls themselves — how tall they stand and what they’re made of. Set all four at once, or one side, one floor, or one section of a wall at a time.' },
+  { id: 'walls', label: 'Walls & openings', view: 'wall', planContext: 'windows', greet: () => 'One chapter for each wall and everything in it. Pick a side, then build it — height, system, weather face — and pierce it: doors, windows, and the greenhouse glass all land on the same wall you’re looking at.' },
   { id: 'frame', label: 'Frame', view: 'frame', greet: () => 'What holds the roof up. Load-bearing walls carry it themselves — the usual choice for bale and cob — or a timber frame, posts and beams, or stick framing stands inside the walls. The Frame view shows just the bones on their foundation.' },
   { id: 'roof', label: 'Roof', view: '3d', greet: () => 'Choose how the roof sheds weather and sun. Pick the shape, how steep it runs, what insulates it, and how far it reaches past the walls.' },
-  { id: 'openings', label: 'Openings', view: 'wall', planContext: 'windows', greet: () => 'Place doors and windows where light and paths want them. Slide them along their wall.' },
   { id: 'systems', label: 'Systems', view: '3d', greet: () => 'Heat, water, power, waste — the working parts. Each shows its own receipts.' },
   { id: 'finishes', label: 'Finishes', view: '3d', greet: () => 'Materials and surfaces, inside and out — natural or conventional, wall by wall.' }
 ];
@@ -57,7 +56,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 143 · Jul 21';
+const UPDATE_STAMP = 'update 144 · Jul 21';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1426,6 +1425,10 @@ export default function App() {
   // context, where their extent plates drag by border and corners.
   const planContext = activeChapter === 'shape' && targetIsObject ? 'rooms'
     : activeChapter === 'storeys' && activeFloor <= 1 ? 'shell'
+    // The merged walls-&-openings chapter: openings drag on the plan by
+    // default; tap a wall (or a section) and the plan turns to the shell so
+    // sections push in and out like before the merge.
+    : activeChapter === 'walls' && String(selectedId || '').startsWith('wall-') ? 'shell'
     : (chapter.planContext || null);
 
   return (
@@ -1474,7 +1477,7 @@ export default function App() {
             onMoveOpening={moveOpening}
             context={planContext}
             onContext={timelineOpen ? null : openContext}
-            activeFloor={activeChapter === 'rooms' || activeChapter === 'openings' || activeChapter === 'storeys' ? activeFloor : 1}
+            activeFloor={activeChapter === 'rooms' || activeChapter === 'walls' || activeChapter === 'storeys' ? activeFloor : 1}
           />
         ) : (
           <ThreeScene
@@ -1602,7 +1605,9 @@ export default function App() {
               onSelectWall={(side) => {
                 const lv = Math.max(1, activeFloor);
                 setSelectedId(`wall-${side}${lv > 1 ? (lv === 2 ? '-u' : `-u${lv}`) : ''}`);
-                setViewMode('3d');
+                // merged Walls & openings: picking a side keeps you FACE-ON -
+                // the view where both its construction and its openings live
+                setViewMode('wall');
               }}
               onFrame={setFrame}
               onRoofType={setRoofType} onPitch={setRoofPitch} onShedFall={setShedFall}
@@ -1882,21 +1887,6 @@ export default function App() {
                 <div className="rz-shape-note">Tap a room on the plan to rename or remove it (or press Delete). Right-click for more.</div>
               </div>
             )}
-            {activeChapter === 'openings' && (
-              <>
-                {floors > 1 && (
-                  <FloorBar spec={spec} floors={floors} activeFloor={activeFloor} hasBasement={hasBasement} onSelect={setActiveFloor} onAdd={addFloor} onRemove={removeFloor} />
-                )}
-                <OpeningsControls
-                  spec={spec}
-                  level={activeFloor}
-                  wall={openWall}
-                  onWall={setOpenWall}
-                  onAdd={addOpening}
-                  onAddDormer={addDormer}
-                />
-              </>
-            )}
             {activeChapter === 'systems' && (
               <SystemsControls spec={spec} derived={derived} onUtility={setUtilityField} />
             )}
@@ -1934,25 +1924,39 @@ export default function App() {
                 {activeFloor === BASEMENT_LEVEL ? (
                   <div className="rz-shape-note">The basement's walls ARE its foundation — concrete or block, chosen in the <b>Foundation</b> chapter <button type="button" className="rz-storey-link-inline" onClick={() => jumpTo('foundation')}>foundation ›</button>.</div>
                 ) : (
-                  <WallsControls
-                    spec={spec}
-                    floors={floors}
-                    level={Math.max(1, activeFloor)}
-                    wallSections={wallSections}
-                    onAllWalls={setAllWalls}
-                    onShedHeights={setShedHeights}
-                    onShedHeightsEW={setShedHeightsEW}
-                    onUpperWalls={setUpperWalls}
-                    onFloorHeight={setFloorHeight}
-                    onShell={setShellField}
-                    onWallSide={setWallSide}
-                    onSplitWall={splitWallSide}
-                    onGreenhouse={addOrGlazeGreenhouse}
-                    onScopeGlass={scopeGlassToGreenhouse}
-                    hasSouthGreenhouseRoom={Boolean(southPlantRoom())}
-                    onSelectWall={(side, lv) => { setSelectedId(`wall-${side}${Number(lv) > 1 ? (Number(lv) === 2 ? '-u' : `-u${lv}`) : ''}`); setViewMode('3d'); }}
-                    onJump={jumpTo}
-                  />
+                  <>
+                    {/* the openings HALF of the merged chapter first — where
+                        things are born; the construction half follows */}
+                    <OpeningsControls
+                      spec={spec}
+                      level={Math.max(1, activeFloor)}
+                      wall={openWall}
+                      onWall={setOpenWall}
+                      onAdd={addOpening}
+                      onAddDormer={addDormer}
+                      onGreenhouse={addOrGlazeGreenhouse}
+                      onScopeGlass={scopeGlassToGreenhouse}
+                      onWallSide={setWallSide}
+                      hasSouthGreenhouseRoom={Boolean(southPlantRoom())}
+                      onSelectSection={(edgeKey) => { setSelectedId(`wall-${edgeKey}`); setViewMode('wall'); }}
+                    />
+                    <WallsControls
+                      spec={spec}
+                      floors={floors}
+                      level={Math.max(1, activeFloor)}
+                      wallSections={wallSections}
+                      onAllWalls={setAllWalls}
+                      onShedHeights={setShedHeights}
+                      onShedHeightsEW={setShedHeightsEW}
+                      onUpperWalls={setUpperWalls}
+                      onFloorHeight={setFloorHeight}
+                      onShell={setShellField}
+                      onWallSide={setWallSide}
+                      onSplitWall={splitWallSide}
+                      onSelectWall={(side, lv) => { setSelectedId(`wall-${side}${Number(lv) > 1 ? (Number(lv) === 2 ? '-u' : `-u${lv}`) : ''}`); setViewMode('3d'); }}
+                      onJump={jumpTo}
+                    />
+                  </>
                 )}
               </>
             )}
@@ -2562,7 +2566,7 @@ export default function App() {
               }}>{level > 1 ? 'This floor’s wall settings…' : 'Height & what it’s made of…'}</button>
               <button onClick={() => { addOpening(side, 'door', level); closeMenu(); }}>+ Door on this wall</button>
               <button onClick={() => { addOpening(side, 'window', level); closeMenu(); }}>+ Window on this wall</button>
-              <button onClick={() => { setActiveChapter('openings'); setOpenWall(side); setActiveFloor(Math.max(1, level)); setViewMode('wall'); closeMenu(); }}>See this wall face-on</button>
+              <button onClick={() => { setActiveChapter('walls'); setOpenWall(side); setActiveFloor(Math.max(1, level)); setViewMode('wall'); closeMenu(); }}>See this wall face-on</button>
               {level === 1 && (
                 <button onClick={() => { setWallSide(side, 'omitted', !r.omitted); closeMenu(); }}>
                   {r.omitted ? 'Put this wall back' : 'No wall on this side (open it up)'}
@@ -3318,7 +3322,7 @@ function StoreysControls({ spec, floors, hasBasement, activeFloor, onSelectFloor
 // roof. Openings carry the floor picked in the Floor selector — a 2nd-floor
 // window goes in the upper wall, and a dormer opens the roof to meet it.
 const DORMER_STYLES = [['gable', 'Gable dormer', 'peaked doghouse'], ['shed', 'Shed dormer', 'single slope']];
-function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAddDormer }) {
+function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAddDormer, onGreenhouse, onScopeGlass, onWallSide, hasSouthGreenhouseRoom = false, onSelectSection }) {
   const openings = spec.openings || [];
   const onThisFloor = (o) => o.wall === 'roof' ? level === 1 : Number(o.level || 1) === level;
   const floorWord = level === 1 ? 'ground floor' : floorLabel(spec, level).toLowerCase();
@@ -3352,6 +3356,68 @@ function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAd
           </button>
         ))}
       </div>
+      {/* THE GREENHOUSE IS AN OPENING HERE — born beside the windows, listed
+          with them below. Under the hood it stays a wall section (the wall
+          drops to a kneewall and glass climbs to the roof), but that is the
+          engine's business, not yours. */}
+      {level === 1 && onGreenhouse && (
+        <>
+          <button type="button" className="rz-floorbar-outline" onClick={onGreenhouse}
+            title="Greenhouse glass — a slanted glass section over the greenhouse's stretch of the south wall, the wall carrying on in its own system either side">
+            ☀ Greenhouse — slanted glass over its stretch
+          </button>
+          {(() => {
+            const items = [];
+            WALL_SIDES.forEach((s) => {
+              const r = resolveWallSide(spec, s);
+              if (r.sunGlazing && !r.omitted) items.push({ kind: 'side', side: s });
+            });
+            if (hasSegmentedFootprint(spec)) {
+              footprintEdges(spec).forEach((edge) => {
+                const r = resolveWallSide(spec, edge.facing, 1, edge.key);
+                if (r.sunGlazing && !r.omitted) items.push({ kind: 'section', edge, side: edge.facing, len: Math.round(edge.lengthFt * 10) / 10, knee: Number(r.heightFt) || 2, tilt: Number(r.sunGlazingTiltDeg ?? 30) });
+              });
+            }
+            (spec.rooms || []).forEach((room) => {
+              if (room.type !== 'plant' || Number(room.level || 1) !== 1) return;
+              if ((Number(room.y) || 0) + (Number(room.d) || 0) > (Number(spec.shell.depthFt) || 24) + 1.5) items.push({ kind: 'annex', room });
+            });
+            if (!items.length) return null;
+            return (
+              <div className="rz-ghlist">
+                <div className="rz-found-head">Greenhouse glass placed</div>
+                {items.map((it, i) => it.kind === 'section' ? (
+                  <div key={i} className="rz-ghrow">
+                    <button type="button" className="rz-storey-link-inline" onClick={() => onSelectSection && onSelectSection(it.edge.key)}>☀ {WALL_SIDE_LABELS[it.side]} wall — {it.len} ft of slanted glass</button>
+                    <label className="rz-field rz-field-num"><span>Glass starts at (the kneewall)</span>
+                      <NumInput value={it.knee} min={1} max={8} step={0.5} onCommit={(v) => onWallSide(it.edge.key, 'kneewallFt', v)} /></label>
+                    <label className="rz-field rz-field-num"><span>Glass tilt (from vertical)</span>
+                      <NumInput value={it.tilt} min={0} max={45} step={5} unit="°" onCommit={(v) => onWallSide(it.edge.key, 'sunGlazingTiltDeg', v)} /></label>
+                    <button type="button" className="rz-fresh" onClick={() => onWallSide(it.edge.key, 'sunGlazing', false)}>Remove the glass — the wall stands back up</button>
+                  </div>
+                ) : it.kind === 'side' ? (
+                  <div key={i} className="rz-ghrow">
+                    <span>☀ {WALL_SIDE_LABELS[it.side]} wall — the WHOLE face is glass (a wall-card choice)</span>
+                    <button type="button" className="rz-fresh" onClick={() => onWallSide(it.side, 'sunGlazing', false)}>Take the whole-wall glass off</button>
+                  </div>
+                ) : (
+                  <div key={i} className="rz-ghrow">
+                    <span>☀ {it.room.name || 'Greenhouse'} — its own glazed annex past the wall (tap it on the plan or the 3D house)</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+          {resolveWallSide(spec, 'south').sunGlazing && hasSouthGreenhouseRoom && (
+            <div className="rz-shape-note rz-shape-warn">
+              The WHOLE south wall is a glass face AND the greenhouse brings its own glass — two designs fighting.
+              <button type="button" className="rz-fresh" style={{ display: 'block', marginTop: 4 }} onClick={onScopeGlass}>
+                Keep the straw-bale wall — glass only at the greenhouse
+              </button>
+            </div>
+          )}
+        </>
+      )}
       <label className="rz-field" data-cap="cap-openings-fancy">
         <span>Something fancier</span>
         <select
@@ -3664,7 +3730,7 @@ function FoundationControls({ spec, selectedId, onChoose, onUtility, onShell, on
 // every grain the engine knows: all four sides at once, one floor, one side,
 // or one SECTION of one side (split a wall, then mix a framed section beside
 // straw or cob infill). The timeline and every receipt follow along.
-function WallsControls({ spec, floors, level = 1, wallSections, onAllWalls, onShedHeights, onShedHeightsEW, onUpperWalls, onFloorHeight, onShell, onWallSide, onSplitWall, onGreenhouse, onScopeGlass, hasSouthGreenhouseRoom = false, onSelectWall, onJump }) {
+function WallsControls({ spec, floors, level = 1, wallSections, onAllWalls, onShedHeights, onShedHeightsEW, onUpperWalls, onFloorHeight, onShell, onWallSide, onSplitWall, onSelectWall, onJump }) {
   const [side, setSide] = useState('south');
   const resolved = WALL_SIDES.map((s) => resolveWallSide(spec, s));
   const wallKeys = new Set(resolved.map((r) => r.assemblyKey));
@@ -3793,20 +3859,8 @@ function WallsControls({ spec, floors, level = 1, wallSections, onAllWalls, onSh
       {upperLevels.length > 0 && (
         <div className="rz-shape-note">Each upper floor's walls — height, system, face, side by side — live under the <b>Floor</b> selector above.</div>
       )}
-      {/* the greenhouse classic, one tap — a low south kneewall with slanted
-          glass rising to the eave (all three settings land together) */}
-      <button type="button" className="rz-floorbar-outline" onClick={onGreenhouse}
-        title="Adds (or slides) a greenhouse room past the south wall — its kneewall and slanted glass build over just its stretch, and the wall behind it keeps its own system and weather face">
-        ☀ Greenhouse — glass over its own stretch only
-      </button>
-      {southR.sunGlazing && hasSouthGreenhouseRoom && (
-        <div className="rz-shape-note rz-shape-warn">
-          Right now the WHOLE south wall is a glass face AND the greenhouse brings its own glass — two designs fighting.
-          <button type="button" className="rz-fresh" style={{ display: 'block', marginTop: 4 }} onClick={onScopeGlass}>
-            Keep the straw-bale wall — glass only at the greenhouse
-          </button>
-        </div>
-      )}
+      {/* the greenhouse moved in with the OPENINGS above — glass is a thing
+          IN a wall, so it lives with the doors and windows now */}
       {/* ONE WALL AT A TIME — pick a side, get its full card inline: height,
           system, thickness, face, glazing, or no wall at all */}
       <div className="rz-found-head">One wall at a time</div>
@@ -4345,7 +4399,7 @@ const prettyId = (id) => String(id || '').replace(/[-_]/g, ' ').replace(/\b\w/g,
 // tapping things on the model itself opens their cards as always.
 const FLAG_CHAPTER = {
   shell: 'shape', rooms: 'rooms', foundation: 'foundation', walls: 'walls',
-  frame: 'frame', roof: 'roof', windows: 'openings', water: 'systems',
+  frame: 'frame', roof: 'roof', windows: 'walls', water: 'systems',
   power: 'systems', heat: 'systems', waste: 'systems', systems: 'systems',
   flooring: 'finishes', finishes: 'finishes', budget: 'finishes'
 };
@@ -4456,18 +4510,28 @@ function SiteQuickRow({
   }
   if (chapter === 'walls') {
     const south = resolveWallSide(spec, 'south');
+    const counts = { win: 0, door: 0, sky: 0 };
+    (spec.openings || []).forEach((o) => {
+      const p = OPENING_TYPES[o.type] || OPENING_TYPES.window;
+      if (p.roof) counts.sky += 1; else if (p.entry) counts.door += 1; else counts.win += 1;
+    });
     return (
       <>
-        <span className="st-toolbar-label">Walls</span>
+        <span className="st-toolbar-label">Walls & openings</span>
         <span className="st-tool-group" data-cap="cap-walls-side">
           {WALL_SIDES.map((s) => (
-            <button key={s} className="st-pill" title={`${WALL_SIDE_LABELS[s]} wall${activeFloor > 1 ? ` — floor ${activeFloor}` : ''} — tap it on the model, or here`} onClick={() => onSelectWall(s)}>{s[0].toUpperCase() + s.slice(1)}</button>
+            <button key={s} className={`st-pill ${openWall === s ? 'on' : ''}`}
+              title={`${WALL_SIDE_LABELS[s]} wall${activeFloor > 1 ? ` — floor ${activeFloor}` : ''} — its construction card, AND where the next opening lands`}
+              onClick={() => { onPickWall(s); onSelectWall(s); }}>{s[0].toUpperCase() + s.slice(1)}</button>
           ))}
         </span>
+        <button className="st-pill" data-cap="cap-openings-add" onClick={() => onAddOpening('window')}>+ Window <small>{counts.win} placed</small></button>
+        <button className="st-pill" onClick={() => onAddOpening('door')}>+ Door <small>{counts.door} placed</small></button>
+        <button className="st-pill" onClick={() => onAddOpening('skylight')}>+ Skylight <small>{counts.sky} placed</small></button>
+        <button className="st-pill" data-cap="cap-openings-greenhouse" title="Greenhouse glass — a slanted glass section over the greenhouse's stretch of the south wall, straw bale carrying on either side. Never the whole wall unless you ask a wall card for that."
+          onClick={onGreenhouse}>☀ Greenhouse<small>slanted glass section</small></button>
         <span className="st-chip">{south.assembly.label} — R{south.assembly.rValue}</span>
-        <button className="st-pill" data-cap="cap-walls-greenhouse" title="Adds (or slides) a greenhouse room past the south wall — its kneewall + slanted glass build over just its stretch; the wall behind keeps its own face"
-          onClick={onGreenhouse}>☀ Greenhouse<small>glass over its stretch</small></button>
-        <button className="st-pill" data-cap="cap-more-walls" onClick={onMore}>+ more…<small>heights · split a wall</small></button>
+        <button className="st-pill" data-cap="cap-more-walls" onClick={onMore}>+ more…<small>construction · sections · fancier openings</small></button>
       </>
     );
   }
@@ -4516,30 +4580,6 @@ function SiteQuickRow({
             </label>
           )}
         <button className="st-pill" data-cap="cap-more-roof" onClick={onMore}>+ more…<small>insulation · overhang · gutters</small></button>
-      </>
-    );
-  }
-  if (chapter === 'openings') {
-    const counts = { win: 0, door: 0, sky: 0 };
-    (spec.openings || []).forEach((o) => {
-      const p = OPENING_TYPES[o.type] || OPENING_TYPES.window;
-      if (p.roof) counts.sky += 1; else if (p.entry) counts.door += 1; else counts.win += 1;
-    });
-    return (
-      <>
-        <span className="st-toolbar-label">Openings</span>
-        <span className="st-tool-group" data-cap="cap-openings-wall">
-          {WALL_SIDES.map((s) => (
-            <button key={s} className={`st-pill ${openWall === s ? 'on' : ''}`} title={`Put the next opening on the ${WALL_SIDE_LABELS[s]} wall`}
-              onClick={() => onPickWall(s)}>{s[0].toUpperCase() + s.slice(1)}</button>
-          ))}
-        </span>
-        <button className="st-pill" data-cap="cap-openings-add" onClick={() => onAddOpening('window')}>+ Window <small>{counts.win} placed</small></button>
-        <button className="st-pill" onClick={() => onAddOpening('door')}>+ Door <small>{counts.door} placed</small></button>
-        <button className="st-pill" onClick={() => onAddOpening('skylight')}>+ Skylight <small>{counts.sky} placed</small></button>
-        <button className="st-pill" data-cap="cap-openings-greenhouse" title="Greenhouse glass — a slanted glass section over the greenhouse's stretch of the south wall, straw bale carrying on either side. Never the whole wall unless you ask a wall card for that."
-          onClick={onGreenhouse}>☀ Greenhouse<small>slanted glass section</small></button>
-        <button className="st-pill" data-cap="cap-more-openings" onClick={onMore}>fancier…<small>french · raked · dormers</small></button>
       </>
     );
   }
