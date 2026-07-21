@@ -4722,3 +4722,69 @@ export const PLAN_ZONE_HEX = {
 // spec, so editing a thickness / stem height / overhang in the fields beside
 // the drawing redraws the joint. Feet are the SVG unit.
 export const hexOf = (color) => `#${Number(color || 0x8a8a8a).toString(16).padStart(6, '0')}`;
+
+// --- Legacy glass cleanup (update 148) --------------------------------------
+// Five generations of greenhouse design used to coexist: whole-wall glass
+// FACE (sunGlazing), whole-wall glass SYSTEM (glazed assembly), outline-fixed
+// glazed SECTIONS, the room annex, and the greenhouse OPENING. Only the last
+// two remain. This runs on every design as it LOADS: legacy artifacts are
+// removed silently, walls stand back up in the house's solid system, and the
+// glass survives as at most ONE moveable greenhouse opening on the south
+// wall (placed where the south glass actually was). No buttons, no lists.
+export function normalizeLegacyGlass(spec) {
+  if (!spec?.shell) return 0;
+  let cleaned = 0;
+  const counts = {};
+  WALL_SIDES.forEach((s) => {
+    const k = resolveWallSide(spec, s).assemblyKey;
+    if (k !== 'glazed') counts[k] = (counts[k] || 0) + 1;
+  });
+  const solid = (Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || ['straw-bale'])[0];
+  let keep = null; // the one south greenhouse opening the cleanup may leave
+  const W = Number(spec.shell.widthFt) || 36;
+  if (hasSegmentedFootprint(spec) && spec.wallSegments) {
+    footprintEdges(spec).forEach((edge) => {
+      const seg = spec.wallSegments[edge.key];
+      if (!seg || !seg.sunGlazing) return;
+      cleaned += 1;
+      if (edge.facing === 'south' && !keep) {
+        const lo = edge.horizontal ? Math.min(edge.x0, edge.x1) : Math.min(edge.y0, edge.y1);
+        keep = { at: Math.max(0.5, Math.round(lo * 2) / 2), w: Math.min(24, Math.max(3, Math.round(edge.lengthFt * 2) / 2)), tilt: Number(seg.sunGlazingTiltDeg ?? 30) };
+      }
+      delete seg.sunGlazing; delete seg.sunGlazingTiltDeg; delete seg.kneewallFt;
+      if (!Object.keys(seg).length) delete spec.wallSegments[edge.key];
+    });
+    if (spec.wallSegments && !Object.keys(spec.wallSegments).length) delete spec.wallSegments;
+  }
+  WALL_SIDES.forEach((side) => {
+    const w = (spec.walls || {})[side];
+    if (!w) return;
+    if (w.sunGlazing) {
+      cleaned += 1;
+      delete w.sunGlazing; delete w.sunGlazingTiltDeg;
+      // the low wall existed only to carry the glass
+      if (Number(w.heightFt) > 0 && Number(w.heightFt) <= 4) delete w.heightFt;
+      if (side === 'south' && !keep) keep = { at: Math.max(0.5, W / 2 - 9), w: Math.min(24, Math.max(3, W - 2)), tilt: 30 };
+    }
+    if (w.assembly === 'glazed') {
+      cleaned += 1;
+      w.assembly = solid;
+      if (side === 'south' && !keep) keep = { at: Math.max(0.5, W / 2 - 9), w: Math.min(24, Math.max(3, W - 2)), tilt: 30 };
+    }
+    if (!Object.keys(w).length) delete spec.walls[side];
+  });
+  if (keep) {
+    spec.openings = spec.openings || [];
+    const at = Math.min(keep.at, Math.max(0.5, W - keep.w));
+    const clash = spec.openings.some((o) => {
+      if (o.wall !== 'south' || Number(o.level || 1) !== 1) return false;
+      const e0 = Number(o.x ?? 0); const e1 = e0 + (Number(o.widthFt) || 3);
+      return at < e1 - 0.05 && at + keep.w > e0 + 0.05;
+    });
+    const hasGh = spec.openings.some((o) => o.type === 'greenhouse');
+    if (!clash && !hasGh) {
+      spec.openings.push({ type: 'greenhouse', wall: 'south', x: at, widthFt: keep.w, label: 'South Greenhouse — slanted glass', level: 1, tiltDeg: keep.tilt });
+    }
+  }
+  return cleaned;
+}

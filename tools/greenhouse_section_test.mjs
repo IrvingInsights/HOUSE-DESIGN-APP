@@ -120,3 +120,30 @@ console.log(`greenhouse_section_test: all ${checks} checks green`);
   ok(!(s.openings || []).some((o) => o.type === 'greenhouse'), 'gh-opening: removes like any opening');
 }
 console.log('greenhouse OPENING checks green');
+
+// 8. THE NORMALIZER (update 148): Daniel's real pileup — north whole-face
+//    glass, south glazed SYSTEM, a north fixed section, a south fixed
+//    section, zero openings — loads as: solid walls everywhere, ONE moveable
+//    greenhouse opening on the south wall where his south glass stood.
+import { normalizeLegacyGlass } from '../src/engine.js';
+{
+  const s = {
+    shell: { widthFt: 36, depthFt: 28, wallHeightFt: 10, roofType: 'gable', roofPitch: 0.32, footprint: [[0, 0], [4, 0], [32, 0], [36, 0], [36, 28], [27, 28], [9, 28], [0, 28]] },
+    wallSegments: { e1: { sunGlazing: true, sunGlazingTiltDeg: 30, kneewallFt: 2 }, e5: { sunGlazing: true, sunGlazingTiltDeg: 30, kneewallFt: 2 } },
+    walls: { north: { sunGlazing: true, heightFt: 2 }, south: { assembly: 'glazed' }, east: { assembly: 'straw-bale' }, west: { assembly: 'straw-bale' } },
+    rooms: [], elements: [], openings: []
+  };
+  const cleaned = normalizeLegacyGlass(s);
+  ok(cleaned === 4, `normalizer: found all 4 artifacts (got ${cleaned})`);
+  ok(!s.wallSegments, 'normalizer: fixed sections gone');
+  ok(!s.walls.north || !s.walls.north.sunGlazing, 'normalizer: north face glass gone');
+  ok(s.walls.south.assembly === 'straw-bale', 'normalizer: south system back to the house system');
+  const gh = (s.openings || []).filter((o) => o.type === 'greenhouse');
+  ok(gh.length === 1, 'normalizer: exactly ONE greenhouse opening remains');
+  ok(gh[0].wall === 'south' && gh[0].x === 9 && gh[0].widthFt === 18, `normalizer: it sits where the south glass was (x ${gh[0].x}, w ${gh[0].widthFt})`);
+  ok(normalizeLegacyGlass(s) === 0, 'normalizer: second run finds nothing (idempotent)');
+  // a clean design is untouched
+  const clean = { shell: { widthFt: 30, depthFt: 24 }, walls: { south: { assembly: 'cob' } }, openings: [{ type: 'greenhouse', wall: 'south', x: 5, widthFt: 10, level: 1 }] };
+  ok(normalizeLegacyGlass(clean) === 0 && clean.openings.length === 1, 'normalizer: clean designs pass through untouched');
+}
+console.log('normalizer checks green');
