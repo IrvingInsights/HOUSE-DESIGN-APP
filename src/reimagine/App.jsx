@@ -57,7 +57,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 142 · Jul 21';
+const UPDATE_STAMP = 'update 143 · Jul 21';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -3924,6 +3924,15 @@ function WallSideFields({ side, spec, onWallSide, level = 1 }) {
           ))}
         </select>
       </label>
+      {/* The system and the face are LAYERS, not rivals — without this line
+          "I picked straw bale and nothing changed" (the siding covers it). */}
+      <div className="rz-shape-note">
+        {r.sunGlazing
+          ? `This wall now: a ${Math.round(r.heightFt * 10) / 10} ft ${r.assembly.label.toLowerCase()} kneewall with slanted glass above. The wall system builds the kneewall, the weather face dresses it — the glass answers to neither.`
+          : r.cladding && r.cladding !== 'render'
+            ? `This wall now: ${Math.round(r.thicknessFt * 12)}″ of ${r.assembly.label.toLowerCase()} doing the standing and insulating, WEARING ${(CLADDING_TYPES[r.cladding] || {}).label || r.cladding} as its skin. The face covers the system — to SEE the ${r.assembly.label.toLowerCase()} itself, set the weather face to rainscreen / lime render.`
+            : `This wall now: ${Math.round(r.thicknessFt * 12)}″ of ${r.assembly.label.toLowerCase()} showing its own rendered face. The system is the structure and warmth; the weather face is the skin you see — they layer, they never replace each other.`}
+      </div>
       {/* greenhouse face: slanted glazing on this wall, carried by the frame.
           Glazing, height, and no-wall shape the ground storey + roofline —
           upper bands keep to construction (the engine's rule). */}
