@@ -533,6 +533,53 @@ const FACING_BY_NORMAL = { '0,-1': 'north', '0,1': 'south', '1,0': 'east', '-1,0
 // wall construction stays keyed by facing (all north-facing edges share the
 // 'north' wall settings), so resolveWallSide keeps working unchanged and the
 // cardinal names remain aliases while the footprint is a plain rectangle.
+// Insert split points at x0/x1 along the south-facing edge that carries that
+// stretch, so ONE section of the wall can get its own construction (the
+// greenhouse's slanted sun glass, bale carrying on either side). Works on the
+// plain rectangle AND any custom outline — L, T, U, or an outline already
+// split by an earlier section. Returns { poly, x0, x1 } (clamped to the edge)
+// or null when there is no straight south edge to split (round outline, or
+// the stretch misses every south edge / ends up under 3 ft).
+export function splitSouthEdgeAt(spec, x0raw, x1raw) {
+  const shell = (spec && spec.shell) || {};
+  if (shell.footprint === 'round') return null;
+  const W = Number(shell.widthFt) || 36;
+  const D = Number(shell.depthFt) || 28;
+  const snap = (v) => Math.round(v * 2) / 2;
+  const wantLo = Math.min(Number(x0raw) || 0, Number(x1raw) || 0);
+  const wantHi = Math.max(Number(x0raw) || 0, Number(x1raw) || 0);
+  if (!Array.isArray(shell.footprint)) {
+    const x0 = snap(Math.max(0, wantLo));
+    const x1 = snap(Math.min(W, wantHi));
+    if (x1 - x0 < 3) return null;
+    return {
+      poly: [[0, 0], [W, 0], [W, D], ...(x1 < W - 0.1 ? [[x1, D]] : []), ...(x0 > 0.1 ? [[x0, D]] : []), [0, D]],
+      x0, x1
+    };
+  }
+  const edges = footprintEdges(spec);
+  const verts = edges.map((e) => [e.x0, e.y0]);
+  let edge = null; let bestOv = 0;
+  for (const e of edges) {
+    if (e.facing !== 'south' || !e.horizontal) continue;
+    const lo = Math.min(e.x0, e.x1); const hi = Math.max(e.x0, e.x1);
+    const ov = Math.min(hi, wantHi) - Math.max(lo, wantLo);
+    if (ov > bestOv) { bestOv = ov; edge = e; }
+  }
+  if (!edge || bestOv < 3) return null;
+  const lo = Math.min(edge.x0, edge.x1); const hi = Math.max(edge.x0, edge.x1);
+  const x0 = snap(Math.max(lo, wantLo));
+  const x1 = snap(Math.min(hi, wantHi));
+  if (x1 - x0 < 3) return null;
+  const y = edge.y0;
+  const dir = Math.sign(edge.x1 - edge.x0) || -1;
+  const inserted = (dir < 0 ? [x1, x0] : [x0, x1])
+    .filter((x) => Math.abs(x - edge.x0) > 0.1 && Math.abs(x - edge.x1) > 0.1)
+    .map((x) => [x, y]);
+  const poly = [...verts.slice(0, edge.index + 1), ...inserted, ...verts.slice(edge.index + 1)];
+  return { poly, x0, x1 };
+}
+
 export function footprintEdges(spec) {
   const vertices = footprintPolygon(spec);
   const n = vertices.length;
@@ -1925,6 +1972,13 @@ export function applyBimOperations(currentSpec, plan) {
         const on = operation.value === true || String(operation.value) === 'true' || operation.value === 1 || operation.value === '1';
         const hadGlazing = Boolean(next.walls[side].sunGlazing);
         next.walls[side].sunGlazing = on;
+        // Turning glazing ON brings its kneewall: a glazed side's heightFt IS
+        // the kneewall, so a full-height wall (or none set) would leave only a
+        // sliver of glass at the top — the glass must start low.
+        if (on && !hadGlazing) {
+          const cur = Number(next.walls[side].heightFt);
+          if (!Number.isFinite(cur) || cur > 4) next.walls[side].heightFt = 2;
+        }
         // Turning glazing OFF removes the kneewall with it — the low wall
         // only existed to carry the glass. The side stands back up to the
         // shell's roofline; the shell itself never moved (kneewalls don't

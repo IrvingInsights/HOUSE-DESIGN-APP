@@ -7,7 +7,7 @@ import {
   applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
   INSULATION_TYPES, resolveInsulation, OPENING_TYPES, openingVerticalBand,
   FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS, storeyHeightFt, storeyElevationFt,
-  footprintPolygon, polygonArea, footprintBounds, footprintEdges, roofProfile, snapPlatesToShell
+  footprintPolygon, polygonArea, footprintBounds, footprintEdges, splitSouthEdgeAt, roofProfile, snapPlatesToShell
 } from '../../backend/bim-core.mjs';
 import {
   seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS,
@@ -57,7 +57,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 141 · Jul 20';
+const UPDATE_STAMP = 'update 142 · Jul 21';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -540,10 +540,13 @@ export default function App() {
   // straw bale carrying on either side. The same collinear-point splitting
   // move as the earthship mass wall above. Returns the new spec + edge, so
   // callers can chain it after other ops and commit once.
-  const splitAndGlazeSouth = (baseSpec, x0, x1) => {
-    const W = Number(baseSpec.shell.widthFt) || 36;
-    const D = Number(baseSpec.shell.depthFt) || 28;
-    const poly = [[0, 0], [W, 0], [W, D], ...(x1 < W - 0.1 ? [[x1, D]] : []), ...(x0 > 0.1 ? [[x0, D]] : []), [0, D]];
+  const splitAndGlazeSouth = (baseSpec, x0raw, x1raw) => {
+    // splitSouthEdgeAt understands ANY outline — the plain rectangle, L/T/U,
+    // or one already carrying sections — and clamps the stretch to the south
+    // edge that carries it. Only 'round' answers null.
+    const cut = splitSouthEdgeAt(baseSpec, x0raw, x1raw);
+    if (!cut) return null;
+    const { poly, x0, x1 } = cut;
     const r1 = applyBimOperations(baseSpec, { operations: [{ type: 'set_footprint', value: JSON.stringify(poly) }] });
     if (!r1?.spec) return null;
     const edge = footprintEdges(r1.spec).find((e) => e.facing === 'south'
@@ -558,14 +561,14 @@ export default function App() {
   };
   const glazeWallSection = (x0raw, x1raw, why = '') => {
     const W = Number(spec.shell.widthFt) || 36;
-    if (Array.isArray(spec.shell.footprint) || spec.shell.footprint === 'round') {
-      setMoveNote({ text: 'This outline already has wall sections — pick the south section in Walls → Sections of a wall and turn on its slanted sun glass there.' });
+    if (spec.shell.footprint === 'round') {
+      setMoveNote({ text: 'A round outline has no straight south wall to split — sun glazing on round walls is a later chapter of this app.' });
       return;
     }
     const x0 = Math.round(clamp(Number(x0raw) || 0, 0, W) * 2) / 2;
     const x1 = Math.round(clamp(Number(x1raw) || 0, 0, W) * 2) / 2;
     if (x1 - x0 < 3) { setMoveNote({ text: 'That stretch is under 3 ft — too narrow for a glazed section.' }); return; }
-    if (x1 - x0 >= W - 0.5) { makeGreenhouseSouth(); return; } // the whole face IS the classic glass face
+    if (!Array.isArray(spec.shell.footprint) && x1 - x0 >= W - 0.5) { makeGreenhouseSouth(); return; } // the whole face IS the classic glass face
     const done = splitAndGlazeSouth(spec, x0, x1);
     if (!done) { setMoveNote({ text: 'Could not split the south wall there — try the Sections controls in Walls.' }); return; }
     commitSpec(done.spec);
@@ -1260,27 +1263,71 @@ export default function App() {
   // wall becomes kneewall + glass — and stays a deliberate WallCard choice.
   const southPlantRoom = () => (spec.rooms || []).find((r) => r.type === 'plant' && Number(r.level || 1) === 1);
   const roomPokesSouth = (room) => (Number(room.y) || 0) + (Number(room.d) || 0) > (Number(spec.shell.depthFt) || 24) + 1.5;
-  // An INTERIOR greenhouse sitting against the south wall: the wall stretch
+  // The south edge THIS room's stretch actually faces — on an L/T/U outline
+  // that can be an inset stretch, not the outermost wall.
+  const localSouthEdgeFor = (room) => {
+    const W = Number(spec.shell.widthFt) || 36;
+    const D = Number(spec.shell.depthFt) || 24;
+    if (!Array.isArray(spec.shell.footprint)) return { y: D, lo: 0, hi: W };
+    const rx = Number(room.x) || 0; const rw = Number(room.w) || 0;
+    let best = null; let bestOv = -Infinity;
+    footprintEdges(spec).forEach((e) => {
+      if (e.facing !== 'south' || !e.horizontal) return;
+      const lo = Math.min(e.x0, e.x1); const hi = Math.max(e.x0, e.x1);
+      const ov = Math.min(hi, rx + rw) - Math.max(lo, rx);
+      if (ov > bestOv) { best = e; bestOv = ov; }
+    });
+    return best ? { y: best.y0, lo: Math.min(best.x0, best.x1), hi: Math.max(best.x0, best.x1) } : { y: D, lo: 0, hi: W };
+  };
+  // An INTERIOR greenhouse sitting against its south wall: the wall stretch
   // in front of it becomes the glass (Daniel's chosen design — glass IN the
   // wall, bale either side), rather than sliding the room outdoors.
   const roomAgainstSouth = (room) => {
-    const D = Number(spec.shell.depthFt) || 24;
-    const gap = D - ((Number(room.y) || 0) + (Number(room.d) || 0));
+    const local = localSouthEdgeFor(room);
+    const gap = local.y - ((Number(room.y) || 0) + (Number(room.d) || 0));
     return gap < 2 && !roomPokesSouth(room);
   };
   const glazeForRoom = (room) => {
     if (roomAgainstSouth(room)) {
-      glazeWallSection(Number(room.x) || 0, (Number(room.x) || 0) + (Number(room.w) || 0), `over ${room.name || 'the greenhouse'}`);
+      const local = localSouthEdgeFor(room);
+      const x0 = Math.max(Number(room.x) || 0, local.lo);
+      const x1 = Math.min((Number(room.x) || 0) + (Number(room.w) || 0), local.hi);
+      glazeWallSection(x0, x1, `over ${room.name || 'the greenhouse'}`);
       return;
     }
     glazeGreenhouseRoom(room);
   };
   const glazeGreenhouseRoom = (room) => {
+    const D = Number(spec.shell.depthFt) || 24;
+    const local = localSouthEdgeFor(room);
+    const gap = local.y - ((Number(room.y) || 0) + (Number(room.d) || 0));
+    if (gap > 6) {
+      // Far from any south wall: moving it for him teleported greenhouses
+      // across the plan — say what to do instead, move nothing.
+      setSelectedId(room.id);
+      setMoveNote({ text: `${room.name || 'The greenhouse'} sits ${Math.round(gap)} ft from its south wall — drag it against the sunny south side, then tap ☀ again. Nothing was moved.` });
+      return;
+    }
+    if (local.y < D - 0.1) {
+      // An inset south stretch (the notch of an L/T/U): the glazed annex only
+      // builds off the OUTERMOST wall, so here the room is pulled flush and
+      // the wall section in front of it becomes the glass instead.
+      const r0 = applyBimOperations(spec, { operations: [{ type: 'move_object', targetId: room.id, name: room.name, x: Number(room.x) || 0, y: Math.max(0.5, local.y - (Number(room.d) || 0)) }] });
+      if (!r0?.spec) return;
+      const x0 = Math.max(Number(room.x) || 0, local.lo);
+      const x1 = Math.min((Number(room.x) || 0) + (Number(room.w) || 0), local.hi);
+      const done = x1 - x0 >= 3 ? splitAndGlazeSouth(r0.spec, x0, x1) : null;
+      commitSpec((done || r0).spec);
+      setSelectedId(done ? `wall-${done.edge.key}` : room.id);
+      setMoveNote({ text: done
+        ? `${room.name || 'The greenhouse'} sits flush and the wall in front of it is now slanted sun glass on a 2 ft kneewall — the wall carries on in its own system either side. Ctrl+Z undoes it.`
+        : `${room.name || 'The greenhouse'} sits flush against its south wall, but its stretch is under 3 ft — too narrow for a glazed section.` });
+      return;
+    }
     // The flag's "drag it a couple of feet past the wall", automated: keep
     // its x, slide it south until 1.5 ft stays inside (the doorway) — the
     // glazed annex builds over exactly its span.
-    const depth = Number(spec.shell.depthFt) || 24;
-    applyOps([{ type: 'move_object', targetId: room.id, name: room.name, x: Number(room.x) || 0, y: Math.max(0.5, depth - 1.5) }]);
+    applyOps([{ type: 'move_object', targetId: room.id, name: room.name, x: Number(room.x) || 0, y: Math.max(0.5, D - 1.5) }]);
     setSelectedId(room.id);
     setMoveNote({ text: `${room.name || 'The greenhouse'} now stands past the south wall — its kneewall, timber and slanted glass build over just that stretch, and the wall behind it keeps its own face. Ctrl+Z undoes it.` });
   };
@@ -1305,7 +1352,7 @@ export default function App() {
     // An interior greenhouse against the wall gets a glazed wall SECTION
     // over its stretch; a poking one keeps its annex; anything else just
     // gets the wall back.
-    if (room && roomAgainstSouth(room) && !Array.isArray(r0.spec.shell.footprint) && r0.spec.shell.footprint !== 'round') {
+    if (room && roomAgainstSouth(room) && r0.spec.shell.footprint !== 'round') {
       const x0 = Math.round(clamp(Number(room.x) || 0, 0, Number(r0.spec.shell.widthFt) || 36) * 2) / 2;
       const x1 = Math.round(clamp((Number(room.x) || 0) + (Number(room.w) || 0), 0, Number(r0.spec.shell.widthFt) || 36) * 2) / 2;
       const done = x1 - x0 >= 3 ? splitAndGlazeSouth(r0.spec, x0, x1) : null;
@@ -4481,6 +4528,8 @@ function SiteQuickRow({
         <button className="st-pill" data-cap="cap-openings-add" onClick={() => onAddOpening('window')}>+ Window <small>{counts.win} placed</small></button>
         <button className="st-pill" onClick={() => onAddOpening('door')}>+ Door <small>{counts.door} placed</small></button>
         <button className="st-pill" onClick={() => onAddOpening('skylight')}>+ Skylight <small>{counts.sky} placed</small></button>
+        <button className="st-pill" data-cap="cap-openings-greenhouse" title="Greenhouse glass — a slanted glass section over the greenhouse's stretch of the south wall, straw bale carrying on either side. Never the whole wall unless you ask a wall card for that."
+          onClick={onGreenhouse}>☀ Greenhouse<small>slanted glass section</small></button>
         <button className="st-pill" data-cap="cap-more-openings" onClick={onMore}>fancier…<small>french · raked · dormers</small></button>
       </>
     );
