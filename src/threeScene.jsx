@@ -3385,11 +3385,15 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               // projecting exterior sill ledge under windows
               part(size + 0.5, 0.13, 0.5, mid, sill - fw - 0.04, 0.22, frameMat);
             }
-            // Tilted glazing pane — lean the glass on its angle (top toward the
-            // house, the greenhouse face), around the wall's own axis.
+            // Tilted glazing pane — lean the glass on its angle: TOP toward
+            // the house, bottom standing proud at the kneewall — the lean-to
+            // sunspace profile. (The sign was backwards from birth: the pane
+            // leaned top-OUT like a shop awning. Daniel: "the fucking glass
+            // slants the wrong way." Top-inward = MINUS dirOut on horizontal
+            // walls; measured on the south wall: top z < bottom z.)
             if (Number(opening.tiltDeg) > 0 && mesh) {
               const tr = clamp(Number(opening.tiltDeg), 5, 60) * Math.PI / 180;
-              if (horizontalWall) mesh.rotation.x = dirOut * tr; else mesh.rotation.z = -dirOut * tr;
+              if (horizontalWall) mesh.rotation.x = -dirOut * tr; else mesh.rotation.z = dirOut * tr;
             }
             // Raked gable window — a sloped head frame (an inverted V) following
             // the roof pitch over the tall glass.
