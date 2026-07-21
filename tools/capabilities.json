@@ -32,6 +32,7 @@
 
     { "id": "openings.pick-wall", "chapter": "openings", "label": "Pick which wall the next opening lands on", "marker": "cap-openings-wall", "site": "quick" },
     { "id": "openings.add", "chapter": "openings", "label": "Add a window, door, or skylight", "marker": "cap-openings-add", "site": "quick" },
+    { "id": "openings.greenhouse", "chapter": "openings", "label": "Greenhouse — a slanted glass SECTION of the south wall, reachable from Openings too", "marker": "cap-openings-greenhouse", "site": "quick" },
     { "id": "openings.fancy", "chapter": "openings", "label": "Fancier openings — french, raked, tilted, dormers", "marker": "cap-openings-fancy", "site": "more", "classic": "OpeningsControls" },
 
     { "id": "systems.heat", "chapter": "systems", "label": "Heat source", "marker": "cap-systems-heat", "site": "quick" },

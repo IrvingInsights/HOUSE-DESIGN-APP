@@ -69,6 +69,21 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
         out.push({ t0: Math.max(0.3, lo + 0.2), t1: Math.min(run - 0.3, hi - 0.2), knee: Number(r.heightFt) || 2 });
       });
     }
+    // A greenhouse ROOM standing past this wall builds its glazed annex in
+    // 3D — draw the same band here, so the Wall view shows it too (it was
+    // 3D-only, and "the greenhouse button did nothing" was born).
+    const W = Number(shell.widthFt) || 36;
+    const Dp = Number(shell.depthFt) || 28;
+    (spec.rooms || []).forEach((room) => {
+      if (room.type !== 'plant' || Number(room.level || 1) !== 1) return;
+      const rx = Number(room.x) || 0; const ry = Number(room.y) || 0;
+      const rw = Number(room.w) || 0; const rd = Number(room.d) || 0;
+      const poke = { south: ry + rd - Dp, north: -ry, east: rx + rw - W, west: -rx }[wall];
+      if (!(poke > 1.5)) return;
+      const lo = horiz ? Math.max(0, rx) : Math.max(0, ry);
+      const hi = horiz ? Math.min(run, rx + rw) : Math.min(run, ry + rd);
+      out.push({ t0: Math.max(0.3, lo + 0.2), t1: Math.min(run - 0.3, hi - 0.2), knee: 2, annex: true, label: `${room.name || 'greenhouse'} — slanted glass` });
+    });
     return out.filter((s) => s.t1 - s.t0 > 1.5);
   })();
   // half the slope span × pitch — mirrors the 3D's corrected gable law
@@ -347,7 +362,7 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
                   : null;
               })}
               <line x1={X(s.t0)} y1={Y(s.knee)} x2={X(s.t1)} y2={Y(s.knee)} stroke="#7c5c38" strokeWidth={0.28} />
-              <text x={(X(s.t0) + X(s.t1)) / 2} y={Y(s.knee) + 1.1} textAnchor="middle" fontSize="0.95" fill="#5d7d89">slanted sun glass</text>
+              <text x={(X(s.t0) + X(s.t1)) / 2} y={Y(s.knee) + 1.1} textAnchor="middle" fontSize="0.95" fill="#5d7d89">{s.label || 'slanted sun glass'}</text>
             </g>
           );
         })}
