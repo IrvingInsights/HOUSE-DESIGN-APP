@@ -56,7 +56,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 144 · Jul 21';
+const UPDATE_STAMP = 'update 145 · Jul 21';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1344,9 +1344,27 @@ export default function App() {
   // batch turns the side glazing off (the engine stands the wall back up)
   // and slides the room into the sun — bale face back, glass only where the
   // greenhouse is.
+  // The house's dominant wall system — what a wall should return to when its
+  // whole-wall glass (face OR system) is scoped down to the greenhouse.
+  const dominantWallAssembly = () => {
+    const counts = {};
+    WALL_SIDES.forEach((s) => {
+      const k = resolveWallSide(spec, s).assemblyKey;
+      if (k !== 'glazed') counts[k] = (counts[k] || 0) + 1;
+    });
+    return (Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || ['straw-bale'])[0];
+  };
   const scopeGlassToGreenhouse = () => {
     const room = southPlantRoom();
-    const r0 = applyBimOperations(spec, { operations: [{ type: 'set_wall_side', wall: 'south', field: 'sunGlazing', value: false }] });
+    // BOTH whole-wall glass designs come off in one batch: the glass FACE
+    // (sunGlazing) and the glass SYSTEM (the glazed curtain-wall assembly) —
+    // either one alone kept the whole south wall glass and fought the
+    // greenhouse's own band.
+    const ops = [{ type: 'set_wall_side', wall: 'south', field: 'sunGlazing', value: false }];
+    if (resolveWallSide(spec, 'south').assemblyKey === 'glazed') {
+      ops.push({ type: 'set_wall_side', wall: 'south', field: 'assembly', value: dominantWallAssembly() });
+    }
+    const r0 = applyBimOperations(spec, { operations: ops });
     if (!r0?.spec) return;
     // An interior greenhouse against the wall gets a glazed wall SECTION
     // over its stretch; a poking one keeps its annex; anything else just
@@ -3370,7 +3388,11 @@ function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAd
             const items = [];
             WALL_SIDES.forEach((s) => {
               const r = resolveWallSide(spec, s);
-              if (r.sunGlazing && !r.omitted) items.push({ kind: 'side', side: s });
+              if (r.omitted) return;
+              if (r.sunGlazing) items.push({ kind: 'side', side: s });
+              // a GLAZED curtain-wall SYSTEM makes the whole wall glass too —
+              // it belongs in this list or it fights the greenhouse unseen
+              else if (r.assemblyKey === 'glazed') items.push({ kind: 'glazedSystem', side: s });
             });
             if (hasSegmentedFootprint(spec)) {
               footprintEdges(spec).forEach((edge) => {
@@ -3400,6 +3422,16 @@ function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAd
                     <span>☀ {WALL_SIDE_LABELS[it.side]} wall — the WHOLE face is glass (a wall-card choice)</span>
                     <button type="button" className="rz-fresh" onClick={() => onWallSide(it.side, 'sunGlazing', false)}>Take the whole-wall glass off</button>
                   </div>
+                ) : it.kind === 'glazedSystem' ? (
+                  <div key={i} className="rz-ghrow">
+                    <span>☀ {WALL_SIDE_LABELS[it.side]} wall — its wall SYSTEM is a glazed curtain wall, so the whole wall is glass (R2, little warmth)</span>
+                    <button type="button" className="rz-fresh" onClick={() => {
+                      const counts = {};
+                      WALL_SIDES.forEach((s2) => { const k = resolveWallSide(spec, s2).assemblyKey; if (k !== 'glazed') counts[k] = (counts[k] || 0) + 1; });
+                      const solid = (Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || ['straw-bale'])[0];
+                      onWallSide(it.side, 'assembly', solid);
+                    }}>Give it the house's wall system — keep glass only where the greenhouse is</button>
+                  </div>
                 ) : (
                   <div key={i} className="rz-ghrow">
                     <span>☀ {it.room.name || 'Greenhouse'} — its own glazed annex past the wall (tap it on the plan or the 3D house)</span>
@@ -3408,11 +3440,11 @@ function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAd
               </div>
             );
           })()}
-          {resolveWallSide(spec, 'south').sunGlazing && hasSouthGreenhouseRoom && (
+          {(() => { const sr = resolveWallSide(spec, 'south'); return (sr.sunGlazing || sr.assemblyKey === 'glazed') && hasSouthGreenhouseRoom; })() && (
             <div className="rz-shape-note rz-shape-warn">
-              The WHOLE south wall is a glass face AND the greenhouse brings its own glass — two designs fighting.
+              The WHOLE south wall is glass ({resolveWallSide(spec, 'south').assemblyKey === 'glazed' ? 'its wall system is a glazed curtain wall' : 'its face is set to glass'}) AND the greenhouse brings its own glass — two designs fighting.
               <button type="button" className="rz-fresh" style={{ display: 'block', marginTop: 4 }} onClick={onScopeGlass}>
-                Keep the straw-bale wall — glass only at the greenhouse
+                Give the wall back its solid system — glass only at the greenhouse
               </button>
             </div>
           )}
@@ -3981,7 +4013,9 @@ function WallSideFields({ side, spec, onWallSide, level = 1 }) {
       {/* The system and the face are LAYERS, not rivals — without this line
           "I picked straw bale and nothing changed" (the siding covers it). */}
       <div className="rz-shape-note">
-        {r.sunGlazing
+        {r.assemblyKey === 'glazed'
+          ? 'This wall now: its SYSTEM is a glazed curtain wall — the whole wall IS glass (R2, little warmth), and a weather face doesn’t apply. For glass over just the greenhouse’s stretch, pick a solid system here and use ☀ Greenhouse instead.'
+          : r.sunGlazing
           ? `This wall now: a ${Math.round(r.heightFt * 10) / 10} ft ${r.assembly.label.toLowerCase()} kneewall with slanted glass above. The wall system builds the kneewall, the weather face dresses it — the glass answers to neither.`
           : r.cladding && r.cladding !== 'render'
             ? `This wall now: ${Math.round(r.thicknessFt * 12)}″ of ${r.assembly.label.toLowerCase()} doing the standing and insulating, WEARING ${(CLADDING_TYPES[r.cladding] || {}).label || r.cladding} as its skin. The face covers the system — to SEE the ${r.assembly.label.toLowerCase()} itself, set the weather face to rainscreen / lime render.`
