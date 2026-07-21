@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { OPENING_TYPES, openingVerticalBand, storeyElevationFt, storeyHeightFt, footprintEdges, hasSegmentedFootprint } from '../../backend/bim-core.mjs';
+import { OPENING_TYPES, openingVerticalBand, storeyElevationFt, storeyHeightFt, footprintEdges, hasSegmentedFootprint, CLADDING_TYPES } from '../../backend/bim-core.mjs';
 import { resolveWallSide, upperPlateRect, resolveDeck } from '../engine.js';
 import { buildFaceLaw } from './faceLaw.js';
 
@@ -52,6 +52,21 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   // Sun-glazed stretches on THIS face — the whole side (classic) or glazed
   // SECTIONS of a split wall. Drawn as slanted-glass bands so the Wall view
   // finally shows the greenhouse face the 3D builds (it was 3D-only).
+  // What this face WEARS — the chosen cladding's color, else the wall
+  // system's own rendered face — pulled well toward paper so lines and
+  // openings stay crisp. Before this the face was one fixed paper color and
+  // both the system and face selects looked dead in this view.
+  const rFace = resolveWallSide(spec, wall);
+  const wearHex = rFace.cladding && rFace.cladding !== 'render'
+    ? (CLADDING_TYPES[rFace.cladding] || {}).color
+    : (rFace.assembly || {}).color;
+  const faceFill = (() => {
+    if (!Number.isFinite(Number(wearHex))) return '#f4efe3';
+    const mix = (a, b, t) => Math.round(a + (b - a) * t);
+    const h = Number(wearHex);
+    const r8 = mix((h >> 16) & 255, 0xf4, 0.55); const g8 = mix((h >> 8) & 255, 0xef, 0.55); const b8 = mix(h & 255, 0xe3, 0.55);
+    return `#${((r8 << 16) | (g8 << 8) | b8).toString(16).padStart(6, '0')}`;
+  })();
   const glassCeilFace = storeys > 1 ? elevOf(2) : Infinity;
   const glassStretches = (() => {
     const out = [];
@@ -337,8 +352,10 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
             fill="#e9e2d1" stroke="#a49d8a" strokeWidth={0.09} strokeDasharray="0.7 0.5" opacity="0.7" pointerEvents="none" />
         ))}
 
-        {/* the wall face */}
-        <polygon points={facePts} fill="#f4efe3" stroke="#4a4f47" strokeWidth={0.16} strokeLinejoin="round" />
+        {/* the wall face — tinted by what the wall actually WEARS (its
+            cladding, or the wall system's own rendered face), so this view
+            answers the system/face selects instead of ignoring both */}
+        <polygon points={facePts} fill={faceFill} stroke="#4a4f47" strokeWidth={0.16} strokeLinejoin="round" />
 
         {/* sun-glazed stretches: kneewall line, glass band up to the roofline
             (or the 2nd floor on a multi-storey house), timber mullions */}
