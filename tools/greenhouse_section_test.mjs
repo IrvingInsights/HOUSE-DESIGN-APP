@@ -101,3 +101,22 @@ const glazedEdgeOf = (spec, x0, x1) => footprintEdges(spec).find((e) => e.facing
 }
 
 console.log(`greenhouse_section_test: all ${checks} checks green`);
+
+// 7. The greenhouse OPENING (update 146): added, moved, resized, removed like
+//    any window — the moveable design that replaced fixed wall sections.
+{
+  let s = base();
+  s = applyBimOperations(s, { operations: [{ type: 'add_opening', wall: 'south', openingType: 'greenhouse', widthFt: 12, positionFt: 10, level: 1, tiltDeg: 30 }] }).spec;
+  const gh = (s.openings || []).find((o) => o.type === 'greenhouse');
+  ok(Boolean(gh), 'gh-opening: stored');
+  ok(gh.x === 10 && gh.widthFt === 12, 'gh-opening: explicit position and width stick');
+  ok(Number(gh.tiltDeg) === 30, 'gh-opening: tilt stored');
+  const idx = (s.openings || []).indexOf(gh);
+  s = applyBimOperations(s, { operations: [{ type: 'update_object', targetId: `opening-${idx}`, field: 'widthFt', value: 16 }] }).spec;
+  ok(Number(s.openings[idx].widthFt) === 16, 'gh-opening: resizes like any opening');
+  s = applyBimOperations(s, { operations: [{ type: 'update_object', targetId: `opening-${idx}`, field: 'sillFt', value: 3 }] }).spec;
+  ok(Number(s.openings[idx].sillFt) === 3, 'gh-opening: kneewall (sill) adjustable');
+  s = applyBimOperations(s, { operations: [{ type: 'remove_object', targetId: `opening-${idx}` }] }).spec;
+  ok(!(s.openings || []).some((o) => o.type === 'greenhouse'), 'gh-opening: removes like any opening');
+}
+console.log('greenhouse OPENING checks green');

@@ -56,7 +56,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 145 · Jul 21';
+const UPDATE_STAMP = 'update 146 · Jul 21';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1286,59 +1286,50 @@ export default function App() {
     const gap = local.y - ((Number(room.y) || 0) + (Number(room.d) || 0));
     return gap < 2 && !roomPokesSouth(room);
   };
-  const glazeForRoom = (room) => {
-    if (roomAgainstSouth(room)) {
-      const local = localSouthEdgeFor(room);
-      const x0 = Math.max(Number(room.x) || 0, local.lo);
-      const x1 = Math.min((Number(room.x) || 0) + (Number(room.w) || 0), local.hi);
-      glazeWallSection(x0, x1, `over ${room.name || 'the greenhouse'}`);
-      return;
+  // The greenhouse is an OPENING now (Daniel: "allow me to just add the
+  // greenhouse using the existing controls") — one add, then it drags,
+  // resizes, and removes exactly like a window. A plant ROOM standing near
+  // the south wall centers the glass over its stretch; otherwise the engine
+  // finds a free stretch like any opening.
+  const addGreenhouseOpening = (why = '') => {
+    const room = southPlantRoom();
+    const extras = { tiltDeg: 30 };
+    if (room && !roomPokesSouth(room)) {
+      const W = Number(spec.shell.widthFt) || 36;
+      const w = clamp(Math.round((Number(room.w) || 10) * 2) / 2, 3, 24);
+      extras.widthFt = w;
+      extras.positionFt = clamp(Math.round((Number(room.x) || 0) * 2) / 2, 0, Math.max(0, W - w));
     }
-    glazeGreenhouseRoom(room);
+    addOpening('south', 'greenhouse', 1, extras);
+    setMoveNote({ text: `Greenhouse glass added to the south wall${why ? ` (${why})` : ''} — drag it along the wall, pull its side handles wider, lift its sill, all in the Wall view. Delete removes it like any opening.` });
+  };
+  const glazeForRoom = (room) => {
+    if (room && roomPokesSouth(room)) { glazeGreenhouseRoom(room); return; }
+    addGreenhouseOpening(room ? `over ${room.name || 'the greenhouse'}` : '');
   };
   const glazeGreenhouseRoom = (room) => {
-    const D = Number(spec.shell.depthFt) || 24;
-    const local = localSouthEdgeFor(room);
-    const gap = local.y - ((Number(room.y) || 0) + (Number(room.d) || 0));
-    if (gap > 6) {
-      // Far from any south wall: moving it for him teleported greenhouses
-      // across the plan — say what to do instead, move nothing.
-      setSelectedId(room.id);
-      setMoveNote({ text: `${room.name || 'The greenhouse'} sits ${Math.round(gap)} ft from its south wall — drag it against the sunny south side, then tap ☀ again. Nothing was moved.` });
-      return;
-    }
-    if (local.y < D - 0.1) {
-      // An inset south stretch (the notch of an L/T/U): the glazed annex only
-      // builds off the OUTERMOST wall, so here the room is pulled flush and
-      // the wall section in front of it becomes the glass instead.
-      const r0 = applyBimOperations(spec, { operations: [{ type: 'move_object', targetId: room.id, name: room.name, x: Number(room.x) || 0, y: Math.max(0.5, local.y - (Number(room.d) || 0)) }] });
-      if (!r0?.spec) return;
-      const x0 = Math.max(Number(room.x) || 0, local.lo);
-      const x1 = Math.min((Number(room.x) || 0) + (Number(room.w) || 0), local.hi);
-      const done = x1 - x0 >= 3 ? splitAndGlazeSouth(r0.spec, x0, x1) : null;
-      commitSpec((done || r0).spec);
-      setSelectedId(done ? `wall-${done.edge.key}` : room.id);
-      setMoveNote({ text: done
-        ? `${room.name || 'The greenhouse'} sits flush and the wall in front of it is now slanted sun glass on a 2 ft kneewall — the wall carries on in its own system either side. Ctrl+Z undoes it.`
-        : `${room.name || 'The greenhouse'} sits flush against its south wall, but its stretch is under 3 ft — too narrow for a glazed section.` });
-      return;
-    }
-    // The flag's "drag it a couple of feet past the wall", automated: keep
-    // its x, slide it south until 1.5 ft stays inside (the doorway) — the
-    // glazed annex builds over exactly its span.
-    applyOps([{ type: 'move_object', targetId: room.id, name: room.name, x: Number(room.x) || 0, y: Math.max(0.5, D - 1.5) }]);
+    // A plant room already standing PAST the wall keeps its automatic annex —
+    // that one moves with the room itself.
     setSelectedId(room.id);
-    setMoveNote({ text: `${room.name || 'The greenhouse'} now stands past the south wall — its kneewall, timber and slanted glass build over just that stretch, and the wall behind it keeps its own face. Ctrl+Z undoes it.` });
+    setMoveNote({ text: `${room.name || 'The greenhouse'} already builds its own glass annex past the wall — drag the room to move it. For glass IN the wall instead, pull the room inside and tap ☀ again.` });
   };
   const addOrGlazeGreenhouse = () => {
-    const room = southPlantRoom();
-    if (!room) {
-      addRoomPreset(roomPresetFromName('greenhouse') || { name: 'Greenhouse', type: 'plant', w: 12, d: 8 });
-      return;
-    }
-    if (!roomPokesSouth(room)) { glazeForRoom(room); return; }
-    setSelectedId(room.id);
-    setMoveNote({ text: `${room.name || 'The greenhouse'} already has its glass — tap it on the plan or the model to work with it.` });
+    glazeForRoom(southPlantRoom());
+  };
+  // A legacy glazed wall SECTION (fixed to the outline, can't move) becomes a
+  // moveable greenhouse OPENING in one undoable batch: section glass off,
+  // opening on at the same stretch.
+  const convertSectionToOpening = (edgeKey) => {
+    const edge = footprintEdges(spec).find((e) => e.key === edgeKey);
+    if (!edge) return;
+    const r = resolveWallSide(spec, edge.facing, 1, edge.key);
+    const lo = edge.horizontal ? Math.min(edge.x0, edge.x1) : Math.min(edge.y0, edge.y1);
+    const w = clamp(Math.round(edge.lengthFt * 2) / 2, 3, 24);
+    applyOps([
+      { type: 'set_wall_side', wall: edge.key, field: 'sunGlazing', value: false },
+      { type: 'add_opening', wall: edge.facing, openingType: 'greenhouse', widthFt: w, positionFt: Math.max(0.5, Math.round((lo + Math.max(0, (edge.lengthFt - w) / 2)) * 2) / 2), level: 1, tiltDeg: Number(r.sunGlazingTiltDeg ?? 30) }
+    ]);
+    setMoveNote({ text: 'That glass is now a greenhouse OPENING — drag it along the wall, resize it, lift its sill, or delete it like any window. Ctrl+Z undoes it.' });
   };
   // Recovery from the whole-wall glass when a greenhouse room exists: ONE
   // batch turns the side glazing off (the engine stands the wall back up)
@@ -1364,22 +1355,18 @@ export default function App() {
     if (resolveWallSide(spec, 'south').assemblyKey === 'glazed') {
       ops.push({ type: 'set_wall_side', wall: 'south', field: 'assembly', value: dominantWallAssembly() });
     }
+    // An interior greenhouse near the wall gets a moveable greenhouse OPENING
+    // over its stretch, in the SAME batch — one undo step for the whole swap.
+    if (room && !roomPokesSouth(room)) {
+      const W = Number(spec.shell.widthFt) || 36;
+      const w = clamp(Math.round((Number(room.w) || 10) * 2) / 2, 3, 24);
+      ops.push({ type: 'add_opening', wall: 'south', openingType: 'greenhouse', widthFt: w, positionFt: clamp(Math.round((Number(room.x) || 0) * 2) / 2, 0, Math.max(0, W - w)), level: 1, tiltDeg: 30 });
+    }
     const r0 = applyBimOperations(spec, { operations: ops });
     if (!r0?.spec) return;
-    // An interior greenhouse against the wall gets a glazed wall SECTION
-    // over its stretch; a poking one keeps its annex; anything else just
-    // gets the wall back.
-    if (room && roomAgainstSouth(room) && r0.spec.shell.footprint !== 'round') {
-      const x0 = Math.round(clamp(Number(room.x) || 0, 0, Number(r0.spec.shell.widthFt) || 36) * 2) / 2;
-      const x1 = Math.round(clamp((Number(room.x) || 0) + (Number(room.w) || 0), 0, Number(r0.spec.shell.widthFt) || 36) * 2) / 2;
-      const done = x1 - x0 >= 3 ? splitAndGlazeSouth(r0.spec, x0, x1) : null;
-      commitSpec((done || r0).spec);
-      if (done) setSelectedId(`wall-${done.edge.key}`);
-    } else {
-      commitSpec(r0.spec);
-      if (room) setSelectedId(room.id);
-    }
-    setMoveNote({ text: 'The south wall stands back up in its own system and weather face — the glass now lives only at the greenhouse. Ctrl+Z undoes it.' });
+    commitSpec(r0.spec);
+    if (room) setSelectedId(room.id);
+    setMoveNote({ text: 'The south wall stands back up in its own system and weather face — the glass is now a greenhouse opening you can drag, resize, or delete like any window. Ctrl+Z undoes it.' });
   };
   // --- finishes: floor, exterior cladding, reclaimed materials ---------------
   const setFlooring = (value) => applyOps([{ type: 'set_flooring', value }]);
@@ -1957,6 +1944,7 @@ export default function App() {
                       onWallSide={setWallSide}
                       hasSouthGreenhouseRoom={Boolean(southPlantRoom())}
                       onSelectSection={(edgeKey) => { setSelectedId(`wall-${edgeKey}`); setViewMode('wall'); }}
+                      onConvertSection={convertSectionToOpening}
                     />
                     <WallsControls
                       spec={spec}
@@ -3340,7 +3328,7 @@ function StoreysControls({ spec, floors, hasBasement, activeFloor, onSelectFloor
 // roof. Openings carry the floor picked in the Floor selector — a 2nd-floor
 // window goes in the upper wall, and a dormer opens the roof to meet it.
 const DORMER_STYLES = [['gable', 'Gable dormer', 'peaked doghouse'], ['shed', 'Shed dormer', 'single slope']];
-function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAddDormer, onGreenhouse, onScopeGlass, onWallSide, hasSouthGreenhouseRoom = false, onSelectSection }) {
+function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAddDormer, onGreenhouse, onScopeGlass, onWallSide, hasSouthGreenhouseRoom = false, onSelectSection, onConvertSection }) {
   const openings = spec.openings || [];
   const onThisFloor = (o) => o.wall === 'roof' ? level === 1 : Number(o.level || 1) === level;
   const floorWord = level === 1 ? 'ground floor' : floorLabel(spec, level).toLowerCase();
@@ -3381,8 +3369,8 @@ function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAd
       {level === 1 && onGreenhouse && (
         <>
           <button type="button" className="rz-floorbar-outline" onClick={onGreenhouse}
-            title="Greenhouse glass — a slanted glass section over the greenhouse's stretch of the south wall, the wall carrying on in its own system either side">
-            ☀ Greenhouse — slanted glass over its stretch
+            title="Adds greenhouse glass as an OPENING — drag it, resize it, delete it like any window. Centers over your greenhouse room when one stands there.">
+            ☀ Greenhouse — a moveable slanted-glass opening
           </button>
           {(() => {
             const items = [];
@@ -3410,11 +3398,8 @@ function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAd
                 <div className="rz-found-head">Greenhouse glass placed</div>
                 {items.map((it, i) => it.kind === 'section' ? (
                   <div key={i} className="rz-ghrow">
-                    <button type="button" className="rz-storey-link-inline" onClick={() => onSelectSection && onSelectSection(it.edge.key)}>☀ {WALL_SIDE_LABELS[it.side]} wall — {it.len} ft of slanted glass</button>
-                    <label className="rz-field rz-field-num"><span>Glass starts at (the kneewall)</span>
-                      <NumInput value={it.knee} min={1} max={8} step={0.5} onCommit={(v) => onWallSide(it.edge.key, 'kneewallFt', v)} /></label>
-                    <label className="rz-field rz-field-num"><span>Glass tilt (from vertical)</span>
-                      <NumInput value={it.tilt} min={0} max={45} step={5} unit="°" onCommit={(v) => onWallSide(it.edge.key, 'sunGlazingTiltDeg', v)} /></label>
+                    <button type="button" className="rz-storey-link-inline" onClick={() => onSelectSection && onSelectSection(it.edge.key)}>☀ {WALL_SIDE_LABELS[it.side]} wall — {it.len} ft of slanted glass (fixed to the outline)</button>
+                    <button type="button" className="rz-fresh" onClick={() => onConvertSection && onConvertSection(it.edge.key)}>Make it moveable — turn it into a greenhouse opening</button>
                     <button type="button" className="rz-fresh" onClick={() => onWallSide(it.edge.key, 'sunGlazing', false)}>Remove the glass — the wall stands back up</button>
                   </div>
                 ) : it.kind === 'side' ? (
@@ -3463,7 +3448,7 @@ function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAd
         >
           <option value="">Add a special window or door…</option>
           <optgroup label="Windows">
-            {['picture', 'awning', 'clerestory', 'bay', 'raked', 'tilted'].map((key) => (
+            {['picture', 'awning', 'clerestory', 'bay', 'raked', 'tilted', 'greenhouse'].map((key) => (
               <option key={key} value={key}>{OPENING_TYPES[key].label}</option>
             ))}
           </optgroup>
@@ -4562,8 +4547,8 @@ function SiteQuickRow({
         <button className="st-pill" data-cap="cap-openings-add" onClick={() => onAddOpening('window')}>+ Window <small>{counts.win} placed</small></button>
         <button className="st-pill" onClick={() => onAddOpening('door')}>+ Door <small>{counts.door} placed</small></button>
         <button className="st-pill" onClick={() => onAddOpening('skylight')}>+ Skylight <small>{counts.sky} placed</small></button>
-        <button className="st-pill" data-cap="cap-openings-greenhouse" title="Greenhouse glass — a slanted glass section over the greenhouse's stretch of the south wall, straw bale carrying on either side. Never the whole wall unless you ask a wall card for that."
-          onClick={onGreenhouse}>☀ Greenhouse<small>slanted glass section</small></button>
+        <button className="st-pill" data-cap="cap-openings-greenhouse" title="Adds greenhouse glass as an OPENING on the south wall — drag it, resize it, delete it like any window. Centers over your greenhouse room when one stands there."
+          onClick={onGreenhouse}>☀ Greenhouse<small>a moveable glass opening</small></button>
         <span className="st-chip">{south.assembly.label} — R{south.assembly.rValue}</span>
         <button className="st-pill" data-cap="cap-more-walls" onClick={onMore}>+ more…<small>construction · sections · fancier openings</small></button>
       </>

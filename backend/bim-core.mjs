@@ -1361,6 +1361,10 @@ export const OPENING_TYPES = {
   bay: { label: 'Bay window / window seat', h: 4.5, sill: 1.5, glazed: true, defaultW: 6, bay: true },
   raked: { label: 'Raked gable window', h: 4, sill: 3, glazed: true, defaultW: 5, raked: true },
   tilted: { label: 'Tilted glazing pane', h: 4.5, sill: 1.5, glazed: true, defaultW: 4, tilted: true },
+  // The greenhouse is an OPENING (Daniel's directive): a wide slanted glass
+  // pane on a 2 ft kneewall, moved / resized / removed like any window —
+  // rides the tilted-pane render path, glass area feeds the normal cost.
+  greenhouse: { label: 'Greenhouse — slanted glass', h: 6, sill: 2, glazed: true, defaultW: 10, tilted: true, greenhouse: true },
   skylight: { label: 'Skylight / roof window', h: 0, sill: 0, glazed: true, defaultW: 2.5, roof: true }
 };
 
