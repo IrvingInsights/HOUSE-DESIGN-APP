@@ -10,7 +10,7 @@ import {
   footprintPolygon, polygonArea, footprintBounds, footprintEdges, hasSegmentedFootprint, splitSouthEdgeAt, roofProfile, snapPlatesToShell
 } from '../../backend/bim-core.mjs';
 import {
-  seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS,
+  seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS, normalizeLegacyGlass,
   buildTimeline, phaseDependencies, orderPhasesByDeps, validatePhaseOrder, DEFAULT_MODEL_LAYERS,
   floorCount, floorLabel, storeyInfo, upperPlateRect, utilitiesOf, resolveOverhangs,
   WALL_SIDES, WALL_SIDE_LABELS, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS,
@@ -56,7 +56,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 146 · Jul 21';
+const UPDATE_STAMP = 'update 148 · Jul 21';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -140,6 +140,11 @@ function healLoadedSpec(specIn) {
     if (Number.isFinite(want) && Math.abs(Number(el.z || 0) - want) > 0.05) el.z = want;
   });
   snapPlatesToShell(specIn);
+  // Legacy glass designs (whole-wall face/system, fixed sections) clean
+  // themselves up as a design loads — glass in a wall is ONE moveable
+  // greenhouse opening now, nothing else. Silent, automatic, idempotent.
+  const glassCleaned = normalizeLegacyGlass(specIn);
+  if (glassCleaned && typeof window !== 'undefined') window.__rzGlassCleaned = glassCleaned;
   return specIn;
 }
 function loadStoredSpec() {
@@ -254,6 +259,11 @@ export default function App() {
   // this note says so and why — the app explains its refusals instead of
   // silently snapping (and the numbers double as a diagnostic to report).
   const [moveNote, setMoveNote] = useState(null);
+  useEffect(() => {
+    if (!window.__rzGlassCleaned) return;
+    const n = window.__rzGlassCleaned; delete window.__rzGlassCleaned;
+    setMoveNote({ text: `Tidied up ${n} old glass leftover${n === 1 ? '' : 's'} from earlier designs — glass in a wall is now ONE moveable greenhouse opening. Look at the south wall: drag it, resize it, or delete it like any window.` });
+  }, []);
   const [heading, setHeading] = useState(0); // camera compass heading (radians) for the overlay compass
   // (the Ask bar's state lived here — parked with the bar, see SURFACE 4b)
   const [budgetOpen, setBudgetOpen] = useState(false);
@@ -533,46 +543,6 @@ export default function App() {
       : null;
     commitSpec((r2 || r1).spec);
     setMoveNote({ text: `Earthship move made: the ${Math.round((x1 - x0) * 10) / 10} ft of south wall behind “${room.name || 'the greenhouse'}” is now cob — thermal mass where the winter sun lands, insulation everywhere else. Ctrl+Z undoes it.` });
-  };
-  // "Part of this S face is slanted glass": split the south wall at a
-  // stretch and glaze JUST that section — kneewall + tilted glass + timber,
-  // straw bale carrying on either side. The same collinear-point splitting
-  // move as the earthship mass wall above. Returns the new spec + edge, so
-  // callers can chain it after other ops and commit once.
-  const splitAndGlazeSouth = (baseSpec, x0raw, x1raw) => {
-    // splitSouthEdgeAt understands ANY outline — the plain rectangle, L/T/U,
-    // or one already carrying sections — and clamps the stretch to the south
-    // edge that carries it. Only 'round' answers null.
-    const cut = splitSouthEdgeAt(baseSpec, x0raw, x1raw);
-    if (!cut) return null;
-    const { poly, x0, x1 } = cut;
-    const r1 = applyBimOperations(baseSpec, { operations: [{ type: 'set_footprint', value: JSON.stringify(poly) }] });
-    if (!r1?.spec) return null;
-    const edge = footprintEdges(r1.spec).find((e) => e.facing === 'south'
-      && Math.min(e.x0, e.x1) >= x0 - 0.3 && Math.max(e.x0, e.x1) <= x1 + 0.3);
-    if (!edge) return null;
-    const r2 = applyBimOperations(r1.spec, { operations: [
-      { type: 'set_wall_side', wall: edge.key, field: 'sunGlazing', value: true },
-      { type: 'set_wall_side', wall: edge.key, field: 'sunGlazingTiltDeg', value: 30 },
-      { type: 'set_wall_side', wall: edge.key, field: 'kneewallFt', value: 2 }
-    ] });
-    return { spec: (r2?.spec ? r2 : r1).spec, edge };
-  };
-  const glazeWallSection = (x0raw, x1raw, why = '') => {
-    const W = Number(spec.shell.widthFt) || 36;
-    if (spec.shell.footprint === 'round') {
-      setMoveNote({ text: 'A round outline has no straight south wall to split — sun glazing on round walls is a later chapter of this app.' });
-      return;
-    }
-    const x0 = Math.round(clamp(Number(x0raw) || 0, 0, W) * 2) / 2;
-    const x1 = Math.round(clamp(Number(x1raw) || 0, 0, W) * 2) / 2;
-    if (x1 - x0 < 3) { setMoveNote({ text: 'That stretch is under 3 ft — too narrow for a glazed section.' }); return; }
-    if (!Array.isArray(spec.shell.footprint) && x1 - x0 >= W - 0.5) { makeGreenhouseSouth(); return; } // the whole face IS the classic glass face
-    const done = splitAndGlazeSouth(spec, x0, x1);
-    if (!done) { setMoveNote({ text: 'Could not split the south wall there — try the Sections controls in Walls.' }); return; }
-    commitSpec(done.spec);
-    setSelectedId(`wall-${done.edge.key}`);
-    setMoveNote({ text: `${Math.round((x1 - x0) * 10) / 10} ft of the south wall is now slanted sun glass on a 2 ft kneewall, timber framed — the wall carries on in its own system either side${why ? ` (${why})` : ''}. Ctrl+Z undoes it.` });
   };
   // Which outside walls a room touches (its own storey's outline for upper
   // rooms) — the sides its card can put a door or window on.
@@ -1245,47 +1215,13 @@ export default function App() {
   // Split one side into three sections (engine picks that side's longest
   // edge) — each section can then carry its own construction.
   const splitWallSide = (side) => applyOps([{ type: 'split_wall_edge', wall: side }]);
-  // The greenhouse classic in one tap: a 2 ft south kneewall with slanted
-  // glass rising to the eave — ONE dispatch so undo is one step. Glazing
-  // FIRST: a glazed side's height is a kneewall, not a roof edit, so the
-  // roof keeps its shape (the old order flipped a 17/10 shed to 2/10).
-  const makeGreenhouseSouth = () => applyOps([
-    { type: 'set_wall_side', wall: 'south', field: 'sunGlazing', value: true },
-    { type: 'set_wall_side', wall: 'south', field: 'sunGlazingTiltDeg', value: 30 },
-    { type: 'set_wall_side', wall: 'south', field: 'heightFt', value: 2 }
-  ]);
   // The greenhouse the app PREFERS is a ROOM: a growing room standing past
   // the south wall grows its own glazed annex (kneewall, timber, slanted
   // glass) over exactly ITS stretch — and the house wall behind it keeps its
   // own system and weather face (straw bale + lime render stays straw bale +
-  // lime render). makeGreenhouseSouth above is the OTHER design — the whole
-  // wall becomes kneewall + glass — and stays a deliberate WallCard choice.
+  // lime render). Glass IN a wall is a greenhouse OPENING — the only design.
   const southPlantRoom = () => (spec.rooms || []).find((r) => r.type === 'plant' && Number(r.level || 1) === 1);
   const roomPokesSouth = (room) => (Number(room.y) || 0) + (Number(room.d) || 0) > (Number(spec.shell.depthFt) || 24) + 1.5;
-  // The south edge THIS room's stretch actually faces — on an L/T/U outline
-  // that can be an inset stretch, not the outermost wall.
-  const localSouthEdgeFor = (room) => {
-    const W = Number(spec.shell.widthFt) || 36;
-    const D = Number(spec.shell.depthFt) || 24;
-    if (!Array.isArray(spec.shell.footprint)) return { y: D, lo: 0, hi: W };
-    const rx = Number(room.x) || 0; const rw = Number(room.w) || 0;
-    let best = null; let bestOv = -Infinity;
-    footprintEdges(spec).forEach((e) => {
-      if (e.facing !== 'south' || !e.horizontal) return;
-      const lo = Math.min(e.x0, e.x1); const hi = Math.max(e.x0, e.x1);
-      const ov = Math.min(hi, rx + rw) - Math.max(lo, rx);
-      if (ov > bestOv) { best = e; bestOv = ov; }
-    });
-    return best ? { y: best.y0, lo: Math.min(best.x0, best.x1), hi: Math.max(best.x0, best.x1) } : { y: D, lo: 0, hi: W };
-  };
-  // An INTERIOR greenhouse sitting against its south wall: the wall stretch
-  // in front of it becomes the glass (Daniel's chosen design — glass IN the
-  // wall, bale either side), rather than sliding the room outdoors.
-  const roomAgainstSouth = (room) => {
-    const local = localSouthEdgeFor(room);
-    const gap = local.y - ((Number(room.y) || 0) + (Number(room.d) || 0));
-    return gap < 2 && !roomPokesSouth(room);
-  };
   // The greenhouse is an OPENING now (Daniel: "allow me to just add the
   // greenhouse using the existing controls") — one add, then it drags,
   // resizes, and removes exactly like a window. A plant ROOM standing near
@@ -1315,58 +1251,6 @@ export default function App() {
   };
   const addOrGlazeGreenhouse = () => {
     glazeForRoom(southPlantRoom());
-  };
-  // A legacy glazed wall SECTION (fixed to the outline, can't move) becomes a
-  // moveable greenhouse OPENING in one undoable batch: section glass off,
-  // opening on at the same stretch.
-  const convertSectionToOpening = (edgeKey) => {
-    const edge = footprintEdges(spec).find((e) => e.key === edgeKey);
-    if (!edge) return;
-    const r = resolveWallSide(spec, edge.facing, 1, edge.key);
-    const lo = edge.horizontal ? Math.min(edge.x0, edge.x1) : Math.min(edge.y0, edge.y1);
-    const w = clamp(Math.round(edge.lengthFt * 2) / 2, 3, 24);
-    applyOps([
-      { type: 'set_wall_side', wall: edge.key, field: 'sunGlazing', value: false },
-      { type: 'add_opening', wall: edge.facing, openingType: 'greenhouse', widthFt: w, positionFt: Math.max(0.5, Math.round((lo + Math.max(0, (edge.lengthFt - w) / 2)) * 2) / 2), level: 1, tiltDeg: Number(r.sunGlazingTiltDeg ?? 30) }
-    ]);
-    setMoveNote({ text: 'That glass is now a greenhouse OPENING — drag it along the wall, resize it, lift its sill, or delete it like any window. Ctrl+Z undoes it.' });
-  };
-  // Recovery from the whole-wall glass when a greenhouse room exists: ONE
-  // batch turns the side glazing off (the engine stands the wall back up)
-  // and slides the room into the sun — bale face back, glass only where the
-  // greenhouse is.
-  // The house's dominant wall system — what a wall should return to when its
-  // whole-wall glass (face OR system) is scoped down to the greenhouse.
-  const dominantWallAssembly = () => {
-    const counts = {};
-    WALL_SIDES.forEach((s) => {
-      const k = resolveWallSide(spec, s).assemblyKey;
-      if (k !== 'glazed') counts[k] = (counts[k] || 0) + 1;
-    });
-    return (Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || ['straw-bale'])[0];
-  };
-  const scopeGlassToGreenhouse = () => {
-    const room = southPlantRoom();
-    // BOTH whole-wall glass designs come off in one batch: the glass FACE
-    // (sunGlazing) and the glass SYSTEM (the glazed curtain-wall assembly) —
-    // either one alone kept the whole south wall glass and fought the
-    // greenhouse's own band.
-    const ops = [{ type: 'set_wall_side', wall: 'south', field: 'sunGlazing', value: false }];
-    if (resolveWallSide(spec, 'south').assemblyKey === 'glazed') {
-      ops.push({ type: 'set_wall_side', wall: 'south', field: 'assembly', value: dominantWallAssembly() });
-    }
-    // An interior greenhouse near the wall gets a moveable greenhouse OPENING
-    // over its stretch, in the SAME batch — one undo step for the whole swap.
-    if (room && !roomPokesSouth(room)) {
-      const W = Number(spec.shell.widthFt) || 36;
-      const w = clamp(Math.round((Number(room.w) || 10) * 2) / 2, 3, 24);
-      ops.push({ type: 'add_opening', wall: 'south', openingType: 'greenhouse', widthFt: w, positionFt: clamp(Math.round((Number(room.x) || 0) * 2) / 2, 0, Math.max(0, W - w)), level: 1, tiltDeg: 30 });
-    }
-    const r0 = applyBimOperations(spec, { operations: ops });
-    if (!r0?.spec) return;
-    commitSpec(r0.spec);
-    if (room) setSelectedId(room.id);
-    setMoveNote({ text: 'The south wall stands back up in its own system and weather face — the glass is now a greenhouse opening you can drag, resize, or delete like any window. Ctrl+Z undoes it.' });
   };
   // --- finishes: floor, exterior cladding, reclaimed materials ---------------
   const setFlooring = (value) => applyOps([{ type: 'set_flooring', value }]);
@@ -1716,7 +1600,7 @@ export default function App() {
                 const ghRoom = (spec.rooms || []).find((r) => r.id === f.roomId) || southPlantRoom();
                 return (
                   <button type="button" className="rz-fresh" style={{ alignSelf: 'flex-start', marginTop: 4 }}
-                    onClick={() => (ghRoom ? glazeForRoom(ghRoom) : makeGreenhouseSouth())}>
+                    onClick={() => (ghRoom ? glazeForRoom(ghRoom) : addGreenhouseOpening())}>
                     ☀ Glass over the greenhouse only — the wall keeps its face
                   </button>
                 );
@@ -1940,11 +1824,6 @@ export default function App() {
                       onAdd={addOpening}
                       onAddDormer={addDormer}
                       onGreenhouse={addOrGlazeGreenhouse}
-                      onScopeGlass={scopeGlassToGreenhouse}
-                      onWallSide={setWallSide}
-                      hasSouthGreenhouseRoom={Boolean(southPlantRoom())}
-                      onSelectSection={(edgeKey) => { setSelectedId(`wall-${edgeKey}`); setViewMode('wall'); }}
-                      onConvertSection={convertSectionToOpening}
                     />
                     <WallsControls
                       spec={spec}
@@ -2230,7 +2109,7 @@ export default function App() {
           onMassWall={selectedRoom.type === 'plant'
             && (Number(selectedRoom.y) || 0) + (Number(selectedRoom.d) || 0) >= (Number(spec.shell.depthFt) || 28) - 1
             ? () => makeMassWallBehind(selectedRoom) : null}
-          onGlassWall={selectedRoom.type === 'plant' && roomAgainstSouth(selectedRoom)
+          onGlassWall={selectedRoom.type === 'plant' && Number(selectedRoom.level || 1) === 1
             ? () => glazeForRoom(selectedRoom) : null}
           doorSides={roomDoorSides(selectedRoom)}
           onAddOpening={(side, type) => addRoomOpening(selectedRoom, side, type)}
@@ -3328,7 +3207,7 @@ function StoreysControls({ spec, floors, hasBasement, activeFloor, onSelectFloor
 // roof. Openings carry the floor picked in the Floor selector — a 2nd-floor
 // window goes in the upper wall, and a dormer opens the roof to meet it.
 const DORMER_STYLES = [['gable', 'Gable dormer', 'peaked doghouse'], ['shed', 'Shed dormer', 'single slope']];
-function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAddDormer, onGreenhouse, onScopeGlass, onWallSide, hasSouthGreenhouseRoom = false, onSelectSection, onConvertSection }) {
+function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAddDormer, onGreenhouse }) {
   const openings = spec.openings || [];
   const onThisFloor = (o) => o.wall === 'roof' ? level === 1 : Number(o.level || 1) === level;
   const floorWord = level === 1 ? 'ground floor' : floorLabel(spec, level).toLowerCase();
@@ -3362,78 +3241,13 @@ function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAd
           </button>
         ))}
       </div>
-      {/* THE GREENHOUSE IS AN OPENING HERE — born beside the windows, listed
-          with them below. Under the hood it stays a wall section (the wall
-          drops to a kneewall and glass climbs to the roof), but that is the
-          engine's business, not yours. */}
+      {/* the ONE way glass gets into a wall: a greenhouse OPENING — drag it,
+          resize it, delete it like any window */}
       {level === 1 && onGreenhouse && (
-        <>
-          <button type="button" className="rz-floorbar-outline" onClick={onGreenhouse}
-            title="Adds greenhouse glass as an OPENING — drag it, resize it, delete it like any window. Centers over your greenhouse room when one stands there.">
-            ☀ Greenhouse — a moveable slanted-glass opening
-          </button>
-          {(() => {
-            const items = [];
-            WALL_SIDES.forEach((s) => {
-              const r = resolveWallSide(spec, s);
-              if (r.omitted) return;
-              if (r.sunGlazing) items.push({ kind: 'side', side: s });
-              // a GLAZED curtain-wall SYSTEM makes the whole wall glass too —
-              // it belongs in this list or it fights the greenhouse unseen
-              else if (r.assemblyKey === 'glazed') items.push({ kind: 'glazedSystem', side: s });
-            });
-            if (hasSegmentedFootprint(spec)) {
-              footprintEdges(spec).forEach((edge) => {
-                const r = resolveWallSide(spec, edge.facing, 1, edge.key);
-                if (r.sunGlazing && !r.omitted) items.push({ kind: 'section', edge, side: edge.facing, len: Math.round(edge.lengthFt * 10) / 10, knee: Number(r.heightFt) || 2, tilt: Number(r.sunGlazingTiltDeg ?? 30) });
-              });
-            }
-            (spec.rooms || []).forEach((room) => {
-              if (room.type !== 'plant' || Number(room.level || 1) !== 1) return;
-              if ((Number(room.y) || 0) + (Number(room.d) || 0) > (Number(spec.shell.depthFt) || 24) + 1.5) items.push({ kind: 'annex', room });
-            });
-            if (!items.length) return null;
-            return (
-              <div className="rz-ghlist">
-                <div className="rz-found-head">Greenhouse glass placed</div>
-                {items.map((it, i) => it.kind === 'section' ? (
-                  <div key={i} className="rz-ghrow">
-                    <button type="button" className="rz-storey-link-inline" onClick={() => onSelectSection && onSelectSection(it.edge.key)}>☀ {WALL_SIDE_LABELS[it.side]} wall — {it.len} ft of slanted glass (fixed to the outline)</button>
-                    <button type="button" className="rz-fresh" onClick={() => onConvertSection && onConvertSection(it.edge.key)}>Make it moveable — turn it into a greenhouse opening</button>
-                    <button type="button" className="rz-fresh" onClick={() => onWallSide(it.edge.key, 'sunGlazing', false)}>Remove the glass — the wall stands back up</button>
-                  </div>
-                ) : it.kind === 'side' ? (
-                  <div key={i} className="rz-ghrow">
-                    <span>☀ {WALL_SIDE_LABELS[it.side]} wall — the WHOLE face is glass (a wall-card choice)</span>
-                    <button type="button" className="rz-fresh" onClick={() => onWallSide(it.side, 'sunGlazing', false)}>Take the whole-wall glass off</button>
-                  </div>
-                ) : it.kind === 'glazedSystem' ? (
-                  <div key={i} className="rz-ghrow">
-                    <span>☀ {WALL_SIDE_LABELS[it.side]} wall — its wall SYSTEM is a glazed curtain wall, so the whole wall is glass (R2, little warmth)</span>
-                    <button type="button" className="rz-fresh" onClick={() => {
-                      const counts = {};
-                      WALL_SIDES.forEach((s2) => { const k = resolveWallSide(spec, s2).assemblyKey; if (k !== 'glazed') counts[k] = (counts[k] || 0) + 1; });
-                      const solid = (Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || ['straw-bale'])[0];
-                      onWallSide(it.side, 'assembly', solid);
-                    }}>Give it the house's wall system — keep glass only where the greenhouse is</button>
-                  </div>
-                ) : (
-                  <div key={i} className="rz-ghrow">
-                    <span>☀ {it.room.name || 'Greenhouse'} — its own glazed annex past the wall (tap it on the plan or the 3D house)</span>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-          {(() => { const sr = resolveWallSide(spec, 'south'); return (sr.sunGlazing || sr.assemblyKey === 'glazed') && hasSouthGreenhouseRoom; })() && (
-            <div className="rz-shape-note rz-shape-warn">
-              The WHOLE south wall is glass ({resolveWallSide(spec, 'south').assemblyKey === 'glazed' ? 'its wall system is a glazed curtain wall' : 'its face is set to glass'}) AND the greenhouse brings its own glass — two designs fighting.
-              <button type="button" className="rz-fresh" style={{ display: 'block', marginTop: 4 }} onClick={onScopeGlass}>
-                Give the wall back its solid system — glass only at the greenhouse
-              </button>
-            </div>
-          )}
-        </>
+        <button type="button" className="rz-floorbar-outline" onClick={onGreenhouse}
+          title="Adds greenhouse glass as an OPENING — drag it, resize it, delete it like any window. Centers over your greenhouse room when one stands there.">
+          ☀ Greenhouse — a moveable slanted-glass opening
+        </button>
       )}
       <label className="rz-field" data-cap="cap-openings-fancy">
         <span>Something fancier</span>
@@ -3788,7 +3602,7 @@ function WallsControls({ spec, floors, level = 1, wallSections, onAllWalls, onSh
           <span>{floorName} — wall system (all sides)</span>
           <select value={u.wallVal} onChange={(e) => { if (e.target.value !== '__mixed') onUpperWalls(level, 'assembly', e.target.value); }}>
             {u.wallVal === '__mixed' && <option value="__mixed">Mixed — sides differ</option>}
-            {Object.values(WALL_ASSEMBLIES).map((a) => (
+            {Object.values(WALL_ASSEMBLIES).filter((a) => a.key !== 'glazed').map((a) => (
               <option key={a.key} value={a.key}>{a.green ? '🌿 ' : ''}{a.label} — R{a.rValue}</option>
             ))}
           </select>
@@ -3866,7 +3680,7 @@ function WallsControls({ spec, floors, level = 1, wallSections, onAllWalls, onSh
         <span>{floors > 1 ? 'Ground floor — wall system' : 'Walls (all sides)'}</span>
         <select value={wallVal} onChange={(e) => { if (e.target.value !== '__mixed') onAllWalls(e.target.value); }}>
           {wallVal === '__mixed' && <option value="__mixed">Mixed — sides differ</option>}
-          {Object.values(WALL_ASSEMBLIES).map((a) => (
+          {Object.values(WALL_ASSEMBLIES).filter((a) => a.key !== 'glazed').map((a) => (
             <option key={a.key} value={a.key}>{a.green ? '🌿 ' : ''}{a.label} — R{a.rValue}</option>
           ))}
         </select>
@@ -3913,9 +3727,8 @@ function WallsControls({ spec, floors, level = 1, wallSections, onAllWalls, onSh
             <div className="rz-sections">
               {sections.map((sec) => {
                 const ov = (spec.wallSegments || {})[sec.edgeKey] || {};
-                const segGlazed = Boolean(ov.sunGlazing);
                 return (
-                  <div key={sec.edgeKey} className="rz-perwall-row" data-cap="cap-walls-section-glass">
+                  <div key={sec.edgeKey} className="rz-perwall-row" data-cap="cap-walls-section-construction">
                     <span className="rz-perwall-name">{sec.name} · {Math.round(sec.lengthFt)} ft</span>
                     <select
                       className="rz-perwall-sys"
@@ -3924,26 +3737,10 @@ function WallsControls({ spec, floors, level = 1, wallSections, onAllWalls, onSh
                       onChange={(e) => onWallSide(sec.edgeKey, 'assembly', e.target.value)}
                     >
                       <option value="">— match the {sec.side} side —</option>
-                      {Object.values(WALL_ASSEMBLIES).map((a) => (
+                      {Object.values(WALL_ASSEMBLIES).filter((a) => a.key !== 'glazed').map((a) => (
                         <option key={a.key} value={a.key}>{a.green ? '🌿 ' : ''}{a.label}</option>
                       ))}
                     </select>
-                    <label className="rz-nowall" title="Just this stretch becomes kneewall + slanted sun glass — the rest of the side keeps its wall">
-                      <input type="checkbox" checked={segGlazed} onChange={(e) => onWallSide(sec.edgeKey, 'sunGlazing', e.target.checked)} />
-                      <span>Slanted sun glass on this section</span>
-                    </label>
-                    {segGlazed && (
-                      <>
-                        <label className="rz-field rz-field-num">
-                          <span>Kneewall under the glass</span>
-                          <NumInput value={Number(ov.kneewallFt ?? 2)} min={0.5} max={8} step={0.5} onCommit={(v) => onWallSide(sec.edgeKey, 'kneewallFt', v)} />
-                        </label>
-                        <label className="rz-field rz-field-num">
-                          <span>Glass tilt (from vertical)</span>
-                          <NumInput value={Math.round(Number(ov.sunGlazingTiltDeg ?? 30))} min={0} max={45} step={5} unit="°" onCommit={(v) => onWallSide(sec.edgeKey, 'sunGlazingTiltDeg', v)} />
-                        </label>
-                      </>
-                    )}
                   </div>
                 );
               })}
@@ -3971,14 +3768,14 @@ function WallSideFields({ side, spec, onWallSide, level = 1 }) {
     <>
       {!upper && (
         <label className="rz-field rz-field-num">
-          <span>{r.sunGlazing ? 'Kneewall height (the glass climbs from here to the roof)' : 'Height (this wall)'}</span>
+          <span>Height (this wall)</span>
           <NumInput value={Math.round(r.heightFt * 10) / 10} min={2} max={40} step={0.5} onCommit={(v) => onWallSide(side, 'heightFt', v)} />
         </label>
       )}
       <label className="rz-field">
         <span>Wall system (this wall)</span>
         <select value={r.assemblyKey} onChange={(e) => onWallSide(side, 'assembly', e.target.value, level)}>
-          {Object.values(WALL_ASSEMBLIES).map((a) => (
+          {Object.values(WALL_ASSEMBLIES).filter((a) => a.key !== 'glazed').map((a) => (
             <option key={a.key} value={a.key}>{a.green ? '🌿 ' : ''}{a.label} — R{a.rValue}</option>
           ))}
         </select>
@@ -3988,7 +3785,7 @@ function WallSideFields({ side, spec, onWallSide, level = 1 }) {
         <NumInput value={Math.round(r.thicknessFt * 10) / 10} min={0.2} max={3.5} step={0.1} onCommit={(v) => onWallSide(side, 'thicknessFt', v, level)} />
       </label>
       <label className="rz-field">
-        <span>{r.sunGlazing ? 'Weather face (the kneewall — the glass above wears no cladding)' : 'Weather face (this wall)'}</span>
+        <span>Weather face (this wall)</span>
         <select value={r.cladding || 'render'} onChange={(e) => onWallSide(side, 'cladding', e.target.value, level)}>
           {Object.values(CLADDING_TYPES).map((c) => (
             <option key={c.key} value={c.key}>{c.green ? '🌿 ' : ''}{c.label}</option>
@@ -3998,11 +3795,7 @@ function WallSideFields({ side, spec, onWallSide, level = 1 }) {
       {/* The system and the face are LAYERS, not rivals — without this line
           "I picked straw bale and nothing changed" (the siding covers it). */}
       <div className="rz-shape-note">
-        {r.assemblyKey === 'glazed'
-          ? 'This wall now: its SYSTEM is a glazed curtain wall — the whole wall IS glass (R2, little warmth), and a weather face doesn’t apply. For glass over just the greenhouse’s stretch, pick a solid system here and use ☀ Greenhouse instead.'
-          : r.sunGlazing
-          ? `This wall now: a ${Math.round(r.heightFt * 10) / 10} ft ${r.assembly.label.toLowerCase()} kneewall with slanted glass above. The wall system builds the kneewall, the weather face dresses it — the glass answers to neither.`
-          : r.cladding && r.cladding !== 'render'
+        {r.cladding && r.cladding !== 'render'
             ? `This wall now: ${Math.round(r.thicknessFt * 12)}″ of ${r.assembly.label.toLowerCase()} doing the standing and insulating, WEARING ${(CLADDING_TYPES[r.cladding] || {}).label || r.cladding} as its skin. The face covers the system — to SEE the ${r.assembly.label.toLowerCase()} itself, set the weather face to rainscreen / lime render.`
             : `This wall now: ${Math.round(r.thicknessFt * 12)}″ of ${r.assembly.label.toLowerCase()} showing its own rendered face. The system is the structure and warmth; the weather face is the skin you see — they layer, they never replace each other.`}
       </div>
@@ -4011,16 +3804,6 @@ function WallSideFields({ side, spec, onWallSide, level = 1 }) {
           upper bands keep to construction (the engine's rule). */}
       {!upper && (
         <>
-          <label className="rz-nowall">
-            <input type="checkbox" checked={Boolean(r.sunGlazing)} onChange={(e) => onWallSide(side, 'sunGlazing', e.target.checked)} />
-            <span>Glass face — this WHOLE wall becomes kneewall + slanted glass (replaces the wall system above the kneewall; a greenhouse room brings its own glass, so leave this off to keep the {r.assembly.label.toLowerCase()} face)</span>
-          </label>
-          {r.sunGlazing && (
-            <label className="rz-field rz-field-num">
-              <span>Glass tilt (from vertical)</span>
-              <NumInput value={Math.round(Number(r.sunGlazingTiltDeg ?? 30))} min={0} max={45} step={5} unit="°" onCommit={(v) => onWallSide(side, 'sunGlazingTiltDeg', v)} />
-            </label>
-          )}
           <label className="rz-nowall">
             <input type="checkbox" checked={Boolean(r.omitted)} onChange={(e) => onWallSide(side, 'omitted', e.target.checked)} />
             <span>No wall on this side (opens to an attached space)</span>
