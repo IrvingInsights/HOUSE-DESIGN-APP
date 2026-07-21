@@ -1216,8 +1216,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             meshes = wallRunMeshes({ horizontal: false, thickCenter: cx, t, a0, a1: a0 + len, hAt: () => groundH, mat: matG, gaps: gapsFor(edge.key), yBase: sideReveal[edge.facing] });
           }
           wallMeshSpecs.push({ side: edge.facing, storey: 'ground', edgeKey: edge.key, meshes });
-          // No extent plate: the upper band rides this same edge.
-          for (let level = 2; level <= Math.ceil(storeys); level++) {
+          // No extent plate: the upper band rides this same edge. WITH a plate
+          // the plate-ring block below owns the upper walls — running both
+          // stacked a second full set of upper walls on every edge (the
+          // "wall-e#-u over wall-side-u" double-walling Daniel saw).
+          for (let level = 2; !hasPlate && level <= Math.ceil(storeys); level++) {
             const uH = heightAt(level);
             if (uH > 0) {
               const u = resolveWallSide(spec, edge.facing, level, edge.key);
