@@ -1101,34 +1101,56 @@ export function planNewRoomPlacements(spec, newRooms, level = 1) {
   // Only rooms on the SAME floor collide — each storey packs independently.
   const virtualRooms = (spec.rooms || []).filter((r) => Number(r.level || 1) === level).map((r) => ({ x: Number(r.x), y: Number(r.y), w: Number(r.w), d: Number(r.d) }));
   const taken = new Set((spec.rooms || []).map((r) => r.name));
-  let shellW = Number(spec.shell.widthFt);
-  let shellD = Number(spec.shell.depthFt);
+  const shellW = Number(spec.shell.widthFt);
+  const shellD = Number(spec.shell.depthFt);
   const startW = shellW;
   const startD = shellD;
   const addOps = [];
   const names = [];
+  const unplaced = [];
   for (const nr of newRooms) {
     let name = nr.name;
     let n = 2;
     while (taken.has(name)) { name = `${nr.name} ${n}`; n += 1; }
     taken.add(name);
     names.push(name);
-    const fpForSpots = hasCustomFootprint(spec) && shellW === Number(spec.shell.widthFt) && shellD === Number(spec.shell.depthFt) ? footprintPolygon(spec) : null;
-    let spot = findFreeSpot(shellW, shellD, virtualRooms, nr.w, nr.d, fpForSpots);
+    const fpForSpots = hasCustomFootprint(spec) ? footprintPolygon(spec) : null;
+    let spot = null;
+    let fit = true;
+    // A GREENHOUSE lands ON THE SOLAR WALL, poking OUT — the glazed annex
+    // builds itself the moment the room exists. An interior plant room is
+    // only a floor zone, and adding one read as "it fails to add the
+    // greenhouse over and over": the room appeared, the GREENHOUSE didn't.
+    // 1.5 ft stays inside (the doorway); the rest stands past the south
+    // wall in the sun. Slides along the wall to a clear stretch; overlaps
+    // the wall band as a last resort (still glazed either way).
+    if (nr.type === 'plant' && level === 1 && !fpForSpots) {
+      const yGh = Math.max(0.5, shellD - 1.5);
+      let xGh = null;
+      for (let cx = 0.5; cx <= shellW - nr.w - 0.5; cx += 0.5) {
+        const clash = virtualRooms.some((r) => r.y + r.d > yGh - 0.01 && r.x < cx + nr.w && r.x + r.w > cx);
+        if (!clash) { xGh = cx; break; }
+      }
+      spot = { x: xGh == null ? Math.max(0.5, Math.round(((shellW - nr.w) / 2) * 2) / 2) : xGh, y: yGh };
+    }
+    if (!spot) spot = findFreeSpot(shellW, shellD, virtualRooms, nr.w, nr.d, fpForSpots);
     if (!spot) {
-      if (nr.w > shellW - 2) shellW = clamp(Math.ceil(nr.w + 2), 18, 120);
-      const bottom = virtualRooms.length ? Math.max(...virtualRooms.map((r) => r.y + r.d)) : 1;
-      const y = Math.round((bottom + 0.5) * 2) / 2;
-      shellD = clamp(Math.max(shellD, Math.ceil(y + nr.d + 1)), 18, 80);
-      spot = { x: 1, y };
+      // NEVER grow the shell — or the foundation under it — because a room
+      // was added; the walls are the person's decision (Daniel: "Stop
+      // bumping out the foundation when i add a room"). No free floor =
+      // the room lands mid-plan, overlapping, clearly the person's to
+      // resolve: drag rooms apart, shrink something, or grow the Shape.
+      fit = false;
+      spot = {
+        x: Math.max(0.5, Math.round(((shellW - nr.w) / 2) * 2) / 2),
+        y: Math.max(0.5, Math.round(((shellD - nr.d) / 2) * 2) / 2)
+      };
     }
     virtualRooms.push({ x: spot.x, y: spot.y, w: nr.w, d: nr.d });
+    if (!fit) unplaced.push(name);
     addOps.push({ type: 'add_room', name, category: nr.type, w: nr.w, d: nr.d, x: spot.x, y: spot.y, level });
   }
-  const growOps = [];
-  if (shellW !== startW) growOps.push({ type: 'set_shell', field: 'widthFt', value: String(shellW) });
-  if (shellD !== startD) growOps.push({ type: 'set_shell', field: 'depthFt', value: String(shellD) });
-  return { ops: [...growOps, ...addOps], names, grew: growOps.length > 0, newW: shellW, newD: shellD };
+  return { ops: addOps, names, grew: false, unplaced, newW: startW, newD: startD };
 }
 
 // Interior partitions implied by the room layout: where two rooms on one floor
@@ -1856,6 +1878,8 @@ export function getWallSections(spec) {
         rValue: r.assembly.rValue,
         interiorFinish: r.interiorFinish,
         exteriorFinish: r.exteriorFinish,
+        sunGlazing: !upper && Boolean(r.sunGlazing),
+        sunGlazingTiltDeg: Number(r.sunGlazingTiltDeg ?? 30),
         note: `${r.assembly.label} (R≈${r.assembly.rValue}, ${r.thicknessFt.toFixed(2)}' thick); ${edge.lengthFt}' long, ${heightFt}' ${upper ? `on level ${level}` : 'high'}. One segment of the ${edge.facing}-facing walls — construction is shared across that facing. Move it in the Plan view.`
       };
     };
@@ -3360,6 +3384,58 @@ export function repairNorthBandRooms(spec) {
   return bandRooms;
 }
 
+// ── THE SUNSPACE WALL LAW ───────────────────────────────────────────────────
+// A greenhouse is separated from the living space by a wall — standard
+// practice the app UNDERSTANDS by itself (Daniel: "it does not understand
+// that there is an interior wall behind a greenhouse"). DERIVED, not placed:
+// every interior-facing edge of a level-1 plant room (more than 2 ft from
+// its matching exterior wall) grows a cob thermal-mass wall with a doorway.
+// Both the plan and the 3D consume THIS list, so the wall exists everywhere
+// or nowhere. A real partition the person placed along that edge wins — the
+// derived wall stands down. Tapping a derived wall selects its room.
+export function sunspacePartitions(spec) {
+  const shell = spec.shell || {};
+  const W = Number(shell.widthFt) || 36;
+  const D = Number(shell.depthFt) || 28;
+  const out = [];
+  (spec.rooms || []).filter((r) => r.type === 'plant' && Number(r.level || 1) === 1).forEach((room) => {
+    const rx = Number(room.x) || 0; const ry = Number(room.y) || 0;
+    const rw = Number(room.w) || 0; const rd = Number(room.d) || 0;
+    if (rw < 3 || rd < 3) return;
+    // a room poking outside grows the glazed annex instead — out there the
+    // exterior wall IS the separation
+    if (Math.max(ry + rd - D, -ry, rx + rw - W, -rx) > 1.5) return;
+    const t = 0.7;
+    const edges = [
+      { side: 'north', gap: ry, rect: { x: rx, y: ry, w: rw, d: t } },
+      { side: 'south', gap: D - (ry + rd), rect: { x: rx, y: ry + rd - t, w: rw, d: t } },
+      { side: 'west', gap: rx, rect: { x: rx, y: ry, w: t, d: rd } },
+      { side: 'east', gap: W - (rx + rw), rect: { x: rx + rw - t, y: ry, w: t, d: rd } }
+    ];
+    edges.forEach(({ side, gap, rect }) => {
+      if (gap <= 2) return; // against (or near) the shell — the shell is the wall
+      const covered = (spec.elements || []).some((e) => e.category === 'partition'
+        && Number(e.x) < rect.x + rect.w + 0.75 && Number(e.x) + Number(e.w) > rect.x - 0.75
+        && Number(e.y) < rect.y + rect.d + 0.75 && Number(e.y) + Number(e.d) > rect.y - 0.75);
+      if (covered) return;
+      const along = (side === 'north' || side === 'south') ? rect.w : rect.d;
+      out.push({
+        id: room.id, // tapping the wall selects its room
+        // a room can grow one of these per free edge — the render key must be
+        // unique per WALL or React sees duplicate 'greenhouse' keys and may
+        // drop/duplicate children (planView keys on synKey || id)
+        synKey: `${room.id}::swall-${side}`,
+        synthetic: true,
+        name: `${room.name || 'Greenhouse'} wall`,
+        category: 'partition', construction: 'cob', level: 1,
+        ...rect, h: 0,
+        doorWFt: 3, doorAtFt: Math.max(0.5, along / 2 - 1.5)
+      });
+    });
+  });
+  return out;
+}
+
 export function detectIssues(spec) {
   const issues = [];
 
@@ -3592,6 +3668,119 @@ export function detectIssues(spec) {
   if (naturalApproach && hasSouthGlass && derivedForChecks.winterShadeFrac > 0.33) {
     issues.push({ severity: 'warning', title: `South overhang shades ${Math.round(derivedForChecks.winterShadeFrac * 100)}% of the winter sun`, owner: 'Designer', system: 'roof', fixId: 'reduce-south-overhang', fix: `At your latitude the winter noon sun sits at ${Math.round(derivedForChecks.sunWinterDeg)}° — the ${overhangCheck.south.toFixed(1)} ft south overhang casts that much shadow on your solar glass. Trim it, or raise the south wall.` });
   }
+  // ── STANDARD BUILDING PRACTICES — the encyclopedic sweep over everything
+  // the newer controls can shape: hand-edited frames, custom members, storey
+  // stacks, decks, and per-storey roofs. Every freedom the app grants gets a
+  // practice that judges it — plain-language, rule-of-thumb numbers, always
+  // "confirm with your engineer/inspector" territory, never a hard stop.
+  const floorsPr = floorCount(spec);
+  const shellPr = spec.shell || {};
+  // 1. Hand-removed skeleton pieces: something must still carry their load.
+  const removedPr = (spec.frame?.removedMembers || []).length;
+  if (removedPr > 0) {
+    issues.push({ severity: removedPr > 3 ? 'critical' : 'warning', title: `${removedPr} piece${removedPr === 1 ? '' : 's'} removed from the frame skeleton`, owner: 'Engineer', system: 'frame', fix: 'Every removed post or beam carried something. Make sure a wall, your own post, or a beam takes over its load — or bring the pieces back (Frame chapter → “Bring back all removed pieces”).' });
+  }
+  // 2. Bent/bay spacing beyond timber norms.
+  const frameKeyPr = resolveFrameType(spec, 1);
+  const bayPr = Number(spec.frame?.baySpacingFt) || 8;
+  if (frameKeyPr !== 'load-bearing' && bayPr > 12) {
+    issues.push({ severity: 'warning', title: `Post bays are ${bayPr}′ apart — beyond common timber practice`, owner: 'Engineer', system: 'frame', fix: 'Timber bents usually stand 8–12 ft apart; wider bays need engineered beams. Tighten the bay spacing on the Frame page, or plan for heavier timbers with an engineer.' });
+  }
+  // 3. Two storeys of load-bearing natural wall: beyond the usual envelope.
+  const naturalGroundPr = WALL_SIDES.some((side) => { const r = resolveWallSide(spec, side); return !r.omitted && ['straw-bale', 'cob', 'cordwood', 'light-straw-clay'].includes(r.assemblyKey); });
+  if (frameKeyPr === 'load-bearing' && naturalGroundPr && floorsPr >= 3) {
+    issues.push({ severity: 'warning', title: 'Three storeys on load-bearing natural walls', owner: 'Engineer', system: 'frame', fix: 'Load-bearing bale/cob practice is one to two storeys. Three wants a structural frame carrying the floors, with the natural wall as enclosure — pick a frame on the Frame page.' });
+  }
+  // 4. Hand-placed members: spans and slenderness.
+  (spec.elements || []).forEach((el) => {
+    if (el.category === 'beam') {
+      const span = Math.max(Number(el.w) || 0, Number(el.d) || 0);
+      if (span > 16) issues.push({ severity: 'warning', title: `${el.name || 'A beam'} spans ${Math.round(span)}′ — beyond common timber spans`, owner: 'Engineer', system: 'frame', fix: 'Solid timber beams commonly span 12–16 ft. Add a post under the middle (Frame page → ＋ Post), or plan an engineered beam.' });
+    }
+    if (el.category === 'post') {
+      const hP = Number(el.h) || 0; const wP = Math.min(Number(el.w) || 0.7, Number(el.d) || 0.7);
+      if (wP > 0 && hP / wP > 30) issues.push({ severity: 'warning', title: `${el.name || 'A post'} is very slender (${Math.round(hP)}′ tall on ${(wP * 12).toFixed(0)}″)`, owner: 'Engineer', system: 'frame', fix: 'A free-standing post beyond ~30:1 height-to-width wants bracing or a fatter section. Shorten it, thicken it, or brace it into the frame.' });
+    }
+  });
+  // 5. Habitable storey heights.
+  for (let lv = 1; lv <= floorsPr; lv += 1) {
+    const hLv = storeyHeightFt(shellPr, lv);
+    if (hLv < 7) issues.push({ severity: 'warning', title: `${lv === 1 ? 'The ground floor' : `Storey ${lv}`} is only ${Math.round(hLv * 10) / 10}′ floor-to-floor`, owner: 'Architect', system: 'shell', fix: 'Habitable rooms want about 7 ft of clear ceiling after the floor build-up. Raise this storey in the Storeys view (drag its top edge).' });
+  }
+  // 6. An upper storey overhanging its support.
+  for (let lv = 3; lv <= floorsPr; lv += 1) {
+    const pU = upperPlateRect(spec, lv); const pB = upperPlateRect(spec, lv - 1);
+    if (!pU || !pB) continue;
+    const over = Math.max(pB.x - pU.x, pB.y - pU.y, (pU.x + pU.w) - (pB.x + pB.w), (pU.y + pU.d) - (pB.y + pB.d), 0);
+    if (over > 2) issues.push({ severity: 'warning', title: `Storey ${lv} overhangs the floor below by ${Math.round(over * 10) / 10}′`, owner: 'Engineer', system: 'shell', fix: 'A floor cantilevering more than ~2 ft past its support needs engineered framing. Slide the storey back over the one below (Storeys view), or put posts under the overhang (Frame page → ＋ Post).' });
+  }
+  // 7. Decks: railings above 30″, and a way down.
+  (spec.elements || []).filter((el) => el.category === 'deck').forEach((el) => {
+    const dk = resolveDeck(spec, el);
+    if (dk.topFt >= 2.5 && dk.railKey === 'none') {
+      issues.push({ severity: 'critical', title: `${el.name || 'A deck'} stands ${Math.round(dk.topFt * 10) / 10}′ up with no railing`, owner: 'Engineer', system: 'rooms', fix: 'A walking surface more than 30″ above the ground needs a guard (36″+ railing). Tap the deck and pick a railing.' });
+    }
+    if (dk.topFt >= 1.5 && String(el.deckStairs || 'auto') === 'none') {
+      issues.push({ severity: 'warning', title: `${el.name || 'A deck'} has no steps down`, owner: 'Architect', system: 'rooms', fix: 'Tap the deck and give its steps an edge — or plan its only door back into the house knowingly.' });
+    }
+  });
+  // 8. Per-storey and attached roofs that won't drain (or are extreme).
+  (spec.elements || []).filter((el) => el.category === 'floor' && Number(el.level || 1) >= 2).forEach((el) => {
+    const tp = Number(el.roofPitch);
+    if (Number.isFinite(tp) && tp > 0 && tp < 0.02) {
+      issues.push({ severity: 'warning', title: `${floorLabel(spec, Number(el.level))}’s own roof is nearly flat`, owner: 'Engineer', system: 'roof', fix: 'Give it at least ¼″ per foot of fall (≈ 0.02) so water leaves — set the pitch on that floor’s roof card.' });
+    }
+    if (el.stepBelow === 'roof-top') {
+      // the steepest attached plane = the NARROWEST real step around the
+      // plate (west inset alone false-flagged every east/south step)
+      const p = upperPlateRect(spec, Number(el.level));
+      const wPr = Number(shellPr.widthFt) || 36; const dPr = Number(shellPr.depthFt) || 28;
+      const insets = p ? [p.x, wPr - (p.x + p.w), p.y, dPr - (p.y + p.d)].filter((g) => g > 0.75) : [];
+      if (insets.length) {
+        const runW = Math.min(...insets);
+        const prof2 = roofProfile(shellPr);
+        const rise = (storeyElevationFt(shellPr, Number(el.level)) + storeyHeightFt(shellPr, Number(el.level))) - (prof2.roofType === 'shed' ? Math.min(prof2.westWallHeightFt, prof2.eastWallHeightFt, prof2.southWallHeightFt, prof2.northWallHeightFt) : prof2.highWallHeightFt);
+        const pitchA = runW > 0 ? rise / runW : 0;
+        if (pitchA > 1.05) issues.push({ severity: 'warning', title: 'The attached roof below this storey is steeper than 12:12', owner: 'Engineer', system: 'roof', fix: 'A lean-to steeper than 45° sheds weather well but is hard to build and walk. Widen the step it covers, or lower the storey it attaches to.' });
+      }
+    }
+  });
+  // 9. A greenhouse that is only a floor zone — no glass anywhere. The glass
+  // used to depend on a geometric ACCIDENT (the room poking >1.5 ft past a
+  // wall grew the annex); when the house deepened, the greenhouse silently
+  // un-built — Daniel "kept losing the greenhouse". It can still un-build
+  // (geometry is geometry), but never silently: this flags it, with a
+  // one-tap remedy (glaze the face it sits against) wired in the flags card.
+  {
+    const widthPr = Number(shellPr.widthFt) || 36;
+    const depthPr = Number(shellPr.depthFt) || 28;
+    (spec.rooms || []).filter((room) => room.type === 'plant' && Number(room.level || 1) === 1).forEach((room) => {
+      const rx = Number(room.x) || 0; const ry = Number(room.y) || 0;
+      const rw = Number(room.w) || 0; const rd = Number(room.d) || 0;
+      const pokes = Math.max(ry + rd - depthPr, -ry, rx + rw - widthPr, -rx) > 1.5;
+      const covered = (spec.elements || []).some((e) => e.category === 'greenhouse'
+        && e.x < rx + rw && e.x + e.w > rx && e.y < ry + rd && e.y + e.d > ry);
+      const glazedNear = WALL_SIDES.some((side) => {
+        const r = resolveWallSide(spec, side);
+        if (!r.sunGlazing || r.omitted) return false;
+        const gap = side === 'south' ? depthPr - (ry + rd) : side === 'north' ? ry : side === 'east' ? widthPr - (rx + rw) : rx;
+        return gap < 4;
+      });
+      if (!pokes && !covered && !glazedNear) {
+        issues.push({ severity: 'warning', title: `${room.name || 'The greenhouse'} has no glass — it’s only a floor zone right now`, owner: 'Natural Builder', system: 'walls', fixId: 'greenhouse-glass', roomId: room.id, fix: 'A greenhouse needs a glazed face. One tap below slides the room past the south wall so its own kneewall + slanted glass build over just its stretch — the house wall behind it keeps its own system and weather face.' });
+      }
+    });
+  }
+  // 10. Wide openings in load-bearing natural walls need real lintels.
+  (spec.openings || []).forEach((opening) => {
+    if (opening.wall === 'roof') return;
+    const r = resolveWallSide(spec, opening.wall, Number(opening.level || 1));
+    const wide = Number(opening.widthFt) || 0;
+    if (!r.omitted && ['straw-bale', 'cob', 'cordwood', 'light-straw-clay'].includes(r.assemblyKey) && frameKeyPr === 'load-bearing' && wide > 6) {
+      issues.push({ severity: 'warning', title: `A ${Math.round(wide)}′ opening in the load-bearing ${opening.wall} wall`, owner: 'Engineer', system: 'windows', fix: 'Openings over ~6 ft in a load-bearing natural wall need an engineered lintel or a post each side. Narrow it, split it in two, or add posts (Frame page → ＋ Post).' });
+    }
+  });
+
   if (issues.length === 0) {
     issues.push({ severity: 'pass', title: 'Schematic passes current council checks', owner: 'Project Manager', fix: 'Ready for PE/architect review, structural sizing, jurisdictional code check, and stamped drawing development.' });
   }
@@ -3788,6 +3977,25 @@ export function deriveDesign(spec, wallSections) {
     const area = ((side === 'north' || side === 'south' ? w : d) - 1) * (gapH / Math.cos(tilt * Math.PI / 180));
     return { side, tilt, area, glass: area * 0.9 };
   }).filter(Boolean);
+  // Sun-glazed SECTIONS: on a side that is NOT glazed whole, a split wall's
+  // glazed segment contributes its own band — its run, its kneewall (the
+  // section's resolved heightFt), its tilt. The side-level path above stays
+  // byte-identical for existing designs.
+  if (hasSegmentedFootprint(spec)) {
+    footprintEdges(spec).forEach((edge) => {
+      const rSide = resolveWallSide(spec, edge.facing);
+      if (rSide.sunGlazing) return; // whole side already counted above
+      const rSeg = resolveWallSide(spec, edge.facing, 1, edge.key);
+      if (!rSeg.sunGlazing || rSeg.omitted) return;
+      const gapH = Math.max(0, eaveForBand - rSeg.heightFt);
+      if (gapH < 1.5) return;
+      const tilt = clamp(Number(rSeg.sunGlazingTiltDeg ?? 30), 0, 45);
+      const run = Math.max(0, edge.lengthFt - 1);
+      if (run < 2) return;
+      const area = run * (gapH / Math.cos(tilt * Math.PI / 180));
+      sunBands.push({ side: edge.facing, tilt, area, glass: area * 0.9 });
+    });
+  }
   const southBandGlass = sunBands.filter((b) => b.side === 'south').reduce((sum, b) => sum + b.glass * (1 + Math.min(0.3, b.tilt / 100)), 0);
   const nonSouthBandGlass = sunBands.filter((b) => b.side !== 'south').reduce((sum, b) => sum + b.glass, 0);
   const bandFrameArea = sunBands.reduce((sum, b) => sum + b.area, 0);
@@ -4514,3 +4722,69 @@ export const PLAN_ZONE_HEX = {
 // spec, so editing a thickness / stem height / overhang in the fields beside
 // the drawing redraws the joint. Feet are the SVG unit.
 export const hexOf = (color) => `#${Number(color || 0x8a8a8a).toString(16).padStart(6, '0')}`;
+
+// --- Legacy glass cleanup (update 148) --------------------------------------
+// Five generations of greenhouse design used to coexist: whole-wall glass
+// FACE (sunGlazing), whole-wall glass SYSTEM (glazed assembly), outline-fixed
+// glazed SECTIONS, the room annex, and the greenhouse OPENING. Only the last
+// two remain. This runs on every design as it LOADS: legacy artifacts are
+// removed silently, walls stand back up in the house's solid system, and the
+// glass survives as at most ONE moveable greenhouse opening on the south
+// wall (placed where the south glass actually was). No buttons, no lists.
+export function normalizeLegacyGlass(spec) {
+  if (!spec?.shell) return 0;
+  let cleaned = 0;
+  const counts = {};
+  WALL_SIDES.forEach((s) => {
+    const k = resolveWallSide(spec, s).assemblyKey;
+    if (k !== 'glazed') counts[k] = (counts[k] || 0) + 1;
+  });
+  const solid = (Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || ['straw-bale'])[0];
+  let keep = null; // the one south greenhouse opening the cleanup may leave
+  const W = Number(spec.shell.widthFt) || 36;
+  if (hasSegmentedFootprint(spec) && spec.wallSegments) {
+    footprintEdges(spec).forEach((edge) => {
+      const seg = spec.wallSegments[edge.key];
+      if (!seg || !seg.sunGlazing) return;
+      cleaned += 1;
+      if (edge.facing === 'south' && !keep) {
+        const lo = edge.horizontal ? Math.min(edge.x0, edge.x1) : Math.min(edge.y0, edge.y1);
+        keep = { at: Math.max(0.5, Math.round(lo * 2) / 2), w: Math.min(24, Math.max(3, Math.round(edge.lengthFt * 2) / 2)), tilt: Number(seg.sunGlazingTiltDeg ?? 30) };
+      }
+      delete seg.sunGlazing; delete seg.sunGlazingTiltDeg; delete seg.kneewallFt;
+      if (!Object.keys(seg).length) delete spec.wallSegments[edge.key];
+    });
+    if (spec.wallSegments && !Object.keys(spec.wallSegments).length) delete spec.wallSegments;
+  }
+  WALL_SIDES.forEach((side) => {
+    const w = (spec.walls || {})[side];
+    if (!w) return;
+    if (w.sunGlazing) {
+      cleaned += 1;
+      delete w.sunGlazing; delete w.sunGlazingTiltDeg;
+      // the low wall existed only to carry the glass
+      if (Number(w.heightFt) > 0 && Number(w.heightFt) <= 4) delete w.heightFt;
+      if (side === 'south' && !keep) keep = { at: Math.max(0.5, W / 2 - 9), w: Math.min(24, Math.max(3, W - 2)), tilt: 30 };
+    }
+    if (w.assembly === 'glazed') {
+      cleaned += 1;
+      w.assembly = solid;
+      if (side === 'south' && !keep) keep = { at: Math.max(0.5, W / 2 - 9), w: Math.min(24, Math.max(3, W - 2)), tilt: 30 };
+    }
+    if (!Object.keys(w).length) delete spec.walls[side];
+  });
+  if (keep) {
+    spec.openings = spec.openings || [];
+    const at = Math.min(keep.at, Math.max(0.5, W - keep.w));
+    const clash = spec.openings.some((o) => {
+      if (o.wall !== 'south' || Number(o.level || 1) !== 1) return false;
+      const e0 = Number(o.x ?? 0); const e1 = e0 + (Number(o.widthFt) || 3);
+      return at < e1 - 0.05 && at + keep.w > e0 + 0.05;
+    });
+    const hasGh = spec.openings.some((o) => o.type === 'greenhouse');
+    if (!clash && !hasGh) {
+      spec.openings.push({ type: 'greenhouse', wall: 'south', x: at, widthFt: keep.w, label: 'South Greenhouse — slanted glass', level: 1, tiltDeg: keep.tilt });
+    }
+  }
+  return cleaned;
+}

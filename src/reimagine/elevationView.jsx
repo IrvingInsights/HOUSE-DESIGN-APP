@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { OPENING_TYPES, openingVerticalBand, storeyElevationFt, storeyHeightFt } from '../../backend/bim-core.mjs';
-import { resolveWallSide, upperPlateRect } from '../engine.js';
+import { OPENING_TYPES, openingVerticalBand, storeyElevationFt, storeyHeightFt, footprintEdges, hasSegmentedFootprint, CLADDING_TYPES } from '../../backend/bim-core.mjs';
+import { resolveWallSide, upperPlateRect, resolveDeck } from '../engine.js';
+import { buildFaceLaw } from './faceLaw.js';
 
 // ElevationView — the chosen wall drawn face-on, from OUTSIDE the house, so
 // doors and windows can be placed the way you'd sketch them on paper: slide
@@ -16,7 +17,7 @@ import { resolveWallSide, upperPlateRect } from '../engine.js';
 const snapHalf = (v) => Math.round(v * 2) / 2;
 const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
-export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSizeAlong, onContext = null, onWallHeight = null, onPickWall = null }) {
+export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSizeAlong, onContext = null, onWallHeight = null, onPickWall = null, onSelectId = null, onMoveObject = null }) {
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
   const shell = spec.shell || {};
@@ -37,56 +38,104 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   const width = Number(shell.widthFt) || 24;
   const depth = Number(shell.depthFt) || 24;
   const elevOf = (lv) => storeyElevationFt(shell, lv);
+  // THE FACE LAW — the same wall-top math the 3D scene builds from (shed
+  // rakes, tier tops that climb with the roof, storey caps, the attached
+  // lean-to of "roof below: climbs to this floor's top"). Before this, the
+  // face drew flat storey tops and the 2D and 3D disagreed.
+  const law = buildFaceLaw(spec, wall);
   // Each upper storey shows on this wall only where its own outline stands:
   // TOUCHING the wall = the face steps up there ("built up only where the
   // second storey is"); SET BACK from it = drawn faint behind the face.
-  const touching = [];
-  const setBack = [];
-  for (let lv = 2; lv <= storeys; lv += 1) {
-    const h = storeyHeightFt(shell, lv);
-    if (h <= 0) continue;
-    const r = upperPlateRect(spec, lv) || { x: 0, y: 0, w: width, d: depth };
-    const touches = wall === 'north' ? r.y <= 0.05
-      : wall === 'south' ? r.y + r.d >= depth - 0.05
-      : wall === 'west' ? r.x <= 0.05
-      : r.x + r.w >= width - 0.05;
-    const s0 = clampN(horiz ? r.x : r.y, 0, run);
-    const s1 = clampN(horiz ? r.x + r.w : r.y + r.d, 0, run);
-    if (s1 - s0 < 0.1) continue;
-    (touches ? touching : setBack).push({ lv, s0, s1, y0: elevOf(lv), y1: elevOf(lv) + h });
-  }
-  const groundProfileAt = (t) => {
-    if (roofType === 'shed' && shedEW) {
-      if (wall === 'east') return hE;
-      if (wall === 'west') return hW;
-      // north/south walls rake from the west end to the east end; t runs in
-      // plan x here (flipX only mirrors the drawing, not the measurement)
-      return hW + (hE - hW) * (t / run);
+  const touching = law.tiers.filter((b) => b.touches).map((b) => ({ lv: b.lv, s0: b.s0, s1: b.s1, y0: b.floorY, y1: b.topAt((b.s0 + b.s1) / 2) }));
+  const setBack = law.tiers.filter((b) => !b.touches).map((b) => ({ lv: b.lv, s0: b.s0, s1: b.s1, y0: b.floorY, y1: b.topAt((b.s0 + b.s1) / 2) }));
+  const groundProfileAt = (t) => law.groundTopAt(t);
+  // Sun-glazed stretches on THIS face — the whole side (classic) or glazed
+  // SECTIONS of a split wall. Drawn as slanted-glass bands so the Wall view
+  // finally shows the greenhouse face the 3D builds (it was 3D-only).
+  // What this face WEARS — the chosen cladding's color, else the wall
+  // system's own rendered face — pulled well toward paper so lines and
+  // openings stay crisp. Before this the face was one fixed paper color and
+  // both the system and face selects looked dead in this view.
+  const rFace = resolveWallSide(spec, wall);
+  const wearHex = rFace.cladding && rFace.cladding !== 'render'
+    ? (CLADDING_TYPES[rFace.cladding] || {}).color
+    : (rFace.assembly || {}).color;
+  const faceFill = (() => {
+    if (!Number.isFinite(Number(wearHex))) return '#f4efe3';
+    const mix = (a, b, t) => Math.round(a + (b - a) * t);
+    const h = Number(wearHex);
+    const r8 = mix((h >> 16) & 255, 0xf4, 0.55); const g8 = mix((h >> 8) & 255, 0xef, 0.55); const b8 = mix(h & 255, 0xe3, 0.55);
+    return `#${((r8 << 16) | (g8 << 8) | b8).toString(16).padStart(6, '0')}`;
+  })();
+  const glassCeilFace = storeys > 1 ? elevOf(2) : Infinity;
+  const glassStretches = (() => {
+    const out = [];
+    const rSide = resolveWallSide(spec, wall);
+    if (rSide.omitted) return out;
+    if (rSide.sunGlazing) {
+      out.push({ t0: 0.5, t1: run - 0.5, knee: Number(rSide.heightFt) || 2 });
+    } else if (hasSegmentedFootprint(spec)) {
+      footprintEdges(spec).forEach((edge) => {
+        if (edge.facing !== wall) return;
+        const r = resolveWallSide(spec, wall, 1, edge.key);
+        if (!r.sunGlazing || r.omitted) return;
+        const lo = horiz ? Math.min(edge.x0, edge.x1) : Math.min(edge.y0, edge.y1);
+        const hi = horiz ? Math.max(edge.x0, edge.x1) : Math.max(edge.y0, edge.y1);
+        out.push({ t0: Math.max(0.3, lo + 0.2), t1: Math.min(run - 0.3, hi - 0.2), knee: Number(r.heightFt) || 2 });
+      });
     }
-    if (roofType === 'shed') {
-      if (wall === 'south') return hS;
-      if (wall === 'north') return hN;
-      return hN + (hS - hN) * (t / run); // east/west walls rake from the north end to the south end
-    }
-    return groundH;
-  };
-  const gableRise = roofType === 'gable' && horiz && storeys === 1 ? (Number(shell.depthFt) || 24) * pitch : 0;
-  // the face's top edge: ground profile, capped at a covering storey's floor,
-  // then raised by every storey standing on this stretch of the wall
+    // A greenhouse ROOM standing past this wall builds its glazed annex in
+    // 3D — draw the same band here, so the Wall view shows it too (it was
+    // 3D-only, and "the greenhouse button did nothing" was born).
+    const W = Number(shell.widthFt) || 36;
+    const Dp = Number(shell.depthFt) || 28;
+    (spec.rooms || []).forEach((room) => {
+      if (room.type !== 'plant' || Number(room.level || 1) !== 1) return;
+      const rx = Number(room.x) || 0; const ry = Number(room.y) || 0;
+      const rw = Number(room.w) || 0; const rd = Number(room.d) || 0;
+      const poke = { south: ry + rd - Dp, north: -ry, east: rx + rw - W, west: -rx }[wall];
+      if (!(poke > 1.5)) return;
+      const lo = horiz ? Math.max(0, rx) : Math.max(0, ry);
+      const hi = horiz ? Math.min(run, rx + rw) : Math.min(run, ry + rd);
+      out.push({ t0: Math.max(0.3, lo + 0.2), t1: Math.min(run - 0.3, hi - 0.2), knee: 2, annex: true, label: `${room.name || 'greenhouse'} — slanted glass` });
+    });
+    return out.filter((s) => s.t1 - s.t0 > 1.5);
+  })();
+  // half the slope span × pitch — mirrors the 3D's corrected gable law
+  const gableRise = roofType === 'gable' && horiz && storeys === 1 ? ((Number(shell.widthFt) || 24) / 2) * pitch : 0;
+  // the face's top edge — the law's silhouette, plus the classic gable peak
   const topAt = (t) => {
-    const covers = touching.filter((c) => t > c.s0 - 0.01 && t < c.s1 + 0.01);
-    let g = groundProfileAt(t);
-    if (covers.length) g = Math.min(g, Math.min(...covers.map((c) => c.y0)));
-    let v = Math.max(g, ...covers.map((c) => c.y1));
+    let v = law.wallTopAt(t);
     if (gableRise > 0) {
       const half = run / 2;
       v += gableRise * (1 - Math.abs(t - half) / half); // the gable peak, mid-wall
     }
     return v;
   };
-  const cuts = [...new Set([0, run, run / 2, ...touching.flatMap((c) => [c.s0, c.s1])])]
+  const cuts = [...new Set([0, run, run / 2, ...law.tiers.flatMap((c) => [c.s0, c.s1])])]
     .filter((t) => t >= 0 && t <= run).sort((a, b) => a - b);
-  const maxTop = Math.max(...cuts.map((t) => topAt(t)), ...setBack.map((c) => c.y1));
+  // the attached lean-to crossing this face (drawn as a roof line): sampled
+  // per INTERVAL with a hair of inset — a cut sits exactly on a plate edge,
+  // where the plane itself answers null. SEGMENTED so wings on opposite
+  // sides of a storey never bridge with a phantom line across its face.
+  const roofLineSegs = [];
+  let roofSeg = [];
+  for (let ci = 0; ci < cuts.length - 1; ci += 1) {
+    const t0 = cuts[ci]; const t1 = cuts[ci + 1];
+    if (t1 - t0 < 0.05) continue;
+    const eps = Math.min(0.02, (t1 - t0) / 4);
+    if (law.roofAt((t0 + t1) / 2) == null) {
+      if (roofSeg.length >= 2) roofLineSegs.push(roofSeg);
+      roofSeg = [];
+      continue;
+    }
+    const ya = law.roofAt(t0 + eps); const yb = law.roofAt(t1 - eps);
+    if (ya != null) roofSeg.push([t0, ya]);
+    if (yb != null) roofSeg.push([t1, yb]);
+  }
+  if (roofSeg.length >= 2) roofLineSegs.push(roofSeg);
+  const roofLine = roofLineSegs.flat();
+  const maxTop = Math.max(...cuts.map((t) => topAt(t)), ...setBack.map((c) => c.y1), ...roofLine.map(([, y]) => y));
   const Y = (v) => maxTop - v; // feet measure up; paper draws down
   const X = (t) => (flipX ? run - t : t);
 
@@ -131,6 +180,35 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   }
 
   const openings = (spec.openings || []).map((o, i) => ({ o, i })).filter(({ o }) => o.wall === wall);
+  // Decks that stand against THIS wall (touching it or just outside it, and
+  // overlapping its run) show face-on: the walking slab at its true height,
+  // its railing, draggable along the wall — the numeric twin of the plan
+  // drag. Tapping opens the same deck card every other view opens.
+  const wallDecks = (spec.elements || []).filter((el) => {
+    if (el.category !== 'deck') return false;
+    const ex = Number(el.x) || 0; const ey = Number(el.y) || 0;
+    const ew = Number(el.w) || 10; const ed = Number(el.d) || 8;
+    const near = wall === 'south' ? ey + ed >= depth - 0.75
+      : wall === 'north' ? ey <= 0.75
+      : wall === 'east' ? ex + ew >= width - 0.75
+      : ex <= 0.75;
+    if (!near) return false;
+    const s0 = horiz ? ex : ey; const s1 = horiz ? ex + ew : ey + ed;
+    return s1 > 0.1 && s0 < run - 0.1;
+  }).map((el) => {
+    const dk = resolveDeck(spec, el);
+    return { el, topFt: dk.topFt, railed: dk.railKey !== 'none' };
+  });
+
+  function startDeckDrag(event, el) {
+    if (!onMoveObject) return;
+    event.stopPropagation();
+    event.preventDefault();
+    try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
+    const { fx } = toFeet(event);
+    if (onSelectId) onSelectId(el.id);
+    setDrag({ deck: { id: el.id, origAlong: horiz ? (Number(el.x) || 0) : (Number(el.y) || 0), x: Number(el.x) || 0, y: Number(el.y) || 0 }, startFx: fx, ghostAlong: null });
+  }
   const sillOf = (o) => {
     const prof = OPENING_TYPES[o.type] || OPENING_TYPES.window;
     return Number.isFinite(Number(o.sillFt)) ? Number(o.sillFt) : prof.sill;
@@ -163,6 +241,12 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
   function onPointerMove(event) {
     if (!drag) return;
+    if (drag.deck) {
+      const { fx } = toFeet(event);
+      const dAlong = (flipX ? -1 : 1) * (fx - drag.startFx);
+      setDrag((d) => (d ? { ...d, ghostAlong: snapHalf(d.deck.origAlong + dAlong) } : d));
+      return;
+    }
     if (drag.wallShape) {
       const { fy } = toFeet(event);
       const dUp = drag.startFy - fy;
@@ -199,6 +283,14 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
   function onPointerUp() {
     if (!drag) return;
+    if (drag.deck) {
+      const { deck, ghostAlong } = drag;
+      setDrag(null);
+      if (ghostAlong == null || Math.abs(ghostAlong - deck.origAlong) < 0.01) return;
+      if (horiz) onMoveObject(deck.id, ghostAlong, deck.y);
+      else onMoveObject(deck.id, deck.x, ghostAlong);
+      return;
+    }
     if (drag.wallShape) {
       const { wallShape, ghostH } = drag;
       setDrag(null);
@@ -214,13 +306,27 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
   const pad = 3.2;
   const soil = 2.4;
-  const vb = `${-pad} ${-2.2} ${run + pad * 2} ${maxTop + 2.2 + soil + 2.4}`;
+  // the face covers the wall AND every deck sticking past its ends (a deck
+  // 8 ft west of the house was clipped mid-slab before)
+  const deckSpansEl = wallDecks.map(({ el }) => {
+    const s0d = horiz ? (Number(el.x) || 0) : (Number(el.y) || 0);
+    const s1d = s0d + (horiz ? (Number(el.w) || 10) : (Number(el.d) || 8));
+    return flipX ? [run - s1d, run - s0d] : [s0d, s1d];
+  });
+  const vx0 = Math.min(0, ...deckSpansEl.map(([a]) => a)) - pad;
+  const vx1 = Math.max(run, ...deckSpansEl.map(([, b]) => b)) + pad;
+  const vb = `${vx0} ${-2.2} ${vx1 - vx0} ${maxTop + 2.2 + soil + 2.4}`;
 
   return (
     <div className="planWrap rz-elev-wrap">
       {onPickWall && (
-        <div className="rz-wallpick">
-          <span>Looking at the <b>{capWord(wall)} wall</b> from outside{onWallHeight ? ' — drag its top edge ↕ to change the height' : ''}.</span>
+        <div
+          className="rz-wallpick"
+          title={`Looking at the ${wall} wall from outside${onWallHeight ? ' — drag its top edge ↕ to change the height; drag doors and windows right on the face' : ''}.`}
+        >
+          {/* a few words only — the full how-to lives in the hover tip so
+              the chip never grows over the drawing */}
+          <span><b>{capWord(wall)} wall</b> · from outside</span>
           {['south', 'north', 'east', 'west'].map((s) => (
             <button key={s} type="button" className={s === wall ? 'on' : ''} onClick={() => onPickWall(s)}>{capWord(s)}</button>
           ))}
@@ -246,8 +352,45 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
             fill="#e9e2d1" stroke="#a49d8a" strokeWidth={0.09} strokeDasharray="0.7 0.5" opacity="0.7" pointerEvents="none" />
         ))}
 
-        {/* the wall face */}
-        <polygon points={facePts} fill="#f4efe3" stroke="#4a4f47" strokeWidth={0.16} strokeLinejoin="round" />
+        {/* the wall face — tinted by what the wall actually WEARS (its
+            cladding, or the wall system's own rendered face), so this view
+            answers the system/face selects instead of ignoring both */}
+        <polygon points={facePts} fill={faceFill} stroke="#4a4f47" strokeWidth={0.16} strokeLinejoin="round" />
+
+        {/* sun-glazed stretches: kneewall line, glass band up to the roofline
+            (or the 2nd floor on a multi-storey house), timber mullions */}
+        {glassStretches.map((s, si) => {
+          const steps = Math.max(6, Math.round((s.t1 - s.t0) / 1.5));
+          const topOfT = (t) => Math.min(groundProfileAt(t), glassCeilFace);
+          const topEdge = Array.from({ length: steps + 1 }, (_, k) => {
+            const t = s.t1 - ((s.t1 - s.t0) * k) / steps;
+            return `${X(t)},${Y(topOfT(t))}`;
+          }).join(' ');
+          const pts = `${X(s.t0)},${Y(s.knee)} ${X(s.t1)},${Y(s.knee)} ${topEdge}`;
+          const bays = Math.max(2, Math.round((s.t1 - s.t0) / 4));
+          return (
+            <g key={`sg${si}`} pointerEvents="none">
+              <polygon points={pts} fill="#bcd8e0" fillOpacity="0.55" stroke="#6e93a0" strokeWidth={0.12} strokeLinejoin="round" />
+              {Array.from({ length: bays + 1 }, (_, k) => {
+                const t = s.t0 + ((s.t1 - s.t0) * k) / bays;
+                const yT = topOfT(t);
+                return yT - s.knee > 0.8
+                  ? <line key={k} x1={X(t)} y1={Y(s.knee)} x2={X(t)} y2={Y(yT)} stroke="#7c5c38" strokeWidth={0.22} />
+                  : null;
+              })}
+              <line x1={X(s.t0)} y1={Y(s.knee)} x2={X(s.t1)} y2={Y(s.knee)} stroke="#7c5c38" strokeWidth={0.28} />
+              <text x={(X(s.t0) + X(s.t1)) / 2} y={Y(s.knee) + 1.1} textAnchor="middle" fontSize="0.95" fill="#5d7d89">{s.label || 'slanted sun glass'}</text>
+            </g>
+          );
+        })}
+
+        {/* the attached lean-to roof crossing this face — same plane the 3D
+            builds, so the 2D face finally shows the roof the model wears
+            (one polyline per contiguous wing; gaps stay gaps) */}
+        {roofLineSegs.map((segPts, si) => (
+          <polyline key={`rl${si}`} points={segPts.map(([t, y]) => `${X(t)},${Y(y)}`).join(' ')}
+            fill="none" stroke="#7f8c89" strokeWidth={0.26} strokeLinecap="round" pointerEvents="none" opacity="0.9" />
+        ))}
 
         {/* floor lines — where each upper storey's floor sits */}
         {Array.from({ length: storeys - 1 }, (_, k) => k + 2).map((lv) => {
@@ -318,6 +461,39 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
           );
         })}
 
+        {/* decks against this wall: the slab at its true height + railing —
+            drag it along the wall; tap for its card (surface, roof, steps) */}
+        {wallDecks.map(({ el, topFt, railed }) => {
+          const isGhost = drag?.deck?.id === el.id && drag.ghostAlong != null;
+          const alongNow = isGhost ? drag.ghostAlong : (horiz ? (Number(el.x) || 0) : (Number(el.y) || 0));
+          const len = horiz ? (Number(el.w) || 10) : (Number(el.d) || 8);
+          const dx0 = flipX ? run - alongNow - len : alongNow;
+          const sel = String(selectedId || '') === String(el.id);
+          const railN = Math.max(1, Math.round(len / 4));
+          return (
+            <g key={`k${el.id}`}>
+              <rect x={dx0} y={Y(topFt)} width={len} height={0.45}
+                fill="#c9a06b" stroke={sel ? '#3C6472' : '#8a6a48'} strokeWidth={sel ? 0.2 : 0.1}
+                opacity={isGhost ? 0.75 : 1}
+                style={{ cursor: onMoveObject ? 'move' : 'pointer' }}
+                onPointerDown={(e) => startDeckDrag(e, el)} />
+              {railed && (
+                <g pointerEvents="none">
+                  <line x1={dx0 + 0.2} y1={Y(topFt + 3)} x2={dx0 + len - 0.2} y2={Y(topFt + 3)} stroke="#8a6a48" strokeWidth={0.12} />
+                  {Array.from({ length: railN + 1 }, (_, i) => dx0 + 0.2 + ((len - 0.4) * i) / railN).map((px, i) => (
+                    <line key={i} x1={px} y1={Y(topFt)} x2={px} y2={Y(topFt + 3)} stroke="#8a6a48" strokeWidth={0.09} />
+                  ))}
+                </g>
+              )}
+              {sel && (
+                <text x={dx0 + len / 2} y={Y(topFt) - 0.6} textAnchor="middle" fontSize="1.05" fill="#22251F" fontWeight="600" pointerEvents="none">
+                  {el.name || 'Deck'} — {Math.round(len * 10) / 10}′ along this wall, floor at {Math.round(topFt * 10) / 10}′
+                </text>
+              )}
+            </g>
+          );
+        })}
+
         {/* which corner is which */}
         <text x={0.2} y={Y(0) + 1.6} fontSize="1.15" fill="#6b6f66" pointerEvents="none">{leftEnd}</text>
         <text x={run - 0.2} y={Y(0) + 1.6} textAnchor="end" fontSize="1.15" fill="#6b6f66" pointerEvents="none">{rightEnd}</text>
@@ -377,7 +553,7 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
         {openings.length === 0 && (
           <text x={run / 2} y={Y(Math.max(2, groundProfileAt(run / 2) / 2))} textAnchor="middle" fontSize="1.3" fill="#8a8271" pointerEvents="none">
-            No doors or windows on this wall yet — add them in the Openings chapter.
+            No doors or windows on this wall yet — the + Window and + Door buttons up top put them right here.
           </text>
         )}
       </svg>

@@ -1,0 +1,47 @@
+{
+  "_what": "The user-facing capability inventory. Every entry names a control that must be reachable in the DEFAULT (site) look. site:'quick' = its data-cap marker must render inside SiteQuickRow's branch for that chapter. site:'more' = it may live behind the More panel (the classic component named in 'classic'), but that chapter's quick row must then carry a cap-more-<chapter> signpost or an onMore control. Removing a control without editing this file is a test failure — that is the point. Checker: tools/capability_test.mjs (static reachability; it cannot catch CSS hiding or occlusion — that is the live elementFromPoint audit's job).",
+  "capabilities": [
+    { "id": "shape.outline", "chapter": "shape", "label": "Pick the building outline — rectangle, L, T, U, round", "marker": "cap-shape-outline", "site": "quick" },
+    { "id": "shape.size", "chapter": "shape", "label": "Whole-building width and depth by the numbers", "marker": "cap-shape-size", "site": "quick" },
+    { "id": "shape.fit-walls", "chapter": "shape", "label": "Fit the walls to the rooms (one-tap slack remedy)", "marker": "cap-shape-fit-walls", "site": "quick" },
+
+    { "id": "storeys.count", "chapter": "storeys", "label": "Add or remove a floor", "marker": "cap-storeys-count", "site": "quick" },
+    { "id": "storeys.pick", "chapter": "storeys", "label": "Pick a storey — its outline in hand on the plan", "marker": "cap-storeys-pick", "site": "quick" },
+    { "id": "storeys.basement", "chapter": "storeys", "label": "Add or remove a basement", "marker": "cap-storeys-basement", "site": "quick" },
+    { "id": "storeys.numbers", "chapter": "storeys", "label": "Each floor's W × D × H by the numbers", "marker": "cap-storeys-numbers", "site": "more", "classic": "StoreysControls" },
+
+    { "id": "rooms.add", "chapter": "rooms", "label": "Add a room / stairs / deck (the More panel palette)", "marker": "cap-more-rooms", "site": "quick" },
+
+    { "id": "foundation.main-type", "chapter": "foundation", "label": "Pick the main foundation type under the house", "marker": "cap-foundation-main-type", "site": "quick" },
+    { "id": "foundation.outdoor-pad", "chapter": "foundation", "label": "Drop an outdoor pad — carport, patio, porch, walkway", "marker": "cap-foundation-outdoor-pad", "site": "quick" },
+    { "id": "foundation.slab-any", "chapter": "foundation", "label": "Slab — one shape, any size, anywhere", "marker": "cap-foundation-slab", "site": "quick" },
+    { "id": "foundation.footing-run", "chapter": "foundation", "label": "Drop footing runs under specific walls — even outside", "marker": "cap-foundation-run", "site": "quick" },
+    { "id": "foundation.run-sizing", "chapter": "foundation", "label": "Size or remove placed runs by the numbers", "marker": "cap-foundation-run-list", "site": "more", "classic": "FoundationControls" },
+
+    { "id": "walls.pick-side", "chapter": "walls", "label": "Pick a wall — its construction card AND where the next opening lands", "marker": "cap-walls-side", "site": "quick" },
+    { "id": "walls.split", "chapter": "walls", "label": "Split a wall into sections with their own construction", "marker": "cap-walls-split", "site": "more", "classic": "WallsControls" },
+    { "id": "walls.section-construction", "chapter": "walls", "label": "Each wall section its own construction", "marker": "cap-walls-section-construction", "site": "more", "classic": "WallsControls" },
+
+    { "id": "frame.type", "chapter": "frame", "label": "Pick what holds the roof up", "marker": "cap-frame-type", "site": "quick" },
+
+    { "id": "roof.shape", "chapter": "roof", "label": "Pick the roof shape — gable, shed, hip, flat", "marker": "cap-roof-shape", "site": "quick" },
+    { "id": "roof.pitch", "chapter": "roof", "label": "Roof steepness", "marker": "cap-roof-pitch", "site": "quick" },
+    { "id": "roof.shed-fall", "chapter": "roof", "label": "Which way a shed roof falls — all four directions", "marker": "cap-roof-shed-fall", "site": "quick" },
+    { "id": "roof.drainage", "chapter": "roof", "label": "Gutters and where the water goes", "marker": "cap-roof-drainage", "site": "more", "classic": "DrainageControls" },
+
+    { "id": "openings.add", "chapter": "walls", "label": "Add a window, door, or skylight (merged Walls & openings chapter)", "marker": "cap-openings-add", "site": "quick" },
+    { "id": "openings.greenhouse", "chapter": "walls", "label": "Greenhouse — an OPENING control: a slanted glass section of the south wall", "marker": "cap-openings-greenhouse", "site": "quick" },
+    { "id": "openings.fancy", "chapter": "walls", "label": "Fancier openings — french, raked, tilted, dormers", "marker": "cap-openings-fancy", "site": "more", "classic": "OpeningsControls" },
+
+    { "id": "systems.heat", "chapter": "systems", "label": "Heat source", "marker": "cap-systems-heat", "site": "quick" },
+    { "id": "systems.water", "chapter": "systems", "label": "Water source", "marker": "cap-systems-water", "site": "quick" },
+    { "id": "systems.waste", "chapter": "systems", "label": "Waste — where used water goes", "marker": "cap-systems-waste", "site": "quick" },
+    { "id": "systems.power", "chapter": "systems", "label": "Power source", "marker": "cap-systems-power", "site": "quick" },
+    { "id": "systems.tank", "chapter": "systems", "label": "Storage tank and system numbers", "marker": "cap-systems-tank", "site": "more", "classic": "SystemsControls" },
+
+    { "id": "finishes.cladding", "chapter": "finishes", "label": "Exterior cladding — ALL types, none silently hidden", "marker": "cap-finishes-cladding", "site": "quick" },
+    { "id": "finishes.floor", "chapter": "finishes", "label": "The finished floor underfoot", "marker": "cap-finishes-floor", "site": "quick" },
+    { "id": "finishes.colors", "chapter": "finishes", "label": "Wall / roof / floor colors", "marker": "cap-finishes-colors", "site": "more", "classic": "FinishesControls" },
+    { "id": "finishes.reclaimed", "chapter": "finishes", "label": "New or salvaged materials toggles", "marker": "cap-finishes-reclaimed", "site": "more", "classic": "FinishesControls" }
+  ]
+}

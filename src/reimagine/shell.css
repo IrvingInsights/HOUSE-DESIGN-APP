@@ -811,3 +811,8 @@ button.rz-storey-name:hover { color: var(--evergreen, #3c6472); background: colo
 
 /* the Outline section's whole-building size row */
 .rz-shape-size { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+
+/* greenhouse-as-opening list (merged Walls & openings chapter) */
+.rz-ghlist { margin-top: 6px; }
+.rz-ghrow { border-top: 1px dashed #d8d2c2; padding: 6px 0 2px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.rz-ghrow .rz-fresh { align-self: flex-start; }

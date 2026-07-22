@@ -7,7 +7,7 @@ import {
 import { Grid3X3, Plus } from 'lucide-react';
 import {
   clamp, floorCount, floorLabel, resolveOverhangs, utilitiesOf, resolveWallSide, PLAN_ELEMENT_HEX, planLabelInk,
-  PLAN_ZONE_HEX, hexOf
+  PLAN_ZONE_HEX, hexOf, sunspacePartitions
 } from './engine.js';
 
 export function JointDetail({ spec, derived, kind, side = 'south', opening = null }) {
@@ -701,7 +701,9 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
         })}
         {/* placed elements (heater, tank, garden, coop, stairs…) — dashed to
             read as objects/fixtures rather than rooms; drag + resize like rooms */}
-        {(spec.elements || []).filter(planLevelFilter).map((raw) => {
+        {/* placed elements PLUS the derived sunspace walls — the same list
+            the 3D consumes, so a greenhouse's wall exists in both or neither */}
+        {[...(spec.elements || []), ...sunspacePartitions(spec)].filter(planLevelFilter).map((raw) => {
           const el = roomAt(raw);
           const isSel = raw.id === selectedRoom;
           const w = Number(el.w) || 4;
@@ -751,7 +753,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
           // Foundation view (drag them under whatever they carry).
           const isContextSubject = context === 'foundation' && raw.category === 'foundation';
           return (
-            <g key={raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
+            <g key={raw.synKey || raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
               <rect
                 x={el.x} y={el.y} width={w} height={d}
                 fill={PLAN_ELEMENT_HEX[raw.category] || '#8a7768'}
@@ -759,7 +761,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                 stroke={isSel ? 'var(--active-line)' : '#5a5348'}
                 strokeWidth={isSel ? 0.4 : 0.22}
                 strokeDasharray={raw.category === 'partition' ? undefined : '0.8 0.5'}
-                pointerEvents={buildingContext && !isContextSubject ? 'none' : undefined}
+                pointerEvents={raw.synthetic || (buildingContext && !isContextSubject) ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
                 onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}
               />

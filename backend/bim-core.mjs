@@ -186,6 +186,12 @@ export function resolveWallSide(spec, side, level = 1, edgeKey = null) {
     if (!seg) return base;
     const segAssemblyKey = seg.assembly && WALL_ASSEMBLIES[seg.assembly] ? seg.assembly : base.assemblyKey;
     const segAssembly = WALL_ASSEMBLIES[segAssemblyKey] || base.assembly;
+    // A sun-glazed SECTION resolves exactly like a sun-glazed side: its
+    // heightFt IS the kneewall (glass climbs from there to the roof), so
+    // every consumer of the glazed-side convention — wall builders, the
+    // glazing band, cost, solar — works per-section with no special cases.
+    // The side's own height/roof math never sees this (read-time only).
+    const segGlazed = Boolean(seg.sunGlazing);
     return {
       ...base,
       assemblyKey: segAssemblyKey,
@@ -194,6 +200,11 @@ export function resolveWallSide(spec, side, level = 1, edgeKey = null) {
       interiorFinish: seg.interiorFinish || base.interiorFinish,
       exteriorFinish: seg.exteriorFinish || base.exteriorFinish,
       cladding: CLADDING_TYPES[seg.cladding] ? seg.cladding : base.cladding,
+      ...(segGlazed ? {
+        sunGlazing: true,
+        sunGlazingTiltDeg: Number(seg.sunGlazingTiltDeg ?? base.sunGlazingTiltDeg ?? 30),
+        heightFt: Number(seg.kneewallFt ?? 2)
+      } : {}),
       segmentKey: edgeKey
     };
   };
@@ -522,6 +533,53 @@ const FACING_BY_NORMAL = { '0,-1': 'north', '0,1': 'south', '1,0': 'east', '-1,0
 // wall construction stays keyed by facing (all north-facing edges share the
 // 'north' wall settings), so resolveWallSide keeps working unchanged and the
 // cardinal names remain aliases while the footprint is a plain rectangle.
+// Insert split points at x0/x1 along the south-facing edge that carries that
+// stretch, so ONE section of the wall can get its own construction (the
+// greenhouse's slanted sun glass, bale carrying on either side). Works on the
+// plain rectangle AND any custom outline — L, T, U, or an outline already
+// split by an earlier section. Returns { poly, x0, x1 } (clamped to the edge)
+// or null when there is no straight south edge to split (round outline, or
+// the stretch misses every south edge / ends up under 3 ft).
+export function splitSouthEdgeAt(spec, x0raw, x1raw) {
+  const shell = (spec && spec.shell) || {};
+  if (shell.footprint === 'round') return null;
+  const W = Number(shell.widthFt) || 36;
+  const D = Number(shell.depthFt) || 28;
+  const snap = (v) => Math.round(v * 2) / 2;
+  const wantLo = Math.min(Number(x0raw) || 0, Number(x1raw) || 0);
+  const wantHi = Math.max(Number(x0raw) || 0, Number(x1raw) || 0);
+  if (!Array.isArray(shell.footprint)) {
+    const x0 = snap(Math.max(0, wantLo));
+    const x1 = snap(Math.min(W, wantHi));
+    if (x1 - x0 < 3) return null;
+    return {
+      poly: [[0, 0], [W, 0], [W, D], ...(x1 < W - 0.1 ? [[x1, D]] : []), ...(x0 > 0.1 ? [[x0, D]] : []), [0, D]],
+      x0, x1
+    };
+  }
+  const edges = footprintEdges(spec);
+  const verts = edges.map((e) => [e.x0, e.y0]);
+  let edge = null; let bestOv = 0;
+  for (const e of edges) {
+    if (e.facing !== 'south' || !e.horizontal) continue;
+    const lo = Math.min(e.x0, e.x1); const hi = Math.max(e.x0, e.x1);
+    const ov = Math.min(hi, wantHi) - Math.max(lo, wantLo);
+    if (ov > bestOv) { bestOv = ov; edge = e; }
+  }
+  if (!edge || bestOv < 3) return null;
+  const lo = Math.min(edge.x0, edge.x1); const hi = Math.max(edge.x0, edge.x1);
+  const x0 = snap(Math.max(lo, wantLo));
+  const x1 = snap(Math.min(hi, wantHi));
+  if (x1 - x0 < 3) return null;
+  const y = edge.y0;
+  const dir = Math.sign(edge.x1 - edge.x0) || -1;
+  const inserted = (dir < 0 ? [x1, x0] : [x0, x1])
+    .filter((x) => Math.abs(x - edge.x0) > 0.1 && Math.abs(x - edge.x1) > 0.1)
+    .map((x) => [x, y]);
+  const poly = [...verts.slice(0, edge.index + 1), ...inserted, ...verts.slice(edge.index + 1)];
+  return { poly, x0, x1 };
+}
+
 export function footprintEdges(spec) {
   const vertices = footprintPolygon(spec);
   const n = vertices.length;
@@ -955,6 +1013,31 @@ function upsertRoom(spec, room) {
 // Whoever edits a shared check should decide, per change, whether it belongs to
 // both layers. FOLLOW-UP (reimagining spec §6/§10): fully unify these by relocating
 // deriveDesign into a shared lower module so one detectIssues can serve both.
+// A storey-extent edge within SNAP_FT of the shell edge snaps flush to it.
+// 17.5 + 18 = 35.5 on a 36-foot house is a slip of the keypad, not a design —
+// and the sliver it leaves builds real geometry: a full-roofline wall fin and
+// a floating ribbon of wing roof over six inches of "ground floor". Exported
+// so the load-time heal (App.jsx healLoadedSpec) can apply the same law to
+// designs saved before this fix existed.
+// 0.6: catches the keypad-slip class (17.5 + 18 leaving a 6″ sliver) while a
+// deliberate 1 ft step — reachable from the Stack view's half-foot drags —
+// survives (review finding: 1.5 silently rewrote sub-1.5 ft placements).
+const PLATE_SNAP_FT = 0.6;
+export function snapPlatesToShell(spec) {
+  const shellW = Number(spec?.shell?.widthFt) || 0;
+  const shellD = Number(spec?.shell?.depthFt) || 0;
+  if (shellW <= 0 || shellD <= 0) return spec;
+  for (const plate of (spec.elements || []).filter((el) => el?.category === 'floor' && Number(el.level || 1) >= 2)) {
+    const x0 = Number(plate.x) || 0; const y0 = Number(plate.y) || 0;
+    const x1 = x0 + (Number(plate.w) || 0); const y1 = y0 + (Number(plate.d) || 0);
+    if (x0 > 0 && x0 < PLATE_SNAP_FT) { plate.x = 0; plate.w = Math.round(x1 * 10) / 10; }
+    if (x1 < shellW && shellW - x1 < PLATE_SNAP_FT) plate.w = Math.round((shellW - (Number(plate.x) || 0)) * 10) / 10;
+    if (y0 > 0 && y0 < PLATE_SNAP_FT) { plate.y = 0; plate.d = Math.round(y1 * 10) / 10; }
+    if (y1 < shellD && shellD - y1 < PLATE_SNAP_FT) plate.d = Math.round((shellD - (Number(plate.y) || 0)) * 10) / 10;
+  }
+  return spec;
+}
+
 function normalizeRooms(spec) {
   // Self-healing reconciliations — corrupt or legacy-era stored values that
   // disagree with the engine's own derived truth get pulled back in line:
@@ -1029,6 +1112,13 @@ function normalizeRooms(spec) {
       plate.w = Math.round(Math.max(1, nw) * 10) / 10; plate.d = Math.round(Math.max(1, nd) * 10) / 10;
     }
   }
+  // A storey plate that stops a HAIR short of the shell edge is a mistyped
+  // number, not a step: "from west 17.5, W 18" on a 36' house leaves a
+  // 6-inch sliver of "ground floor" along the east wall — whose wall then
+  // rises to the full roofline as a two-storey fin wearing a floating
+  // ribbon of roof. No real step is thinner than SNAP_FT (nothing can stand,
+  // walk, or drain on it), so an edge that close to the shell snaps flush.
+  snapPlatesToShell(spec);
 
   const roomMargin = Math.max(16, padExtension(spec.shell));
   spec.rooms = spec.rooms.map((room) => {
@@ -1066,8 +1156,9 @@ function normalizeRooms(spec) {
   }
   if (Array.isArray(spec.elements)) {
     spec.elements = spec.elements.map((element) => {
-      // Partitions are legitimately thin — don't fatten a 0.45' stud wall to 1'.
-      const minDim = element.category === 'partition' ? 0.3 : 1;
+      // Partitions are legitimately thin — don't fatten a 0.45' stud wall to
+      // 1'. Hand-placed posts and beams are timber-thin the same way.
+      const minDim = element.category === 'partition' || element.category === 'post' || element.category === 'beam' ? 0.3 : 1;
       const resized = {
         ...element,
         w: clamp(Number(element.w) || 1, minDim, spec.shell.widthFt + 48),
@@ -1270,6 +1361,10 @@ export const OPENING_TYPES = {
   bay: { label: 'Bay window / window seat', h: 4.5, sill: 1.5, glazed: true, defaultW: 6, bay: true },
   raked: { label: 'Raked gable window', h: 4, sill: 3, glazed: true, defaultW: 5, raked: true },
   tilted: { label: 'Tilted glazing pane', h: 4.5, sill: 1.5, glazed: true, defaultW: 4, tilted: true },
+  // The greenhouse is an OPENING (Daniel's directive): a wide slanted glass
+  // pane on a 2 ft kneewall, moved / resized / removed like any window —
+  // rides the tilted-pane render path, glass area feeds the normal cost.
+  greenhouse: { label: 'Greenhouse — slanted glass', h: 6, sill: 2, glazed: true, defaultW: 10, tilted: true, greenhouse: true },
   skylight: { label: 'Skylight / roof window', h: 0, sill: 0, glazed: true, defaultW: 2.5, roof: true }
 };
 
@@ -1789,9 +1884,13 @@ export function applyBimOperations(currentSpec, plan) {
       if (segMatch) {
         const segKey = segMatch[1];
         const field = operation.field;
-        const constructionFields = ['assembly', 'thicknessFt', 'cladding', 'interiorFinish', 'exteriorFinish'];
+        // Construction fields PLUS sun glazing — a SECTION of a wall can be
+        // the slanted-glass sun face (kneewall below, tilted glass to the
+        // roof) while the rest of the side stays bale (Daniel: "make part of
+        // this S face slanted glass"). Height/omit stay side-level.
+        const constructionFields = ['assembly', 'thicknessFt', 'cladding', 'interiorFinish', 'exteriorFinish', 'sunGlazing', 'sunGlazingTiltDeg', 'kneewallFt'];
         if (!constructionFields.includes(field)) {
-          warnings.push(`Wall sections take construction fields only (assembly, thickness, finishes) — ${field} applies to the whole side. Target the side (north/south/east/west) instead.`);
+          warnings.push(`Wall sections take construction and glazing fields only — ${field} applies to the whole side. Target the side (north/south/east/west) instead.`);
           rejectedOperations.push(operation);
           continue;
         }
@@ -1802,11 +1901,33 @@ export function applyBimOperations(currentSpec, plan) {
           actions.push(`Wall section ${segKey} matches its side again.`);
           continue;
         }
+        if (field === 'sunGlazing') {
+          const on = operation.value === true || String(operation.value) === 'true' || operation.value === 1 || operation.value === '1';
+          if (!on) {
+            // Un-glazing a section removes its glazing fields — it stands
+            // back up as plain wall in its own (or its side's) construction.
+            const seg = (next.wallSegments || {})[segKey];
+            if (seg) {
+              delete seg.sunGlazing; delete seg.sunGlazingTiltDeg; delete seg.kneewallFt;
+              if (Object.keys(seg).length === 0) delete next.wallSegments[segKey];
+              if (next.wallSegments && Object.keys(next.wallSegments).length === 0) delete next.wallSegments;
+            }
+            actions.push(`Wall section ${segKey} is plain wall again.`);
+            continue;
+          }
+          next.wallSegments ||= {};
+          next.wallSegments[segKey] ||= {};
+          next.wallSegments[segKey].sunGlazing = true;
+          actions.push(`Wall section ${segKey} is now a slanted-glass sun face.`);
+          continue;
+        }
         next.wallSegments ||= {};
         next.wallSegments[segKey] ||= {};
         if (field === 'assembly') next.wallSegments[segKey].assembly = WALL_ASSEMBLIES[operation.value] ? operation.value : 'framed';
         else if (field === 'thicknessFt') next.wallSegments[segKey].thicknessFt = clamp(Number(operation.value), 0.2, 3.5);
         else if (field === 'cladding') next.wallSegments[segKey].cladding = CLADDING_TYPES[operation.value] ? operation.value : 'render';
+        else if (field === 'sunGlazingTiltDeg') next.wallSegments[segKey].sunGlazingTiltDeg = clamp(Number(operation.value) || 0, 0, 45);
+        else if (field === 'kneewallFt') next.wallSegments[segKey].kneewallFt = clamp(Number(operation.value) || 2, 0.5, 8);
         else next.wallSegments[segKey][field] = String(operation.value || '');
         actions.push(`Set wall section ${segKey} ${field} to ${operation.value}.`);
         continue;
@@ -1855,6 +1976,13 @@ export function applyBimOperations(currentSpec, plan) {
         const on = operation.value === true || String(operation.value) === 'true' || operation.value === 1 || operation.value === '1';
         const hadGlazing = Boolean(next.walls[side].sunGlazing);
         next.walls[side].sunGlazing = on;
+        // Turning glazing ON brings its kneewall: a glazed side's heightFt IS
+        // the kneewall, so a full-height wall (or none set) would leave only a
+        // sliver of glass at the top — the glass must start low.
+        if (on && !hadGlazing) {
+          const cur = Number(next.walls[side].heightFt);
+          if (!Number.isFinite(cur) || cur > 4) next.walls[side].heightFt = 2;
+        }
         // Turning glazing OFF removes the kneewall with it — the low wall
         // only existed to carry the glass. The side stands back up to the
         // shell's roofline; the shell itself never moved (kneewalls don't
@@ -2192,6 +2320,24 @@ export function applyBimOperations(currentSpec, plan) {
       if (operation.field === 'baySpacingFt') {
         next.frame.baySpacingFt = clamp(Number(operation.value) || 8, 4, 16);
         actions.push(`Set frame bay spacing to ${next.frame.baySpacingFt}'.`);
+        continue;
+      }
+      // Hand-removal of a DERIVED member: the value is the member's stable
+      // geometry key (the scene stamps one on every skeleton piece). Undo
+      // works through the normal snapshot stack; "restoreMembers" clears the
+      // whole list — the one-tap "bring back everything I removed".
+      if (operation.field === 'removeMember') {
+        const key = String(operation.value || '');
+        if (key.startsWith('fm:')) {
+          next.frame.removedMembers = [...new Set([...(next.frame.removedMembers || []), key])];
+          actions.push('Removed a frame member.');
+        }
+        continue;
+      }
+      if (operation.field === 'restoreMembers') {
+        const n = (next.frame.removedMembers || []).length;
+        next.frame.removedMembers = [];
+        actions.push(`Brought back ${n} removed frame member${n === 1 ? '' : 's'}.`);
         continue;
       }
       const value = FRAME_TYPES[operation.value] ? operation.value : 'load-bearing';
@@ -2556,6 +2702,27 @@ export function applyBimOperations(currentSpec, plan) {
       target.w = Math.max(minDim, Number(operation.w || target.w));
       target.d = Math.max(minDim, Number(operation.d || target.d));
       if (operation.h) target.h = Math.max(0.2, Number(operation.h));
+      // Shrinking a STOREY EXTENT pulls that floor's rooms inside the new
+      // outline RIGHT HERE, in the op — so every door (plan corner drag,
+      // Stack view, number boxes) keeps the size the person set. Before,
+      // only the number-box path pulled rooms; the plan drag left them
+      // outside and the covers-its-rooms heal grew the plate straight back
+      // ("it is forcing the 1st floor shape to match the 2nd" — stale
+      // rooms from an older, deeper house pinned the plate at full size).
+      if (target.category === 'floor' && Number(target.level || 1) >= 2) {
+        const px = Number(target.x) || 0; const py = Number(target.y) || 0;
+        const pw = Number(target.w) || 1; const pd = Number(target.d) || 1;
+        (next.rooms || []).filter((r) => Number(r.level || 1) === Number(target.level)).forEach((r) => {
+          const nw = Math.min(Number(r.w) || 1, pw);
+          const nd = Math.min(Number(r.d) || 1, pd);
+          const nx = clamp(Number(r.x) || 0, px, px + pw - nw);
+          const ny = clamp(Number(r.y) || 0, py, py + pd - nd);
+          if (nw !== Number(r.w)) r.w = nw;
+          if (nd !== Number(r.d)) r.d = nd;
+          if (nx !== Number(r.x)) r.x = nx;
+          if (ny !== Number(r.y)) r.y = ny;
+        });
+      }
       changedIds.push(target.id);
       actions.push(operationDescription({ ...operation, name: target.name }, next));
     } else if (operation.type === 'update_object') {
