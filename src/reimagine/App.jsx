@@ -56,7 +56,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 151 · Jul 21';
+const UPDATE_STAMP = 'update 152 · Jul 21';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1084,6 +1084,19 @@ export default function App() {
     // debounced autosave (browser cache + the engine store, best effort)
     try { localStorage.setItem(STORE_KEY, JSON.stringify({ spec, savedAt: Date.now() })); } catch { /* fine */ }
     if (backendReadyRef.current) { try { await serverSave(spec); } catch { /* revisions have the last save */ } }
+    // A plain location.reload() let the browser keep the CACHED old modules —
+    // the new code was pulled to disk, the server served it, but the browser
+    // showed the old app, so every update "changed nothing". This clears the
+    // Cache Storage + service workers and reloads on a fresh URL so the whole
+    // module graph is re-fetched. (Verified: a fresh tab always showed the
+    // fix; the long-lived tab did not.)
+    const hardReload = async () => {
+      try { if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } } catch { /* ignore */ }
+      try { if (navigator.serviceWorker) { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map((rg) => rg.unregister())); } } catch { /* ignore */ }
+      const u = new URL(window.location.href);
+      u.searchParams.set('u', String(Date.now()));
+      window.location.replace(u.toString());
+    };
     try {
       const r = await fetch('/api/update/apply', { method: 'POST' });
       const j = await r.json();
@@ -1095,14 +1108,14 @@ export default function App() {
           try { const ping = await fetch('/api/update/check', { cache: 'no-store' }); if (ping.ok) break; } catch { /* still restarting */ }
         }
       }
-      window.location.reload();
+      await hardReload();
     } catch {
       // apply killed the engine before answering — same story: wait, reload
       for (let i = 0; i < 40; i += 1) {
         await new Promise((resolve) => setTimeout(resolve, 1500));
         try { const ping = await fetch('/api/update/check', { cache: 'no-store' }); if (ping.ok) break; } catch { /* still restarting */ }
       }
-      window.location.reload();
+      await hardReload();
     }
   };
 
