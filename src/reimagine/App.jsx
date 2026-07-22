@@ -47,6 +47,12 @@ const CHAPTERS = [
 // the frame standing on its foundation: walls, roof, rooms, and openings off;
 // frame, foundation runs/pads, floor decks, and the ground stay.
 const MODEL_SHOW_PRESETS = {
+  // THE DEFAULT: the finished house — walls, roof, windows, no structural
+  // timber frame. Showing the frame by default drew every rafter and post as a
+  // skeletal comb of teeth over the house ("nothing changed / still broken");
+  // a homeowner wants to see the finished building, and the frame has its own
+  // Frame view + the "everything" option below.
+  finished: { ...DEFAULT_MODEL_LAYERS, frame: false },
   all: null,
   bones: { ...DEFAULT_MODEL_LAYERS, wallNorth: false, wallSouth: false, wallEast: false, wallWest: false, roof: false, rooms: false, openings: false, labels: false },
   noroof: { ...DEFAULT_MODEL_LAYERS, roof: false },
@@ -56,7 +62,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 152 · Jul 21';
+const UPDATE_STAMP = 'update 153 · Jul 21';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -227,7 +233,7 @@ export default function App() {
   const [openWall, setOpenWall] = useState('south'); // which wall the Openings chapter is working on
   // 3D "Show" filter: see just part of the build (frame on its foundation,
   // the house without its roof) — the same layer system the Time Machine uses.
-  const [modelShow, setModelShow] = useState('all');
+  const [modelShow, setModelShow] = useState('finished');
   // THE SITE TABLE — Daniel's chosen Claude Design direction (Jul 2026): the
   // chapters run as a strip across the top, the model owns the center, money
   // sits on the table. 'classic' keeps the left-Trail look one tap away.
@@ -1579,7 +1585,8 @@ export default function App() {
               <>
                 <span className="st-dock-sep" />
                 <select value={modelShow} title="See just part of the build" onChange={(e) => setModelShow(e.target.value)}>
-                  <option value="all">Show: everything</option>
+                  <option value="finished">Show: finished house</option>
+                  <option value="all">Show: with the frame</option>
                   <option value="bones">Show: frame & foundation</option>
                   <option value="frame">Show: just the frame</option>
                   <option value="noroof">Show: no roof</option>
@@ -1665,7 +1672,8 @@ export default function App() {
         {viewMode === '3d' && <span className="rz-views-sep" />}
         {viewMode === '3d' && (
           <select className="rz-show" value={modelShow} title="See just part of the build" onChange={(e) => { preFrameShowRef.current = null; setModelShow(e.target.value); }}>
-            <option value="all">Show all</option>
+            <option value="finished">Finished house</option>
+            <option value="all">With the frame</option>
             <option value="bones">Frame &amp; foundation</option>
             <option value="frame">Just the frame</option>
             <option value="noroof">No roof</option>
