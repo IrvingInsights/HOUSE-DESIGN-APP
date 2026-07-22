@@ -1024,6 +1024,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const bp = upperPlateRect(spec, below) || { x: 0, y: 0, w: width, d: depth };
           if (edgeX > bp.x - 0.05 && edgeX < bp.x + bp.w + 0.05 && edgeZ > bp.y - 0.05 && edgeZ < bp.y + bp.d + 0.05) return elevAt(level);
         }
+        // A FULL-footprint upper storey stands on a flat lower storey — it
+        // seats on that flat floor. The wing/eave seat below is only for a
+        // SET-BACK tower dropped onto a lower shed roof plane; using it for a
+        // full storey seated the upstairs walls down at the shed eave (5.5 ft)
+        // instead of the floor (10 ft), overlapping the floor below.
+        const platE = upperPlateRect(spec, level);
+        const fullFootprint = !platE || (platE.w * platE.d >= width * depth - 1);
+        if (fullFootprint) return elevAt(level);
         if (roofSpec.roofType === 'shed') {
           const wingTop = shedEaveAt(edgeX, edgeZ);
           return Math.min(elevAt(level), wingTop - JOINTS.TUCK);
@@ -1185,11 +1193,19 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const cx = midX - edge.nx * (t / 2);
           const cy = midY - edge.ny * (t / 2);
           const len = edge.lengthFt;
-          const rakes = shed && (shedEW ? edge.horizontal : !edge.horizontal);
+          // A shed rakes its walls — but on a MULTI-STOREY building the shed
+          // slope belongs only to the TOP storey (the roof). The lower
+          // storeys are flat boxes rising to the flat floor plate above; if
+          // they raked with the shed, the ground wall dropped BELOW the
+          // upstairs floor on the low side (a see-through gap) and poked above
+          // it on the high side. So under a plate the ground is flat at its
+          // storey ceiling and the rake moves to the upper band.
+          const groundCeil = storeyHeightFt(spec.shell, 1);
+          const rakes = shed && !hasPlate && (shedEW ? edge.horizontal : !edge.horizontal);
           const totalH = shed
             ? (rakes ? Math.max(eaveAtPt(edge.x0, edge.y0), eaveAtPt(edge.x1, edge.y1)) : eaveAtPt(midX, midY))
             : rG.heightFt + storeyLift;
-          const groundH = Math.max(1, totalH - storeyLift);
+          const groundH = hasPlate ? groundCeil : Math.max(1, totalH - storeyLift);
           const matG = wallMatOf(rG);
           let meshes;
           if (rakes && !edge.horizontal) {
@@ -1197,7 +1213,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const z1 = Math.max(edge.y0, edge.y1);
             meshes = wallRunMeshes({
               horizontal: false, thickCenter: cx, t, a0: z0, a1: z1,
-              hAt: (zz) => Math.max(1, eaveAtPt(midX, zz) - (hasPlate ? storeyLift : 0)),
+              hAt: (zz) => Math.max(1, eaveAtPt(midX, zz)),
               mat: matG, gaps: gapsFor(edge.key), yBase: sideReveal[edge.facing]
             });
           } else if (rakes && edge.horizontal) {
@@ -1205,7 +1221,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const x1 = Math.max(edge.x0, edge.x1);
             meshes = wallRunMeshes({
               horizontal: true, thickCenter: cy, t, a0: x0, a1: x1,
-              hAt: (xx) => Math.max(1, eaveAtPt(xx, midY) - (hasPlate ? storeyLift : 0)),
+              hAt: (xx) => Math.max(1, eaveAtPt(xx, midY)),
               mat: matG, gaps: gapsFor(edge.key), yBase: sideReveal[edge.facing]
             });
           } else if (edge.horizontal) {
