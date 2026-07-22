@@ -1,4 +1,4 @@
-const DEFAULT_SITE_PAD_EXTENSION_FT = 64;
+const DEFAULT_SITE_PAD_EXTENSION_FT = 16;
 const DEFAULT_OUTDOOR_GRID_SIZE_FT = 240;
 // Spaces that live OUT on the land, not inside the conditioned shell — they can
 // be bigger than the house and sit well outside its footprint. Includes the

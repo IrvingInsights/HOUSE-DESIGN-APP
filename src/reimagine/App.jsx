@@ -10,7 +10,7 @@ import {
   footprintPolygon, polygonArea, footprintBounds, footprintEdges, hasSegmentedFootprint, splitSouthEdgeAt, roofProfile, snapPlatesToShell
 } from '../../backend/bim-core.mjs';
 import {
-  seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS, normalizeLegacyGlass,
+  seedSpec, getWallSections, deriveDesign, detectIssues, fmtMoney, fmtNum, COST_ROWS, normalizeLegacyGlass, DEFAULT_SITE_PAD_EXTENSION_FT,
   buildTimeline, phaseDependencies, orderPhasesByDeps, validatePhaseOrder, DEFAULT_MODEL_LAYERS,
   floorCount, floorLabel, storeyInfo, upperPlateRect, utilitiesOf, resolveOverhangs,
   WALL_SIDES, WALL_SIDE_LABELS, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS,
@@ -62,7 +62,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 153 · Jul 21';
+const UPDATE_STAMP = 'update 154 · Jul 21';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -146,6 +146,14 @@ function healLoadedSpec(specIn) {
     if (Number.isFinite(want) && Math.abs(Number(el.z || 0) - want) > 0.05) el.z = want;
   });
   snapPlatesToShell(specIn);
+  // The AI starter set the SITE PAD to extend 64 ft on every side — a 28×32
+  // house then sat on a 156×160 ft concrete slab, marooned and tiny. 64 was
+  // the old default (nobody chose it), so migrate exactly that value down to
+  // the new sane default; a user who dragged the pad to some OTHER size keeps
+  // it. The pad stays freely resizable.
+  if (Number(specIn.shell.padExtensionFt) === 64 || !(Number(specIn.shell.padExtensionFt) >= 4)) {
+    specIn.shell.padExtensionFt = DEFAULT_SITE_PAD_EXTENSION_FT;
+  }
   // Legacy glass designs (whole-wall face/system, fixed sections) clean
   // themselves up as a design loads — glass in a wall is ONE moveable
   // greenhouse opening now, nothing else. Silent, automatic, idempotent.

@@ -20,7 +20,7 @@ export const DEFAULT_PROMPT = '';
 export const DEFAULT_EXPERT_QUESTION = 'What should I worry about before taking this design further?';
 export const DEFAULT_CHAT_MESSAGES = [];
 export const WELCOME_CHAT_TEXT = 'Tell me what to change, attach sketches, or choose an expert/team target and ask for plain-language advice.';
-export const DEFAULT_SITE_PAD_EXTENSION_FT = 64;
+export const DEFAULT_SITE_PAD_EXTENSION_FT = 16;
 export const DEFAULT_OUTDOOR_GRID_SIZE_FT = 240;
 export const OUTDOOR_SPACE_TYPES = new Set(['outdoor', 'site', 'garden', 'animal', 'paddock', 'run', 'landscape', 'homestead']);
 
@@ -138,7 +138,7 @@ export function loadSavedDashboardState() {
     if (!stored) return null;
     const parsed = JSON.parse(stored);
     if (!parsed?.spec?.shell || !Array.isArray(parsed.spec.rooms)) return null;
-    if (!Number.isFinite(Number(parsed.spec.shell.padExtensionFt)) || Number(parsed.spec.shell.padExtensionFt) < 32) {
+    if (!Number.isFinite(Number(parsed.spec.shell.padExtensionFt)) || Number(parsed.spec.shell.padExtensionFt) < 4 || Number(parsed.spec.shell.padExtensionFt) === 64) {
       parsed.spec.shell.padExtensionFt = DEFAULT_SITE_PAD_EXTENSION_FT;
     }
     return parsed;
