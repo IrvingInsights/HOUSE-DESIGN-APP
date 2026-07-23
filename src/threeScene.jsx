@@ -2900,13 +2900,38 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           if (alongX) roofGlass.rotation.x = rot; else roofGlass.rotation.z = rot;
           ghPart(roofGlass);
           // kneewall + glazing on the OUTER face and both ENDS (house face open)
+          // The lean-to roof falls from hIn (at the house) to hOut (outer edge),
+          // so each END wall is a TRAPEZOID. Glazing them with a flat rectangle
+          // at the AVERAGE height left a triangular gap under the roof at the
+          // tall house end and poked through the glass roof at the low end.
+          // Follow the real roofline instead. The outer face stays a rectangle.
+          const endGlassMat = glassMat.clone(); endGlassMat.side = THREE.DoubleSide;
+          const roofUnderAtCross = (c) => {
+            const t = crossLen > 0 ? Math.abs(c - crossH) / crossLen : 0;
+            return hIn + (hOut - hIn) * t - 0.35;
+          };
           const face = (r0, r1, cross, isEnd) => {
             const fLen = isEnd ? crossLen - T : r1 - r0;
             const [fx, fz] = isEnd ? P(cross, (crossH + crossO) / 2) : P((r0 + r1) / 2, cross + (crossO > crossH ? -T / 2 : T / 2));
             const along = isEnd ? !alongX : alongX;
             ghPart(box(along ? fLen : 0.3, kneeH, along ? 0.3 : fLen, fx, elevation + kneeH / 2, fz, kneeMat));
-            const glassH = (isEnd ? (hIn + hOut) / 2 : hOut) - kneeH - 0.35;
-            if (glassH > 0.5) ghPart(box(along ? fLen - 0.15 : 0.16, glassH, along ? 0.16 : fLen - 0.15, fx, elevation + kneeH + glassH / 2, fz, glassMat));
+            if (isEnd) {
+              const cA = crossH + (crossO > crossH ? T / 2 : -T / 2);
+              const cB = crossO + (crossO > crossH ? -T / 2 : T / 2);
+              const yA = Math.max(roofUnderAtCross(cA), kneeH + 0.05);
+              const yB = Math.max(roofUnderAtCross(cB), kneeH + 0.05);
+              if (Math.max(yA, yB) > kneeH + 0.4) {
+                const shape = new THREE.Shape();
+                shape.moveTo(cA, kneeH); shape.lineTo(cB, kneeH); shape.lineTo(cB, yB); shape.lineTo(cA, yA); shape.closePath();
+                const endGlass = new THREE.Mesh(new THREE.ShapeGeometry(shape), endGlassMat);
+                if (alongX) { endGlass.rotation.y = -Math.PI / 2; endGlass.position.set(cross, elevation, 0); }
+                else { endGlass.position.set(0, elevation, cross); }
+                ghPart(endGlass);
+              }
+            } else {
+              const glassH = hOut - kneeH - 0.35;
+              if (glassH > 0.5) ghPart(box(along ? fLen - 0.15 : 0.16, glassH, along ? 0.16 : fLen - 0.15, fx, elevation + kneeH + glassH / 2, fz, glassMat));
+            }
           };
           face(run0, run1, crossO, false);
           face(null, null, run0 + T / 2, true);
