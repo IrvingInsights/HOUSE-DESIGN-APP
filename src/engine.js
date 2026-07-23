@@ -3,7 +3,7 @@ import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES,
   resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint, pointInFootprint,
   isRoundFootprint, ellipseArea, ellipsePerimeter, rectRoundOverlapArea,
-  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt, storeyHeightFt,
+  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, ROOF_COVERINGS, resolveRoofCovering, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt, storeyHeightFt,
   scoreTraceSpecChecks, openingVerticalBand,
   // Single source of truth for the per-wall assembly model — no longer duplicated here.
   WALL_SIDES, WALL_ASSEMBLIES, wallAssemblyKeyFromText, resolveWallSide,
@@ -1548,7 +1548,7 @@ export function materialsTakeoff(spec, derived) {
   }
 
   // Roof
-  add('roof', 'Roof cladding + sheathing', `${Math.round(derived.roofArea)} sf`, 'includes overhangs and pitch');
+  add('roof', `Roof covering — ${resolveRoofCovering(spec.shell).label.toLowerCase()}`, `${Math.round(derived.roofArea)} sf`, 'includes overhangs and pitch');
   const roofInsul = INSULATION_TYPES[derived.roofInsulation];
   if (roofInsul && derived.roofInsulation !== 'none') add('roof', `Roof insulation (${roofInsul.label.toLowerCase()})`, `${Math.round(derived.roofArea)} sf`, `R≈${derived.roofR}`);
   add('roof', 'Roof framing (rafters)', '—', 'not calculated yet — rafters draw in Export → Frame drawings');
@@ -4223,7 +4223,10 @@ export function deriveDesign(spec, wallSectionsParam) {
   const downspoutCost = drainage.downspouts * DOWNSPOUT_COST;
   const dischargeCost = drainage.gutters !== 'none' ? (drainage.dischargeSpec?.cost || 0) : 0;
   const drainageCost = gutterCost + downspoutCost + dischargeCost;
-  const roofCostRaw = roofArea * 10 + roofInsulCost + drainageCost;
+  // What covers the roof drives its price and its carbon — metal, cedar, thatch
+  // and a living roof are wildly different. (Was a flat $10/sf for everything.)
+  const roofCover = resolveRoofCovering(spec.shell);
+  const roofCostRaw = roofArea * roofCover.costPsf + roofInsulCost + drainageCost;
   const cost = {
     foundation: foundationCostBase + foundationRunCost,
     frame: frameCost,
@@ -4262,7 +4265,7 @@ export function deriveDesign(spec, wallSectionsParam) {
   const wallCarbon = wallCarbonRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.carbon : 1);
   const frameCarbon = frameCarbonRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.carbon : 1);
   const drainageCarbon = drainage.gutterLf * GUTTER_CARBON_LF + (drainage.gutters !== 'none' ? (drainage.dischargeSpec?.carbon || 0) : 0);
-  const roofCarbonRaw = roofArea * (12 + INSULATION_TYPES[roofInsulKey].carbonPsf) + drainageCarbon;
+  const roofCarbonRaw = roofArea * (roofCover.carbonPsf + INSULATION_TYPES[roofInsulKey].carbonPsf) + drainageCarbon;
   const roofCarbon = roofCarbonRaw * (reclaimed.roof ? RECLAIMED_FACTORS.roof.carbon : 1);
   const flooringCarbon = flooringCarbonRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.carbon : 1) + subfloorCarbon + floor * INSULATION_TYPES[floorInsulKey].carbonPsf;
   const stemCarbonExtra = utilities.foundationType === 'stemwall' ? perimeterFt * Math.max(0, stemwallHeightFt - 1.5) * 40 : 0;

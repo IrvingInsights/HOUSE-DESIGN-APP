@@ -11,7 +11,7 @@ import { FRAME_MEMBERS } from './frameDrawings.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
   OPENING_TYPES, openingVerticalBand, resolveFrameType, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, decomposeFootprint, subtractRect,
-  subtractRectFromFootprint, pointInFootprint, edgeForOpening, gradeElevationAt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, storeyElevationFt, storeyHeightFt,
+  subtractRectFromFootprint, pointInFootprint, edgeForOpening, gradeElevationAt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, resolveRoofCovering, storeyElevationFt, storeyHeightFt,
   isRoundFootprint, clipRectToRoundShell
 } from '../backend/bim-core.mjs';
 import {
@@ -826,7 +826,17 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const roofTint = finishHex(spec.shell.roofColorHex);
       const wallTint = finishHex(spec.shell.wallColorHex);
       const floorTint = finishHex(spec.shell.floorColorHex);
-      const roofMat = new THREE.MeshStandardMaterial({ color: roofTint || 0x8a938f, roughness: 0.5, metalness: 0.22, map: grainTexture('metal'), bumpMap: bumpTexture('metal'), bumpScale: 0.16, envMap: envTex, envMapIntensity: 0.35, side: THREE.DoubleSide });
+      // The roof wears what COVERS it — cedar reads as wood, a living roof as
+      // planted green, metal as standing seam. A chosen finish color still wins.
+      const roofCover = resolveRoofCovering(spec.shell);
+      const roofIsMetal = roofCover.texture === 'metal';
+      const roofMat = new THREE.MeshStandardMaterial({
+        color: roofTint || roofCover.color,
+        roughness: roofIsMetal ? 0.5 : 0.9,
+        metalness: roofIsMetal ? 0.22 : 0.02,
+        map: grainTexture(roofCover.texture), bumpMap: bumpTexture(roofCover.texture), bumpScale: roofIsMetal ? 0.16 : 0.22,
+        envMap: envTex, envMapIntensity: roofIsMetal ? 0.35 : 0.1, side: THREE.DoubleSide
+      });
       const glassMat = new THREE.MeshStandardMaterial({ color: 0x9cc3d8, transparent: true, opacity: 0.5, roughness: 0.06, metalness: 0.25, envMap: envTex, envMapIntensity: 0.85 });
       const frameMat = new THREE.MeshStandardMaterial({ color: 0x7a5c3e, roughness: 0.7, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
       const doorMatWood = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.72, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });

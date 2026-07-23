@@ -5,7 +5,7 @@ import { ElevationView } from './elevationView.jsx';
 import { InteriorWallView } from './interiorWallView.jsx';
 import { StackView } from './stackView.jsx';
 import {
-  applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES, PARTITION_TYPES,
+  applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES, PARTITION_TYPES, ROOF_COVERINGS, resolveRoofCovering,
   INSULATION_TYPES, resolveInsulation, OPENING_TYPES, openingVerticalBand,
   FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS, storeyHeightFt, storeyElevationFt,
   footprintPolygon, polygonArea, footprintBounds, footprintEdges, hasSegmentedFootprint, splitSouthEdgeAt, roofProfile, snapPlatesToShell
@@ -1959,6 +1959,7 @@ export default function App() {
                   <RoofControls
                     spec={spec}
                     derived={derived}
+                    onCovering={(v) => applyOps([{ type: 'set_shell', field: 'roofCovering', value: v }])}
                     onRoofType={setRoofType}
                     onPitch={setRoofPitch}
                     onInsulation={setRoofInsulation}
@@ -4166,8 +4167,9 @@ function UpperRoofControls({ spec, level, floors, onOps }) {
   );
 }
 
-function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOverhang, onShedFall, onGutters, onDischarge }) {
+function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOverhang, onShedFall, onGutters, onDischarge, onCovering }) {
   const roofType = spec.shell.roofType || 'gable';
+  const cover = resolveRoofCovering(spec.shell);
   const pitch = Number(spec.shell.roofPitch || 0.32);
   const insulKey = resolveInsulation(utilitiesOf(spec).roofInsulation, 'cellulose');
   const overhangs = resolveOverhangs(spec.shell);
@@ -4187,6 +4189,32 @@ function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOver
         </select>
       </label>
       <div className="rz-shape-note">{ROOF_SHAPES.find((s) => s.key === roofType)?.note}</div>
+
+      {onCovering && (
+        <>
+          <PickRow
+            label="What covers it"
+            value={cover.key}
+            onChange={onCovering}
+            options={Object.values(ROOF_COVERINGS).map((c) => ({ value: c.key, label: c.label, leaf: c.green, desc: `$${c.costPsf}/sf · ${c.carbonPsf} kg CO₂e/sf — ${c.note}` }))}
+          />
+          {(() => {
+            // The pitch a covering actually wants — thatch sheds only when it's
+            // steep, a living roof has to stay near flat, membrane is flat-only.
+            const p = Number(spec.shell.roofPitch || 0.32);
+            const [lo, hi] = cover.pitch || [0, 2];
+            const off = p < lo || p > hi;
+            return (
+              <div className="rz-shape-note">
+                {cover.catchment
+                  ? 'Rainwater off this roof is safe to catch and drink.'
+                  : 'Not for drinking-water catchment — route it to irrigation or a pond.'}
+                {off ? ` ⚠ At ${Math.round(p * 12)}/12 this pitch is outside what ${cover.label.toLowerCase()} wants (${Math.round(lo * 12)}/12–${Math.round(hi * 12)}/12).` : ''}
+              </div>
+            );
+          })()}
+        </>
+      )}
 
       {roofType === 'shed' ? (
         <>

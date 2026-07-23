@@ -141,6 +141,27 @@ export const CLADDING_TYPES = {
   brick:       { key: 'brick',       label: 'Brick veneer',                          costPsf: 12,  carbonPsf: 9,  color: 0x9c5f4a, texture: 'concrete' }
 };
 
+// What actually COVERS the roof. Until now the roof was priced at a flat $10/sf
+// and drawn generic grey no matter what — so metal, cedar, and a living roof all
+// cost and weighed the same. Standing-seam metal is the default at exactly the
+// old 10 / 12 numbers, so existing designs don't shift when this landed.
+// 'catchment' marks coverings safe to drink rainwater off; 'pitch' is the
+// sensible range (a living roof wants it flat-ish, thatch wants it steep).
+export const ROOF_COVERINGS = {
+  metal:       { key: 'metal',       label: 'Standing seam metal',   costPsf: 10, carbonPsf: 12, color: 0x8a938f, texture: 'metal',    catchment: true,  pitch: [0.08, 1.2], note: 'Long-lived and light — the rain-catchment favorite.' },
+  corrugated:  { key: 'corrugated',  label: 'Corrugated metal',      costPsf: 7,  carbonPsf: 10, color: 0x9aa3a0, texture: 'metal',    catchment: true,  pitch: [0.15, 1.2], note: 'The cheapest metal, and still catchment-safe.' },
+  cedar:       { key: 'cedar',       label: 'Cedar shakes',          costPsf: 12, carbonPsf: 4,  color: 0x8d7355, texture: 'wood',     catchment: false, pitch: [0.33, 1.2], green: true, note: 'Renewable and beautiful; not for drinking-water catchment.' },
+  thatch:      { key: 'thatch',      label: 'Thatch (reed / straw)', costPsf: 16, carbonPsf: 2,  color: 0xb59a63, texture: 'plaster',  catchment: false, pitch: [0.75, 1.5], green: true, note: 'Lowest carbon of all — wants a steep pitch to shed water.' },
+  living:      { key: 'living',      label: 'Living (green) roof',   costPsf: 22, carbonPsf: 6,  color: 0x6d8a52, texture: 'plaster',  catchment: false, pitch: [0.02, 0.25], green: true, note: 'Vegetated: heavy, so it needs structure, membrane and drainage. Low pitch only.' },
+  clay:        { key: 'clay',        label: 'Clay tile',             costPsf: 18, carbonPsf: 16, color: 0xa8624a, texture: 'concrete', catchment: true,  pitch: [0.33, 1.0], note: 'Heavy but lasts a century.' },
+  asphalt:     { key: 'asphalt',     label: 'Asphalt shingles',      costPsf: 5,  carbonPsf: 14, color: 0x4f4a45, texture: 'plaster',  catchment: false, pitch: [0.17, 1.0], note: 'Cheapest and most common; petroleum-based, not catchment-safe.' },
+  membrane:    { key: 'membrane',    label: 'EPDM membrane',         costPsf: 8,  carbonPsf: 13, color: 0x3f4442, texture: 'plaster',  catchment: false, pitch: [0, 0.15], note: 'For flat and near-flat roofs.' }
+};
+
+export function resolveRoofCovering(shell = {}) {
+  return ROOF_COVERINGS[shell?.roofCovering] || ROOF_COVERINGS.metal;
+}
+
 // Interior partition walls — thin walls BETWEEN rooms, placed as elements
 // (category 'partition'). Distinct from the envelope: no weather duty, so
 // they price by face area of the chosen construction.
@@ -1523,7 +1544,7 @@ export function resolveFrameType(spec, level = 1) {
 // grew a set_shell op the engine then threw away.
 const SHELL_FIELD_NAMES = new Set(['widthFt', 'depthFt', 'wallHeightFt', 'padExtensionFt', 'storeys',
   'basementHeightFt', 'basementHeated', 'upperStoreyHeightFt', 'overhangFt', 'roofType',
-  'designApproach', 'projectName', 'sitePad', 'gutters', 'discharge',
+  'designApproach', 'projectName', 'sitePad', 'gutters', 'discharge', 'roofCovering',
   'wallColorHex', 'roofColorHex', 'floorColorHex']);
 
 export const parseWxD = (value) => {
