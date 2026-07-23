@@ -77,6 +77,20 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
   const tweenRef = useRef(null);
   const focusIdRef = useRef(null);
   const sectionCutRef = useRef(1);
+  // The heavy WebGL engine (renderer, camera, controls, PMREM env map, post
+  // pipeline) is now built ONCE and reused across edits — only renderModel()
+  // re-runs when the design changes. So the engine's long-lived closures and
+  // pointer handlers must read the CURRENT design from these refs, not the
+  // values frozen in when the scene was first created.
+  const specRef = useRef(spec);
+  const layersRef = useRef(layers);
+  const contextRef = useRef(context);
+  const renderModelRef = useRef(null);
+  const focusSelectionRef = useRef(null);
+  const firstBuildRef = useRef(true);
+  specRef.current = spec;
+  layersRef.current = layers;
+  contextRef.current = context;
 
   useEffect(() => {
     selectedRoomRef.current = selectedRoom;
@@ -365,7 +379,22 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     }
 
     function renderModel() {
-      scene.children.filter((child) => child.userData.generated).forEach((child) => scene.remove(child));
+      // Read the LIVE design each build. The engine effect runs once, so its
+      // `spec`/`selectedRoom`/`layers`/`context` closure is frozen at mount —
+      // these refs carry the current values in.
+      const spec = specRef.current;
+      const selectedRoom = selectedRoomRef.current;
+      const layers = layersRef.current;
+      const context = contextRef.current;
+      // Free the previous build's GPU geometry before dropping it. The old code
+      // reclaimed this by destroying the whole WebGL context each edit; now the
+      // context persists, so undisposed vertex buffers would pile up per edit.
+      // (Geometry only — materials/textures are cached and shared across builds,
+      // so disposing them here would blank out reused surfaces.)
+      scene.children.filter((child) => child.userData.generated).forEach((child) => {
+        child.traverse((node) => { node.geometry?.dispose?.(); });
+        scene.remove(child);
+      });
       roomMeshes.length = 0;
       resizeHandles.length = 0;
       draggableParts.clear();
@@ -4273,6 +4302,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     let rightDownAt = null;
 
     function onPointerDown(event) {
+      const spec = specRef.current, context = contextRef.current;
       if (event.button === 2) { rightDownAt = { x: event.clientX, y: event.clientY }; return; }
       if (event.button !== 0) return; // middle/right never start an object drag
       updatePointer(event);
@@ -4381,6 +4411,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     }
 
     function onPointerMove(event) {
+      const spec = specRef.current, context = contextRef.current;
       if (!dragState || dragState.pointerId !== event.pointerId) return;
       updatePointer(event);
       if (!raycaster.ray.intersectPlane(floorPlane, dragPoint)) return;
@@ -4509,6 +4540,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     // menu never shows over the model. Uses the same raycast targets as a
     // left-click pick, so "selectable" and "right-clickable" stay one truth.
     function onContextMenu(event) {
+      const spec = specRef.current, context = contextRef.current;
       event.preventDefault();
       if (!callbacksRef.current.onContext) return;
       if (rightDownAt && Math.hypot(event.clientX - rightDownAt.x, event.clientY - rightDownAt.y) > 6) return; // that was a pan
@@ -4557,28 +4589,36 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       camera.updateProjectionMatrix();
     }
 
-    renderModel();
     // Orbit around what you picked: on a NEW selection, glide the orbit pivot
     // to the object's center (camera stays put, so it reads as a gentle pan).
     // Same-selection rebuilds (spec edits) leave the camera alone.
-    if (selectedRoom && focusIdRef.current !== selectedRoom) {
-      focusIdRef.current = selectedRoom;
-      const bounds = new THREE.Box3();
-      let found = false;
-      scene.traverse((node) => {
-        if (node.isMesh && String(node.userData.roomId || '') === String(selectedRoom)) {
-          bounds.expandByObject(node);
-          found = true;
-        }
-      });
-      if (found && !bounds.isEmpty()) {
-        const center = bounds.getCenter(new THREE.Vector3());
-        if (center.distanceTo(controls.target) > 2) {
-          tweenRef.current = { fromPos: camera.position.clone(), fromTarget: controls.target.clone(), pos: camera.position.clone(), target: center, t: 0 };
+    function focusSelection(sel) {
+      if (sel && focusIdRef.current !== sel) {
+        focusIdRef.current = sel;
+        const bounds = new THREE.Box3();
+        let found = false;
+        scene.traverse((node) => {
+          if (node.isMesh && String(node.userData.roomId || '') === String(sel)) {
+            bounds.expandByObject(node);
+            found = true;
+          }
+        });
+        if (found && !bounds.isEmpty()) {
+          const center = bounds.getCenter(new THREE.Vector3());
+          if (center.distanceTo(controls.target) > 2) {
+            tweenRef.current = { fromPos: camera.position.clone(), fromTarget: controls.target.clone(), pos: camera.position.clone(), target: center, t: 0 };
+          }
         }
       }
+      if (!sel) focusIdRef.current = null;
     }
-    if (!selectedRoom) focusIdRef.current = null;
+
+    // Expose the two per-edit operations so the redraw effect (below) can reuse
+    // this live engine instead of rebuilding it.
+    renderModelRef.current = renderModel;
+    focusSelectionRef.current = focusSelection;
+    renderModel();
+    focusSelection(selectedRoomRef.current);
     animate();
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
     renderer.domElement.addEventListener('pointermove', onPointerMove);
@@ -4612,7 +4652,25 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       pmrem.dispose();
       composer.dispose();
       renderer.dispose();
+      renderModelRef.current = null;
+      focusSelectionRef.current = null;
+      sceneRef.current = null;
     };
+    // Build the engine ONCE. Design edits used to sit in this dependency array,
+    // which tore down and recreated the WebGL renderer + environment map on
+    // every keystroke — the real cause of the edit lag / low FPS. Now only the
+    // redraw effect below re-runs renderModel() against the live engine.
+  }, []);
+
+  // Redraw the model — NOT the engine — whenever the design, selection, active
+  // building context, or visible layers change. Reuses the renderer/camera/post
+  // pipeline created above, so an edit costs a geometry rebuild, not a full
+  // WebGL context + env-map rebuild.
+  useEffect(() => {
+    if (firstBuildRef.current) { firstBuildRef.current = false; return; } // the engine effect already did the first build
+    if (!renderModelRef.current || !sceneRef.current) return; // engine not up yet (WebGL unavailable)
+    renderModelRef.current();
+    focusSelectionRef.current?.(selectedRoom);
   }, [spec, selectedRoom, layers, context]);
 
   if (!webglAvailable()) {

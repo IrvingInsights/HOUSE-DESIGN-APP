@@ -238,8 +238,13 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
       event.preventDefault();
       const point = svg.createSVGPoint();
       point.x = event.clientX; point.y = event.clientY;
-      const user = point.matrixTransform(svg.getScreenCTM().inverse());
-      const factor = event.deltaY > 0 ? 1.18 : 1 / 1.18;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      const user = point.matrixTransform(ctm.inverse());
+      const delta = event.deltaY;
+      const factor = Math.abs(delta) < 40
+        ? Math.pow(1.005, delta)
+        : (delta > 0 ? 1.18 : 1 / 1.18);
       setViewOverride((current) => {
         const cur = current || fitBoxRef.current;
         const w = clamp(cur.w * factor, 8, Math.max(240, fitBoxRef.current.w * 2.5));
@@ -249,7 +254,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
     };
     svg.addEventListener('wheel', onWheel, { passive: false });
     return () => svg.removeEventListener('wheel', onWheel);
-  }, []);
+  });
   function startPan(event) {
     if (event.button !== 0) return;
     try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
@@ -345,9 +350,11 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
       let { x, y, w, d } = o;
       const right = o.x + o.w;
       const bottom = o.y + o.d;
-      // 2-ft floor: a reach-in closet is a real 2-ft-deep room.
-      if (drag.mode.includes('w')) { x = clamp(snap(o.x + dx), right - 60, right - 2); w = right - x; } else if (drag.mode.includes('e')) { w = clamp(snap(o.w + dx), 2, 60); }
-      if (drag.mode.includes('n')) { y = clamp(snap(o.y + dy), bottom - 60, bottom - 2); d = bottom - y; } else if (drag.mode.includes('s')) { d = clamp(snap(o.d + dy), 2, 60); }
+      // 2-ft floor for rooms (a reach-in closet is a real 2-ft-deep room);
+      // interior walls are legitimately thin, so they size down to 6 inches.
+      const minDim = o.category === 'partition' ? 0.5 : 2;
+      if (drag.mode.includes('w')) { x = clamp(snap(o.x + dx), right - 60, right - minDim); w = right - x; } else if (drag.mode.includes('e')) { w = clamp(snap(o.w + dx), minDim, 60); }
+      if (drag.mode.includes('n')) { y = clamp(snap(o.y + dy), bottom - 60, bottom - minDim); d = bottom - y; } else if (drag.mode.includes('s')) { d = clamp(snap(o.d + dy), minDim, 60); }
       ghost = { x, y, w, d };
     }
     setDrag((current) => current && { ...current, ghost });
@@ -584,7 +591,8 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
         )}
         {buildingContext && onResizeShell && (
           <>
-            <circle cx={shellW} cy={shellD} r={1.1} fill="var(--active-line)" stroke="#fff" strokeWidth={0.18} style={{ cursor: 'se-resize' }} onPointerDown={startShellDrag} />
+            <circle cx={shellW} cy={shellD} r={1.1} fill="transparent" style={{ cursor: 'se-resize' }} onPointerDown={startShellDrag} />
+            <circle cx={shellW} cy={shellD} r={0.42} fill="var(--active-line)" stroke="#fff" strokeWidth={0.12} pointerEvents="none" />
             {shellGhost && <text x={shellW / 2} y={shellD / 2} textAnchor="middle" fontSize={2.4} fill="var(--active-line)" fontWeight="700" pointerEvents="none">{shellW}′ × {shellD}′</text>}
           </>
         )}
@@ -694,7 +702,14 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
               {isSel && ['nw', 'ne', 'sw', 'se'].map((corner) => {
                 const cx = room.x + (corner.includes('e') ? room.w : 0);
                 const cy = room.y + (corner.includes('s') ? room.d : 0);
-                return <circle key={corner} cx={cx} cy={cy} r={0.9} fill="var(--active-line)" stroke="#fff" strokeWidth={0.15} style={{ cursor: `${corner}-resize` }} onPointerDown={(event) => startDrag(event, raw, corner)} />;
+                return (
+                  <g key={corner}>
+                    {/* large invisible grab area — stays easy to grab */}
+                    <circle cx={cx} cy={cy} r={0.9} fill="transparent" style={{ cursor: `${corner}-resize` }} onPointerDown={(event) => startDrag(event, raw, corner)} />
+                    {/* small visible dot — a precise center to line up */}
+                    <circle cx={cx} cy={cy} r={0.35} fill="var(--active-line)" stroke="#fff" strokeWidth={0.1} pointerEvents="none" />
+                  </g>
+                );
               })}
             </g>
           );

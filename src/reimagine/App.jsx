@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ThreeScene, webglAvailable } from '../threeScene.jsx';
 import { PlanView } from '../planView.jsx';
 import { ElevationView } from './elevationView.jsx';
+import { InteriorWallView } from './interiorWallView.jsx';
 import { StackView } from './stackView.jsx';
 import {
   applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
@@ -16,7 +17,7 @@ import {
   WALL_SIDES, WALL_SIDE_LABELS, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS,
   ROOM_PRESETS, planNewRoomPlacements, roomPresetFromName,
   resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons, downloadFile,
-  DECK_SURFACES, resolveDeck, resolveDeckStairs
+  DECK_SURFACES, resolveDeck, resolveDeckStairs, derivePartitionOps
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms } from '../placement.js';
 import { STARTER_DESIGNS } from './starters.js';
@@ -62,7 +63,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 154 · Jul 21';
+const UPDATE_STAMP = 'update 160 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -357,6 +358,7 @@ export default function App() {
   };
 
   const selectedRoom = spec.rooms.find((r) => r.id === selectedId) || null;
+  const selectedPartition = (spec.elements || []).find((e) => e.id === selectedId && e.category === 'partition') || null;
   const chapter = CHAPTERS.find((c) => c.id === activeChapter) || CHAPTERS[0];
 
   // --- direct editing: apply ops CLIENT-SIDE, no server round-trip ----------
@@ -1352,6 +1354,16 @@ export default function App() {
       {/* SURFACE 1 — the Model / Plan, center stage and full-bleed */}
       <div className="rz-model">
         {viewMode === 'wall' ? (
+          selectedPartition ? (
+            <InteriorWallView
+              el={selectedPartition}
+              spec={spec}
+              partitions={(spec.elements || []).filter((e) => e.category === 'partition' && Number(e.level || 1) === Number(selectedPartition.level || 1))}
+              onSetDoor={(field, value) => applyOps([{ type: 'update_object', targetId: selectedPartition.id, name: selectedPartition.name, field, value }])}
+              onPickWall={(id) => setSelectedId(id)}
+              onClose={() => setViewMode('plan')}
+            />
+          ) : (
           <ElevationView
             spec={spec}
             wall={openWall}
@@ -1365,6 +1377,7 @@ export default function App() {
             onSelectId={setSelectedId}
             onMoveObject={moveObject}
           />
+          )
         ) : viewMode === 'storeys' ? (
           <StackView
             spec={spec}
@@ -1800,6 +1813,16 @@ export default function App() {
                     applyOps([{ type: 'add_element', name: 'Interior wall', category: 'partition', construction: 'framed', x: Math.round(W / 2 - 5), y: Math.round(D / 2), w: 10, d: 0.45, level: lvl, widthFt: 3 }]);
                   }}
                 >＋ Interior wall — a partition with a doorway (10 ft)</button>
+                <button
+                  type="button"
+                  className="rz-floorbar-outline"
+                  title="Put a wall on every boundary where two rooms meet — each drops with a doorway. Then tap any wall on the plan to change its build, size its doorway, or remove it to leave that boundary open (like kitchen ↔ great room). Runs again to fill any new boundaries."
+                  onClick={() => {
+                    const lvl = activeFloor >= 1 ? activeFloor : 1;
+                    const ops = derivePartitionOps(spec, lvl);
+                    if (ops.length) applyOps(ops);
+                  }}
+                >＋ Walls between rooms — one per shared boundary</button>
                 <div className="rz-shape-note">Tap a placed deck to pick its surface, railing, roof, and how it sits. Two decks pushed together join into one wraparound.</div>
                 {roomNote && <div className="rz-shape-note">{roomNote}</div>}
                 <div className="rz-shape-note">Tap a room on the plan to rename or remove it (or press Delete). Right-click for more.</div>
@@ -2236,6 +2259,44 @@ export default function App() {
                   : 'Your own timber beam — it lies at its bottom height; stretch Width or Depth to run it along the span it carries.'}</div>
               </>
             )}
+            {el && el.category === 'partition' && (() => {
+              // THE INTERIOR-WALL CARD — construction, its doorway, and the
+              // whole-object actions in one place. Position + length come from
+              // PlaceSizeRows above; thickness follows the construction.
+              const con = ['framed', 'cob', 'adobe'].includes(el.construction) ? el.construction : 'framed';
+              const doorW = Math.round((Number(el.doorWFt) || 0) * 10) / 10;
+              const runFt = Math.max(Number(el.w) || 0, Number(el.d) || 0);
+              const setField = (field, value) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field, value }]);
+              return (
+                <>
+                  <PickRow
+                    label="Construction"
+                    value={con}
+                    onChange={(v) => setField('construction', v)}
+                    options={[
+                      { value: 'framed', label: 'Stud', desc: 'Light framed — thin and cheap.' },
+                      { value: 'cob', label: 'Cob', leaf: true, desc: 'Earthen thermal mass — thick.' },
+                      { value: 'adobe', label: 'Adobe', leaf: true, desc: 'Sun-dried earthen brick.' }
+                    ]}
+                  />
+                  <label className="rz-field rz-field-num">
+                    <span>Doorway width{doorW > 0 ? '' : ' — none (solid wall)'}</span>
+                    <NumInput value={doorW} min={0} max={Math.max(2, Math.floor(runFt))} step={0.5} unit="ft" onCommit={(v) => setField('doorWFt', v)} />
+                  </label>
+                  {doorW > 0 && (
+                    <label className="rz-field rz-field-num">
+                      <span>Doorway from the wall’s start</span>
+                      <NumInput value={Math.round((Number(el.doorAtFt) || 0) * 10) / 10} min={0} max={Math.max(0, Math.round(runFt - doorW))} step={0.5} unit="ft" onCommit={(v) => setField('doorAtFt', v)} />
+                    </label>
+                  )}
+                  <div className="rz-shape-note">Set the doorway width to 0 for a solid wall. Interior windows are coming next.</div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button type="button" className="rz-fresh" onClick={() => setViewMode('wall')}>Work on it face-on</button>
+                    <button type="button" className="rz-fresh" onClick={() => applyOps([{ type: 'add_element', name: `${el.name} copy`, category: 'partition', construction: con, x: (Number(el.x) || 0) + 2, y: (Number(el.y) || 0) + 2, w: Number(el.w) || 10, d: Number(el.d) || 0.45, level: Number(el.level) || 1, widthFt: doorW, positionFt: Number(el.doorAtFt) || 0 }])}>Duplicate</button>
+                  </div>
+                </>
+              );
+            })()}
             {el && el.category === 'deck' && (() => {
               // THE DECK CARD — every deck option in one place, priced live
               // in the Budget receipts. resolveDeck is the same answer the
@@ -2778,6 +2839,9 @@ function PlaceSizeRows({ obj, onMove, onResize }) {
   const w = Math.round((Number(obj.w) || 0) * 10) / 10;
   const d = Math.round((Number(obj.d) || 0) * 10) / 10;
   const area = Math.round((Number(obj.w) || 0) * (Number(obj.d) || 0));
+  // Interior walls are thin — let them size down to 6 inches (0.5 ft); rooms
+  // keep a sensible 1-ft floor.
+  const minDim = obj.category === 'partition' ? 0.5 : 1;
   return (
     <>
       {onMove && (
@@ -2789,9 +2853,9 @@ function PlaceSizeRows({ obj, onMove, onResize }) {
       )}
       {onResize && (
         <div className="rz-run-size rz-card-size">
-          <label>Width<NumInput value={w} min={1} max={96} step={0.5} unit="" onCommit={(v) => onResize(v, d)} /></label>
+          <label>Width<NumInput value={w} min={minDim} max={96} step={0.5} unit="" onCommit={(v) => onResize(v, d)} /></label>
           <span className="rz-run-x">×</span>
-          <label>Depth<NumInput value={d} min={1} max={80} step={0.5} unit="ft" onCommit={(v) => onResize(w, v)} /></label>
+          <label>Depth<NumInput value={d} min={minDim} max={80} step={0.5} unit="ft" onCommit={(v) => onResize(w, v)} /></label>
           <span className="rz-run-area">{fmtNum(area)} sf</span>
         </div>
       )}
@@ -3317,6 +3381,33 @@ function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAd
   );
 }
 
+// A chip picker for small choice sets in the detail ("+ more…") panels. Shows
+// every option at a glance instead of hiding them in a dropdown — one tap to
+// pick, and the chosen option explains itself on the line below. Less nesting,
+// more scannable. Options: [{ value, label, desc, leaf }] (leaf = 🌿 natural).
+function PickRow({ label, value, options, onChange }) {
+  const current = options.find((option) => option.value === value);
+  return (
+    <div className="rz-field rz-pick">
+      <span>{label}</span>
+      <div className="rz-pick-chips" role="group" aria-label={label}>
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={`rz-pick-chip${option.value === value ? ' on' : ''}`}
+            aria-pressed={option.value === value}
+            onClick={() => onChange(option.value)}
+          >
+            {option.leaf ? <span className="rz-pick-leaf" aria-hidden="true">🌿</span> : null}{option.label}
+          </button>
+        ))}
+      </div>
+      {current?.desc ? <small className="rz-pick-desc">{current.desc}</small> : null}
+    </div>
+  );
+}
+
 // Systems chapter: the working parts — water, waste, power, heat. Plain choices
 // that drive the receipts and the council checks; DIY toggles turn labor into
 // sweat equity. (Mirrors the classic app's system pages, one dispatch each.)
@@ -3325,28 +3416,24 @@ function SystemsControls({ spec, derived, onUtility }) {
   const gpd = Math.round(Number(derived?.septicGpd) || 0);
   return (
     <div className="rz-found">
-      <label className="rz-field">
-        <span>Water — where it comes from</span>
-        <select value={u.waterSource} onChange={(e) => onUtility('waterSource', e.target.value)}>
-          <option value="well">Drilled well — reliable, needs a pump</option>
-          <option value="spring">Spring — cheap if the land has one</option>
-          <option value="catchment">🌿 Rain catchment — roof + rain</option>
-          <option value="town">Town main — simplest</option>
-        </select>
-      </label>
+      <PickRow label="Water — where it comes from" value={u.waterSource} onChange={(v) => onUtility('waterSource', v)}
+        options={[
+          { value: 'well', label: 'Well', desc: 'Drilled — reliable, needs a pump.' },
+          { value: 'spring', label: 'Spring', desc: 'Cheap if the land has one.' },
+          { value: 'catchment', label: 'Rain catchment', leaf: true, desc: 'Roof runoff into storage.' },
+          { value: 'town', label: 'Town main', desc: 'Simplest — just connect.' }
+        ]} />
       <label className="rz-field rz-field-num" data-cap="cap-systems-tank">
         <span>Storage tank</span>
         <NumInput value={Number(u.tankGal) || 0} min={0} max={50000} step={100} unit="gal" onCommit={(v) => onUtility('tankGal', v)} />
       </label>
 
-      <label className="rz-field">
-        <span>Waste — where used water goes</span>
-        <select value={u.wasteMethod} onChange={(e) => onUtility('wasteMethod', e.target.value)}>
-          <option value="septic">Septic + leach field — conventional</option>
-          <option value="composting">🌿 Composting toilet + greywater</option>
-          <option value="reedbed">Reed bed / constructed wetland</option>
-        </select>
-      </label>
+      <PickRow label="Waste — where used water goes" value={u.wasteMethod} onChange={(v) => onUtility('wasteMethod', v)}
+        options={[
+          { value: 'septic', label: 'Septic', desc: 'Leach field — conventional.' },
+          { value: 'composting', label: 'Composting', leaf: true, desc: 'Compost toilet + greywater.' },
+          { value: 'reedbed', label: 'Reed bed', desc: 'Constructed wetland.' }
+        ]} />
       {u.wasteMethod === 'septic' && (
         <label className="rz-field rz-field-num">
           <span>Well → septic</span>
@@ -3354,24 +3441,20 @@ function SystemsControls({ spec, derived, onUtility }) {
         </label>
       )}
 
-      <label className="rz-field">
-        <span>Power — where electricity comes from</span>
-        <select value={u.powerMode} onChange={(e) => onUtility('powerMode', e.target.value)}>
-          <option value="offgrid">Off-grid — panels + battery, independent</option>
-          <option value="hybrid">Grid + solar — panels, grid as backup</option>
-          <option value="gridtie">Grid only — simplest, no battery</option>
-        </select>
-      </label>
+      <PickRow label="Power — where electricity comes from" value={u.powerMode} onChange={(v) => onUtility('powerMode', v)}
+        options={[
+          { value: 'offgrid', label: 'Off-grid', desc: 'Panels + battery, independent.' },
+          { value: 'hybrid', label: 'Grid + solar', desc: 'Panels, grid as backup.' },
+          { value: 'gridtie', label: 'Grid only', desc: 'Simplest, no battery.' }
+        ]} />
 
-      <label className="rz-field">
-        <span>Heat — how you stay warm</span>
-        <select value={u.heatSource} onChange={(e) => onUtility('heatSource', e.target.value)}>
-          <option value="rocket_mass">🌿 Rocket mass heater — wood, very DIY</option>
-          <option value="masonry">Masonry heater — wood, slow radiant</option>
-          <option value="wood_stove">Wood stove — simple, familiar</option>
-          <option value="minisplit">Electric mini-split — no wood, draws power</option>
-        </select>
-      </label>
+      <PickRow label="Heat — how you stay warm" value={u.heatSource} onChange={(v) => onUtility('heatSource', v)}
+        options={[
+          { value: 'rocket_mass', label: 'Rocket mass', leaf: true, desc: 'Wood, very DIY.' },
+          { value: 'masonry', label: 'Masonry heater', desc: 'Wood, slow radiant.' },
+          { value: 'wood_stove', label: 'Wood stove', desc: 'Simple, familiar.' },
+          { value: 'minisplit', label: 'Mini-split', desc: 'Electric, draws power.' }
+        ]} />
       <label className="rz-nowall">
         <input type="checkbox" checked={Boolean(u.diyHeat)} onChange={(e) => onUtility('diyHeat', e.target.checked)} />
         <span>I'll build the heater myself (sweat equity)</span>

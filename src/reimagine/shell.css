@@ -30,9 +30,14 @@
    beneath it and couldn't be clicked or dragged. */
 .rz-model { background: var(--canvas, #F4F3EC); }
 .rz-model .planWrap {
+  position: absolute;
   inset: 60px 16px 76px 364px;
   border-radius: 14px;
   border: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 60%, transparent);
+  overflow: hidden;
+}
+.st-look .rz-model .planWrap {
+  inset: 60px 16px 76px 16px;
 }
 /* narrow windows: the trail overlays regardless — let the plan use the width */
 @media (max-width: 860px) {
@@ -320,6 +325,16 @@
 /* roof chapter — overhang controls */
 .rz-field-lead { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); }
 .rz-field-num .rz-field-lead { flex: 1; }
+/* Chip picker (PickRow): every option visible at a glance, one tap to choose,
+   the chosen option explains itself below. Replaces dropdowns in the detail
+   panels. Matches the toolbar's st-pill look using the same brand tokens. */
+.rz-pick-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rz-pick-chip { font: inherit; font-size: 13px; color: var(--ink, #22251f); background: var(--raise, #fff); border: 1px solid var(--line, #dbd9ce); border-radius: 999px; padding: 6px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: border-color .12s, background .12s, color .12s; }
+.rz-pick-chip:hover { border-color: var(--evergreen, #3c6472); }
+.rz-pick-chip.on { background: var(--evergreen, #3c6472); border-color: var(--evergreen, #3c6472); color: #fff; font-weight: 600; }
+.rz-pick-chip:focus-visible { outline: 2px solid var(--evergreen, #3c6472); outline-offset: 2px; }
+.rz-pick-chip.on .rz-pick-leaf { filter: brightness(1.7); }
+.rz-pick-desc { font-size: 12px; color: var(--moss, #868a7c); line-height: 1.4; }
 .rz-overhang-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 /* stack label over a full-width input; higher specificity so it wins over .rz-field-num's row */
 .rz-overhang-grid .rz-overhang-cell { flex-direction: column; align-items: stretch; gap: 3px; }

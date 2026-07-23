@@ -3847,7 +3847,8 @@ export function convertSpecApproach(spec, target) {
   return next;
 }
 
-export function deriveDesign(spec, wallSections) {
+export function deriveDesign(spec, wallSectionsParam) {
+  const wallSections = wallSectionsParam || getWallSections(spec);
   const site = siteOf(spec);
   const utilities = utilitiesOf(spec);
   const w = Number(spec.shell.widthFt) || 0;

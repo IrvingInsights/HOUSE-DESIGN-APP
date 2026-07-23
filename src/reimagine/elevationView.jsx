@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { OPENING_TYPES, openingVerticalBand, storeyElevationFt, storeyHeightFt, footprintEdges, hasSegmentedFootprint, CLADDING_TYPES } from '../../backend/bim-core.mjs';
 import { resolveWallSide, upperPlateRect, resolveDeck } from '../engine.js';
 import { buildFaceLaw } from './faceLaw.js';
@@ -61,10 +61,19 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
     ? (CLADDING_TYPES[rFace.cladding] || {}).color
     : (rFace.assembly || {}).color;
   const faceFill = (() => {
-    if (!Number.isFinite(Number(wearHex))) return '#f4efe3';
+    if (wearHex == null) return '#f4efe3';
+    let h = 0x8a8271;
+    if (typeof wearHex === 'number' && Number.isFinite(wearHex)) {
+      h = wearHex;
+    } else if (typeof wearHex === 'string') {
+      const clean = wearHex.replace('#', '');
+      const parsed = parseInt(clean, 16);
+      if (!Number.isNaN(parsed)) h = parsed;
+    }
     const mix = (a, b, t) => Math.round(a + (b - a) * t);
-    const h = Number(wearHex);
-    const r8 = mix((h >> 16) & 255, 0xf4, 0.55); const g8 = mix((h >> 8) & 255, 0xef, 0.55); const b8 = mix(h & 255, 0xe3, 0.55);
+    const r8 = mix((h >> 16) & 255, 0xf4, 0.55);
+    const g8 = mix((h >> 8) & 255, 0xef, 0.55);
+    const b8 = mix(h & 255, 0xe3, 0.55);
     return `#${((r8 << 16) | (g8 << 8) | b8).toString(16).padStart(6, '0')}`;
   })();
   const glassCeilFace = storeys > 1 ? elevOf(2) : Infinity;
@@ -135,7 +144,13 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   }
   if (roofSeg.length >= 2) roofLineSegs.push(roofSeg);
   const roofLine = roofLineSegs.flat();
-  const maxTop = Math.max(...cuts.map((t) => topAt(t)), ...setBack.map((c) => c.y1), ...roofLine.map(([, y]) => y));
+  const rawMax = Math.max(
+    8,
+    ...cuts.map((t) => topAt(t)).filter(Number.isFinite),
+    ...setBack.map((c) => Number(c.y1)).filter(Number.isFinite),
+    ...roofLine.map(([, y]) => Number(y)).filter(Number.isFinite)
+  );
+  const maxTop = Number.isFinite(rawMax) ? Math.max(8, rawMax) : 16;
   const Y = (v) => maxTop - v; // feet measure up; paper draws down
   const X = (t) => (flipX ? run - t : t);
 
@@ -215,6 +230,8 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   };
   const alongOf = (o) => Number(horiz ? o.x : o.y) || 0;
 
+  // Screen pixel → drawing feet, via the SVG's current CTM (so it stays correct
+  // under the zoom/pan viewBox). Restored: still called by every drag handler.
   function toFeet(event) {
     const svg = svgRef.current;
     if (!svg) return { fx: 0, fy: 0 };
@@ -239,7 +256,27 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
     onSelect(idx);
   }
 
+  const [viewOverride, setViewOverride] = useState(null);
+  const [panDrag, setPanDrag] = useState(null);
+  const containerRef = useRef(null);
+
   function onPointerMove(event) {
+    if (panDrag) {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0 || rect.height === 0) return;
+      const cur = panDrag.orig;
+      const fpp = Math.max(cur.w / rect.width, cur.h / rect.height);
+      if (!Number.isFinite(fpp) || fpp <= 0) return;
+      const dx = (event.clientX - panDrag.cx) * fpp;
+      const dy = (event.clientY - panDrag.cy) * fpp;
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
+      const nx = cur.x - dx;
+      const ny = cur.y - dy;
+      if (Number.isFinite(nx) && Number.isFinite(ny)) {
+        setViewOverride({ x: nx, y: ny, w: cur.w, h: cur.h });
+      }
+      return;
+    }
     if (!drag) return;
     if (drag.deck) {
       const { fx } = toFeet(event);
@@ -282,6 +319,10 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   }
 
   function onPointerUp() {
+    if (panDrag) {
+      setPanDrag(null);
+      return;
+    }
     if (!drag) return;
     if (drag.deck) {
       const { deck, ghostAlong } = drag;
@@ -306,30 +347,105 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
   const pad = 3.2;
   const soil = 2.4;
-  // the face covers the wall AND every deck sticking past its ends (a deck
-  // 8 ft west of the house was clipped mid-slab before)
   const deckSpansEl = wallDecks.map(({ el }) => {
     const s0d = horiz ? (Number(el.x) || 0) : (Number(el.y) || 0);
     const s1d = s0d + (horiz ? (Number(el.w) || 10) : (Number(el.d) || 8));
     return flipX ? [run - s1d, run - s0d] : [s0d, s1d];
   });
-  const vx0 = Math.min(0, ...deckSpansEl.map(([a]) => a)) - pad;
-  const vx1 = Math.max(run, ...deckSpansEl.map(([, b]) => b)) + pad;
-  const vb = `${vx0} ${-2.2} ${vx1 - vx0} ${maxTop + 2.2 + soil + 2.4}`;
+  const minDeckSpan = Math.min(0, ...deckSpansEl.map(([a]) => Number(a)).filter(Number.isFinite));
+  const maxDeckSpan = Math.max(run, ...deckSpansEl.map(([, b]) => Number(b)).filter(Number.isFinite));
+  const vx0 = Number.isFinite(minDeckSpan) ? minDeckSpan - pad : -pad;
+  const vx1 = Number.isFinite(maxDeckSpan) ? maxDeckSpan + pad : run + pad;
+  const baseBox = {
+    x: vx0,
+    y: -2.2,
+    w: Math.max(8, vx1 - vx0),
+    h: Math.max(8, maxTop + 2.2 + soil + 2.4)
+  };
+  const baseBoxRef = useRef(baseBox); baseBoxRef.current = baseBox;
+
+  const curBoxRaw = viewOverride || baseBox;
+  const curBox = {
+    x: Number.isFinite(curBoxRaw?.x) ? curBoxRaw.x : baseBox.x,
+    y: Number.isFinite(curBoxRaw?.y) ? curBoxRaw.y : baseBox.y,
+    w: Number.isFinite(curBoxRaw?.w) && curBoxRaw.w > 0 ? curBoxRaw.w : baseBox.w,
+    h: Number.isFinite(curBoxRaw?.h) && curBoxRaw.h > 0 ? curBoxRaw.h : baseBox.h,
+  };
+  const vbRef = useRef(curBox); vbRef.current = curBox;
+  const vb = `${curBox.x} ${curBox.y} ${curBox.w} ${curBox.h}`;
+
+  useEffect(() => {
+    setViewOverride(null);
+  }, [wall]);
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return undefined;
+    const onWheel = (event) => {
+      event.preventDefault();
+      const point = svg.createSVGPoint();
+      point.x = event.clientX; point.y = event.clientY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      const inv = ctm.inverse();
+      if (!inv) return;
+      const user = point.matrixTransform(inv);
+      if (!Number.isFinite(user.x) || !Number.isFinite(user.y)) return;
+      const delta = event.deltaY;
+      const factor = Math.abs(delta) < 40
+        ? Math.pow(1.005, delta)
+        : (delta > 0 ? 1.18 : 1 / 1.18);
+      setViewOverride((current) => {
+        const cur = (current && Number.isFinite(current.x) && Number.isFinite(current.w)) ? current : baseBoxRef.current;
+        const w = clampN(cur.w * factor, 3, Math.max(240, baseBoxRef.current.w * 4));
+        const scale = w / cur.w;
+        const nx = user.x - (user.x - cur.x) * scale;
+        const ny = user.y - (user.y - cur.y) * scale;
+        const nh = cur.h * scale;
+        if (!Number.isFinite(nx) || !Number.isFinite(ny) || !Number.isFinite(w) || !Number.isFinite(nh)) {
+          return null;
+        }
+        return { x: nx, y: ny, w, h: nh };
+      });
+    };
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  });
+
+  const zoomPct = Math.round((baseBox.w / curBox.w) * 100);
 
   return (
-    <div className="planWrap rz-elev-wrap">
+    <div ref={containerRef} className="planWrap rz-elev-wrap">
       {onPickWall && (
         <div
           className="rz-wallpick"
           title={`Looking at the ${wall} wall from outside${onWallHeight ? ' — drag its top edge ↕ to change the height; drag doors and windows right on the face' : ''}.`}
         >
-          {/* a few words only — the full how-to lives in the hover tip so
-              the chip never grows over the drawing */}
           <span><b>{capWord(wall)} wall</b> · from outside</span>
           {['south', 'north', 'east', 'west'].map((s) => (
             <button key={s} type="button" className={s === wall ? 'on' : ''} onClick={() => onPickWall(s)}>{capWord(s)}</button>
           ))}
+          <span style={{ width: 1, height: 16, background: 'var(--line2, #cac8bb)', margin: '0 4px' }} />
+          <button type="button" title="Zoom in (+)" onClick={() => {
+            setViewOverride((cur) => {
+              const c = cur || baseBox;
+              const w = clampN(c.w / 1.25, 3, baseBox.w * 4);
+              const scale = w / c.w;
+              return { x: c.x + (c.w - w) / 2, y: c.y + (c.h - c.h * scale) / 2, w, h: c.h * scale };
+            });
+          }}>＋</button>
+          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--moss, #868a7c)', padding: '0 2px' }}>{zoomPct}%</span>
+          <button type="button" title="Zoom out (-)" onClick={() => {
+            setViewOverride((cur) => {
+              const c = cur || baseBox;
+              const w = clampN(c.w * 1.25, 3, baseBox.w * 4);
+              const scale = w / c.w;
+              return { x: c.x + (c.w - w) / 2, y: c.y + (c.h - c.h * scale) / 2, w, h: c.h * scale };
+            });
+          }}>－</button>
+          {viewOverride !== null && (
+            <button type="button" title="Fit wall to view" onClick={() => setViewOverride(null)}>Fit</button>
+          )}
         </div>
       )}
       <svg
@@ -339,7 +455,13 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
         preserveAspectRatio="xMidYMid meet"
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerDown={() => onSelect(-1)}
+        onPointerDown={(e) => {
+          if (e.button === 0 && (e.target === svgRef.current || e.target.tagName === 'rect' || e.target.tagName === 'polygon' || e.target.tagName === 'line')) {
+            try { svgRef.current?.setPointerCapture(e.pointerId); } catch {}
+            setPanDrag({ cx: e.clientX, cy: e.clientY, orig: vbRef.current });
+          }
+          onSelect(-1);
+        }}
         onContextMenu={(event) => event.preventDefault()}
       >
         {/* ground: a soil band under the grade line */}

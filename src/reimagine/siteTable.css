@@ -9,11 +9,14 @@
    deliberately; the prototype's typefaces were not adopted. */
 
 .st-panel {
-  background: rgba(251, 250, 246, 0.9);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(219, 217, 206, 0.7);
-  box-shadow: 0 8px 30px rgba(30, 40, 30, 0.12);
+  /* Frosted glass, not a solid slab: the design shows through and dominates,
+     while a stronger blur keeps text legible over the busy model behind.
+     (Was 0.9 opaque with a heavy float — it read as an obtrusive card.) */
+  background: rgba(251, 250, 246, 0.6);
+  backdrop-filter: blur(18px) saturate(1.04);
+  -webkit-backdrop-filter: blur(18px) saturate(1.04);
+  border: 1px solid rgba(219, 217, 206, 0.55);
+  box-shadow: 0 4px 16px rgba(30, 40, 30, 0.07);
 }
 
 /* ── chapter rail — the left edge is free real estate (Daniel), so the ten
