@@ -1642,7 +1642,15 @@ export const RECLAIMED_FACTORS = {
   walls: { cost: 0.65, carbon: 0.3 },
   flooring: { cost: 0.45, carbon: 0.25 },
   windows: { cost: 0.4, carbon: 0.35 },
-  roof: { cost: 0.6, carbon: 0.3 }
+  roof: { cost: 0.6, carbon: 0.3 },
+  // Bought used. Buying second-hand skips almost all the manufacturing carbon,
+  // so the carbon factor drops further than the price does. Slab-wood counters
+  // and shelving off reclaimed timber are the 'builtin' line.
+  fixture: { cost: 0.45, carbon: 0.3 },
+  builtin: { cost: 0.5, carbon: 0.2 },
+  appliance: { cost: 0.35, carbon: 0.2 },
+  furniture: { cost: 0.3, carbon: 0.15 },
+  outdoor: { cost: 0.5, carbon: 0.25 }
 };
 
 // Offline ZIP -> region estimate (the assistant/geocoder refines this later).
@@ -4242,8 +4250,21 @@ export function deriveDesign(spec, wallSectionsParam) {
   // appliances, furniture, outdoor pieces — priced from the catalog. (The heater
   // carries 0 here: cost.heat already prices the chosen heat source.)
   const furnishingEls = (spec.elements || []).filter((el) => el.category === 'furnishing');
-  const furnishingsCost = furnishingEls.reduce((sum, el) => sum + (resolveFurnishing(el)?.cost || 0), 0);
-  const furnishingsCarbon = furnishingEls.reduce((sum, el) => sum + (resolveFurnishing(el)?.carbon || 0), 0);
+  // Bought used? Each catalog group has its own salvage toggle (Finishes →
+  // "New or salvaged"), and a piece marked used on its own card wins over it.
+  const furnFactor = (f, el, kindOf) => {
+    const used = el.reclaimed === true || (el.reclaimed !== false && reclaimed[f.group]);
+    return used ? (RECLAIMED_FACTORS[f.group]?.[kindOf] ?? 1) : 1;
+  };
+  const furnishingsCostRaw = furnishingEls.reduce((sum, el) => sum + (resolveFurnishing(el)?.cost || 0), 0);
+  const furnishingsCost = furnishingEls.reduce((sum, el) => {
+    const f = resolveFurnishing(el); if (!f) return sum;
+    return sum + f.cost * furnFactor(f, el, 'cost');
+  }, 0);
+  const furnishingsCarbon = furnishingEls.reduce((sum, el) => {
+    const f = resolveFurnishing(el); if (!f) return sum;
+    return sum + f.carbon * furnFactor(f, el, 'carbon');
+  }, 0);
   const cost = {
     furnishings: furnishingsCost,
     foundation: foundationCostBase + foundationRunCost,

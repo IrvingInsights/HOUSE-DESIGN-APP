@@ -3573,7 +3573,13 @@ const RECLAIMED_ITEMS = [
   { key: 'frame', label: 'Timber frame', note: 'salvaged beams & posts' },
   { key: 'walls', label: 'Wall materials', note: 'reclaimed cladding / infill' },
   { key: 'windows', label: 'Windows & doors', note: 'salvaged units' },
-  { key: 'roof', label: 'Roofing', note: 'reclaimed metal / tile' }
+  { key: 'roof', label: 'Roofing', note: 'reclaimed metal / tile' },
+  // Bought used — the furnishings catalog, group by group.
+  { key: 'appliance', label: 'Appliances', note: 'second-hand range, fridge, washer' },
+  { key: 'builtin', label: 'Counters & shelving', note: 'reclaimed slab wood' },
+  { key: 'furniture', label: 'Furniture', note: 'second-hand beds, tables, seating' },
+  { key: 'fixture', label: 'Fixtures', note: 'salvaged tub, sinks, tank' },
+  { key: 'outdoor', label: 'Outdoor pieces', note: 'used shed, cistern, coop' }
 ];
 // Curated natural-finish colors — named the way a builder would say them.
 // '' = the material's own default (plaster shows its assembly color, the roof

@@ -1588,8 +1588,12 @@ export function resolveInsulation(key, fallback = 'cellulose') {
   return INSULATION_TYPES[key] ? key : fallback;
 }
 
-export const RECLAIMED_SYSTEMS = ['frame', 'walls', 'flooring', 'windows', 'roof'];
-export const RECLAIMED_DEFAULTS = { frame: false, walls: false, flooring: false, windows: false, roof: false };
+export const RECLAIMED_SYSTEMS = ['frame', 'walls', 'flooring', 'windows', 'roof',
+  // Bought-used categories for the furnishings catalog — salvaged appliances,
+  // slab-wood counters and shelving, second-hand furniture, salvaged fixtures.
+  'fixture', 'builtin', 'appliance', 'furniture', 'outdoor'];
+export const RECLAIMED_DEFAULTS = { frame: false, walls: false, flooring: false, windows: false, roof: false,
+  fixture: false, builtin: false, appliance: false, furniture: false, outdoor: false };
 
 // The frame in effect on a given storey — a per-storey override falls back to
 // the base frame type. level 1 (or unset) is the ground/base.
