@@ -162,6 +162,69 @@ export function resolveRoofCovering(shell = {}) {
   return ROOF_COVERINGS[shell?.roofCovering] || ROOF_COVERINGS.metal;
 }
 
+// ── WHAT GOES IN (AND AROUND) THE HOUSE ─────────────────────────────────────
+// Fixtures, built-ins, appliances, furniture and outdoor pieces. Every one is a
+// normal element (category 'furnishing', kind = the catalog key), so it drags on
+// the plan, draws in 3D, and edits through the same card as anything else. Each
+// carries real cost and carbon into the receipts.
+//   w/d = plan footprint in feet, h = height. cost = $, carbon = kg CO2e.
+// The heater is the one special case: its size, name and price already come from
+// the chosen heat source, so it carries cost 0 here (cost.heat covers it).
+export const FURNISHING_GROUPS = [
+  { key: 'fixture',   label: 'Fixtures' },
+  { key: 'builtin',   label: 'Built-ins' },
+  { key: 'appliance', label: 'Appliances' },
+  { key: 'furniture', label: 'Furniture' },
+  { key: 'outdoor',   label: 'Outdoor' }
+];
+
+export const FURNISHINGS = {
+  // Fixtures
+  heater:       { key: 'heater',       group: 'fixture',   label: 'Heater',            w: 3,   d: 2.5, h: 4,   cost: 0,    carbon: 0,   color: 0x8a5a3c, note: 'Size, name and price follow your chosen heat source.' },
+  water_tank:   { key: 'water_tank',   group: 'fixture',   label: 'Water tank',        w: 4,   d: 4,   h: 5,   cost: 900,  carbon: 120, color: 0x6f8898 },
+  water_heater: { key: 'water_heater', group: 'fixture',   label: 'Water heater',      w: 2,   d: 2,   h: 5,   cost: 1400, carbon: 180, color: 0x93a0a8 },
+  toilet:       { key: 'toilet',       group: 'fixture',   label: 'Toilet',            w: 2.5, d: 2,   h: 2.5, cost: 450,  carbon: 60,  color: 0xe8e6e0 },
+  shower:       { key: 'shower',       group: 'fixture',   label: 'Shower',            w: 3,   d: 3,   h: 7,   cost: 1600, carbon: 150, color: 0xd8e2e6 },
+  tub:          { key: 'tub',          group: 'fixture',   label: 'Bathtub',           w: 5,   d: 2.5, h: 2,   cost: 1900, carbon: 200, color: 0xe8e6e0 },
+  sink_bath:    { key: 'sink_bath',    group: 'fixture',   label: 'Bathroom sink',     w: 2,   d: 1.8, h: 3,   cost: 550,  carbon: 70,  color: 0xe8e6e0 },
+  // Built-ins
+  counter:      { key: 'counter',      group: 'builtin',   label: 'Kitchen counter',   w: 8,   d: 2,   h: 3,   cost: 1800, carbon: 220, color: 0xa8895f },
+  island:       { key: 'island',       group: 'builtin',   label: 'Kitchen island',    w: 6,   d: 3,   h: 3,   cost: 1600, carbon: 190, color: 0xa8895f },
+  cabinets:     { key: 'cabinets',     group: 'builtin',   label: 'Upper cabinets',    w: 8,   d: 1.2, h: 2.5, cost: 1200, carbon: 150, color: 0x9c7f57 },
+  shelving:     { key: 'shelving',     group: 'builtin',   label: 'Shelving',          w: 6,   d: 1,   h: 6,   cost: 500,  carbon: 70,  color: 0x9c7f57, green: true },
+  wardrobe:     { key: 'wardrobe',     group: 'builtin',   label: 'Built-in wardrobe', w: 6,   d: 2,   h: 7,   cost: 1400, carbon: 170, color: 0x9c7f57 },
+  pantry_shelf: { key: 'pantry_shelf', group: 'builtin',   label: 'Pantry shelving',   w: 5,   d: 1.5, h: 7,   cost: 700,  carbon: 90,  color: 0x9c7f57, green: true },
+  // Appliances
+  range:        { key: 'range',        group: 'appliance', label: 'Range / cooktop',   w: 2.5, d: 2.2, h: 3,   cost: 1500, carbon: 260, color: 0x6d7276 },
+  fridge:       { key: 'fridge',       group: 'appliance', label: 'Refrigerator',      w: 3,   d: 2.5, h: 6,   cost: 1800, carbon: 420, color: 0xc9ced1 },
+  dishwasher:   { key: 'dishwasher',   group: 'appliance', label: 'Dishwasher',        w: 2,   d: 2.2, h: 3,   cost: 900,  carbon: 210, color: 0xc9ced1 },
+  sink_kitchen: { key: 'sink_kitchen', group: 'appliance', label: 'Kitchen sink',      w: 3,   d: 2,   h: 3,   cost: 800,  carbon: 110, color: 0xd5d9db },
+  washer:       { key: 'washer',       group: 'appliance', label: 'Washer',            w: 2.5, d: 2.5, h: 3.5, cost: 1000, carbon: 230, color: 0xc9ced1 },
+  dryer:        { key: 'dryer',        group: 'appliance', label: 'Dryer',             w: 2.5, d: 2.5, h: 3.5, cost: 900,  carbon: 210, color: 0xc9ced1 },
+  // Furniture
+  bed_queen:    { key: 'bed_queen',    group: 'furniture', label: 'Bed — queen',       w: 5,   d: 6.7, h: 2,   cost: 1400, carbon: 160, color: 0x9a7f6a },
+  bed_twin:     { key: 'bed_twin',     group: 'furniture', label: 'Bed — twin',        w: 3.2, d: 6.3, h: 2,   cost: 800,  carbon: 100, color: 0x9a7f6a },
+  table_dining: { key: 'table_dining', group: 'furniture', label: 'Dining table',      w: 6,   d: 3.5, h: 2.5, cost: 900,  carbon: 120, color: 0x8f7050 },
+  sofa:         { key: 'sofa',         group: 'furniture', label: 'Sofa',              w: 7,   d: 3,   h: 2.8, cost: 1600, carbon: 200, color: 0x7d8a7a },
+  armchair:     { key: 'armchair',     group: 'furniture', label: 'Armchair',          w: 3,   d: 3,   h: 2.8, cost: 700,  carbon: 90,  color: 0x7d8a7a },
+  desk:         { key: 'desk',         group: 'furniture', label: 'Desk',              w: 4.5, d: 2.2, h: 2.5, cost: 600,  carbon: 80,  color: 0x8f7050 },
+  dresser:      { key: 'dresser',      group: 'furniture', label: 'Dresser',           w: 4,   d: 1.8, h: 3.5, cost: 700,  carbon: 95,  color: 0x8f7050 },
+  bookcase:     { key: 'bookcase',     group: 'furniture', label: 'Bookcase',          w: 3,   d: 1.2, h: 6,   cost: 450,  carbon: 65,  color: 0x8f7050 },
+  // Outdoor
+  carport:      { key: 'carport',      group: 'outdoor',   label: 'Carport',           w: 20,  d: 20,  h: 9,   cost: 9000, carbon: 2600, color: 0x8b8f88 },
+  porch:        { key: 'porch',        group: 'outdoor',   label: 'Porch',             w: 12,  d: 8,   h: 9,   cost: 7000, carbon: 1900, color: 0x9a8064 },
+  planter:      { key: 'planter',      group: 'outdoor',   label: 'Raised bed',        w: 8,   d: 4,   h: 1.5, cost: 250,  carbon: 40,  color: 0x6d8a52, green: true },
+  shed:         { key: 'shed',         group: 'outdoor',   label: 'Garden shed',       w: 10,  d: 8,   h: 8,   cost: 4500, carbon: 1400, color: 0x8a7a5c },
+  firepit:      { key: 'firepit',      group: 'outdoor',   label: 'Fire pit',          w: 4,   d: 4,   h: 1.2, cost: 600,  carbon: 180, color: 0x77716a },
+  cistern:      { key: 'cistern',      group: 'outdoor',   label: 'Cistern',           w: 8,   d: 8,   h: 7,   cost: 3800, carbon: 700, color: 0x6f8898, green: true },
+  arbor:        { key: 'arbor',        group: 'outdoor',   label: 'Arbor / pergola',   w: 12,  d: 10,  h: 8,   cost: 2600, carbon: 480, color: 0x9a8064, green: true },
+  coop:         { key: 'coop',         group: 'outdoor',   label: 'Chicken coop',      w: 8,   d: 6,   h: 6,   cost: 1800, carbon: 420, color: 0x8a7a5c, green: true }
+};
+
+export function resolveFurnishing(el = {}) {
+  return FURNISHINGS[el?.kind] || null;
+}
+
 // Interior partition walls — thin walls BETWEEN rooms, placed as elements
 // (category 'partition'). Distinct from the envelope: no weather duty, so
 // they price by face area of the chosen construction.
@@ -1696,7 +1759,7 @@ export function shellShorthandDims(operation) {
 
 // Element kinds that live ON/IN the house — an unset position means "at the
 // origin", never "park it in the yard beside the shell".
-const INTERIOR_ELEMENT_CATS = new Set(['floor', 'partition', 'foundation']);
+const INTERIOR_ELEMENT_CATS = new Set(['floor', 'partition', 'foundation', 'furnishing']);
 
 export function applyBimOperations(currentSpec, plan) {
   const next = structuredClone(currentSpec);
@@ -2616,6 +2679,9 @@ export function applyBimOperations(currentSpec, plan) {
         // width (0 = solid wall), positionFt = distance along the wall run.
         doorWFt: operation.category === 'partition' ? Number(operation.widthFt || 0) : 0,
         doorAtFt: operation.category === 'partition' ? Number(operation.positionFt || 0) : 0,
+        // Which catalog piece a 'furnishing' is (range, sofa, cistern…) — it
+        // drives its price, carbon and color.
+        kind: operation.kind || '',
         type: operation.category || 'custom'
       };
       // A partition defaults to a full-height thin wall, not the 10x10x1.2

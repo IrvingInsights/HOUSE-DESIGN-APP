@@ -5,7 +5,7 @@ import { ElevationView } from './elevationView.jsx';
 import { InteriorWallView } from './interiorWallView.jsx';
 import { StackView } from './stackView.jsx';
 import {
-  applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES, PARTITION_TYPES, ROOF_COVERINGS, resolveRoofCovering,
+  applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES, PARTITION_TYPES, ROOF_COVERINGS, resolveRoofCovering, FURNISHINGS, FURNISHING_GROUPS,
   INSULATION_TYPES, resolveInsulation, OPENING_TYPES, openingVerticalBand,
   FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS, storeyHeightFt, storeyElevationFt,
   footprintPolygon, polygonArea, footprintBounds, footprintEdges, hasSegmentedFootprint, splitSouthEdgeAt, roofProfile, snapPlatesToShell
@@ -17,7 +17,7 @@ import {
   WALL_SIDES, WALL_SIDE_LABELS, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS,
   ROOM_PRESETS, planNewRoomPlacements, roomPresetFromName,
   resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons, downloadFile,
-  DECK_SURFACES, resolveDeck, resolveDeckStairs, derivePartitionOps
+  DECK_SURFACES, resolveDeck, resolveDeckStairs, derivePartitionOps, interiorFixtures
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms } from '../placement.js';
 import { STARTER_DESIGNS } from './starters.js';
@@ -1849,6 +1849,25 @@ export default function App() {
                     if (ops.length) applyOps(ops);
                   }}
                 >＋ Walls between rooms — one per shared boundary</button>
+                {/* WHAT GOES IN IT — fixtures, built-ins, appliances, furniture
+                    and outdoor pieces. Each drops on the floor you're on, in the
+                    middle of the plan; drag it where it belongs, grab a corner to
+                    resize, and its card renames/duplicates/removes it like any
+                    other object. Every piece carries its cost and carbon. */}
+                <FurnishPalette
+                  onAdd={(f) => {
+                    const W = Number(spec.shell.widthFt) || 36;
+                    const D = Number(spec.shell.depthFt) || 28;
+                    const lvl = activeFloor >= 1 ? activeFloor : 1;
+                    const heat = f.key === 'heater' ? interiorFixtures(spec)[0] : null;
+                    const w = Number(heat?.w ?? f.w), d = Number(heat?.d ?? f.d), h = Number(heat?.h ?? f.h);
+                    applyOps([{
+                      type: 'add_element', name: heat?.name || f.label, category: 'furnishing', kind: f.key,
+                      x: Math.round((W / 2 - w / 2) * 2) / 2, y: Math.round((D / 2 - d / 2) * 2) / 2,
+                      w, d, h, level: lvl, z: lvl >= 2 ? storeyElevationFt(spec.shell, lvl) : 0
+                    }]);
+                  }}
+                />
                 <div className="rz-shape-note">Tap a placed deck to pick its surface, railing, roof, and how it sits. Two decks pushed together join into one wraparound.</div>
                 {roomNote && <div className="rz-shape-note">{roomNote}</div>}
                 <div className="rz-shape-note">Tap a room on the plan to rename or remove it (or press Delete). Right-click for more.</div>
@@ -3421,6 +3440,44 @@ function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAd
         <div className="rz-shape-note">{tally} on the {floorWord} — tap one on the Wall view (or the 3D house) to edit it.</div>
       )}
       <div className="rz-shape-note">The Wall view shows this wall face-on: drag a door or window to slide it along or lift it up and down; drag its side handles to widen it. Tap one and its card opens with every number — rename, resize, duplicate or remove it there. Press Delete to remove the one you’ve picked; right-click for more.</div>
+    </div>
+  );
+}
+
+// WHAT GOES IN THE HOUSE — the catalog, grouped, one tap to place. Collapsed to
+// its five group buttons so it never crowds the Rooms chapter; open a group and
+// its pieces appear. Every piece carries real cost and carbon into the receipts.
+function FurnishPalette({ onAdd }) {
+  const [openGroup, setOpenGroup] = useState(null);
+  const items = openGroup ? Object.values(FURNISHINGS).filter((f) => f.group === openGroup) : [];
+  return (
+    <div className="rz-furnish">
+      <div className="ctlChips rz-furnish-groups">
+        {FURNISHING_GROUPS.map((g) => (
+          <button
+            key={g.key}
+            type="button"
+            className={`rz-pick-chip${openGroup === g.key ? ' on' : ''}`}
+            onClick={() => setOpenGroup(openGroup === g.key ? null : g.key)}
+          >{g.label}</button>
+        ))}
+      </div>
+      {openGroup && (
+        <>
+          <div className="ctlChips rz-furnish-items">
+            {items.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                className="rz-pick-chip"
+                title={`${f.w} × ${f.d} ft${f.cost ? ` · $${f.cost.toLocaleString()}` : ''}${f.note ? ` — ${f.note}` : ''}`}
+                onClick={() => onAdd(f)}
+              >{f.green ? <span aria-hidden="true">🌿</span> : null}＋ {f.label}</button>
+            ))}
+          </div>
+          <div className="rz-shape-note">Drops in the middle of the floor you're on — drag it where it belongs, grab a corner to resize. Its card renames, duplicates, or removes it.</div>
+        </>
+      )}
     </div>
   );
 }

@@ -11,7 +11,7 @@ import { FRAME_MEMBERS } from './frameDrawings.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
   OPENING_TYPES, openingVerticalBand, resolveFrameType, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, decomposeFootprint, subtractRect,
-  subtractRectFromFootprint, pointInFootprint, edgeForOpening, gradeElevationAt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, resolveRoofCovering, storeyElevationFt, storeyHeightFt,
+  subtractRectFromFootprint, pointInFootprint, edgeForOpening, gradeElevationAt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, resolveRoofCovering, resolveFurnishing, storeyElevationFt, storeyHeightFt,
   isRoundFootprint, clipRectToRoundShell
 } from '../backend/bim-core.mjs';
 import {
@@ -3162,6 +3162,17 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           group.add(deck);
           const openHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
           mesh = box(element.w, Math.max(7.4, elementHeight), element.d, element.x + element.w / 2, elevation + Math.max(7.4, elementHeight) / 2, element.y + element.d / 2, openHandle);
+        } else if (element.category === 'furnishing') {
+          // Fixtures, built-ins, appliances, furniture, outdoor pieces — a solid
+          // block in the catalog's own color, standing on its floor.
+          const fur = resolveFurnishing(element);
+          const furMat = new THREE.MeshStandardMaterial({
+            color: fur?.color ?? 0x8a7768,
+            roughness: 0.82,
+            transparent: element.id === selectedRoom,
+            opacity: element.id === selectedRoom ? 0.9 : 1
+          });
+          mesh = box(element.w, elementHeight, element.d, element.x + element.w / 2, elevation + elementHeight / 2, element.y + element.d / 2, furMat);
         } else {
         const material = new THREE.MeshStandardMaterial({
           color: elementPalette[element.category] || 0x8a7768,

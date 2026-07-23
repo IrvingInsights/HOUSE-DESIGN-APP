@@ -3,7 +3,7 @@ import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES,
   resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint, pointInFootprint,
   isRoundFootprint, ellipseArea, ellipsePerimeter, rectRoundOverlapArea,
-  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, ROOF_COVERINGS, resolveRoofCovering, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt, storeyHeightFt,
+  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, ROOF_COVERINGS, resolveRoofCovering, FURNISHINGS, FURNISHING_GROUPS, resolveFurnishing, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt, storeyHeightFt,
   scoreTraceSpecChecks, openingVerticalBand,
   // Single source of truth for the per-wall assembly model — no longer duplicated here.
   WALL_SIDES, WALL_ASSEMBLIES, wallAssemblyKeyFromText, resolveWallSide,
@@ -1552,6 +1552,17 @@ export function materialsTakeoff(spec, derived) {
   const roofInsul = INSULATION_TYPES[derived.roofInsulation];
   if (roofInsul && derived.roofInsulation !== 'none') add('roof', `Roof insulation (${roofInsul.label.toLowerCase()})`, `${Math.round(derived.roofArea)} sf`, `R≈${derived.roofR}`);
   add('roof', 'Roof framing (rafters)', '—', 'not calculated yet — rafters draw in Export → Frame drawings');
+
+  // Everything placed inside and around the house, one line per kind.
+  const furnCounts = new Map();
+  (spec.elements || []).filter((el) => el.category === 'furnishing').forEach((el) => {
+    const f = resolveFurnishing(el);
+    if (f) furnCounts.set(f.key, { f, n: (furnCounts.get(f.key)?.n || 0) + 1 });
+  });
+  [...furnCounts.values()].forEach(({ f, n }) => {
+    const groupLabel = (FURNISHING_GROUPS.find((g) => g.key === f.group) || {}).label || f.group;
+    add('furnishings', `${f.label}${n > 1 ? ` × ${n}` : ''}`, `${n}`, f.cost === 0 ? `${groupLabel.toLowerCase()} — priced with your heat system` : groupLabel.toLowerCase());
+  });
 
   // Windows & doors
   const openings = spec.openings || [];
@@ -4227,7 +4238,14 @@ export function deriveDesign(spec, wallSectionsParam) {
   // and a living roof are wildly different. (Was a flat $10/sf for everything.)
   const roofCover = resolveRoofCovering(spec.shell);
   const roofCostRaw = roofArea * roofCover.costPsf + roofInsulCost + drainageCost;
+  // Everything you place inside and around the house — fixtures, built-ins,
+  // appliances, furniture, outdoor pieces — priced from the catalog. (The heater
+  // carries 0 here: cost.heat already prices the chosen heat source.)
+  const furnishingEls = (spec.elements || []).filter((el) => el.category === 'furnishing');
+  const furnishingsCost = furnishingEls.reduce((sum, el) => sum + (resolveFurnishing(el)?.cost || 0), 0);
+  const furnishingsCarbon = furnishingEls.reduce((sum, el) => sum + (resolveFurnishing(el)?.carbon || 0), 0);
   const cost = {
+    furnishings: furnishingsCost,
     foundation: foundationCostBase + foundationRunCost,
     frame: frameCost,
     flooring: flooringCostRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.cost : 1) + subfloorCost + floorInsulCost,
@@ -4274,7 +4292,7 @@ export function deriveDesign(spec, wallSectionsParam) {
   const foundationCarbon = basement.present
     ? perimeterFt * basement.heightFt * 16 + floor * 12
     : (utilities.foundationType === 'slab' ? mainSlabArea : floor) * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra;
-  const carbonKg = foundationCarbon + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + deckCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
+  const carbonKg = foundationCarbon + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + deckCarbon + furnishingsCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
   // What the reclaimed choices saved vs. buying everything new.
   const reclaimedSavings = {
