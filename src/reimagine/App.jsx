@@ -1325,6 +1325,16 @@ export default function App() {
 
   // switching chapters nudges you to the view that chapter is best done in
   const goChapter = (c) => { setActiveChapter(c.id); if (c.view) setViewMode(c.view); };
+  // The other direction: picking a view from the bottom dock ALSO opens the
+  // chapter that owns it, so the left panel and the drawing never disagree —
+  // tapping "Wall" opens Walls & openings, "Storeys" opens Storeys, "Frame"
+  // opens Frame. Views shared by several chapters (plan, 3d) leave the chapter
+  // alone, since there's no single owner to jump to.
+  const pickView = (v) => {
+    setViewMode(v);
+    const owners = CHAPTERS.filter((c) => c.view === v);
+    if (owners.length === 1 && owners[0].id !== activeChapter) setActiveChapter(owners[0].id);
+  };
   // Jump links ("lay out this floor's rooms ›") — chapter + floor in one hop.
   const jumpTo = (chapterId, floor = null) => {
     const c = CHAPTERS.find((ch) => ch.id === chapterId);
@@ -1589,11 +1599,27 @@ export default function App() {
                 <span className="st-dock-sep" />
               </>
             )}
-            <button className={viewMode === 'wall' ? 'on' : ''} onClick={() => setViewMode('wall')}>Wall</button>
-            <button className={viewMode === 'storeys' ? 'on' : ''} title="The floors face-on — drag a top edge for height, side handles for size" onClick={() => setViewMode('storeys')}>Storeys</button>
-            <button className={viewMode === 'plan' ? 'on' : ''} onClick={() => setViewMode('plan')}>Plan</button>
-            <button className={viewMode === '3d' ? 'on' : ''} onClick={() => setViewMode('3d')}>3D</button>
-            <button className={viewMode === 'frame' ? 'on' : ''} title="Just the bones — the frame standing on its foundation" onClick={() => setViewMode('frame')}>Frame</button>
+            {/* The dock is "how am I looking at this", not a second way to change
+                chapter. Plan and 3D are universal; the one special view (Wall /
+                Storeys / Frame) shown is whichever the CURRENT chapter owns — or
+                whichever you're actually in — so you can hop to 3D and come back
+                in one tap without the dock duplicating the Trail's job. */}
+            {(() => {
+              const chapterView = (CHAPTERS.find((c) => c.id === activeChapter) || {}).view;
+              const special = (viewMode !== 'plan' && viewMode !== '3d')
+                ? viewMode
+                : (chapterView && chapterView !== 'plan' && chapterView !== '3d' ? chapterView : null);
+              if (!special) return null;
+              const LABEL = { wall: 'Wall', storeys: 'Storeys', frame: 'Frame' };
+              const TIP = {
+                wall: 'This wall face-on — its height, system, and every opening in it',
+                storeys: 'The floors face-on — drag a top edge for height, side handles for size',
+                frame: 'Just the bones — the frame standing on its foundation'
+              };
+              return <button className={viewMode === special ? 'on' : ''} title={TIP[special]} onClick={() => pickView(special)}>{LABEL[special] || special}</button>;
+            })()}
+            <button className={viewMode === 'plan' ? 'on' : ''} onClick={() => pickView('plan')}>Plan</button>
+            <button className={viewMode === '3d' ? 'on' : ''} onClick={() => pickView('3d')}>3D</button>
             {(viewMode === '3d' || viewMode === 'frame') && webglOK && (
               <>
                 <span className="st-dock-sep" />
