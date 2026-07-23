@@ -974,42 +974,47 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const gapByOpening = []; // index-aligned with spec.openings; .cut set when the hole is real
       if (layers.openings) (spec.openings || []).forEach((opening, openingIdx) => {
         if (opening.wall === 'roof') return;
-        // Only ground-floor openings cut the ground walls. Upper-floor openings
-        // sit on their own storey (rendered at elevation, dormered through the
-        // roof) and must NOT punch a hole in the wall below them.
-        if (Number(opening.level || 1) !== 1) return;
+        const oLvl = Number(opening.level || 1);
         const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
         let key;
         let along;
         if (segFp) {
           const e = edgeForOpening(spec, opening);
           if (!e) return;
-          key = e.key;
+          key = oLvl > 1 ? `${e.key}-u${oLvl > 2 ? oLvl : ''}` : e.key;
           along = e.horizontal ? Number(opening.x) || 0 : Number(opening.y) || 0;
         } else {
-          key = opening.wall;
+          key = oLvl > 1 ? `${opening.wall}-u${oLvl > 2 ? oLvl : ''}` : opening.wall;
           along = (opening.wall === 'north' || opening.wall === 'south') ? Number(opening.x) || 0 : Number(opening.y) || 0;
         }
         const w = Number(opening.widthFt) || 3;
-        // Corrupt or legacy data can put an opening OFF its wall (negative or
-        // past the end) — old traces did exactly that. Clamp it onto the wall
-        // so the assembly never floats in the yard.
         if (!segFp) {
           const wallLen = (opening.wall === 'north' || opening.wall === 'south') ? width : depth;
           along = clamp(along, 0.2, Math.max(0.2, wallLen - w - 0.2));
         }
-        // on a stem wall the whole wall (and its holes) sits on the stem top
-        const revealHere = sideReveal[opening.wall] || 0;
-        // per-opening sill override (dragged up/down on the wall view) beats
-        // the type's default sill
+        const revealHere = oLvl === 1 ? (sideReveal[opening.wall] || 0) : 0;
         const sillHere = Number.isFinite(Number(opening.sillFt)) ? Number(opening.sillFt) : profile.sill;
-        const gap = { from: along, to: along + w, sill: sillHere + revealHere, top: sillHere + profile.h + revealHere };
+        const gap = { from: along, to: along + w, sill: sillHere + revealHere, top: sillHere + profile.h + revealHere, level: oLvl };
         gapByOpening[openingIdx] = gap;
+        
         const list = openingGapsByWall.get(key) || [];
         list.push(gap);
         openingGapsByWall.set(key, list);
+
+        const rawKey = `${opening.wall}:${oLvl}`;
+        const rawList = openingGapsByWall.get(rawKey) || [];
+        rawList.push(gap);
+        openingGapsByWall.set(rawKey, rawList);
       });
-      const gapsFor = (key) => openingGapsByWall.get(key) || [];
+      const gapsFor = (key, level = 1) => {
+        if (level > 1 && typeof key === 'string' && !key.includes(':')) {
+          const lvlKey = `${key}:${level}`;
+          const altKey = `${key}-u${level > 2 ? level : ''}`;
+          const gL = openingGapsByWall.get(lvlKey) || openingGapsByWall.get(altKey);
+          if (gL && gL.length > 0) return gL;
+        }
+        return openingGapsByWall.get(key) || [];
+      };
       // Every storey's wall lives at the ENGINE's floor elevations — the same
       // numbers the floor plates, rooms, and openings use — never stacked on
       // this side's own ground wall. Side-stacking desynced walls from floors
@@ -1127,11 +1132,25 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const yBot = anySetback ? bandSeatY(level, edgeX, edgeZ) : groundH + upAbove(level);
             const bH = yTop - yBot;
             if (bH < 0.05) continue;
-            const upperMesh = side === 'north' ? box(p.w, bH, tU, p.x + p.w / 2, yBot + bH / 2, p.y + tU / 2, wallMatOf(u))
-              : side === 'south' ? box(p.w, bH, tU, p.x + p.w / 2, yBot + bH / 2, p.y + p.d - tU / 2, wallMatOf(u))
-              : side === 'west' ? box(tU, bH, p.d, p.x + tU / 2, yBot + bH / 2, p.y + p.d / 2, wallMatOf(u))
-              : box(tU, bH, p.d, p.x + p.w - tU / 2, yBot + bH / 2, p.y + p.d / 2, wallMatOf(u));
-            wallMeshSpecs.push({ side, storey: 'upper', level, meshes: [upperMesh] });
+            const horiz = side === 'north' || side === 'south';
+            const thickCenter = side === 'north' ? p.y + tU / 2
+              : side === 'south' ? p.y + p.d - tU / 2
+              : side === 'west' ? p.x + tU / 2
+              : p.x + p.w - tU / 2;
+            const a0 = horiz ? p.x : p.y;
+            const a1 = horiz ? p.x + p.w : p.y + p.d;
+            const upperMeshes = wallRunMeshes({
+              horizontal: horiz,
+              thickCenter,
+              t: tU,
+              a0,
+              a1,
+              hAt: () => bH,
+              mat: wallMatOf(u),
+              gaps: gapsFor(side, level),
+              yBase: yBot
+            });
+            wallMeshSpecs.push({ side, storey: 'upper', level, meshes: upperMeshes });
           }
         }
       };
@@ -1834,19 +1853,21 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               bandPart(slantedBox(alongAt(i / bays), 0.3, Math.min(...near.map(gapOf)), 0.24, frameMat));
             }
             // plain WALL fills from the glass ceiling up to a HIGHER roofline
-            // (the wedge under an attached lean-to) — bay by bay, in the
-            // wall's own material, so the face is glass below and wall above
-            // instead of glass climbing to the 2nd floor.
-            for (let b = 0; b < bays; b += 1) {
-              const yBot = visible[b] ? bayTops[b] : kneeH;
-              const hWall = bayWallTops[b] - yBot;
-              if (hWall < 0.3) continue;
-              const alongCenter = alongAt((b + 0.5) / bays);
-              const tWall = rSg.thicknessFt || 0.7;
-              const m = horizNS
-                ? box(bayLen - 0.02, hWall, tWall, width / 2 + alongCenter, yBot + hWall / 2, side === 'south' ? depth - tWall / 2 : tWall / 2, wallMatFor(side))
-                : box(tWall, hWall, bayLen - 0.02, side === 'east' ? width - tWall / 2 : tWall / 2, yBot + hWall / 2, depth / 2 + alongCenter, wallMatFor(side));
-              bandPart(m);
+            // (the wedge under an attached lean-to on single-storey designs) — bay by bay,
+            // in the wall's own material. (On multi-storey designs, the 2nd storey's own
+            // wall assembly owns the upper face).
+            if (Math.ceil(storeys) <= 1) {
+              for (let b = 0; b < bays; b += 1) {
+                const yBot = visible[b] ? bayTops[b] : kneeH;
+                const hWall = bayWallTops[b] - yBot;
+                if (hWall < 0.3) continue;
+                const alongCenter = alongAt((b + 0.5) / bays);
+                const tWall = rSg.thicknessFt || 0.7;
+                const m = horizNS
+                  ? box(bayLen - 0.02, hWall, tWall, width / 2 + alongCenter, yBot + hWall / 2, side === 'south' ? depth - tWall / 2 : tWall / 2, wallMatFor(side))
+                  : box(tWall, hWall, bayLen - 0.02, side === 'east' ? width - tWall / 2 : tWall / 2, yBot + hWall / 2, depth / 2 + alongCenter, wallMatFor(side));
+                bandPart(m);
+              }
             }
           }
           // HEAVY greenhouse framing — with a structural frame chosen, the

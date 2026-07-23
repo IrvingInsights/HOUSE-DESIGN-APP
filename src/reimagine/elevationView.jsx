@@ -209,6 +209,25 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
     if (onSelectId) onSelectId(el.id);
     setDrag({ deck: { id: el.id, origAlong: horiz ? (Number(el.x) || 0) : (Number(el.y) || 0), x: Number(el.x) || 0, y: Number(el.y) || 0 }, startFx: fx, ghostAlong: null });
   }
+
+  function startGreenhouseDrag(event, room) {
+    if (!onMoveObject) return;
+    event.stopPropagation();
+    event.preventDefault();
+    try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
+    const { fx } = toFeet(event);
+    if (onSelectId) onSelectId(room.id);
+    setDrag({
+      greenhouse: {
+        id: room.id,
+        origAlong: horiz ? (Number(room.x) || 0) : (Number(room.y) || 0),
+        x: Number(room.x) || 0,
+        y: Number(room.y) || 0
+      },
+      startFx: fx,
+      ghostAlong: null
+    });
+  }
   const sillOf = (o) => {
     const prof = OPENING_TYPES[o.type] || OPENING_TYPES.window;
     return Number.isFinite(Number(o.sillFt)) ? Number(o.sillFt) : prof.sill;
@@ -239,12 +258,31 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
     onSelect(idx);
   }
 
+  const [viewOverride, setViewOverride] = useState(null);
+  const [panDrag, setPanDrag] = useState(null);
+
   function onPointerMove(event) {
+    if (panDrag) {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const cur = panDrag.orig;
+      const fpp = Math.max(cur.w / rect.width, cur.h / rect.height);
+      const dx = (event.clientX - panDrag.cx) * fpp;
+      const dy = (event.clientY - panDrag.cy) * fpp;
+      setViewOverride({ x: cur.x - dx, y: cur.y - dy, w: cur.w, h: cur.h });
+      return;
+    }
     if (!drag) return;
     if (drag.deck) {
       const { fx } = toFeet(event);
       const dAlong = (flipX ? -1 : 1) * (fx - drag.startFx);
       setDrag((d) => (d ? { ...d, ghostAlong: snapHalf(d.deck.origAlong + dAlong) } : d));
+      return;
+    }
+    if (drag.greenhouse) {
+      const { fx } = toFeet(event);
+      const dAlong = (flipX ? -1 : 1) * (fx - drag.startFx);
+      setDrag((d) => (d ? { ...d, ghostAlong: clampN(snapHalf(d.greenhouse.origAlong + dAlong), 0, Math.max(0, run - 2)) } : d));
       return;
     }
     if (drag.wallShape) {
@@ -282,6 +320,10 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   }
 
   function onPointerUp() {
+    if (panDrag) {
+      setPanDrag(null);
+      return;
+    }
     if (!drag) return;
     if (drag.deck) {
       const { deck, ghostAlong } = drag;
@@ -289,6 +331,18 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
       if (ghostAlong == null || Math.abs(ghostAlong - deck.origAlong) < 0.01) return;
       if (horiz) onMoveObject(deck.id, ghostAlong, deck.y);
       else onMoveObject(deck.id, deck.x, ghostAlong);
+      return;
+    }
+    if (drag.greenhouse) {
+      const { greenhouse, ghostAlong } = drag;
+      setDrag(null);
+      if (ghostAlong == null || Math.abs(ghostAlong - greenhouse.origAlong) < 0.01) return;
+      const room = spec.rooms.find((r) => r.id === greenhouse.id);
+      if (room) {
+        const nx = horiz ? ghostAlong : (Number(room.x) || 0);
+        const ny = horiz ? (Number(room.y) || 0) : ghostAlong;
+        onMoveObject(greenhouse.id, nx, ny);
+      }
       return;
     }
     if (drag.wallShape) {
@@ -306,8 +360,6 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
   const pad = 3.2;
   const soil = 2.4;
-  // the face covers the wall AND every deck sticking past its ends (a deck
-  // 8 ft west of the house was clipped mid-slab before)
   const deckSpansEl = wallDecks.map(({ el }) => {
     const s0d = horiz ? (Number(el.x) || 0) : (Number(el.y) || 0);
     const s1d = s0d + (horiz ? (Number(el.w) || 10) : (Number(el.d) || 8));
@@ -315,21 +367,91 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   });
   const vx0 = Math.min(0, ...deckSpansEl.map(([a]) => a)) - pad;
   const vx1 = Math.max(run, ...deckSpansEl.map(([, b]) => b)) + pad;
-  const vb = `${vx0} ${-2.2} ${vx1 - vx0} ${maxTop + 2.2 + soil + 2.4}`;
+  const baseW = vx1 - vx0;
+  const baseViewH = maxTop + 2.2 + soil + 2.4;
+  const baseBox = { x: vx0, y: -2.2, w: baseW, h: baseViewH };
+  const baseBoxRef = useRef(baseBox); baseBoxRef.current = baseBox;
+
+  const curBox = viewOverride || baseBox;
+  const vbRef = useRef(curBox); vbRef.current = curBox;
+  const vb = `${curBox.x} ${curBox.y} ${curBox.w} ${curBox.h}`;
+
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    setViewOverride(null);
+  }, [wall]);
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    const container = containerRef.current;
+    if (!svg && !container) return undefined;
+    const onWheel = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const targetSvg = svgRef.current;
+      if (!targetSvg) return;
+      const ctm = targetSvg.getScreenCTM();
+      if (!ctm) return;
+      const point = targetSvg.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      const user = point.matrixTransform(ctm.inverse());
+      const factor = Math.pow(1.002, event.deltaY);
+      setViewOverride((current) => {
+        const cur = current || baseBoxRef.current;
+        const w = clampN(cur.w * factor, 3, Math.max(240, baseBoxRef.current.w * 4));
+        const scale = w / cur.w;
+        return {
+          x: user.x - (user.x - cur.x) * scale,
+          y: user.y - (user.y - cur.y) * scale,
+          w,
+          h: cur.h * scale
+        };
+      });
+    };
+    if (svg) svg.addEventListener('wheel', onWheel, { passive: false });
+    if (container) container.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      if (svg) svg.removeEventListener('wheel', onWheel);
+      if (container) container.removeEventListener('wheel', onWheel);
+    };
+  }, [wall]);
+
+  const zoomPct = Math.round((baseBox.w / curBox.w) * 100);
 
   return (
-    <div className="planWrap rz-elev-wrap">
+    <div ref={containerRef} className="planWrap rz-elev-wrap">
       {onPickWall && (
         <div
           className="rz-wallpick"
           title={`Looking at the ${wall} wall from outside${onWallHeight ? ' — drag its top edge ↕ to change the height; drag doors and windows right on the face' : ''}.`}
         >
-          {/* a few words only — the full how-to lives in the hover tip so
-              the chip never grows over the drawing */}
           <span><b>{capWord(wall)} wall</b> · from outside</span>
           {['south', 'north', 'east', 'west'].map((s) => (
             <button key={s} type="button" className={s === wall ? 'on' : ''} onClick={() => onPickWall(s)}>{capWord(s)}</button>
           ))}
+          <span style={{ width: 1, height: 16, background: 'var(--line2, #cac8bb)', margin: '0 4px' }} />
+          <button type="button" title="Zoom in (+)" onClick={() => {
+            setViewOverride((cur) => {
+              const c = cur || baseBox;
+              const w = clampN(c.w / 1.25, 4, baseBox.w * 3.5);
+              const scale = w / c.w;
+              return { x: c.x + (c.w - w) / 2, y: c.y + (c.h - c.h * scale) / 2, w, h: c.h * scale };
+            });
+          }}>＋</button>
+          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--moss, #868a7c)', padding: '0 2px' }}>{zoomPct}%</span>
+          <button type="button" title="Zoom out (-)" onClick={() => {
+            setViewOverride((cur) => {
+              const c = cur || baseBox;
+              const w = clampN(c.w * 1.25, 4, baseBox.w * 3.5);
+              const scale = w / c.w;
+              return { x: c.x + (c.w - w) / 2, y: c.y + (c.h - c.h * scale) / 2, w, h: c.h * scale };
+            });
+          }}>－</button>
+          {viewOverride !== null && (
+            <button type="button" title="Fit wall to view" onClick={() => setViewOverride(null)}>Fit</button>
+          )}
         </div>
       )}
       <svg
@@ -339,7 +461,13 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
         preserveAspectRatio="xMidYMid meet"
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerDown={() => onSelect(-1)}
+        onPointerDown={(e) => {
+          if (e.button === 0 && (e.target === svgRef.current || e.target.tagName === 'rect' || e.target.tagName === 'polygon' || e.target.tagName === 'line')) {
+            try { svgRef.current?.setPointerCapture(e.pointerId); } catch {}
+            setPanDrag({ cx: e.clientX, cy: e.clientY, orig: vbRef.current });
+          }
+          onSelect(-1);
+        }}
         onContextMenu={(event) => event.preventDefault()}
       >
         {/* ground: a soil band under the grade line */}
@@ -362,24 +490,37 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
         {glassStretches.map((s, si) => {
           const steps = Math.max(6, Math.round((s.t1 - s.t0) / 1.5));
           const topOfT = (t) => Math.min(groundProfileAt(t), glassCeilFace);
+          const isAnnex = Boolean(s.annex);
+          const plantRoom = (spec.rooms || []).find((r) => r.type === 'plant' && Number(r.level || 1) === 1);
+          const ghostAlong = drag?.greenhouse && drag.ghostAlong != null ? drag.ghostAlong : null;
+          const sW = s.t1 - s.t0;
+          const renderT0 = ghostAlong != null ? (flipX ? run - ghostAlong - sW : ghostAlong) : s.t0;
+          const renderT1 = ghostAlong != null ? renderT0 + sW : s.t1;
           const topEdge = Array.from({ length: steps + 1 }, (_, k) => {
-            const t = s.t1 - ((s.t1 - s.t0) * k) / steps;
+            const t = renderT1 - ((renderT1 - renderT0) * k) / steps;
             return `${X(t)},${Y(topOfT(t))}`;
           }).join(' ');
-          const pts = `${X(s.t0)},${Y(s.knee)} ${X(s.t1)},${Y(s.knee)} ${topEdge}`;
-          const bays = Math.max(2, Math.round((s.t1 - s.t0) / 4));
+          const pts = `${X(renderT0)},${Y(s.knee)} ${X(renderT1)},${Y(s.knee)} ${topEdge}`;
+          const bays = Math.max(2, Math.round((renderT1 - renderT0) / 4));
           return (
-            <g key={`sg${si}`} pointerEvents="none">
-              <polygon points={pts} fill="#bcd8e0" fillOpacity="0.55" stroke="#6e93a0" strokeWidth={0.12} strokeLinejoin="round" />
+            <g
+              key={`sg${si}`}
+              style={{ cursor: 'move' }}
+              onPointerDown={(e) => {
+                if (plantRoom) startGreenhouseDrag(e, plantRoom);
+                else if (onPickWall) onPickWall(wall);
+              }}
+            >
+              <polygon points={pts} fill="#bcd8e0" fillOpacity={drag?.greenhouse ? 0.8 : 0.55} stroke="#6e93a0" strokeWidth={0.12} strokeLinejoin="round" />
               {Array.from({ length: bays + 1 }, (_, k) => {
-                const t = s.t0 + ((s.t1 - s.t0) * k) / bays;
+                const t = renderT0 + ((renderT1 - renderT0) * k) / bays;
                 const yT = topOfT(t);
                 return yT - s.knee > 0.8
-                  ? <line key={k} x1={X(t)} y1={Y(s.knee)} x2={X(t)} y2={Y(yT)} stroke="#7c5c38" strokeWidth={0.22} />
+                  ? <line key={k} x1={X(t)} y1={Y(s.knee)} x2={X(t)} y2={Y(yT)} stroke="#7c5c38" strokeWidth={0.22} pointerEvents="none" />
                   : null;
               })}
-              <line x1={X(s.t0)} y1={Y(s.knee)} x2={X(s.t1)} y2={Y(s.knee)} stroke="#7c5c38" strokeWidth={0.28} />
-              <text x={(X(s.t0) + X(s.t1)) / 2} y={Y(s.knee) + 1.1} textAnchor="middle" fontSize="0.95" fill="#5d7d89">{s.label || 'slanted sun glass'}</text>
+              <line x1={X(renderT0)} y1={Y(s.knee)} x2={X(renderT1)} y2={Y(s.knee)} stroke="#7c5c38" strokeWidth={0.28} pointerEvents="none" />
+              <text x={(X(renderT0) + X(renderT1)) / 2} y={Y(s.knee) + 1.1} textAnchor="middle" fontSize="0.95" fill="#5d7d89" pointerEvents="none">{s.label || 'slanted sun glass'}</text>
             </g>
           );
         })}
@@ -448,10 +589,16 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
               {sel && (
                 <g>
                   {/* side handles — pull to widen; the labels live in feet */}
-                  <rect x={drawX - 0.45} y={Y(bottom + drawH / 2) - 0.45} width={0.9} height={0.9} rx={0.18} fill="#3C6472" stroke="#fff" strokeWidth={0.1}
-                    style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDrag(e, i, flipX ? 'end' : 'start')} />
-                  <rect x={drawX + w - 0.45} y={Y(bottom + drawH / 2) - 0.45} width={0.9} height={0.9} rx={0.18} fill="#3C6472" stroke="#fff" strokeWidth={0.1}
-                    style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDrag(e, i, flipX ? 'start' : 'end')} />
+                  <rect
+                    x={drawX - 0.25} y={Y(bottom + drawH)} width={0.5} height={drawH}
+                    fill="#3C6472" opacity={0.6} style={{ cursor: 'ew-resize' }}
+                    onPointerDown={(e) => startDrag(e, i, flipX ? 'end' : 'start')}
+                  />
+                  <rect
+                    x={drawX + w - 0.25} y={Y(bottom + drawH)} width={0.5} height={drawH}
+                    fill="#3C6472" opacity={0.6} style={{ cursor: 'ew-resize' }}
+                    onPointerDown={(e) => startDrag(e, i, flipX ? 'start' : 'end')}
+                  />
                   <text x={drawX + w / 2} y={Y(bottom + drawH) - 0.5} textAnchor="middle" fontSize="1.1" fill="#22251F" fontWeight="600" pointerEvents="none">
                     {(o.label || prof.label)} — {Math.round(w * 10) / 10}′ wide · bottom {Math.round(sill * 10) / 10}′ above its floor{isClamped ? ' · pulled to fit its wall' : ''}
                   </text>
@@ -510,7 +657,7 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
               onPointerDown={(e) => startWallDrag(e, isShed ? wall : null, run / 2, topAt(run / 2))}
             />
             <g pointerEvents="none">
-              <rect x={run / 2 - 1.3} y={Y(topAt(run / 2)) - 0.3} width={2.6} height={0.6} rx={0.3} fill="#3C6472" opacity="0.85" />
+              <rect x={run / 2 - 1.3} y={Y(topAt(run / 2)) - 0.3} width={2.6} height={0.6} rx={0.3} fill="#3C6472" opacity={0.85} />
               <text x={run / 2} y={Y(topAt(run / 2)) + 0.22} textAnchor="middle" fontSize="0.62" fill="#fff" fontWeight="700">↕</text>
             </g>
           </g>
@@ -551,7 +698,7 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
           );
         })()}
 
-        {openings.length === 0 && (
+        {openings.length === 0 && glassStretches.length === 0 && (
           <text x={run / 2} y={Y(Math.max(2, groundProfileAt(run / 2) / 2))} textAnchor="middle" fontSize="1.3" fill="#8a8271" pointerEvents="none">
             No doors or windows on this wall yet — the + Window and + Door buttons up top put them right here.
           </text>

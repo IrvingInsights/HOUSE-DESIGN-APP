@@ -2382,27 +2382,45 @@ export function applyBimOperations(currentSpec, plan) {
         // Which storey the opening lives on. Openings on different floors of the
         // same wall never clash — a ground door and a 2nd-floor window can share
         // the same run of wall, one above the other. Legacy openings are level 1.
-        const level = clamp(Math.round(Number(operation.level || 1)), 1, Math.max(1, Math.ceil(Number(next.shell.storeys || 1))));
-        const maxAlong = wall === 'north' || wall === 'south' ? next.shell.widthFt : next.shell.depthFt;
+        const requestedLevel = Math.max(1, Math.round(Number(operation.level || 1)));
+        if (requestedLevel > Number(next.shell.storeys || 1)) {
+          next.shell.storeys = requestedLevel;
+        }
+        const level = requestedLevel;
+        const plate = level > 1 ? upperPlateRect(next, level) : null;
+        const minAlong = plate ? ((wall === 'north' || wall === 'south') ? plate.x : plate.y) : 0;
+        const maxAlong = plate
+          ? ((wall === 'north' || wall === 'south') ? plate.x + plate.w : plate.y + plate.d)
+          : ((wall === 'north' || wall === 'south') ? next.shell.widthFt : next.shell.depthFt);
         const explicitPos = Number(operation.positionFt) > 0;
-        let along = clamp(Number(operation.positionFt || 0), 0, Math.max(0, maxAlong - widthFt));
+        let along = clamp(Number(operation.positionFt || (minAlong + 0.5)), minAlong, Math.max(minAlong, maxAlong - widthFt));
         const overlapsAt = (start) => next.openings.some((existing) => {
           if (existing.wall !== wall || Number(existing.level || 1) !== level) return false;
           const e0 = Number(existing.x ?? existing.y ?? 0);
           const e1 = e0 + (Number(existing.widthFt) || 3);
           return start < e1 - 0.05 && start + widthFt > e0 + 0.05;
         });
-        // No stated position (planners get lazy — everything lands at 0):
-        // slide along the wall to the first free stretch so distinct openings
-        // stay distinct instead of piling onto the corner.
+        // No stated position (GUI add): slide to a free stretch on the wall
         if (!explicitPos && overlapsAt(along)) {
-          for (let candidate = 1; candidate <= maxAlong - widthFt; candidate += 1) {
-            if (!overlapsAt(candidate)) { along = candidate; break; }
+          let foundCandidate = null;
+          for (let candidate = minAlong + 0.5; candidate <= maxAlong - widthFt; candidate += 0.5) {
+            if (!overlapsAt(candidate)) {
+              foundCandidate = candidate;
+              break;
+            }
+          }
+          if (foundCandidate !== null) {
+            along = foundCandidate;
+          } else {
+            const existingOnWall = next.openings.filter((o) => o.wall === wall && Number(o.level || 1) === level);
+            if (existingOnWall.length > 0) {
+              const maxEdge = Math.max(...existingOnWall.map((o) => (Number(o.x ?? o.y ?? 0) + (Number(o.widthFt) || 3))));
+              along = clamp(maxEdge + 0.5, minAlong, Math.max(minAlong, maxAlong - widthFt));
+            }
           }
         }
         // Optional extras: a tilt angle (tilted glazing), a shade eyebrow depth
-        // (window overhang), and an explicit dormer style (gable / shed). Only
-        // stored when meaningfully set, so plain windows stay clean.
+        // (window overhang), and an explicit dormer style (gable / shed).
         const extras = {};
         if (OPENING_TYPES[openingType].tilted || Number(operation.tiltDeg) > 0) extras.tiltDeg = clamp(Number(operation.tiltDeg || 25), 5, 60);
         if (Number(operation.shadeFt) > 0) extras.shadeFt = clamp(Number(operation.shadeFt), 0, 6);
@@ -2410,19 +2428,19 @@ export function applyBimOperations(currentSpec, plan) {
         const incoming = wall === 'north' || wall === 'south'
           ? { type: openingType, wall, x: along, widthFt, label, level, ...extras }
           : { type: openingType, wall, y: along, widthFt, label, level, ...extras };
-        // Openings have no ids, so a re-trace lands the same window again a
-        // foot to the left — forever. An EXPLICITLY placed opening that
-        // overlaps an existing one REPLACES it instead of stacking (two doors
-        // can't share the same stretch of wall in the real world either).
-        const a0 = along, a1 = along + widthFt;
-        const clashIndex = next.openings.findIndex((existing) => {
-          if (existing.wall !== wall || Number(existing.level || 1) !== level) return false;
-          const e0 = Number(existing.x ?? existing.y ?? 0);
-          const e1 = e0 + (Number(existing.widthFt) || 3);
-          return a0 < e1 - 0.05 && a1 > e0 + 0.05;
-        });
-        if (clashIndex >= 0) {
-          next.openings[clashIndex] = { ...incoming, label: operation.name || next.openings[clashIndex].label };
+        if (explicitPos) {
+          const a0 = along, a1 = along + widthFt;
+          const clashIndex = next.openings.findIndex((existing) => {
+            if (existing.wall !== wall || Number(existing.level || 1) !== level) return false;
+            const e0 = Number(existing.x ?? existing.y ?? 0);
+            const e1 = e0 + (Number(existing.widthFt) || 3);
+            return a0 < e1 - 0.05 && a1 > e0 + 0.05;
+          });
+          if (clashIndex >= 0) {
+            next.openings[clashIndex] = { ...incoming, label: operation.name || next.openings[clashIndex].label };
+          } else {
+            next.openings.push(incoming);
+          }
         } else {
           next.openings.push(incoming);
         }

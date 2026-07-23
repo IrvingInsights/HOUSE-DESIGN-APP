@@ -239,10 +239,10 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
       const point = svg.createSVGPoint();
       point.x = event.clientX; point.y = event.clientY;
       const user = point.matrixTransform(svg.getScreenCTM().inverse());
-      const factor = event.deltaY > 0 ? 1.18 : 1 / 1.18;
+      const factor = Math.pow(1.002, event.deltaY);
       setViewOverride((current) => {
         const cur = current || fitBoxRef.current;
-        const w = clamp(cur.w * factor, 8, Math.max(240, fitBoxRef.current.w * 2.5));
+        const w = clamp(cur.w * factor, 4, Math.max(280, fitBoxRef.current.w * 3.5));
         const scale = w / cur.w;
         return { x: user.x - (user.x - cur.x) * scale, y: user.y - (user.y - cur.y) * scale, w, h: cur.h * scale };
       });
@@ -761,7 +761,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                 stroke={isSel ? 'var(--active-line)' : '#5a5348'}
                 strokeWidth={isSel ? 0.4 : 0.22}
                 strokeDasharray={raw.category === 'partition' ? undefined : '0.8 0.5'}
-                pointerEvents={raw.synthetic || (buildingContext && !isContextSubject) ? 'none' : undefined}
+                pointerEvents={raw.synthetic ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
                 onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}
               />

@@ -71,11 +71,11 @@
 }
 .rz-flag-btn:hover { filter: brightness(0.85); }
 
-/* the flags card — each "to look at" opens to its reason and its fix */
+/* the flags card — docked on the left column, never covering the center model */
 .rz-flags-card {
   position: absolute; z-index: 6;
-  top: 60px; left: 50%; transform: translateX(-50%);
-  width: min(430px, calc(100vw - 32px));
+  top: 60px; left: 16px;
+  width: 336px;
   max-height: min(52vh, 460px); overflow-y: auto;
   background: color-mix(in srgb, var(--ivory, #fbfaf6) 94%, transparent);
   -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
@@ -256,10 +256,17 @@
 .rz-shape-field em { position: absolute; right: 9px; bottom: 8px; font-style: normal; font-size: 12px; color: var(--moss, #868a7c); }
 .rz-shape-x { padding-bottom: 8px; color: var(--moss, #868a7c); }
 
-/* SURFACE 3 — the Card, bottom-right, appears on tap */
+/* SURFACE 3 — the Card (docked inside Left Panel, zero canvas overlap) */
 .rz-card {
-  bottom: 20px; right: 20px; width: 300px;
-  border-radius: 16px; padding: 16px 18px 18px;
+  position: relative;
+  inset: auto;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 12px;
+  border-radius: 14px; padding: 14px 16px 16px;
+  background: color-mix(in srgb, var(--ivory, #fbfaf6) 96%, transparent);
+  border: 1px solid color-mix(in srgb, var(--evergreen, #3c6472) 35%, transparent);
+  box-shadow: 0 4px 20px rgba(30, 40, 30, 0.1);
 }
 .rz-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .rz-card-head h2 { margin: 0; font-size: 18px; font-weight: 700; color: var(--ink, #22251f); }

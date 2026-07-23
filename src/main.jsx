@@ -1280,11 +1280,9 @@ function App() {
   function addOpeningOnWall(wall, type) {
     const profile = OPENING_TYPES[type] || OPENING_TYPES.window;
     const widthFt = profile.defaultW;
-    const maxAlong = wall === 'north' || wall === 'south' ? spec.shell.widthFt : spec.shell.depthFt;
     const existing = spec.openings.filter((opening) => opening.wall === wall).length;
-    const along = clamp(4 + existing * 6, 0, Math.max(0, maxAlong - widthFt));
     void applyBackendOperations({
-      operations: [{ type: 'add_opening', wall, openingType: type, widthFt, positionFt: along, name: `${titleCase(wall)} ${profile.label} ${existing + 1}` }],
+      operations: [{ type: 'add_opening', wall, openingType: type, widthFt, positionFt: 0, name: `${titleCase(wall)} ${profile.label} ${existing + 1}` }],
       promptText: `Add ${profile.label} to ${wall} wall`,
       logPrefix: 'Windows'
     });
