@@ -145,9 +145,20 @@ export const CLADDING_TYPES = {
 // (category 'partition'). Distinct from the envelope: no weather duty, so
 // they price by face area of the chosen construction.
 export const PARTITION_TYPES = {
-  framed: { key: 'framed', label: 'Light framed (stud)', thicknessFt: 0.45, costPsf: 8,  carbonPsf: 3, color: 0xd9d5c8 },
-  cob:    { key: 'cob',    label: 'Cob (thermal mass)',  thicknessFt: 0.8,  costPsf: 14, carbonPsf: 6, color: 0xb9835e, green: true },
-  adobe:  { key: 'adobe',  label: 'Adobe brick',         thicknessFt: 0.7,  costPsf: 12, carbonPsf: 5, color: 0xa87f5e, green: true }
+  framed: { key: 'framed', label: 'Light framed (stud)', thicknessFt: 0.45, costPsf: 8,  carbonPsf: 3, color: 0xd9d5c8, chip: 'Stud',  note: 'Light framed — thin and cheap.' },
+  cob:    { key: 'cob',    label: 'Cob (thermal mass)',  thicknessFt: 0.8,  costPsf: 14, carbonPsf: 6, color: 0xb9835e, green: true, chip: 'Cob',   note: 'Earthen thermal mass — thick.' },
+  adobe:  { key: 'adobe',  label: 'Adobe brick',         thicknessFt: 0.7,  costPsf: 12, carbonPsf: 5, color: 0xa87f5e, green: true, chip: 'Adobe', note: 'Sun-dried earthen brick.' },
+  // Full natural WALL assemblies for interior walls that are really thermal
+  // boundaries (e.g. the wall to a greenhouse/sunspace). Thickness, R, cost, and
+  // carbon match the exterior straw-bale/etc., so an interior "exterior wall" is
+  // priced and drawn like the real thing. Straw bale comes flat (full) or on-edge
+  // (slimmer infill).
+  'straw-bale-flat':  { key: 'straw-bale-flat',  label: 'Straw bale (flat)',    thicknessFt: 1.6,  costPsf: 12, carbonPsf: 6,  color: 0xd8bf79, rValue: 33, green: true, chip: 'Straw bale · flat',    note: '≈19″, R-33 — full insulation, can be load-bearing.' },
+  'straw-bale-edge':  { key: 'straw-bale-edge',  label: 'Straw bale (on-edge)', thicknessFt: 1.15, costPsf: 11, carbonPsf: 5,  color: 0xd8bf79, rValue: 21, green: true, chip: 'Straw bale · on-edge', note: '≈14″, R-21 — slimmer infill, non-load-bearing.' },
+  'hemp-lime':        { key: 'hemp-lime',        label: 'Hemp-lime',            thicknessFt: 1.25, costPsf: 20, carbonPsf: 4,  color: 0xb9c49b, rValue: 22, green: true, chip: 'Hemp-lime',           note: '≈15″, R-22 — vapor-open, low carbon.' },
+  'light-straw-clay': { key: 'light-straw-clay', label: 'Light straw-clay',     thicknessFt: 1.0,  costPsf: 15, carbonPsf: 7,  color: 0xc6b077, rValue: 20, green: true, chip: 'Light straw-clay',     note: '≈12″, R-20 — form-packed, the slim natural option.' },
+  'rammed-earth':     { key: 'rammed-earth',     label: 'Rammed earth',         thicknessFt: 1.35, costPsf: 22, carbonPsf: 20, color: 0x9d7456, rValue: 12, green: true, chip: 'Rammed earth',        note: '≈16″, R-12 — mass, not insulation.' },
+  cordwood:           { key: 'cordwood',         label: 'Cordwood',             thicknessFt: 1.25, costPsf: 16, carbonPsf: 8,  color: 0x9b7652, rValue: 18, green: true, chip: 'Cordwood',            note: '≈15″, R-18 — log-ends in lime mortar.' }
 };
 
 // Basement: a real below-grade storey. shell.basementHeightFt > 0 turns it on;
@@ -2385,46 +2396,44 @@ export function applyBimOperations(currentSpec, plan) {
         const level = clamp(Math.round(Number(operation.level || 1)), 1, Math.max(1, Math.ceil(Number(next.shell.storeys || 1))));
         const maxAlong = wall === 'north' || wall === 'south' ? next.shell.widthFt : next.shell.depthFt;
         const explicitPos = Number(operation.positionFt) > 0;
-        let along = clamp(Number(operation.positionFt || 0), 0, Math.max(0, maxAlong - widthFt));
-        const overlapsAt = (start) => next.openings.some((existing) => {
-          if (existing.wall !== wall || Number(existing.level || 1) !== level) return false;
-          const e0 = Number(existing.x ?? existing.y ?? 0);
-          const e1 = e0 + (Number(existing.widthFt) || 3);
-          return start < e1 - 0.05 && start + widthFt > e0 + 0.05;
-        });
-        // No stated position (planners get lazy — everything lands at 0):
-        // slide along the wall to the first free stretch so distinct openings
-        // stay distinct instead of piling onto the corner.
-        if (!explicitPos && overlapsAt(along)) {
-          for (let candidate = 1; candidate <= maxAlong - widthFt; candidate += 1) {
-            if (!overlapsAt(candidate)) { along = candidate; break; }
-          }
-        }
+        const posKey = wall === 'north' || wall === 'south' ? 'x' : 'y';
         // Optional extras: a tilt angle (tilted glazing), a shade eyebrow depth
         // (window overhang), and an explicit dormer style (gable / shed). Only
-        // stored when meaningfully set, so plain windows stay clean.
+        // stored when meaningfully set, so plain openings stay clean.
         const extras = {};
         if (OPENING_TYPES[openingType].tilted || Number(operation.tiltDeg) > 0) extras.tiltDeg = clamp(Number(operation.tiltDeg || 25), 5, 60);
         if (Number(operation.shadeFt) > 0) extras.shadeFt = clamp(Number(operation.shadeFt), 0, 6);
         if (operation.dormerStyle === 'gable' || operation.dormerStyle === 'shed') extras.dormerStyle = operation.dormerStyle;
-        const incoming = wall === 'north' || wall === 'south'
-          ? { type: openingType, wall, x: along, widthFt, label, level, ...extras }
-          : { type: openingType, wall, y: along, widthFt, label, level, ...extras };
-        // Openings have no ids, so a re-trace lands the same window again a
-        // foot to the left — forever. An EXPLICITLY placed opening that
-        // overlaps an existing one REPLACES it instead of stacking (two doors
-        // can't share the same stretch of wall in the real world either).
-        const a0 = along, a1 = along + widthFt;
-        const clashIndex = next.openings.findIndex((existing) => {
-          if (existing.wall !== wall || Number(existing.level || 1) !== level) return false;
-          const e0 = Number(existing.x ?? existing.y ?? 0);
-          const e1 = e0 + (Number(existing.widthFt) || 3);
-          return a0 < e1 - 0.05 && a1 > e0 + 0.05;
-        });
-        if (clashIndex >= 0) {
-          next.openings[clashIndex] = { ...incoming, label: operation.name || next.openings[clashIndex].label };
+        const mkOpening = (start, w) => ({ type: openingType, wall, [posKey]: Math.max(0, Math.round(start * 2) / 2), widthFt: Math.max(0.5, Math.round(w * 2) / 2), label, level, ...extras });
+        if (explicitPos) {
+          // A DELIBERATE drop at a spot (a drag, or a traced position): place it
+          // there. If it lands on an existing opening, replace it — two openings
+          // can't share the same stretch of wall.
+          const along = clamp(Number(operation.positionFt), 0, Math.max(0, maxAlong - widthFt));
+          const clashIndex = next.openings.findIndex((existing) => {
+            if (existing.wall !== wall || Number(existing.level || 1) !== level) return false;
+            const e0 = Number(existing.x ?? existing.y ?? 0); const e1 = e0 + (Number(existing.widthFt) || 3);
+            return along < e1 - 0.05 && along + widthFt > e0 + 0.05;
+          });
+          const incoming = mkOpening(along, widthFt);
+          if (clashIndex >= 0) next.openings[clashIndex] = { ...incoming, label: operation.name || next.openings[clashIndex].label };
+          else next.openings.push(incoming);
         } else {
-          next.openings.push(incoming);
+          // Auto-add (the "+ window / + door" buttons): just ADD it, always, at
+          // full width. Drop it into the largest free gap when one fits; otherwise
+          // fan it across the wall so it doesn't land exactly on top of another.
+          // Overlaps are ALLOWED — arrange freely, tidy up in the model. Never
+          // refuse, never re-space existing openings, never replace one.
+          const onWall = next.openings.filter((o) => o.wall === wall && Number(o.level || 1) === level);
+          const spans = onWall.map((o) => { const s = Number(o.x ?? o.y ?? 0); return [s, s + (Number(o.widthFt) || 3)]; }).sort((a, b) => a[0] - b[0]);
+          const gaps = []; let cursor = 0;
+          for (const [s, e] of spans) { if (s - cursor > 0.01) gaps.push([cursor, s - cursor]); cursor = Math.max(cursor, e); }
+          if (maxAlong - cursor > 0.01) gaps.push([cursor, maxAlong - cursor]);
+          const best = gaps.reduce((m, g) => (g[1] > m[1] ? g : m), [0, 0]);
+          const start = best[1] >= widthFt + 0.25
+            ? best[0] + 0.25
+            : (onWall.length * (widthFt * 0.6)) % Math.max(1, maxAlong - widthFt + 0.5);
+          next.openings.push(mkOpening(start, widthFt));
         }
       }
       actions.push(operationDescription(operation, next));

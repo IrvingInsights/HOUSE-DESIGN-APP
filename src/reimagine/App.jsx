@@ -5,7 +5,7 @@ import { ElevationView } from './elevationView.jsx';
 import { InteriorWallView } from './interiorWallView.jsx';
 import { StackView } from './stackView.jsx';
 import {
-  applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES,
+  applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES, PARTITION_TYPES,
   INSULATION_TYPES, resolveInsulation, OPENING_TYPES, openingVerticalBand,
   FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS, storeyHeightFt, storeyElevationFt,
   footprintPolygon, polygonArea, footprintBounds, footprintEdges, hasSegmentedFootprint, splitSouthEdgeAt, roofProfile, snapPlatesToShell
@@ -2263,21 +2263,37 @@ export default function App() {
               // THE INTERIOR-WALL CARD — construction, its doorway, and the
               // whole-object actions in one place. Position + length come from
               // PlaceSizeRows above; thickness follows the construction.
-              const con = ['framed', 'cob', 'adobe'].includes(el.construction) ? el.construction : 'framed';
+              const con = PARTITION_TYPES[el.construction] ? el.construction : 'framed';
               const doorW = Math.round((Number(el.doorWFt) || 0) * 10) / 10;
               const runFt = Math.max(Number(el.w) || 0, Number(el.d) || 0);
               const setField = (field, value) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field, value }]);
+              // Changing construction also resets the wall's thickness to that
+              // assembly's — so a strawbale wall really is 1.6' thick in the plan
+              // and 3D, not a thin line wearing a strawbale label.
+              const setConstruction = (v) => {
+                const t = PARTITION_TYPES[v]?.thicknessFt || 0.45;
+                const shortIsW = (Number(el.w) || 0) <= (Number(el.d) || 0);
+                applyOps([
+                  { type: 'update_object', targetId: el.id, name: el.name, field: 'construction', value: v },
+                  { type: 'resize_object', targetId: el.id, name: el.name, w: shortIsW ? t : Number(el.w), d: shortIsW ? Number(el.d) : t, h: Number(el.h) || 8 }
+                ]);
+              };
+              // Rotate the wall 90° about its own center — swaps run and thickness.
+              const rotate90 = () => {
+                const w = Number(el.w) || 0, d = Number(el.d) || 0;
+                const cx = (Number(el.x) || 0) + w / 2, cy = (Number(el.y) || 0) + d / 2;
+                applyOps([
+                  { type: 'move_object', targetId: el.id, name: el.name, x: cx - d / 2, y: cy - w / 2 },
+                  { type: 'resize_object', targetId: el.id, name: el.name, w: d, d: w, h: Number(el.h) || 8 }
+                ]);
+              };
               return (
                 <>
                   <PickRow
                     label="Construction"
                     value={con}
-                    onChange={(v) => setField('construction', v)}
-                    options={[
-                      { value: 'framed', label: 'Stud', desc: 'Light framed — thin and cheap.' },
-                      { value: 'cob', label: 'Cob', leaf: true, desc: 'Earthen thermal mass — thick.' },
-                      { value: 'adobe', label: 'Adobe', leaf: true, desc: 'Sun-dried earthen brick.' }
-                    ]}
+                    onChange={setConstruction}
+                    options={Object.values(PARTITION_TYPES).map((t) => ({ value: t.key, label: t.chip, leaf: t.green, desc: t.note }))}
                   />
                   <label className="rz-field rz-field-num">
                     <span>Doorway width{doorW > 0 ? '' : ' — none (solid wall)'}</span>
@@ -2291,6 +2307,7 @@ export default function App() {
                   )}
                   <div className="rz-shape-note">Set the doorway width to 0 for a solid wall. Interior windows are coming next.</div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button type="button" className="rz-fresh" onClick={rotate90}>Rotate 90°</button>
                     <button type="button" className="rz-fresh" onClick={() => setViewMode('wall')}>Work on it face-on</button>
                     <button type="button" className="rz-fresh" onClick={() => applyOps([{ type: 'add_element', name: `${el.name} copy`, category: 'partition', construction: con, x: (Number(el.x) || 0) + 2, y: (Number(el.y) || 0) + 2, w: Number(el.w) || 10, d: Number(el.d) || 0.45, level: Number(el.level) || 1, widthFt: doorW, positionFt: Number(el.doorAtFt) || 0 }])}>Duplicate</button>
                   </div>

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 // A dedicated face-on 2D surface for ONE interior wall (partition) — the same
 // idea as the exterior Wall view, but an interior wall is far simpler: just a
@@ -23,8 +23,40 @@ export function InteriorWallView({ el, spec, partitions = [], onSetDoor, onPickW
   const shownAt = drag && Number.isFinite(drag.at) ? drag.at : doorAt;
 
   const pad = 2;
-  const vb = `${-pad} ${-pad} ${run + pad * 2} ${height + pad * 2}`;
+  const baseBox = { x: -pad, y: -pad, w: run + pad * 2, h: height + pad * 2 };
+  const baseBoxRef = useRef(baseBox); baseBoxRef.current = baseBox;
+  const [view, setView] = useState(null); // null = fit; else a zoomed viewBox
+  useEffect(() => { setView(null); }, [el.id]); // switching walls refits
+  const box = view || baseBox;
+  const vb = `${box.x} ${box.y} ${box.w} ${box.h}`;
   const Y = (v) => height - v; // feet measured up; paper draws down
+
+  // Scroll wheel zooms at the cursor, like the plan and exterior wall views. A
+  // manual non-passive listener so preventDefault stops the page from scrolling.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return undefined;
+    const onWheel = (event) => {
+      event.preventDefault();
+      const point = svg.createSVGPoint();
+      point.x = event.clientX; point.y = event.clientY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      const u = point.matrixTransform(ctm.inverse());
+      if (!Number.isFinite(u.x) || !Number.isFinite(u.y)) return;
+      const factor = event.deltaY > 0 ? 1.15 : 1 / 1.15;
+      setView((current) => {
+        const cur = current || baseBoxRef.current;
+        const base = baseBoxRef.current;
+        const w = Math.min(base.w * 3, Math.max(base.w * 0.12, cur.w * factor));
+        const scale = w / cur.w;
+        const next = { x: u.x - (u.x - cur.x) * scale, y: u.y - (u.y - cur.y) * scale, w, h: cur.h * scale };
+        return [next.x, next.y, next.w, next.h].every(Number.isFinite) ? next : current;
+      });
+    };
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  }, []);
 
   const toFeetX = (event) => {
     const svg = svgRef.current;
@@ -54,6 +86,7 @@ export function InteriorWallView({ el, spec, partitions = [], onSetDoor, onPickW
         {partitions.length > 1 && partitions.map((p) => (
           <button key={p.id} type="button" className={p.id === el.id ? 'on' : ''} onClick={() => onPickWall(p.id)}>{shortWallName(p.name)}</button>
         ))}
+        {view && <button type="button" title="Fit the wall back to the view" onClick={() => setView(null)}>Fit</button>}
         <button type="button" onClick={onClose}>Done</button>
       </div>
       <svg
