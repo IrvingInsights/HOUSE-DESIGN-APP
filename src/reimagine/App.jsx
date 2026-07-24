@@ -2417,26 +2417,57 @@ export default function App() {
                       <option value="gable">Covered — a little peak (gable)</option>
                     </select>
                   </label>
-                  <label className="rz-field">
-                    <span>Steps</span>
-                    <select value={['none', 'north', 'south', 'east', 'west'].includes(el.deckStairs) ? el.deckStairs : 'auto'} onChange={(e2) => setDk('deckStairs', e2.target.value)}>
-                      <option value="auto">Auto — down the longest open edge when the floor sits high</option>
-                      <option value="none">No steps</option>
-                      <option value="north">Down the north edge</option>
-                      <option value="south">Down the south edge</option>
-                      <option value="east">Down the east edge</option>
-                      <option value="west">Down the west edge</option>
-                    </select>
-                  </label>
                   {(() => {
+                    // EVERY EDGE, TESTED. Each chip says where those steps would
+                    // actually land, and an edge that can't take them is greyed
+                    // with the reason. Auto only ever fires on a GROUND-floor
+                    // deck (resolveDeck's needsSteps is level-1 only), so on an
+                    // upper deck that's stated instead of silently doing nothing.
+                    const choice = ['none', 'north', 'south', 'east', 'west'].includes(el.deckStairs) ? el.deckStairs : 'auto';
+                    const sides = ['north', 'south', 'east', 'west'].map((side) => {
+                      const t = resolveDeckStairs(spec, { ...el, deckStairs: side }, dk);
+                      const ok = Boolean(t && !t.blocked);
+                      return {
+                        side,
+                        ok,
+                        label: side[0].toUpperCase() + side.slice(1),
+                        where: ok ? (t.target === 'deck' ? `${t.up ? 'up to' : 'down to'} ${t.targetName}` : 'down to the ground') : (t?.flat ? 'already level' : 'blocked'),
+                        rise: ok ? Math.round(t.rise * 10) / 10 : null,
+                        treads: ok ? t.treads : null
+                      };
+                    });
+                    const autoDead = choice === 'auto' && !dk.needsSteps;
                     const st = resolveDeckStairs(spec, el, dk);
-                    if (!st) return null;
-                    if (st.blocked) {
-                      return <div className="rz-shape-note">{st.flat
-                        ? 'That edge is already level with what’s beside it — nothing to climb.'
-                        : 'That edge leans on the house or another deck at this level — no open stretch to run steps from. Pick another edge.'}</div>;
-                    }
-                    return <div className="rz-shape-note">Steps run {st.up ? 'up' : 'down'} the {st.side} edge — {Math.round(st.rise * 10) / 10} ft, {st.treads} treads, {st.target === 'deck' ? `${st.up ? 'up to' : 'down onto'} ${st.targetName}` : 'down to the ground'}.</div>;
+                    return (
+                      <div className="rz-field">
+                        <span>Steps — which edge you walk down</span>
+                        <div className="ctlChips">
+                          <button type="button" className={`rz-pick-chip${choice === 'none' ? ' on' : ''}`} onClick={() => setDk('deckStairs', 'none')}>No steps</button>
+                          <button type="button" className={`rz-pick-chip${choice === 'auto' ? ' on' : ''}`} title="Ground-floor decks only" onClick={() => setDk('deckStairs', 'auto')}>Auto</button>
+                          {sides.map((s) => (
+                            <button
+                              key={s.side}
+                              type="button"
+                              className={`rz-pick-chip${choice === s.side ? ' on' : ''}`}
+                              style={s.ok ? undefined : { opacity: 0.45 }}
+                              title={s.ok ? `${s.rise} ft, ${s.treads} treads — ${s.where}` : `No steps off this edge — ${s.where}`}
+                              onClick={() => setDk('deckStairs', s.side)}
+                            >{s.label}{s.ok ? ` · ${s.where}` : ' · blocked'}</button>
+                          ))}
+                        </div>
+                        {autoDead && (
+                          <div className="rz-shape-note">⚠ <b>Auto only adds steps to a ground-floor deck.</b> This one sits {Math.round(dk.topFt)} ft up — pick an edge above to run stairs down from it.</div>
+                        )}
+                        {st && !st.blocked && (
+                          <div className="rz-shape-note">Steps run {st.up ? 'up' : 'down'} the {st.side} edge — {Math.round(st.rise * 10) / 10} ft, {st.treads} treads, {st.target === 'deck' ? `${st.up ? 'up to' : 'down onto'} ${st.targetName}` : 'down to the ground'}.</div>
+                        )}
+                        {st && st.blocked && (
+                          <div className="rz-shape-note">{st.flat
+                            ? 'That edge is already level with what’s beside it — nothing to climb.'
+                            : 'That edge leans on the house or another deck at this level — pick one of the open edges above.'}</div>
+                        )}
+                      </div>
+                    );
                   })()}
                   <div className="rz-shape-note">
                     Railings and their cost only grow on edges facing open air — push this deck against the house (a doorway) or against another deck (a wraparound) and the shared edge opens up.
