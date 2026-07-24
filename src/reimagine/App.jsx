@@ -251,6 +251,7 @@ export default function App() {
   });
   const setLook = (v) => { setLookMode(v); try { localStorage.setItem('rz.look.v1', v); } catch { /* fine */ } };
   const [moreOpen, setMoreOpen] = useState(false); // the full chapter controls, one tap from the quick toolbar
+  const [receiptsOpen, setReceiptsOpen] = useState(true); // the cost list; collapses to just its total
   const [flagsPopOpen, setFlagsPopOpen] = useState(false);
   // Entering the Frame chapter shows the bones; leaving restores what was
   // shown before. Picking from the Show dropdown by hand wins over both.
@@ -1566,8 +1567,17 @@ export default function App() {
             </button>
           </div>
 
-          <div className="st-receipts st-panel">
-            <div className="st-receipts-head">Receipts</div>
+          <div className={`st-receipts st-panel${receiptsOpen ? '' : ' collapsed'}`}>
+            {/* Collapse it out of the way — the running total stays visible. */}
+            <button
+              type="button"
+              className="st-receipts-head"
+              title={receiptsOpen ? 'Collapse the receipts — the total stays' : 'Show every line'}
+              onClick={() => setReceiptsOpen((v) => !v)}
+            >
+              <span>Receipts</span>
+              <span className="st-receipts-caret">{receiptsOpen ? '▾' : `${fmtMoney(derived.total)} ▸`}</span>
+            </button>
             <div className="st-receipts-body">
               {COST_ROWS.map(({ key, label }) => {
                 const amount = Number(derived.cost?.[key]) || 0;
