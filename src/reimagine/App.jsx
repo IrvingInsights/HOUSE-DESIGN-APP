@@ -1784,14 +1784,23 @@ export default function App() {
                   />
                 )}
                 <div className="rz-found-head">Add a room{activeFloor !== 1 ? ` — ${floorLabel(spec, activeFloor).toLowerCase()}` : ''}</div>
-                <div className="rz-found-palette rz-rooms-palette">
-                  {ROOM_PRESETS.map((preset) => (
-                    <button key={preset.name} type="button" title={`${preset.w} × ${preset.d} ft to start — drag and resize it after`} onClick={() => addRoomPreset(preset)}>
-                      <b>{preset.name}</b>
-                      <small>{preset.w} × {preset.d} ft</small>
-                    </button>
-                  ))}
-                </div>
+                {/* One pulldown instead of nine tiles — the presets took most of
+                    the page and pushed everything else below the fold. */}
+                <label className="rz-field">
+                  <span>Drop one in — drag and resize it after</span>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const preset = ROOM_PRESETS.find((p) => p.name === e.target.value);
+                      if (preset) addRoomPreset(preset);
+                    }}
+                  >
+                    <option value="">Pick a room…</option>
+                    {ROOM_PRESETS.map((preset) => (
+                      <option key={preset.name} value={preset.name}>{preset.name} — {preset.w} × {preset.d} ft</option>
+                    ))}
+                  </select>
+                </label>
                 <CustomRoomAdd onAdd={(preset) => addRoomPreset(preset)} />
                 {(floors > 1 || hasBasement) && (
                   <button
@@ -2210,6 +2219,12 @@ export default function App() {
           onGlassWall={selectedRoom.type === 'plant' && Number(selectedRoom.level || 1) === 1
             ? () => glazeForRoom(selectedRoom) : null}
           doorSides={roomDoorSides(selectedRoom)}
+          interiorWalls={(spec.elements || []).filter((e) => e.category === 'partition'
+            && Number(e.level || 1) === Number(selectedRoom.level || 1)
+            // touching or overlapping this room's footprint (walls sit ON the edge)
+            && e.x < Number(selectedRoom.x) + Number(selectedRoom.w) + 1 && e.x + e.w > Number(selectedRoom.x) - 1
+            && e.y < Number(selectedRoom.y) + Number(selectedRoom.d) + 1 && e.y + e.d > Number(selectedRoom.y) - 1)}
+          onSetWallDoor={(w, v) => applyOps([{ type: 'update_object', targetId: w.id, name: w.name, field: 'doorWFt', value: v }])}
           onAddOpening={(side, type) => addRoomOpening(selectedRoom, side, type)}
         />
       )}
@@ -2957,7 +2972,7 @@ function PlaceSizeRows({ obj, onMove, onResize }) {
   );
 }
 
-function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose, onMassWall = null, onGlassWall = null, doorSides = [], onAddOpening = null }) {
+function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose, onMassWall = null, onGlassWall = null, doorSides = [], onAddOpening = null, interiorWalls = [], onSetWallDoor = null }) {
   const [doorSideRaw, setDoorSide] = useState('');
   const doorSide = doorSides.includes(doorSideRaw) ? doorSideRaw : doorSides[0];
   const [expanded, setExpanded] = useState(false);
@@ -2998,8 +3013,35 @@ function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose
           <button type="button" onClick={() => onAddOpening(doorSide, 'window')}>+ Window</button>
         </div>
       ) : (
-        <div className="rz-muted">This room doesn’t touch an outside wall — doorways between rooms aren’t drawn yet.</div>
+        <div className="rz-muted">This room doesn’t touch an outside wall — its doors go in the walls it shares with the next room, below.</div>
       ))}
+
+      {/* DOORS TO THE NEXT ROOM — the interior walls around this room, each with
+          its doorway. It's the SAME opening you'd set on the wall itself; this
+          just lets you do it room by room without hunting for the wall. */}
+      {onSetWallDoor && interiorWalls.length > 0 && (
+        <>
+          <div className="rz-found-head" style={{ marginTop: 10 }}>Doors to the next room</div>
+          {interiorWalls.map((w) => {
+            const dw = Math.round((Number(w.doorWFt) || 0) * 10) / 10;
+            const neighbor = String(w.name || 'Wall').replace(/ wall$/i, '').replace(new RegExp(`^${room.name}\\s*/\\s*`, 'i'), '').replace(new RegExp(`\\s*/\\s*${room.name}$`, 'i'), '');
+            return (
+              <div key={w.id} className="rz-field rz-field-num">
+                <span>{neighbor || w.name}</span>
+                {dw > 0 ? (
+                  <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <NumInput value={dw} min={0.5} max={12} step={0.5} unit="ft" onCommit={(v) => onSetWallDoor(w, v)} />
+                    <button type="button" className="rz-pick-chip" onClick={() => onSetWallDoor(w, 0)}>Wall it up</button>
+                  </span>
+                ) : (
+                  <button type="button" className="rz-pick-chip" onClick={() => onSetWallDoor(w, 3)}>＋ Doorway</button>
+                )}
+              </div>
+            );
+          })}
+          <div className="rz-shape-note">Same opening you'd set on the wall itself — slide it along the face in the Wall view.</div>
+        </>
+      )}
 
       <div className="rz-vitals">
         <Vital label="Use" value={TYPE_LABEL[room.type] || room.type || '—'} />
