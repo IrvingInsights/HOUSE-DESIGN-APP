@@ -1748,6 +1748,16 @@ export function openingVerticalBand(spec, opening, { roofUnderAt = null } = {}) 
     return Number.isFinite(r) ? r : conservativeRoof;
   })();
   // which storey's wall actually spans this stretch? (centre-point test)
+  //
+  // TWO questions, and for a long time this asked only the first. ALONG the
+  // wall: does the storey's plate cover the stretch where this opening sits?
+  // And — the one that was missing — does that plate REACH THIS WALL AT ALL?
+  // A second storey set back from the south wall covers the whole width and
+  // still has no south wall to put a window in; testing only the along-axis
+  // said "yes, it spans" and hung five windows on a wall that is not there.
+  // The 3D caught it by accident (its roof test found open sky above them) and
+  // the elevation view, which passes no roof, drew them two storeys up. Same
+  // spec, two answers — exactly what the shared band law exists to prevent.
   const spansHere = (lv) => {
     if (lv <= 1) return true;
     const el = (spec.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === lv);
@@ -1755,7 +1765,16 @@ export function openingVerticalBand(spec, opening, { roofUnderAt = null } = {}) 
     const lo = horiz ? (Number(el.x) || 0) : (Number(el.y) || 0);
     const hi = lo + Math.max(1, Number(horiz ? el.w : el.d) || (horiz ? width : depth));
     const c = a0 + w / 2;
-    return c > lo - 0.1 && c < hi + 0.1;
+    if (!(c > lo - 0.1 && c < hi + 0.1)) return false;
+    const px0 = Number(el.x) || 0;
+    const pz0 = Number(el.y) || 0;
+    const px1 = px0 + Math.max(1, Number(el.w) || width);
+    const pz1 = pz0 + Math.max(1, Number(el.d) || depth);
+    const tol = 0.5;
+    if (side === 'south') return pz1 >= depth - tol;
+    if (side === 'north') return pz0 <= tol;
+    if (side === 'east') return px1 >= width - tol;
+    return px0 <= tol; // west
   };
   let level = Math.min(Math.max(1, Math.round(Number(opening.level || 1))), storeys);
   let dropped = false;

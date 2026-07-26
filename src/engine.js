@@ -3894,7 +3894,49 @@ export function detectIssues(spec) {
   // Openings must FIT their walls vertically (the band law). A window on a
   // wall shrunk to a kneewall, or hanging past its storey's plate, renders
   // pulled into the nearest real wall — this names it in plain words.
+  // A WHOLE WALL WITH NO UPPER STOREY BEHIND IT. When a storey is set back
+  // from one side, every window marked for that floor on that side is orphaned
+  // at once — and "slide it along the wall to where its floor stands" is
+  // useless advice, because that floor does not reach this wall ANYWHERE.
+  // Say it once, name the gap, and offer the two moves that actually help.
+  const orphanedWalls = new Map();
   (spec.openings || []).forEach((opening, oi) => {
+    const lvl = Number(opening.level || 1);
+    if (lvl < 2 || opening.wall === 'roof') return;
+    if (openingVerticalBand(spec, opening).reason !== 'no-storey-here') return;
+    const plate = (spec.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === lvl);
+    if (!plate) return;
+    const W = Number(spec.shell.widthFt) || 0; const D = Number(spec.shell.depthFt) || 0;
+    const px0 = Number(plate.x) || 0; const pz0 = Number(plate.y) || 0;
+    const gap = opening.wall === 'south' ? D - (pz0 + (Number(plate.d) || 0))
+      : opening.wall === 'north' ? pz0
+      : opening.wall === 'east' ? W - (px0 + (Number(plate.w) || 0))
+      : px0;
+    if (!(gap > 0.5)) return; // it reaches this wall; the opening is orphaned for some other reason
+    const key = `${opening.wall}:${lvl}`;
+    const seen = orphanedWalls.get(key) || { wall: opening.wall, level: lvl, gap, plate, indices: [] };
+    seen.indices.push(oi);
+    orphanedWalls.set(key, seen);
+  });
+  const grouped = new Set();
+  for (const info of orphanedWalls.values()) {
+    info.indices.forEach((i) => grouped.add(i));
+    const n = info.indices.length;
+    issues.push({
+      severity: 'warning',
+      title: `${n} window${n === 1 ? '' : 's'} on the ${info.wall} wall belong to floor ${info.level}, which stops ${Math.round(info.gap)} ft short of it`,
+      owner: 'Architect', system: 'windows',
+      // Every opening this flag speaks for, by index. The band-law invariant
+      // (design_space_test I7) demands that no clamped opening goes unmentioned;
+      // grouping five into one message is only allowed because the group still
+      // names every one of them.
+      fixId: 'storey-reach-wall', openingIndices: info.indices,
+      wall: info.wall, level: info.level, gapFt: info.gap, plateId: info.plate.id,
+      fix: `Floor ${info.level} is set back from the ${info.wall} wall, so there is no wall up there to hold ${n === 1 ? 'it' : 'them'} — ${n === 1 ? 'it is' : 'they are'} drawn on the floor below for now, dashed. Either stretch floor ${info.level} out to that wall (the button below, or drag its outline on the ${info.level}-floor plan), or move ${n === 1 ? 'the window' : 'those windows'} down a floor and leave the single-storey stretch as it is.`
+    });
+  }
+  (spec.openings || []).forEach((opening, oi) => {
+    if (grouped.has(oi)) return;
     const bandChk = openingVerticalBand(spec, opening);
     if (!bandChk.clamped) return;
     const label = opening.label || (OPENING_TYPES[opening.type] || OPENING_TYPES.window).label;
@@ -4205,9 +4247,15 @@ export function detectIssues(spec) {
         { side: 'east', gap: Math.abs(shellW - (ghX + ghW)), from: ghY, to: ghY + ghD },
         { side: 'west', gap: Math.abs(ghX), from: ghY, to: ghY + ghD }
       ].sort((a, b) => a.gap - b.gap)[0];
+      // Openings store their run along the wall as x (north/south) or y
+      // (east/west) — positionFt is the OP's field name, not the stored one,
+      // and reading it here quietly put every opening at position 0.
       const inSpan = (o) => {
-        const at = Number(o.positionFt) || 0;
-        return o.wall === nearest.side && at >= nearest.from - 2 && at <= nearest.to + 2;
+        if (o.wall !== nearest.side) return false;
+        const horizWall = nearest.side === 'north' || nearest.side === 'south';
+        const at = Number(horizWall ? o.x : o.y);
+        if (!Number.isFinite(at)) return false;
+        return at >= nearest.from - 2 && at <= nearest.to + 2;
       };
       const ghGlass = (spec.openings || []).some((o) => inSpan(o));
       // High vent: hot air leaves at the top or it does not leave.

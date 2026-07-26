@@ -762,6 +762,40 @@ async function httpSanity() {
   ok(cov?.deckRail === 'cable' && cov?.deckRoof === 'gable', 'add_element keeps the covered deck\'s railing and roof choices');
 }
 
+// --- a storey set back from a wall has NO wall on that side ------------------
+// Daniel's south face, 2026-07-26. The second storey is 28x32 on a 28x39 house
+// — set back 7 ft from the south wall. Five south windows were marked for
+// floor 2, where there is no floor-2 wall to hold them. The band law's
+// spansHere() asked only "does the plate cover this stretch ALONG the wall"
+// (it does — full width) and never "does the plate REACH this wall" (it does
+// not). The 3D caught it sideways, via its roof test finding open sky; the
+// elevation view, which passes no roof function, drew them two storeys up.
+// Same spec, two answers, from the law that exists to give one.
+{
+  const s = freshSpec();
+  s.shell.storeys = 2;
+  s.shell.widthFt = 28; s.shell.depthFt = 39;
+  s.elements = [{ id: 'storey-2-extent', name: 'Storey 2 extent', category: 'floor', x: 0, y: 0, w: 28, d: 32, h: 0.4, level: 2, z: 12 }];
+  s.openings = [
+    { type: 'window', wall: 'south', x: 10, widthFt: 6, sillFt: 1.5, level: 2, label: 'orphan south' },
+    { type: 'window', wall: 'east', y: 10, widthFt: 6, sillFt: 1.5, level: 2, label: 'good east' },
+    { type: 'window', wall: 'north', x: 10, widthFt: 6, sillFt: 1.5, level: 2, label: 'good north' }
+  ];
+  const bandOf = (spec, i) => openingVerticalBand(spec, spec.openings[i]);
+  ok(bandOf(s, 0).level === 1, 'a window on floor 2 of a wall floor 2 does not reach drops to the wall that is really there');
+  ok(bandOf(s, 0).reason === 'no-storey-here', 'and it says WHY, so the drawing can dash it and the flag can name it');
+  ok(bandOf(s, 1).level === 2, 'the east wall, which the storey DOES reach, keeps its second-floor window');
+  ok(bandOf(s, 2).level === 2, 'so does the north');
+  // Stretch the storey to the south wall and the window belongs there again.
+  const grown = apply(s, [{ type: 'resize_object', targetId: 'storey-2-extent', name: 'Storey 2 extent', w: 28, d: 39, h: 0.4 }]).spec;
+  ok(bandOf(grown, 0).level === 2, 'stretch the storey out to that wall and the window is home — the fix the flag offers');
+  // A full-footprint storey must be unaffected: this is the common case.
+  const full = freshSpec();
+  full.shell.storeys = 2;
+  full.openings = [{ type: 'window', wall: 'south', x: 10, widthFt: 6, sillFt: 1.5, level: 2 }];
+  ok(openingVerticalBand(full, full.openings[0]).level === 2, 'a storey with no plate at all is a full-footprint stack and keeps every wall');
+}
+
 // --- shade devices and the whole-house fan ----------------------------------
 {
   const r = apply(freshSpec(), [
