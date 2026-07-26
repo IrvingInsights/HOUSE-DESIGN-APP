@@ -773,7 +773,24 @@ export default function App() {
     if (isStair(obj)) {
       const st = resolveStair(spec, obj);
       const next = STAIR_FACING_ORDER[(STAIR_FACING_ORDER.indexOf(st.facing) + 1) % STAIR_FACING_ORDER.length];
-      applyOps([{ type: 'set_stair', id: obj.id, field: 'facing', value: next }]);
+      // A STAIR TURNS ON THE SPOT TOO. resolveStair anchors the whole assembly
+      // at its MINIMUM CORNER so dragging works — which means changing the way
+      // it climbs swings the body around that corner and throws it across the
+      // room. That is the same corner-pivot that cost a session once already,
+      // and turning it with a button walked straight back into it.
+      // Ask the resolver where the turned stair WOULD sit, then put its middle
+      // back where the old one's was. One batched dispatch: two calls would
+      // race on stale state and only the last would land.
+      const before = st.bbox;
+      const cx = before.x + before.w / 2;
+      const cy = before.y + before.d / 2;
+      const after = resolveStair(spec, { ...obj, stair: { ...(obj.stair || {}), facing: next } });
+      const nx = Math.round((cx - after.bbox.w / 2) * 10) / 10;
+      const ny = Math.round((cy - after.bbox.d / 2) * 10) / 10;
+      applyOps([
+        { type: 'set_stair', id: obj.id, field: 'facing', value: next },
+        { type: 'move_object', targetId: obj.id, name: obj.name, x: nx || 0.01, y: ny || 0.01 }
+      ]);
       return;
     }
     const w = Math.max(0.1, Number(obj.w) || 0);

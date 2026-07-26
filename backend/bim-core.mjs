@@ -155,7 +155,14 @@ export const ROOF_COVERINGS = {
   living:      { key: 'living',      label: 'Living (green) roof',   costPsf: 22, carbonPsf: 6,  color: 0x6d8a52, texture: 'plaster',  catchment: false, pitch: [0.02, 0.25], green: true, note: 'Vegetated: heavy, so it needs structure, membrane and drainage. Low pitch only.' },
   clay:        { key: 'clay',        label: 'Clay tile',             costPsf: 18, carbonPsf: 16, color: 0xa8624a, texture: 'concrete', catchment: true,  pitch: [0.33, 1.0], note: 'Heavy but lasts a century.' },
   asphalt:     { key: 'asphalt',     label: 'Asphalt shingles',      costPsf: 5,  carbonPsf: 14, color: 0x4f4a45, texture: 'plaster',  catchment: false, pitch: [0.17, 1.0], note: 'Cheapest and most common; petroleum-based, not catchment-safe.' },
-  membrane:    { key: 'membrane',    label: 'EPDM membrane',         costPsf: 8,  carbonPsf: 13, color: 0x3f4442, texture: 'plaster',  catchment: false, pitch: [0, 0.15], note: 'For flat and near-flat roofs.' }
+  membrane:    { key: 'membrane',    label: 'EPDM membrane',         costPsf: 8,  carbonPsf: 13, color: 0x3f4442, texture: 'plaster',  catchment: false, pitch: [0, 0.15], note: 'For flat and near-flat roofs.' },
+  // A ROOF YOU CAN SEE THROUGH. Daniel, on roofing the carport that stands
+  // right beside his greenhouse: "if we roof it with clear poly it won't
+  // obscure the greenhouse." Every other covering here stops light dead, which
+  // is fine over a house and wrong over anything a greenhouse has to see past.
+  // Twin-wall polycarbonate is the standard answer — light, cheap, spans on
+  // purlins. Not catchment-safe for drinking; fine for the garden.
+  polycarb:    { key: 'polycarb',    label: 'Clear polycarbonate',   costPsf: 9,  carbonPsf: 11, color: 0xd8e6ee, texture: 'metal',    catchment: false, pitch: [0.08, 1.2], translucent: true, note: 'Light passes straight through — for a carport or a lean-to beside glass, where a solid roof would put the thing behind it in shade. Garden water only, not drinking.' }
 };
 
 export function resolveRoofCovering(shell = {}) {

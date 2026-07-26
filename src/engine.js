@@ -376,7 +376,16 @@ export function sitePadRect(spec) {
 export function objectBounds(spec, object) {
   const pad = padExtension(spec.shell);
   const gridSize = Number(spec.shell?.outdoorGridSizeFt || DEFAULT_OUTDOOR_GRID_SIZE_FT);
-  const isPlacedElement = Boolean((spec.elements || []).some((element) => element.id === object?.id));
+  // AN ELEMENT IS AN ELEMENT BEFORE IT IS IN THE LIST. This asked "is this id
+  // already in spec.elements?", which is false for the one being added right
+  // now — so a NEW element got the tight indoor margin and an EXISTING one got
+  // the generous outdoor margin. Daniel's carport, placed 20 ft east of the
+  // house exactly over its own pad, was dragged 4 ft west onto the house; drag
+  // it by hand afterwards and it is allowed straight back out. Same object,
+  // two different rules, depending only on whether it had been saved yet.
+  // Elements carry a category; rooms carry a type. That is the real test.
+  const isPlacedElement = Boolean(object?.category)
+    || (spec.elements || []).some((element) => element.id === object?.id);
   const isOutdoorSpace = OUTDOOR_SPACE_TYPES.has(object?.type) || OUTDOOR_SPACE_TYPES.has(object?.category);
   const margin = isPlacedElement || isOutdoorSpace ? Math.max(gridSize / 2, pad + 24) : Math.max(16, pad * 0.25);
   return {
