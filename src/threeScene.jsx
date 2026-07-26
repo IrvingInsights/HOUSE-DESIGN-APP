@@ -605,6 +605,21 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           }
           return out;
         };
+        // Does a deck from the storey above stand on this piece of roof? If
+        // most of the piece is under one, that piece IS the deck's substrate:
+        // one flat assembly instead of a sloped roof with a platform floating
+        // through it. Two thirds is the bar — a deck clipping a corner of a
+        // big roof does not turn the whole thing into a terrace.
+        const deckStandsOn = (rect, lvl) => (spec.elements || []).some((el) => {
+          if (el.category !== 'deck') return false;
+          const dk = resolveDeck(spec, el);
+          if (Number(dk.level || 1) <= lvl) return false;
+          const ex = Number(el.x) || 0; const ez = Number(el.y) || 0;
+          const ew = Math.max(1, Number(el.w) || 0); const ed = Math.max(1, Number(el.d) || 0);
+          const ox = Math.max(0, Math.min(rect.x + rect.w, ex + ew) - Math.max(rect.x, ex));
+          const oz = Math.max(0, Math.min(rect.y + rect.d, ez + ed) - Math.max(rect.y, ez));
+          return ox * oz > 0.66 * Math.max(0.01, rect.w * rect.d);
+        });
         const touchSide = (rect, above) => {
           const overlapX = rect.x < above.x + above.w && rect.x + rect.w > above.x;
           const overlapY = rect.y < above.y + above.d && rect.y + rect.d > above.y;
@@ -635,7 +650,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               ring.forEach((rect) => porchRings.push({ rect, level: below.level, topEave: below.topEave, hostRect: below.rect }));
               continue;
             }
-            ring.forEach((rect) => segments.push({ rect, eave: below.topEave, aboveTop: above.topEave, aboveLevel: above.level, kind: 'wing', highSide: touchSide(rect, above.rect), level: below.level, tierDrop: storeyLift - upThru(below.level), tierY0: below.rect.y, tierX0: below.rect.x, tiered: true }));
+            ring.forEach((rect) => segments.push({ rect, eave: below.topEave, aboveTop: above.topEave, aboveLevel: above.level, kind: 'wing', highSide: touchSide(rect, above.rect), level: below.level, tierDrop: storeyLift - upThru(below.level), tierY0: below.rect.y, tierX0: below.rect.x, tiered: true, roofDeck: deckStandsOn(rect, below.level) }));
           }
         } else {
           decomposeFootprint(fpPoly).forEach((rect) => segments.push({ rect, eave: wallHeight, kind: 'full', upper: true, level: storeyTiers.length }));
@@ -665,7 +680,20 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // makeGableSegment, planar ones to makeShedPiece), so plan and mesh
           // stay coordinate-identical and the one-roof law holds.
           const tierShape = seg.tiered && (seg.level || 1) > 1 ? tierShapeOf(seg.level) : null;
-          if (tierShape === 'flat') {
+          // THE DECK IS THE ROOF. Where a deck on the storey above stands over
+          // this piece, the two are one assembly, not two: a flat roof with its
+          // decking laid on top, which is what a roof deck has always been. It
+          // used to build a SLOPED roof here and then float a deck platform
+          // through it — Daniel's greenhouse roof ran 11.4→12.3 ft while the
+          // deck sat at 12.0→12.4, the two inside each other. Flat, at the
+          // storey's own floor line, so the boards land on it.
+          if (seg.roofDeck) {
+            const yD = seg.eave + JOINTS.EAVE_BEARING;
+            seg.topAt = () => yD;
+            seg.stopBearing = JOINTS.EAVE_BEARING;
+            seg.shape = 'flat';
+            seg.isRoofDeck = true;
+          } else if (tierShape === 'flat') {
             const yF = seg.eave + JOINTS.EAVE_BEARING;
             seg.topAt = () => yF;
             seg.stopBearing = JOINTS.EAVE_BEARING;
