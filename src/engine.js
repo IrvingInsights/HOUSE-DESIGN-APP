@@ -3822,9 +3822,21 @@ export function sunspacePartitions(spec) {
     ];
     edges.forEach(({ side, gap, rect }) => {
       if (gap <= 2) return; // against (or near) the shell — the shell is the wall
-      const covered = (spec.elements || []).some((e) => e.category === 'partition'
-        && Number(e.x) < rect.x + rect.w + 0.75 && Number(e.x) + Number(e.w) > rect.x - 0.75
-        && Number(e.y) < rect.y + rect.d + 0.75 && Number(e.y) + Number(e.d) > rect.y - 0.75);
+      // A WALL ONLY COVERS AN EDGE IT RUNS ALONG. This asked for a bounding-box
+      // overlap and nothing else, so the east-west wall across the greenhouse's
+      // NORTH edge also counted as covering its EAST edge — they share a corner,
+      // and a corner overlaps. The result: the app believed there was a wall
+      // between Daniel's greenhouse and his entry, drew none, and the two ran
+      // together as one space. An edge that runs north-south needs a wall that
+      // runs north-south.
+      const edgeIsHoriz = side === 'north' || side === 'south';
+      const covered = (spec.elements || []).some((e) => {
+        if (e.category !== 'partition') return false;
+        const ew = Number(e.w) || 0; const ed = Number(e.d) || 0;
+        if (edgeIsHoriz ? ew < ed : ed < ew) return false; // runs the wrong way
+        return Number(e.x) < rect.x + rect.w + 0.75 && Number(e.x) + ew > rect.x - 0.75
+          && Number(e.y) < rect.y + rect.d + 0.75 && Number(e.y) + ed > rect.y - 0.75;
+      });
       if (covered) return;
       const along = (side === 'north' || side === 'south') ? rect.w : rect.d;
       out.push({
