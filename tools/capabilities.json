@@ -288,6 +288,14 @@
       "marker": "cap-finishes-reclaimed",
       "site": "more",
       "classic": "FinishesControls"
+    },
+    {
+      "id": "structures.add",
+      "chapter": "",
+      "label": "Add a structure — shed, workshop, barn, garage, carport, porch",
+      "marker": "cap-structures-add",
+      "site": "sheet",
+      "classic": "StructurePalette"
     }
   ]
 }

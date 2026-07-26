@@ -19,7 +19,7 @@ import {
   resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons, downloadFile,
   DECK_SURFACES, resolveDeck, resolveDeckStairs, derivePartitionOps, interiorFixtures, sourceNote,
   isStair, resolveStair, STAIR_SHAPES, STAIR_FACINGS, STAIR_TURNS, STAIR_DEFAULTS, STAIR_FACING_ORDER, HEATER_FACINGS,
-  SHADE_DEVICES, ROOM_ENVELOPES, resolveRoomEnvelope
+  SHADE_DEVICES, ROOM_ENVELOPES, resolveRoomEnvelope, OUTBUILDING_PRESETS, OUTBUILDING_CONSTRUCTION
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms } from '../placement.js';
 import { STARTER_DESIGNS } from './starters.js';
@@ -2035,6 +2035,19 @@ export default function App() {
                     middle of the plan; drag it where it belongs, grab a corner to
                     resize, and its card renames/duplicates/removes it like any
                     other object. Every piece carries its cost and carbon. */}
+                <StructurePalette
+                  onAdd={(p) => {
+                    const W = Number(spec.shell.widthFt) || 36;
+                    const lvl = activeFloor >= 1 ? activeFloor : 1;
+                    const report = applyOps([{
+                      type: 'add_element', name: p.name, category: p.category,
+                      construction: p.construction || '', roofType: p.roofType || '',
+                      x: W + 6, y: 3, w: p.w, d: p.d, h: p.h, level: lvl
+                    }]);
+                    const made = (report?.spec?.elements || []).slice(-1)[0];
+                    if (made) setSelectedId(made.id);
+                  }}
+                />
                 <FurnishPalette
                   onAdd={(f) => {
                     const W = Number(spec.shell.widthFt) || 36;
@@ -2674,6 +2687,39 @@ export default function App() {
                 onClick={() => padUnder(el)}
               >▣ Reinforced pad under {el.name}</button>
             )}
+            {el && STRUCTURE_CATS.has(el.category) && (
+              // WHAT IT IS BUILT OF, AND HOW TALL IT STANDS. Both were numbers
+              // only an operation could set: the engine has six builds spanning
+              // $40 to $130 a foot, and a carport's clear height was a constant
+              // in the drawing code. A structure is a building; these are the
+              // two things you decide about a building first.
+              <>
+                {el.category === 'outbuilding' && (
+                  <label className="rz-field">
+                    <span>What it's built of</span>
+                    <select
+                      value={OUTBUILDING_CONSTRUCTION[el.construction] ? el.construction : 'shed'}
+                      onChange={(e2) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'construction', value: e2.target.value }])}
+                    >
+                      {Object.entries(OUTBUILDING_CONSTRUCTION).map(([k, c]) => (
+                        <option key={k} value={k}>{c.label} — ${c.costPsf}/sq ft</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="rz-field rz-field-num">
+                  <span>{el.category === 'outbuilding' ? 'Wall height' : 'Clear height under it'}</span>
+                  <NumInput
+                    value={Math.round((Number(el.h) || 0) * 10) / 10}
+                    min={2} max={24} step={0.5} unit="ft"
+                    onCommit={(v) => applyOps([{ type: 'resize_object', targetId: el.id, name: el.name, w: Number(el.w), d: Number(el.d), h: v }])}
+                  />
+                </label>
+                {el.category !== 'outbuilding' && (
+                  <div className="rz-shape-note">A car wants about 7 ft, a pickup or van 8–9, more again with a rack or a trailer.</div>
+                )}
+              </>
+            )}
             {el && (el.category === 'carport' || el.category === 'porch' || el.roofType) && el.category !== 'floor' && el.category !== 'outbuilding' && (
               // An open bay skinned in poly is a garage that still passes light.
               <label className="rz-field">
@@ -3183,6 +3229,43 @@ function PlaceSizeRows({ obj, onMove, onResize }) {
         </div>
       )}
     </>
+  );
+}
+
+// THE STRUCTURES YOU PUT AROUND A HOUSE. A shed, a workshop, a barn, a garage,
+// a carport, a porch. Every one of these existed in the engine — priced, and
+// with presets — and NONE of them could be added from this app: Daniel's
+// workshop, woodshed and carport only exist because I wrote the operations by
+// hand, which is precisely the thing that must not be true. A palette, like
+// the furnishings one, so anything the engine can build the app can place.
+const CARPORT_PRESETS = [
+  { name: 'Carport', category: 'carport', w: 20, d: 20, h: 9, roofType: 'shed' },
+  { name: 'Porch', category: 'porch', w: 12, d: 8, h: 8, roofType: 'shed' }
+];
+function StructurePalette({ onAdd }) {
+  return (
+    <div className="rz-found" data-cap="cap-structures-add">
+      <div className="rz-found-head">Structures — sheds, shops, a garage, a carport</div>
+      <div className="rz-found-palette">
+        {OUTBUILDING_PRESETS.map((p) => (
+          <button key={p.name} type="button"
+            title={`${p.w} × ${p.d} ft, ${p.h} ft walls, ${OUTBUILDING_CONSTRUCTION[p.construction]?.label || p.construction}. Drops beside the house — drag it where it belongs, grab a corner to resize, and its card sets the build, the height and a doorway per side.`}
+            onClick={() => onAdd({ ...p, category: 'outbuilding' })}>
+            <b>{p.name}</b>
+            <small>{p.w} × {p.d} ft · {fmtMoney(p.w * p.d * (OUTBUILDING_CONSTRUCTION[p.construction]?.costPsf ?? 60))}</small>
+          </button>
+        ))}
+        {CARPORT_PRESETS.map((p) => (
+          <button key={p.name} type="button"
+            title={`Open on every side, a roof on posts. Its card can skin the walls in poly or anything else, put a doorway in any side, and set the clear height under it.`}
+            onClick={() => onAdd(p)}>
+            <b>{p.name}</b>
+            <small>{p.w} × {p.d} ft · roof on posts</small>
+          </button>
+        ))}
+      </div>
+      <div className="rz-shape-note">Each one lands beside the house on this floor — drag it where it goes, grab a corner to resize. Its card sets what it is built of, how tall it stands, and a doorway on any side.</div>
+    </div>
   );
 }
 
@@ -4136,6 +4219,9 @@ function PickRow({ label, value, options, onChange }) {
 // heat in holds August heat in too.
 // Everything here is passive except one fan, because in this climate cooling
 // IS shade, cross-ventilation and a cool night — not equipment.
+// Anything that is a small BUILDING rather than a fitting: it has a build, a
+// height, and sides that can take a doorway.
+const STRUCTURE_CATS = new Set(['outbuilding', 'carport', 'porch']);
 const SHADE_SIDES = ['south', 'east', 'west', 'north'];
 function SummerControls({ derived, onUtility, onAddShade, onRemoveShade }) {
   const th = derived?.thermal;

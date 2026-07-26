@@ -3408,8 +3408,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         if (canopyKind && element.category !== 'foundation' && element.category !== 'floor') {
           // Posts stand on the deck (or a low volume) — never on top of a
           // tall handle volume, which floated the canopy 10ft up.
+          // HOW MUCH ROOM IS UNDER IT. This was a constant: every carport,
+          // porch and canopy in the app stood 6.8 ft in the clear, which is a
+          // low porch and not something a vehicle fits under. The element's own
+          // height sets it now — the deck below stays thin either way — so a
+          // carport can be built to take a truck. Anything still carrying the
+          // old thin height keeps the 6.8 it always had.
           const deckTop = elevation + Math.min(elementHeight, 1);
-          const eave = deckTop + 6.8;
+          const eave = deckTop + (elementHeight > 2 ? elementHeight : 6.8);
           const canopyPart = (m) => { m.userData.roomId = element.id; m.userData.generated = true; group.add(m); };
           [[element.x + 0.4, element.y + 0.4], [element.x + element.w - 0.4, element.y + 0.4],
             [element.x + 0.4, element.y + element.d - 0.4], [element.x + element.w - 0.4, element.y + element.d - 0.4]]
