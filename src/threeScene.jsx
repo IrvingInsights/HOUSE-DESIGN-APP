@@ -3750,12 +3750,28 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // owns the whole skeleton. Round cone roofs have no eave to fill.
         const eaveStyle = spec.shell.eaveStyle === 'soffit' ? 'soffit' : 'open';
         if (!roundFp) {
-          const sides = [
-            { side: 'north', runAxisZ: true, along: width, aIn: 0, aOut: -oAll.north, ov: oAll.north, s: (a) => [a, 0], sOut: (a) => [a, -oAll.north] },
-            { side: 'south', runAxisZ: true, along: width, aIn: depth, aOut: depth + oAll.south, ov: oAll.south, s: (a) => [a, depth], sOut: (a) => [a, depth + oAll.south] },
-            { side: 'west', runAxisZ: false, along: depth, aIn: 0, aOut: -oAll.west, ov: oAll.west, s: (a) => [0, a], sOut: (a) => [-oAll.west, a] },
-            { side: 'east', runAxisZ: false, along: depth, aIn: width, aOut: width + oAll.east, ov: oAll.east, s: (a) => [width, a], sOut: (a) => [width + oAll.east, a] }
+          // EVERY EAVE GETS ITS RAFTERS, not just the four sides of the
+          // footprint. This walked the SHELL perimeter once: north at z=0,
+          // south at z=depth. On a set-back storey that is wrong on both
+          // counts — the upper roof's own south eave stands at the STOREY's
+          // edge and got nothing, while the "south" walk sampled the shell
+          // line where the single-storey roof below happens to be and built
+          // its tails down there instead. Daniel, looking at a fresh 4 ft
+          // south overhang with bare sky under it: "where are the S pointing
+          // roof rafters?" They were seven feet away and twelve feet down.
+          // Each piece of the roof plan now carries its own four eaves, with
+          // its own overhangs. A 0.05 ft joint where two pieces meet fails the
+          // `ov > 0.5` test, so nothing sprouts tails into its neighbour.
+          const sidesForRect = (rect, o) => [
+            { side: 'north', runAxisZ: true, along: rect.w, a0: rect.x, aIn: rect.y, aOut: rect.y - o.north, ov: o.north, s: (a) => [a, rect.y], sOut: (a) => [a, rect.y - o.north] },
+            { side: 'south', runAxisZ: true, along: rect.w, a0: rect.x, aIn: rect.y + rect.d, aOut: rect.y + rect.d + o.south, ov: o.south, s: (a) => [a, rect.y + rect.d], sOut: (a) => [a, rect.y + rect.d + o.south] },
+            { side: 'west', runAxisZ: false, along: rect.d, a0: rect.y, aIn: rect.x, aOut: rect.x - o.west, ov: o.west, s: (a) => [rect.x, a], sOut: (a) => [rect.x - o.west, a] },
+            { side: 'east', runAxisZ: false, along: rect.d, a0: rect.y, aIn: rect.x + rect.w, aOut: rect.x + rect.w + o.east, ov: o.east, s: (a) => [rect.x + rect.w, a], sOut: (a) => [rect.x + rect.w + o.east, a] }
           ];
+          const planPieces = (roofPlan.pieces || []).filter((p) => p.rect && p.o);
+          const sides = planPieces.length
+            ? planPieces.flatMap((p) => sidesForRect(p.rect, p.o))
+            : sidesForRect({ x: 0, y: 0, w: width, d: depth }, oAll);
           if (eaveStyle === 'soffit') {
             // A boarded soffit: piecewise-flat panels tucked just under the roof
             // (sampled from roofUnderAt at each step, so any slope is followed),
@@ -3767,7 +3783,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               if (!(S.ov > 0.5)) continue;
               const n = Math.max(1, Math.round(S.along / STEP));
               for (let i = 0; i < n; i += 1) {
-                const a0 = (S.along * i) / n; const a1 = (S.along * (i + 1)) / n; const am = (a0 + a1) / 2;
+                const a0 = (S.a0 ?? 0) + (S.along * i) / n; const a1 = (S.a0 ?? 0) + (S.along * (i + 1)) / n; const am = (a0 + a1) / 2;
                 const yOut = roofUnderAt(...S.sOut(am));
                 if (!Number.isFinite(yOut)) continue;
                 const seg = a1 - a0;
@@ -3807,7 +3823,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               if (!(S.ov > 0.5)) continue;
               const n = Math.max(2, Math.round(S.along / rOC));
               for (let i = 0; i <= n; i += 1) {
-                const a = (S.along * i) / n;
+                const a = (S.a0 ?? 0) + (S.along * i) / n;
                 tail(S.runAxisZ, S.aIn, S.aOut, a, S.s(a), S.sOut(a));
               }
             }

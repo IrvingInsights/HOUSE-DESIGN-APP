@@ -3928,13 +3928,24 @@ export function detectIssues(spec) {
     // its glazed annex precisely because it pokes past. Telling him to "grow
     // the walls to take it in" would destroy the thing he is building.
     // It counts as attached when one of its edges sits ON a shell wall.
+    // A BUMPOUT IS DELIBERATE; A STRAY IS AN ACCIDENT. The difference is
+    // whether the room sits cleanly OUTSIDE with one edge flush on a shell
+    // wall — a greenhouse hung on the south, an entry foyer beside it — or
+    // straddles the wall / floats in the yard, which is how a room gets left
+    // behind when the shell is resized. Daniel: "there should be no 1st floor
+    // bumpout other than the greenhouse and the little entry foyer next to
+    // it." Those two are the shape of the house, not a mistake in it.
     const attachedAnnex = (room) => {
-      if (room.type !== 'plant') return false;
       const W = Number(spec.shell.widthFt) || 0; const D = Number(spec.shell.depthFt) || 0;
       const x0 = Number(room.x) || 0; const y0 = Number(room.y) || 0;
       const x1 = x0 + (Number(room.w) || 0); const y1 = y0 + (Number(room.d) || 0);
       const t = 1.0;
-      return Math.abs(y0 - D) < t || Math.abs(y1) < t || Math.abs(x0 - W) < t || Math.abs(x1) < t;
+      const flush = Math.abs(y0 - D) < t || Math.abs(y1) < t || Math.abs(x0 - W) < t || Math.abs(x1) < t;
+      if (!flush) return false;
+      // …and clear of the house: no meaningful overlap with the footprint.
+      const ox = Math.max(0, Math.min(x1, W) - Math.max(x0, 0));
+      const oz = Math.max(0, Math.min(y1, D) - Math.max(y0, 0));
+      return ox * oz < 0.1 * Math.max(0.01, (x1 - x0) * (y1 - y0));
     };
     const strays = spec.rooms.filter((room) => Number(room.level || 1) === 1 && !OUTDOOR_SPACE_TYPES.has(room.type)
       && !attachedAnnex(room)
