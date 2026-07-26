@@ -4,6 +4,7 @@ import {
   resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint, pointInFootprint,
   isRoundFootprint, ellipseArea, ellipsePerimeter, rectRoundOverlapArea,
   basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, ROOF_COVERINGS, resolveRoofCovering, FURNISHINGS, FURNISHING_GROUPS, resolveFurnishing, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt, storeyHeightFt,
+  ROOM_ENVELOPES, resolveRoomEnvelope,
   scoreTraceSpecChecks, openingVerticalBand,
   // Single source of truth for the per-wall assembly model — no longer duplicated here.
   WALL_SIDES, WALL_ASSEMBLIES, wallAssemblyKeyFromText, resolveWallSide,
@@ -1784,7 +1785,7 @@ export function materialsTakeoff(spec, derived) {
   const subfloor = SUBFLOOR_TYPES[derived.subfloor];
   if (subfloor && derived.subfloor !== 'slab') add('flooring', `Subfloor (${subfloor.label.split(' —')[0]})`, `${Math.round(derived.floor)} sf`, 'ground-floor deck');
   const finish = FLOORING_TYPES[derived.flooring];
-  if (finish) add('flooring', `Finish floor (${finish.label.toLowerCase()})`, `${Math.round(derived.heatedFloor)} sf`, 'all heated floors');
+  if (finish) add('flooring', `Finish floor (${finish.label.toLowerCase()})`, `${Math.round(derived.heatedFloorRaw ?? derived.heatedFloor)} sf`, 'every enclosed floor, heated or not');
   const floorInsul = INSULATION_TYPES[derived.floorInsulation];
   if (floorInsul && derived.floorInsulation !== 'none') add('flooring', `Floor insulation (${floorInsul.label.toLowerCase()})`, `${Math.round(derived.floor)} sf`, 'under the ground floor');
 
@@ -2594,6 +2595,7 @@ export function wallAssemblyProfile(envelopeText = '') {
 // copies. Re-exported here so existing importers of './engine.js' are unaffected.
 export { WALL_SIDES, WALL_ASSEMBLIES, wallAssemblyKeyFromText, resolveWallSide };
 export { isRoundFootprint, ellipseArea, ellipsePerimeter };
+export { ROOM_ENVELOPES, resolveRoomEnvelope };
 export const WALL_SIDE_LABELS = { north: 'North', south: 'South', east: 'East', west: 'West' };
 
 
@@ -4142,6 +4144,25 @@ export function detectIssues(spec) {
       }
     }
   }
+  // 1b-ii. A BUFFER WITH NOTHING BETWEEN IT AND THE HOUSE IS NOT A BUFFER.
+  // The whole point of an unheated greenhouse or entry airlock is that a real
+  // wall — with a door you close — stands between it and the warm rooms. Open
+  // to the house, it is simply a cold corner of the living space dragging the
+  // whole house down, and it earns you nothing.
+  for (const room of (spec.rooms || []).filter((r) => resolveRoomEnvelope(r) === 'buffer' && Number(r.level || 1) === 1)) {
+    const rx = Number(room.x) || 0; const ry = Number(room.y) || 0;
+    const rw = Math.max(0, Number(room.w) || 0); const rd = Math.max(0, Number(room.d) || 0);
+    const walled = (spec.elements || []).some((el) => el.category === 'partition'
+      && Number(el.x) < rx + rw + 1 && Number(el.x) + Number(el.w) > rx - 1
+      && Number(el.y) < ry + rd + 1 && Number(el.y) + Number(el.d) > ry - 1);
+    if (walled) continue;
+    issues.push({
+      severity: 'warning',
+      title: `${room.name || 'This buffer room'} has no wall between it and the house`,
+      owner: 'Natural Builder', system: 'rooms',
+      fix: 'It is set as an unheated buffer, but nothing separates it from the warm rooms — so it is really just a cold end of the living space, and the house pays to heat it. Put a wall with a door on the side facing the house (Rooms → "＋ Interior wall"), or set it back to "Inside the warm house" on its card.'
+    });
+  }
   // 1c. THE SUMMER, WHICH NOTHING USED TO ASK ABOUT. Every check above this
   // point is about a cold night. A house this well insulated is just as good
   // at holding heat IN in July, and the same south glass that pays for itself
@@ -4451,7 +4472,14 @@ export function deriveDesign(spec, wallSectionsParam) {
   const basementRoomArea = basement.present
     ? spec.rooms.filter((room) => Number(room.level || 1) === BASEMENT_LEVEL).reduce((sum, room) => sum + room.w * room.d, 0)
     : 0;
-  const heatedFloor = floor + upperFloorArea + loftTowerArea + (basementHeated ? basementRoomArea : 0);
+  // BUFFER ROOMS COME OUT OF THE WARM FLOOR. A greenhouse and an entry airlock
+  // are enclosed, but nobody heats them — counting them as living space made
+  // the heated floor (and everything that leans on it) too big by their whole
+  // area. See ROOM_ENVELOPES in bim-core.
+  const bufferRooms = (spec.rooms || []).filter((room) => resolveRoomEnvelope(room) === 'buffer');
+  const bufferArea = bufferRooms.reduce((sum, room) => sum + Math.max(0, Number(room.w) || 0) * Math.max(0, Number(room.d) || 0), 0);
+  const heatedFloorRaw = floor + upperFloorArea + loftTowerArea + (basementHeated ? basementRoomArea : 0);
+  const heatedFloor = Math.max(1, heatedFloorRaw - bufferArea);
   const pitch = Number(spec.shell.roofPitch || 0.32);
   const overhangs = resolveOverhangs(spec.shell);
   const roofFootprint = roundFp
@@ -4607,10 +4635,49 @@ export function deriveDesign(spec, wallSectionsParam) {
   const floorR = INSULATION_TYPES[floorInsulKey].r;
   // Ground-coupled floors lose less than their full area — a 0.5 factor.
   const floorLoss = (floor / Math.max(floorR, 3)) * 0.5;
-  const heatUA = Math.max(0, opaqueWallArea - southOpeningGlass) / Math.max(wallR, 1)
+  // A BUFFER MOVES THE THERMAL BOUNDARY INWARD. The heated box no longer
+  // reaches the outside wall where a greenhouse or an entry stands in front of
+  // it: that stretch of shell now encloses the buffer, and what the warm rooms
+  // actually lose through is the WALL BETWEEN them and it. That wall sees only
+  // part of the outdoor temperature difference, because the buffer sits
+  // somewhere between inside and out — the standard half-factor.
+  // A buffer with no wall between it and the house is not a buffer at all; the
+  // flag says so, and until it exists nothing is subtracted here.
+  const groundBuffers = bufferRooms.filter((room) => Number(room.level || 1) === 1);
+  const bufferBoundary = groundBuffers.reduce((acc, room) => {
+    const rx = Number(room.x) || 0; const ry = Number(room.y) || 0;
+    const rw = Math.max(0, Number(room.w) || 0); const rd = Math.max(0, Number(room.d) || 0);
+    const tol = 1.0;
+    const shellW = Number(spec.shell.widthFt) || 0;
+    const shellD = Number(spec.shell.depthFt) || 0;
+    // Which of this room's four edges lie on the shell (facing weather), and
+    // which face the rest of the house.
+    const edges = [
+      { len: rw, outside: ry <= tol },                 // its north edge
+      { len: rw, outside: ry + rd >= shellD - tol },   // its south edge
+      { len: rd, outside: rx <= tol },                 // its west edge
+      { len: rd, outside: rx + rw >= shellW - tol }    // its east edge
+    ];
+    const wallH = Math.max(1, Number(spec.shell.wallHeightFt) || 10);
+    // Does a real partition stand between this room and the house? Without one
+    // the "buffer" is just part of the same air, and nothing is gained.
+    const walled = (spec.elements || []).some((el) => el.category === 'partition'
+      && Number(el.x) < rx + rw + 1 && Number(el.x) + Number(el.w) > rx - 1
+      && Number(el.y) < ry + rd + 1 && Number(el.y) + Number(el.d) > ry - 1);
+    if (!walled) return acc;
+    acc.shellFace += edges.filter((e) => e.outside).reduce((s, e) => s + e.len, 0) * wallH;
+    acc.innerFace += edges.filter((e) => !e.outside).reduce((s, e) => s + e.len, 0) * wallH;
+    return acc;
+  }, { shellFace: 0, innerFace: 0 });
+  const partitionR = 6; // a framed interior wall, insulated or not — modest either way
+  const bufferUAdelta = bufferBoundary.shellFace > 0
+    ? -(bufferBoundary.shellFace / Math.max(wallR, 1)) + (bufferBoundary.innerFace / partitionR) * 0.5
+    : 0;
+  const heatUA = Math.max(0, Math.max(0, opaqueWallArea - southOpeningGlass) / Math.max(wallR, 1)
     + Math.max(0, roofArea - skylightArea) / roofR
     + floorLoss
-    + (southGlass + skylightArea + nonSouthBandGlass + (glazedWallArea - glazedSouthWallArea) * GLAZED_WALL_GLASS_FRAC) * glazingU;
+    + (southGlass + skylightArea + nonSouthBandGlass + (glazedWallArea - glazedSouthWallArea) * GLAZED_WALL_GLASS_FRAC) * glazingU
+    + bufferUAdelta);
   const heatLoadKbtu = (heatUA * 70) / 1000;
 
   const bedrooms = Math.max(1, spec.rooms.filter((room) => room.type === 'sleeping').length);
@@ -4977,8 +5044,11 @@ export function deriveDesign(spec, wallSectionsParam) {
   const subfloorKey = resolveSubfloor(spec);
   const subfloorCost = floor * (SUBFLOOR_TYPES[subfloorKey]?.costPsf ?? 0);
   const subfloorCarbon = floor * (SUBFLOOR_TYPES[subfloorKey]?.carbonPsf ?? 0);
-  const flooringCostRaw = heatedFloor * (FLOORING_TYPES[flooringKey]?.costPsf ?? 4);
-  const flooringCarbonRaw = heatedFloor * (FLOORING_TYPES[flooringKey]?.carbonPsf ?? 2);
+  // Floor is priced over EVERY enclosed floor, buffer rooms included — a
+  // greenhouse has a floor whether or not you heat it. heatedFloor is the
+  // thermal number and must not be used to buy materials.
+  const flooringCostRaw = heatedFloorRaw * (FLOORING_TYPES[flooringKey]?.costPsf ?? 4);
+  const flooringCarbonRaw = heatedFloorRaw * (FLOORING_TYPES[flooringKey]?.carbonPsf ?? 2);
 
   // Frame (structure): framing quantity ≈ perimeter × wall height, split ground
   // vs. upper storeys so each can run a different frame. A load-bearing wall has
@@ -5193,7 +5263,7 @@ export function deriveDesign(spec, wallSectionsParam) {
   { // flooring
     const lines = [];
     const fRate = FLOORING_TYPES[flooringKey]?.costPsf ?? 4;
-    lines.push(rline(`Finish floor — ${FLOORING_TYPES[flooringKey]?.label || flooringKey}`, flooringCostRaw, heatedFloor, 'sf of heated floor', fRate));
+    lines.push(rline(`Finish floor — ${FLOORING_TYPES[flooringKey]?.label || flooringKey}`, flooringCostRaw, heatedFloorRaw, 'sf of finished floor', fRate));
     if (sourcing.flooring !== 'new') lines.push(rline(`${MATERIAL_SOURCES[sourcing.flooring].label} boards`, -(flooringCostRaw - flooringFinishCost), null, '', null, sourcing.flooring === 'milled'
       ? `sawing instead of buying — you pay ${Math.round(srcFac('flooring', 'cost') * 100)}% of the lumberyard price, and supply the drying time`
       : `you pay ${Math.round(srcFac('flooring', 'cost') * 100)}% of new`));
@@ -5358,7 +5428,7 @@ export function deriveDesign(spec, wallSectionsParam) {
     sweatFractions: { sweatWallsFrac, sweatRoofFrac, sweatHeatFrac, sweatFoundationFrac, sweatFrameFrac },
     // Summer, the swing, and whether the heater covers the load.
     thermal,
-    heatKey, heatFacingKey, heatKit: HEAT_SOURCES[heatKey].kit, heatInstall, heatedFloor, storeys, basement, basementRoomArea, basementHeated, roofArea, roofFootprint, overhangs, wallArea, glazedWallArea, wallR, southGlass, glassPct,
+    heatKey, heatFacingKey, heatKit: HEAT_SOURCES[heatKey].kit, heatInstall, heatedFloor, heatedFloorRaw, bufferArea, bufferRooms: bufferRooms.map((r) => ({ id: r.id, name: r.name, area: Math.round((Number(r.w)||0)*(Number(r.d)||0)) })), storeys, basement, basementRoomArea, basementHeated, roofArea, roofFootprint, overhangs, wallArea, glazedWallArea, wallR, southGlass, glassPct,
     skylightArea, totalGlass, glazingU, stemwallHeightFt, azimuthDeg, solarFactor,
     sunWinterDeg, sunSummerDeg, winterShadeFrac, summerShadeFrac,
     frameGround: groundFrameKey, frameUpper: upperFrameKey, frameArea: groundFrameArea + upperFrameArea,

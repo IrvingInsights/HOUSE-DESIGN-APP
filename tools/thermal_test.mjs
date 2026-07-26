@@ -144,6 +144,31 @@ const win = (wall, positionFt, level = 1, type = 'window', widthFt = 6) => ({ wa
   ok(t.operableGlass === 0 && !t.crossVents, 'and it cannot ventilate, which is the honest answer');
 }
 
+// --- 10. rooms outside the warm house ----------------------------------------
+// A greenhouse counted as living space is 144 sf you pay to keep at 68°F all
+// winter. A buffer is enclosed but unheated: it comes out of the floor you
+// HEAT, stays in the floor you BUILD (it still has a floor), and the wall
+// between it and the house becomes the real thermal boundary.
+{
+  const withGh = base();
+  withGh.rooms = [...(withGh.rooms || []), { id: 'gh1', name: 'Greenhouse', type: 'plant', x: 0, y: 18, w: 12, d: 8, level: 1 }];
+  const d1 = derive(withGh);
+  ok(d1.bufferArea === 96, 'a greenhouse is a buffer by default — nobody means to heat one');
+  ok(Math.abs(d1.heatedFloor - (d1.heatedFloorRaw - 96)) < 0.01, 'its area comes out of the floor you heat');
+  ok(d1.heatedFloorRaw > d1.heatedFloor, 'but stays in the floor you build — it still has a floor to pay for');
+  const heated = structuredClone(withGh);
+  heated.rooms = heated.rooms.map((r) => (r.id === 'gh1' ? { ...r, envelope: 'heated' } : r));
+  const d2 = derive(heated);
+  ok(d2.bufferArea === 0, 'call it heated and it counts as living space again');
+  ok(Math.abs(d2.heatedFloor - d2.heatedFloorRaw) < 0.01, 'with nothing held back');
+  const plain = base();
+  plain.rooms = [...(plain.rooms || []), { id: 'br1', name: 'Bedroom', type: 'sleeping', x: 0, y: 18, w: 12, d: 8, level: 1 }];
+  ok(derive(plain).bufferArea === 0, 'a bedroom is heated space and stays that way');
+  // The floor you build never shrinks when you stop heating a room.
+  ok(Math.abs(d1.heatedFloorRaw - d2.heatedFloorRaw) < 0.01,
+    'heating a room or not cannot change how much floor there is to lay');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail === 0) console.log('The summer half of the year is held to physics, not to a snapshot.');
 process.exit(fail ? 1 : 0);

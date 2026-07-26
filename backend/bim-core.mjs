@@ -225,6 +225,30 @@ export function resolveFurnishing(el = {}) {
   return FURNISHINGS[el?.kind] || null;
 }
 
+// INSIDE THE WARM HOUSE, OR NOT. Every room used to be heated space, which is
+// how a greenhouse ended up counted as 144 sf of living room you pay to keep
+// at 68°F all winter.
+//
+// A BUFFER is a room that is enclosed but not heated: a greenhouse, an entry
+// airlock, a mud porch, an unheated store. It is the oldest trick in cold-
+// climate building — you wrap the warm box in rooms that take the weather
+// first. It does three things at once: the heated floor gets smaller, the wall
+// between warm and buffer becomes the real thermal boundary (and it is a wall,
+// with a door, not an idea), and on the sunny side the buffer pre-warms the
+// air before it ever reaches the house.
+//
+// A greenhouse defaults to buffer, because a heated greenhouse is a thing
+// almost nobody means to build. Everything else defaults to heated. Either can
+// be set per room, and setting it is the only way the app can tell.
+export const ROOM_ENVELOPES = {
+  heated: { key: 'heated', label: 'Inside the warm house', note: 'Heated to living temperature. It counts toward the floor you pay to keep warm.' },
+  buffer: { key: 'buffer', label: 'Unheated buffer', note: 'Enclosed but not heated — a greenhouse, an entry airlock, a mud porch. It shelters the warm rooms behind it and costs nothing to heat.' }
+};
+export function resolveRoomEnvelope(room = {}) {
+  if (ROOM_ENVELOPES[room?.envelope]) return room.envelope;
+  return room?.type === 'plant' ? 'buffer' : 'heated';
+}
+
 // Interior partition walls — thin walls BETWEEN rooms, placed as elements
 // (category 'partition'). Distinct from the envelope: no weather duty, so
 // they price by face area of the chosen construction.
@@ -3082,6 +3106,11 @@ export function applyBimOperations(currentSpec, plan) {
         // Which way a per-storey SHED piece falls (its LOW side).
         if (['north', 'south', 'east', 'west'].includes(operation.value)) target.roofFall = operation.value;
         else delete target.roofFall;
+      } else if (operation.field === 'envelope') {
+        // Inside the warm house, or a buffer outside it (a greenhouse, an
+        // entry airlock, a porch). See ROOM_ENVELOPES.
+        if (['heated', 'buffer'].includes(operation.value)) target.envelope = operation.value;
+        else delete target.envelope;
       } else if (operation.field === 'roofOverhangFt') {
         // This storey's own eave reach past its walls; blank/zero = the
         // whole-roof overhangs.

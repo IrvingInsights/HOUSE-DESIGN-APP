@@ -19,7 +19,7 @@ import {
   resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons, downloadFile,
   DECK_SURFACES, resolveDeck, resolveDeckStairs, derivePartitionOps, interiorFixtures, sourceNote,
   isStair, resolveStair, STAIR_SHAPES, STAIR_FACINGS, STAIR_TURNS, STAIR_DEFAULTS, STAIR_FACING_ORDER, HEATER_FACINGS,
-  SHADE_DEVICES
+  SHADE_DEVICES, ROOM_ENVELOPES, resolveRoomEnvelope
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms } from '../placement.js';
 import { STARTER_DESIGNS } from './starters.js';
@@ -2357,6 +2357,7 @@ export default function App() {
           onResize={(w, d) => resizeObject(selectedRoom.id, Number(selectedRoom.x) || 0, Number(selectedRoom.y) || 0, w, d)}
           onRemove={() => removeObject(selectedRoom)}
           onClose={() => setSelectedId(null)}
+          onSetEnvelope={(value) => applyOps([{ type: 'update_object', targetId: selectedRoom.id, name: selectedRoom.name, field: 'envelope', value }])}
           onMassWall={selectedRoom.type === 'plant'
             && (Number(selectedRoom.y) || 0) + (Number(selectedRoom.d) || 0) >= (Number(spec.shell.depthFt) || 28) - 1
             ? () => makeMassWallBehind(selectedRoom) : null}
@@ -3090,7 +3091,7 @@ function PlaceSizeRows({ obj, onMove, onResize }) {
   );
 }
 
-function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose, onMassWall = null, onGlassWall = null, doorSides = [], onAddOpening = null, interiorWalls = [], onSetWallDoor = null }) {
+function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose, onMassWall = null, onGlassWall = null, doorSides = [], onAddOpening = null, interiorWalls = [], onSetWallDoor = null, onSetEnvelope = null }) {
   const [doorSideRaw, setDoorSide] = useState('');
   const doorSide = doorSides.includes(doorSideRaw) ? doorSideRaw : doorSides[0];
   const [expanded, setExpanded] = useState(false);
@@ -3159,6 +3160,33 @@ function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose
           })}
           <div className="rz-shape-note">Same opening you'd set on the wall itself — slide it along the face in the Wall view.</div>
         </>
+      )}
+
+      {/* IS THIS ROOM HEATED? A greenhouse, an entry airlock, a mud porch are
+          enclosed but not heated — they wrap the warm house and take the
+          weather first. Counting them as living space made the heated floor
+          too big and the heat load wrong. A greenhouse assumes buffer; every
+          other room assumes heated; here is where you say otherwise. */}
+      {onSetEnvelope && (
+        <div className="rz-field">
+          <span>Is it heated?</span>
+          <div className="ctlChips">
+            {Object.values(ROOM_ENVELOPES).map((env) => (
+              <button
+                key={env.key} type="button" title={env.note}
+                className={`rz-pick-chip${resolveRoomEnvelope(room) === env.key ? ' on' : ''}`}
+                onClick={() => onSetEnvelope(env.key)}
+              >{env.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+      {resolveRoomEnvelope(room) === 'buffer' && (
+        <div className="rz-shape-note">
+          Outside the warm house — it costs nothing to heat and shelters the rooms behind it.
+          It needs a real wall with a door between it and the house, or it is just a cold corner
+          of the living space.
+        </div>
       )}
 
       <div className="rz-vitals">
