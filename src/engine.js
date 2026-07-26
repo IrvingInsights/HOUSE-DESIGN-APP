@@ -3921,7 +3921,23 @@ export function detectIssues(spec) {
     // A rectangle shell that only covers PART of the ground floor: indoor
     // rooms left standing outside the walls (a chat/trace often sets the
     // shell to the two-storey core and strands the single-storey spaces).
+    // AN ATTACHED GREENHOUSE IS NOT A STRAY ROOM. Daniel: "the S wall of the
+    // house should be the N wall of the greenhouse." A sunspace hung on the
+    // outside of a wall is the whole point of a sunspace — it stands out
+    // there deliberately, the house's own wall closes it, and the app builds
+    // its glazed annex precisely because it pokes past. Telling him to "grow
+    // the walls to take it in" would destroy the thing he is building.
+    // It counts as attached when one of its edges sits ON a shell wall.
+    const attachedAnnex = (room) => {
+      if (room.type !== 'plant') return false;
+      const W = Number(spec.shell.widthFt) || 0; const D = Number(spec.shell.depthFt) || 0;
+      const x0 = Number(room.x) || 0; const y0 = Number(room.y) || 0;
+      const x1 = x0 + (Number(room.w) || 0); const y1 = y0 + (Number(room.d) || 0);
+      const t = 1.0;
+      return Math.abs(y0 - D) < t || Math.abs(y1) < t || Math.abs(x0 - W) < t || Math.abs(x1) < t;
+    };
     const strays = spec.rooms.filter((room) => Number(room.level || 1) === 1 && !OUTDOOR_SPACE_TYPES.has(room.type)
+      && !attachedAnnex(room)
       && (room.x < -0.5 || room.y < -0.5 || room.x + room.w > spec.shell.widthFt + 0.5 || room.y + room.d > spec.shell.depthFt + 0.5));
     if (strays.length) {
       issues.push({ severity: 'critical', title: strays.length === 1 ? `${strays[0].name} sits outside the walls` : `${strays.length} ground-floor rooms sit outside the walls`, owner: 'Architect', system: 'shell', fixId: 'enclose-rooms', fix: 'The shell only covers part of the ground floor. Grow the walls to take these rooms in — an upper storey can still cover just the core: resize its Storey extent (2nd-floor group in the selector, or drag it on the 2nd-floor Plan), and the roof steps down over the rest.' });
@@ -4175,6 +4191,19 @@ export function detectIssues(spec) {
       && Number(el.x) < rx + rw + 1 && Number(el.x) + Number(el.w) > rx - 1
       && Number(el.y) < ry + rd + 1 && Number(el.y) + Number(el.d) > ry - 1);
     if (walled) continue;
+    // A buffer hung on the OUTSIDE of the house needs no partition: the wall
+    // between it and the warm rooms is the house's own exterior wall. That is
+    // the whole shape of an attached greenhouse — its north wall IS the
+    // house's south wall — and demanding an interior wall as well would be
+    // asking for a wall that has no business existing.
+    {
+      const W = Number(spec.shell.widthFt) || 0; const D = Number(spec.shell.depthFt) || 0;
+      const t = 1.0;
+      const onAShellWall = Math.abs(ry - D) < t || Math.abs(ry + rd) < t
+        || Math.abs(rx - W) < t || Math.abs(rx + rw) < t;
+      const outside = ry + rd > D + 0.5 || ry < -0.5 || rx + rw > W + 0.5 || rx < -0.5;
+      if (outside && onAShellWall) continue;
+    }
     issues.push({
       severity: 'warning',
       title: `${room.name || 'This buffer room'} has no wall between it and the house`,
