@@ -11,7 +11,7 @@ import { FRAME_MEMBERS } from './frameDrawings.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
   OPENING_TYPES, openingVerticalBand, openingWallPlane, resolveFrameType, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, decomposeFootprint, subtractRect,
-  subtractRectFromFootprint, pointInFootprint, edgeForOpening, gradeElevationAt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, resolveRoofCovering, resolveFurnishing, storeyElevationFt, storeyHeightFt,
+  subtractRectFromFootprint, pointInFootprint, edgeForOpening, gradeElevationAt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, ROOF_COVERINGS, resolveRoofCovering, resolveFurnishing, storeyElevationFt, storeyHeightFt,
   isRoundFootprint, clipRectToRoundShell
 } from '../backend/bim-core.mjs';
 import {
@@ -3257,6 +3257,64 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           }
           const openHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
           mesh = box(element.w, Math.max(7.4, elementHeight), element.d, element.x + element.w / 2, elevation + Math.max(7.4, elementHeight) / 2, element.y + element.d / 2, openHandle);
+        } else if (element.category === 'outbuilding') {
+          // A SHED IS A BUILDING, NOT A BOX. An outbuilding had no render of
+          // its own at all — it fell through to the generic element and drew as
+          // a translucent coloured volume. Daniel asked for three doors out of
+          // his workshop and there was nowhere to put them: the thing had no
+          // walls to cut. It now builds like the small building it is — four
+          // walls on a floor, a shed roof falling away from the house — and
+          // each side can carry a doorway (doorNorthFt / South / East / West,
+          // a width in feet; absent or 0 means solid wall).
+          const obH = Math.max(6, Number(element.h) || 9);
+          const T = 0.5;
+          const ox0 = element.x; const oz0 = element.y;
+          const ox1 = element.x + element.w; const oz1 = element.y + element.d;
+          const obPart = (m) => { m.userData.roomId = element.id; m.userData.generated = true; group.add(m); return m; };
+          const obWallMat = new THREE.MeshStandardMaterial({ color: 0xbfae8e, roughness: 0.9, map: grainTexture('plaster'), bumpMap: bumpTexture('plaster'), bumpScale: 0.1 });
+          const obDoorMat = new THREE.MeshStandardMaterial({ color: 0x7a5c3e, roughness: 0.75, map: grainTexture('wood') });
+          obPart(box(element.w, 0.3, element.d, (ox0 + ox1) / 2, elevation + 0.15, (oz0 + oz1) / 2, obWallMat));
+          // Each side: a solid run, or two runs and a header around a doorway.
+          const doorOn = (side) => Math.max(0, Math.min(Number(element[`door${side}Ft`]) || 0, (side === 'North' || side === 'South' ? element.w : element.d) - 1));
+          const DOOR_H = 6.8;
+          const wallRun = (side, horizontal, cross) => {
+            const span = horizontal ? element.w : element.d;
+            const a0 = horizontal ? ox0 : oz0;
+            const dw = doorOn(side);
+            const mk = (from, to, yBase, hgt) => {
+              if (to - from < 0.05 || hgt < 0.05) return;
+              const mid = (from + to) / 2;
+              obPart(horizontal
+                ? box(to - from, hgt, T, mid, elevation + yBase + hgt / 2, cross, obWallMat)
+                : box(T, hgt, to - from, cross, elevation + yBase + hgt / 2, mid, obWallMat));
+            };
+            if (dw <= 0.5) { mk(a0, a0 + span, 0.3, obH - 0.3); return; }
+            const dStart = a0 + (span - dw) / 2;
+            mk(a0, dStart, 0.3, obH - 0.3);
+            mk(dStart + dw, a0 + span, 0.3, obH - 0.3);
+            mk(dStart, dStart + dw, DOOR_H, Math.max(0.2, obH - DOOR_H));       // header over the opening
+            const dMid = dStart + dw / 2;                                        // the door leaf itself
+            obPart(horizontal
+              ? box(dw - 0.2, DOOR_H - 0.4, 0.14, dMid, elevation + 0.3 + (DOOR_H - 0.4) / 2, cross, obDoorMat)
+              : box(0.14, DOOR_H - 0.4, dw - 0.2, cross, elevation + 0.3 + (DOOR_H - 0.4) / 2, dMid, obDoorMat));
+          };
+          wallRun('North', true, oz0 + T / 2);
+          wallRun('South', true, oz1 - T / 2);
+          wallRun('West', false, ox0 + T / 2);
+          wallRun('East', false, ox1 - T / 2);
+          // A shed roof, low side away from the house, with a modest eave.
+          const obCover = ROOF_COVERINGS[element.roofCovering] || null;
+          const obRoofMat = obCover
+            ? new THREE.MeshStandardMaterial({ color: obCover.color, roughness: obCover.translucent ? 0.15 : 0.8, transparent: Boolean(obCover.translucent), opacity: obCover.translucent ? 0.32 : 1, metalness: obCover.texture === 'metal' && !obCover.translucent ? 0.5 : 0 })
+            : roofMat;
+          const obOv = 1;
+          const rise = Math.max(0.8, element.d * 0.18);
+          const panel = box(element.w + obOv * 2, 0.3, element.d + obOv * 2, (ox0 + ox1) / 2, elevation + obH + rise / 2, (oz0 + oz1) / 2, obRoofMat);
+          panel.rotation.x = Math.atan2(rise, element.d + obOv * 2) * (oz0 >= depth / 2 ? 1 : -1);
+          obPart(panel);
+          const obHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
+          mesh = box(element.w, obH, element.d, (ox0 + ox1) / 2, elevation + obH / 2, (oz0 + oz1) / 2, obHandle);
+          elementHeight = obH;
         } else if (element.category === 'shade') {
           // Shade you built or planted. A tree is a trunk and a crown; anything
           // else is a panel leaning off the wall it protects. The full-volume
@@ -3350,6 +3408,13 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const cxm = element.x + element.w / 2;
           const czm = element.y + element.d / 2;
           const ow = 0.9;
+          // A canopy can wear its own covering. Clear polycarbonate over a
+          // carport lets the greenhouse beside it keep its light — a solid roof
+          // there puts 224 sf of glass in the shade for the sake of a car.
+          const canCover = ROOF_COVERINGS[element.roofCovering] || null;
+          const roofMatC = canCover
+            ? new THREE.MeshStandardMaterial({ color: canCover.color, roughness: canCover.translucent ? 0.15 : 0.8, transparent: Boolean(canCover.translucent), opacity: canCover.translucent ? 0.3 : 1, metalness: canCover.texture === 'metal' && !canCover.translucent ? 0.5 : 0 })
+            : roofMat;
           if (canopyKind === 'gable') {
             const alongX = element.w >= element.d;
             const span = (alongX ? element.d : element.w) / 2 + ow;
@@ -3357,8 +3422,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const panelLen = Math.hypot(span, rise);
             for (const dir of [-1, 1]) {
               const panel = alongX
-                ? box(element.w + ow * 2, 0.16, panelLen, cxm, eave + rise / 2, czm + dir * span / 2, roofMat)
-                : box(panelLen, 0.16, element.d + ow * 2, cxm + dir * span / 2, eave + rise / 2, czm, roofMat);
+                ? box(element.w + ow * 2, 0.16, panelLen, cxm, eave + rise / 2, czm + dir * span / 2, roofMatC)
+                : box(panelLen, 0.16, element.d + ow * 2, cxm + dir * span / 2, eave + rise / 2, czm, roofMatC);
               if (alongX) panel.rotation.x = dir * Math.atan2(rise, span);
               else panel.rotation.z = -dir * Math.atan2(rise, span);
               canopyPart(panel);
@@ -3368,7 +3433,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const spanD = element.d + ow * 2;
             const towardX = Math.abs(cxm - width / 2) > Math.abs(czm - depth / 2);
             const rise = Math.max(0.8, (towardX ? spanW : spanD) * 0.12);
-            const panel = box(spanW, 0.16, spanD, cxm, eave + rise / 2, czm, roofMat);
+            const panel = box(spanW, 0.16, spanD, cxm, eave + rise / 2, czm, roofMatC);
             if (towardX) panel.rotation.z = (cxm >= width / 2 ? -1 : 1) * Math.atan2(rise, spanW);
             else panel.rotation.x = (czm >= depth / 2 ? 1 : -1) * Math.atan2(rise, spanD);
             canopyPart(panel);

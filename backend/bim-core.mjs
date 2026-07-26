@@ -3132,6 +3132,21 @@ export function applyBimOperations(currentSpec, plan) {
         // Which way a per-storey SHED piece falls (its LOW side).
         if (['north', 'south', 'east', 'west'].includes(operation.value)) target.roofFall = operation.value;
         else delete target.roofFall;
+      } else if (['doorNorthFt', 'doorSouthFt', 'doorEastFt', 'doorWestFt'].includes(operation.field)) {
+        // A DOORWAY IN ONE SIDE OF A SMALL BUILDING. Width in feet; 0 or blank
+        // is a solid wall. The same idea a partition's doorWFt has always had,
+        // now on the four sides of a shed, workshop or woodshed — which is what
+        // Daniel needed to get from his workshop into the greenhouse, out to
+        // the patio, and through to the carport.
+        const dv = Number(operation.value);
+        if (Number.isFinite(dv) && dv > 0.5) target[operation.field] = clamp(dv, 2, 16);
+        else delete target[operation.field];
+      } else if (operation.field === 'roofCovering') {
+        // A structure can wear a different roof from the house — clear
+        // polycarbonate over a carport so the greenhouse behind it still sees
+        // the sun, where a solid roof would put it in shade.
+        if (ROOF_COVERINGS[operation.value]) target.roofCovering = operation.value;
+        else delete target.roofCovering;
       } else if (operation.field === 'envelope') {
         // Inside the warm house, or a buffer outside it (a greenhouse, an
         // entry airlock, a porch). See ROOM_ENVELOPES.

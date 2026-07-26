@@ -2674,6 +2674,39 @@ export default function App() {
                 onClick={() => padUnder(el)}
               >▣ Reinforced pad under {el.name}</button>
             )}
+            {el && el.category === 'outbuilding' && (
+              // A shed with three doors out of it is a different building from
+              // a shed with none. One width per side, 0 for a solid wall.
+              <>
+                <div className="rz-field-num"><span className="rz-field-lead">Doorways — one per side, 0 for none</span></div>
+                <div className="ctlChips" style={{ flexWrap: 'wrap', gap: 6 }}>
+                  {['North', 'South', 'West', 'East'].map((side) => (
+                    <label key={side} className="rz-field rz-field-num" style={{ flex: '0 0 auto', gap: 4 }}>
+                      <span>{side}</span>
+                      <NumInput
+                        value={Math.round((Number(el[`door${side}Ft`]) || 0) * 10) / 10}
+                        min={0} max={16} step={0.5} unit="ft"
+                        onCommit={(v) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: `door${side}Ft`, value: v }])}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+            {el && (el.category === 'outbuilding' || el.roofType || el.category === 'carport') && el.category !== 'floor' && (
+              <label className="rz-field">
+                <span>What its roof is made of</span>
+                <select
+                  value={el.roofCovering || ''}
+                  onChange={(e2) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'roofCovering', value: e2.target.value }])}
+                >
+                  <option value="">Same as the house</option>
+                  {Object.values(ROOF_COVERINGS).map((c) => (
+                    <option key={c.key} value={c.key}>{c.green ? '🌿 ' : ''}{c.label}</option>
+                  ))}
+                </select>
+              </label>
+            )}
             {el && el.roofType && el.category !== 'floor' && (
               // Anything carrying its own roof — a roof plane, a carport, a
               // porch — picks its shape here, on the same card that moves it.

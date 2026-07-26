@@ -10,7 +10,7 @@ import {
   WALL_ASSEMBLIES, FRAME_TYPES, FLOORING_TYPES, SUBFLOOR_TYPES, OPENING_TYPES,
   gradeElevationAt, maxFoundationExposureFt, resolveWallSide, footprintEdges,
   basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, storeyElevationFt, storeyHeightFt, roofProfile,
-  openingVerticalBand, openingWallPlane
+  openingVerticalBand, openingWallPlane, ROOF_COVERINGS
 } from '../backend/bim-core.mjs';
 // The stair GEOMETRY lives engine-side (bim-core only validates the op values).
 import * as engine from '../src/engine.js';
@@ -841,6 +841,32 @@ async function httpSanity() {
   r = apply(r, [{ type: 'update_object', targetId: 'p2', name: 'Storey 2 extent', field: 'roofOverhangSouthFt', value: 0 }]).spec;
   p = r.elements.find((e) => e.id === 'p2');
   ok(p.roofOverhangSouthFt === 0, 'zero is a real answer — no eave on that side at all');
+}
+
+// --- a small building has walls, and walls can have doorways ---------------
+// An outbuilding used to be a solid box with no render of its own. Daniel
+// wanted three doors out of his workshop — to the greenhouse, to the patio,
+// to the carport — and there was nowhere to put them.
+{
+  const s = freshSpec();
+  s.elements = [{ id: 'ws', name: 'Workshop', category: 'outbuilding', construction: 'shed', x: 40, y: 10, w: 20, d: 8, h: 9, level: 1 }];
+  let r = apply(s, [
+    { type: 'update_object', targetId: 'ws', name: 'Workshop', field: 'doorWestFt', value: 3 },
+    { type: 'update_object', targetId: 'ws', name: 'Workshop', field: 'doorSouthFt', value: 6 }
+  ]).spec;
+  let w = r.elements.find((e) => e.id === 'ws');
+  ok(w.doorWestFt === 3 && w.doorSouthFt === 6, 'each side of a small building carries its own doorway width');
+  ok(w.doorNorthFt === undefined && w.doorEastFt === undefined, 'the sides you did not ask for stay solid wall');
+  r = apply(r, [{ type: 'update_object', targetId: 'ws', name: 'Workshop', field: 'doorWestFt', value: 0 }]).spec;
+  ok(r.elements[0].doorWestFt === undefined, 'zero closes a doorway back up rather than storing a zero-wide door');
+  r = apply(r, [{ type: 'update_object', targetId: 'ws', name: 'Workshop', field: 'doorSouthFt', value: 40 }]).spec;
+  ok(r.elements[0].doorSouthFt === 16, 'an absurd doorway clamps instead of removing the whole wall');
+  // its own roof covering — clear poly over a carport beside glass
+  r = apply(r, [{ type: 'update_object', targetId: 'ws', name: 'Workshop', field: 'roofCovering', value: 'polycarb' }]).spec;
+  ok(r.elements[0].roofCovering === 'polycarb', 'a structure can wear a different roof from the house');
+  ok(ROOF_COVERINGS.polycarb.translucent === true, 'and the clear one is marked translucent, which is the whole point of it');
+  r = apply(r, [{ type: 'update_object', targetId: 'ws', name: 'Workshop', field: 'roofCovering', value: 'unobtanium' }]).spec;
+  ok(r.elements[0].roofCovering === undefined, 'a covering that does not exist clears back to the house roof');
 }
 
 const wantHttp = process.argv.includes('--http');
