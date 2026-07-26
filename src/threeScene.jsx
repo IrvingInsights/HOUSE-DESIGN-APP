@@ -567,6 +567,10 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         }
         const rectHas = (r, px, py) => px > r.x + 0.01 && px < r.x + r.w - 0.01 && py > r.y + 0.01 && py < r.y + r.d - 0.01;
         const coveredAbove = (px, py, lv) => storeyTiers.some((t) => t.level > lv && rectHas(t.rect, px, py));
+        // Anything standing AT this level or higher out there — the test for
+        // "is this edge butting a neighbour, or is it open air over a lower
+        // roof". A tier never matches its own rect: the probe is outside it.
+        const coveredAtOrAbove = (px, py, lv) => storeyTiers.some((t) => t.level >= lv && rectHas(t.rect, px, py));
         const steps = storeyLift > 0 && storeyTiers.some((t, i) => i > 0 && t.rect.w * t.rect.d < storeyTiers[i - 1].rect.w * storeyTiers[i - 1].rect.d - 1);
         const insideFp = (px, py) => (customFp
           ? pointInFootprint(fpPoly, px, py)
@@ -586,7 +590,17 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           for (const side of WALL_SIDES) {
             const [px, py] = probes[side];
             if (!isUpper && coveredAbove(px, py, segLevel)) out[side] = 0.35;
-            else if (insideFp(px, py)) out[side] = 0.05;
+            // AN UPPER STOREY'S EAVE OVER A LOWER ROOF IS STILL AN EAVE.
+            // "Inside the footprint" used to mean "no overhang here", which is
+            // right when the neighbour is a wall at the same height and dead
+            // wrong when it is a single-storey stretch one floor DOWN. Daniel's
+            // upper roof stopped flush at its south wall — 6 ft of eave on the
+            // other three sides and nothing over the greenhouse — so rain ran
+            // straight down the face of the wall his upstairs windows are in,
+            // onto the balcony. What matters is whether something stands at
+            // this level or above out there, not whether the ground below
+            // happens to be part of the same building.
+            else if (isUpper ? coveredAtOrAbove(px, py, segLevel) : insideFp(px, py)) out[side] = 0.05;
             else out[side] = tOv ?? oAll[side];
           }
           return out;
