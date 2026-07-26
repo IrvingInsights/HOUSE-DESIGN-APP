@@ -3657,6 +3657,22 @@ export function normalizeRooms(spec) {
         && Math.abs(Number(w.heightFt) - shellH) > 0.05) delete w.heightFt;
     }
   }
+  // TWO THINGS WITH THE SAME NAME (kept in step with the bim-core copy).
+  // Ids are unique; names never were. Two decks called "2nd floor deck", two
+  // stairs called "Stairs" — every card and every message becomes a coin toss,
+  // and it has already cost a whole session of "the controls do nothing".
+  // Repaired silently in place: first keeps the name, the rest get numbered.
+  {
+    const seenNames = new Map();
+    for (const obj of [...(spec.rooms || []), ...(spec.elements || [])]) {
+      const raw = String(obj.name || '').trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      const n = (seenNames.get(key) || 0) + 1;
+      seenNames.set(key, n);
+      if (n > 1) obj.name = `${raw} ${n}`;
+    }
+  }
   for (const el of (spec.elements || [])) {
     if (el.category === 'floor' && Number(el.level || 1) >= 2) {
       const zNow = storeyElevationFt(spec.shell, Number(el.level));

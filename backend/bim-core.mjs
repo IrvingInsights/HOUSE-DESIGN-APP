@@ -1150,6 +1150,25 @@ function normalizeRooms(spec) {
         && Math.abs(Number(w.heightFt) - shellH) > 0.05) delete w.heightFt;
     }
   }
+  // (1b) TWO THINGS WITH THE SAME NAME. Daniel has two decks both called
+  // "2nd floor deck"; he has had two stairs both called "Stairs", and spent a
+  // session turning one while watching the other, certain the controls were
+  // dead. Ids are unique and names never were, so every card, every list and
+  // every message became a coin toss.
+  // Repaired silently and in place, the way a legacy value gets migrated: the
+  // first keeps the name, the rest get numbered. Nothing to notice, nothing to
+  // press, no list of messes for the user to clean up after the app.
+  {
+    const seenNames = new Map();
+    for (const obj of [...(spec.rooms || []), ...(spec.elements || [])]) {
+      const raw = String(obj.name || '').trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      const n = (seenNames.get(key) || 0) + 1;
+      seenNames.set(key, n);
+      if (n > 1) obj.name = `${raw} ${n}`;
+    }
+  }
   // (2) A storey extent plate always sits at the engine's floor elevation —
   // stale z values from an older stacking model floated plates 7′ high.
   for (const el of (spec.elements || [])) {
