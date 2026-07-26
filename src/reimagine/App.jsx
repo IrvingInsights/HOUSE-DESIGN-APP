@@ -760,6 +760,34 @@ export default function App() {
       x: Number(spec.shell.widthFt) + 3, y: 2 + runs.length * 3, w: pad.w, d: pad.d, h: 0.35, level: 1
     }]);
   };
+  // A QUARTER TURN, FOR ANYTHING WITH A FOOTPRINT. Swap length for depth about
+  // the object's own middle, so it turns where it stands instead of flying off
+  // across the plan (which is what rotating around a corner does, and it cost a
+  // whole session once). ONE batched dispatch — two separate calls would race
+  // on stale state and only the last would win.
+  // A stair is the exception that proves it: its box is DERIVED from which way
+  // you climb, so turning a stair means turning its direction and letting the
+  // footprint follow.
+  const rotate90 = (obj) => {
+    if (!obj) return;
+    if (isStair(obj)) {
+      const st = resolveStair(spec, obj);
+      const next = STAIR_FACING_ORDER[(STAIR_FACING_ORDER.indexOf(st.facing) + 1) % STAIR_FACING_ORDER.length];
+      applyOps([{ type: 'set_stair', id: obj.id, field: 'facing', value: next }]);
+      return;
+    }
+    const w = Math.max(0.1, Number(obj.w) || 0);
+    const d = Math.max(0.1, Number(obj.d) || 0);
+    if (Math.abs(w - d) < 0.01) return; // a square turns into itself
+    const cx = (Number(obj.x) || 0) + w / 2;
+    const cy = (Number(obj.y) || 0) + d / 2;
+    const nx = Math.round((cx - d / 2) * 10) / 10;
+    const ny = Math.round((cy - w / 2) * 10) / 10;
+    applyOps([
+      { type: 'resize_object', targetId: obj.id, name: obj.name, w: d, d: w, h: Number(obj.h) || 0 },
+      { type: 'move_object', targetId: obj.id, name: obj.name, x: nx || 0.01, y: ny || 0.01 }
+    ]);
+  };
   // SHADE, ON A SIDE OF THE HOUSE. It lands standing off that wall, the way
   // the real thing does — a tree twelve feet out, an awning right on the
   // glass — so the plan shows you what is actually shading what. Drag it after;
@@ -2358,6 +2386,7 @@ export default function App() {
           onRemove={() => removeObject(selectedRoom)}
           onClose={() => setSelectedId(null)}
           onSetEnvelope={(value) => applyOps([{ type: 'update_object', targetId: selectedRoom.id, name: selectedRoom.name, field: 'envelope', value }])}
+          onRotate={() => rotate90(selectedRoom)}
           onMassWall={selectedRoom.type === 'plant'
             && (Number(selectedRoom.y) || 0) + (Number(selectedRoom.d) || 0) >= (Number(spec.shell.depthFt) || 28) - 1
             ? () => makeMassWallBehind(selectedRoom) : null}
@@ -2642,6 +2671,7 @@ export default function App() {
                 </div>
               </div>
             )}
+            {el && <RotateButton onRotate={() => rotate90(el)} label={isStair(el) ? 'Turn the stair 90°' : `Turn ${el.name} 90°`} />}
             <p className="rz-muted">Drag it in the plan to move it; grab a corner to resize.</p>
             {el && (
               <button className="rz-remove" onClick={() => removeObject(el)}>Remove {el.name}</button>
@@ -3091,7 +3121,22 @@ function PlaceSizeRows({ obj, onMove, onResize }) {
   );
 }
 
-function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose, onMassWall = null, onGlassWall = null, doorSides = [], onAddOpening = null, interiorWalls = [], onSetWallDoor = null, onSetEnvelope = null }) {
+// ONE TURN, EVERYWHERE. A quarter turn on the spot: the object's middle stays
+// put and its length and depth swap. Stairs, rooms, interior walls, foundation
+// pads, decks, furniture, shade — anything with a footprint turns the same way
+// with the same button, so "how do I turn this?" has one answer instead of a
+// different one per kind of thing (and, until now, no answer at all for most).
+function RotateButton({ onRotate, label = 'Turn it 90°' }) {
+  return (
+    <button
+      type="button" className="rz-fresh" style={{ alignSelf: 'flex-start' }}
+      data-cap="cap-rotate-90"
+      title="A quarter turn on the spot — the middle stays where it is, the long way round becomes the short way"
+      onClick={onRotate}
+    >↻ {label}</button>
+  );
+}
+function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose, onMassWall = null, onGlassWall = null, doorSides = [], onAddOpening = null, interiorWalls = [], onSetWallDoor = null, onSetEnvelope = null, onRotate = null }) {
   const [doorSideRaw, setDoorSide] = useState('');
   const doorSide = doorSides.includes(doorSideRaw) ? doorSideRaw : doorSides[0];
   const [expanded, setExpanded] = useState(false);
@@ -3188,6 +3233,8 @@ function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose
           of the living space.
         </div>
       )}
+
+      {onRotate && <RotateButton onRotate={onRotate} label="Turn this room 90°" />}
 
       <div className="rz-vitals">
         <Vital label="Use" value={TYPE_LABEL[room.type] || room.type || '—'} />

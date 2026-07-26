@@ -162,6 +162,14 @@
       "site": "quick"
     },
     {
+      "id": "object.rotate90",
+      "chapter": "",
+      "label": "Turn anything a quarter turn on the spot — stairs, rooms, interior walls, pads, decks, furniture",
+      "marker": "cap-rotate-90",
+      "site": "sheet",
+      "classic": "RotateButton"
+    },
+    {
       "id": "systems.summer",
       "chapter": "systems",
       "label": "Summer & cooling — shade you build or plant, the whole-house fan, and how far the house drifts on a hot day",
