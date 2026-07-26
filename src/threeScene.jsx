@@ -3041,31 +3041,13 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const dp = (m, mat) => { m.userData.roomId = element.id; m.userData.generated = true; group.add(m); return m; };
           // the walking surface: a slab-thin patio at grade, a framed platform raised
           dp(box(ew0, dk.placement === 'grade' ? 0.25 : 0.35, ed0, ex0 + ew0 / 2, deckTopY, ey0 + ed0 / 2, deckMatD));
-          // LEGS. A raised deck standing off the building had nothing holding
-          // it up — a second-floor deck out past the wall simply hung in the
-          // air, and it read exactly as broken as it was. Posts every ~8 ft
-          // around the perimeter, down to the ground, wherever the deck is
-          // NOT sitting on the building below it.
-          if (dk.placement !== 'grade' && deckTopY > 2.5) {
-            const overBuilding = (px, pz) => px > -0.05 && px < width + 0.05 && pz > -0.05 && pz < depth + 0.05;
-            const legMat = new THREE.MeshStandardMaterial({ color: 0x7a5c3e, roughness: 0.85, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
-            const legsAt = [];
-            const nX = Math.max(1, Math.round(ew0 / 8));
-            const nZ = Math.max(1, Math.round(ed0 / 8));
-            for (let i = 0; i <= nX; i += 1) {
-              for (let j = 0; j <= nZ; j += 1) {
-                if (i > 0 && i < nX && j > 0 && j < nZ) continue; // perimeter only
-                legsAt.push([ex0 + 0.35 + ((ew0 - 0.7) * i) / nX, ey0 + 0.35 + ((ed0 - 0.7) * j) / nZ]);
-              }
-            }
-            legsAt.forEach(([px, pz]) => {
-              if (overBuilding(px, pz)) return; // the house carries it here
-              const ground = gradeElevationAt(spec, px, pz) || 0;
-              const legH = deckTopY - ground - 0.18;
-              if (legH < 1) return;
-              dp(box(0.42, legH, 0.42, px, ground + legH / 2, pz, legMat));
-            });
-          }
+          // NO POSTS UNDER A RAISED DECK. I added some; Daniel took them
+          // straight back off: "if the beams/floor joists extend out for the
+          // decks, just as they do for the roof, we should be fine." That is
+          // how a timber frame actually carries a balcony — the floor joists
+          // run past the wall and the deck sits on the cantilever, the same
+          // move the eaves make overhead. A forest of legs under a second-floor
+          // deck is a different building.
           const railTop = deckTopY + 3;
           // stairs: resolveDeckStairs is the one answer (renderer + receipts +
           // card). 'auto' = the old longest-open-edge rule down to the ground;
@@ -3490,8 +3472,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // containing polygon edge; on a rectangle these are the classic
           // 0 / depth / width / 0 lines (edgeForOpening returns exactly those).
           const oEdge = customFp ? edgeForOpening(spec, opening) : null;
-          const lineNS = oEdge && oEdge.horizontal ? oEdge.y0 : (opening.wall === 'north' ? 0 : depth);
-          const lineEW = oEdge && !oEdge.horizontal ? oEdge.x0 : (opening.wall === 'east' ? width : 0);
+          // …and on a set-back upper storey that line is the STOREY's own wall,
+          // not the footprint. This is where the whole window assembly — frame,
+          // glass, lites, sill — actually gets its position, so getting it
+          // right anywhere else was cosmetic. openingWallPlane is the one
+          // answer; the band law and the dormer already ask it.
+          const oLine = openingWallPlane(spec, opening.wall, oLevel);
+          const lineNS = oEdge && oEdge.horizontal ? oEdge.y0 : (oHoriz ? oLine : depth);
+          const lineEW = oEdge && !oEdge.horizontal ? oEdge.x0 : (!oHoriz ? oLine : 0);
           if (profile.bay) {
             // Bay window: a wood-framed box pushed out from the wall, glass on its face.
             const bayD = 1.4;
