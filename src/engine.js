@@ -3405,6 +3405,13 @@ export function applyStructuredDesignPlan(currentSpec, plan) {
       } else if (operation.field === 'roofFall') {
         if (['north', 'south', 'east', 'west'].includes(operation.value)) target.roofFall = operation.value;
         else delete target.roofFall;
+      } else if (['roofOverhangNorthFt', 'roofOverhangSouthFt', 'roofOverhangEastFt', 'roofOverhangWestFt'].includes(operation.field)) {
+        // Mirror of bim-core: ONE side of this storey's eave. The four eaves of
+        // a storey do different jobs — a deep one shades the glass below it,
+        // and the same depth over a greenhouse shades the plants out.
+        const ov1 = Number(operation.value);
+        if (Number.isFinite(ov1) && ov1 >= 0 && String(operation.value) !== '') target[operation.field] = clamp(ov1, 0, 12);
+        else delete target[operation.field];
       } else if (operation.field === 'roofOverhangFt') {
         const ov = Number(operation.value);
         if (Number.isFinite(ov) && ov > 0) target.roofOverhangFt = clamp(ov, 0, 12);

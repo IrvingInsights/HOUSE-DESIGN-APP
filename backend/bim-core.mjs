@@ -3130,6 +3130,12 @@ export function applyBimOperations(currentSpec, plan) {
         // entry airlock, a porch). See ROOM_ENVELOPES.
         if (['heated', 'buffer'].includes(operation.value)) target.envelope = operation.value;
         else delete target.envelope;
+      } else if (['roofOverhangNorthFt', 'roofOverhangSouthFt', 'roofOverhangEastFt', 'roofOverhangWestFt'].includes(operation.field)) {
+        // One side of THIS storey's eave, overriding its all-round figure.
+        // Blank or negative clears back to the storey's own overhang.
+        const ov1 = Number(operation.value);
+        if (Number.isFinite(ov1) && ov1 >= 0 && String(operation.value) !== '') target[operation.field] = clamp(ov1, 0, 12);
+        else delete target[operation.field];
       } else if (operation.field === 'roofOverhangFt') {
         // This storey's own eave reach past its walls; blank/zero = the
         // whole-roof overhangs.

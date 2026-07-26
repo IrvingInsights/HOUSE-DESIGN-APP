@@ -819,6 +819,30 @@ async function httpSanity() {
   ok(!r2.elements[0].side, 'a nonsense side is dropped rather than stored');
 }
 
+// --- one side of a storey's eave -------------------------------------------
+// The house has always had four separate eaves; a STOREY had one number for
+// all four, so "shorten just the south one" could not be said. Daniel's upper
+// roof carries 6 ft all round and the south one reached 6 ft over a 7 ft
+// greenhouse — correct geometry, plants in the shade.
+{
+  const s = freshSpec();
+  s.shell.storeys = 2;
+  s.elements = [{ id: 'p2', name: 'Storey 2 extent', category: 'floor', x: 0, y: 0, w: 28, d: 32, h: 0.4, level: 2, z: 12, roofOverhangFt: 6 }];
+  let r = apply(s, [{ type: 'update_object', targetId: 'p2', name: 'Storey 2 extent', field: 'roofOverhangSouthFt', value: 4 }]).spec;
+  let p = r.elements.find((e) => e.id === 'p2');
+  ok(p.roofOverhangSouthFt === 4, 'one side of a storey eave can be set on its own');
+  ok(p.roofOverhangFt === 6, 'and the storey keeps its all-round figure for the other three');
+  r = apply(r, [{ type: 'update_object', targetId: 'p2', name: 'Storey 2 extent', field: 'roofOverhangSouthFt', value: '' }]).spec;
+  p = r.elements.find((e) => e.id === 'p2');
+  ok(p.roofOverhangSouthFt === undefined, 'clearing a side hands it back to the all-round figure');
+  r = apply(r, [{ type: 'update_object', targetId: 'p2', name: 'Storey 2 extent', field: 'roofOverhangSouthFt', value: 40 }]).spec;
+  p = r.elements.find((e) => e.id === 'p2');
+  ok(p.roofOverhangSouthFt === 12, 'and an absurd eave clamps instead of building a 40 ft cantilever');
+  r = apply(r, [{ type: 'update_object', targetId: 'p2', name: 'Storey 2 extent', field: 'roofOverhangSouthFt', value: 0 }]).spec;
+  p = r.elements.find((e) => e.id === 'p2');
+  ok(p.roofOverhangSouthFt === 0, 'zero is a real answer — no eave on that side at all');
+}
+
 const wantHttp = process.argv.includes('--http');
 (async () => {
   if (wantHttp) await httpSanity();

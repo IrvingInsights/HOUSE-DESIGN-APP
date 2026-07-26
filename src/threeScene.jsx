@@ -446,6 +446,17 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const tierShapeOf = (lv) => { const v = tierFieldOf(lv, 'roofShape'); return ['shed', 'gable', 'flat'].includes(v) ? v : null; };
       const tierFallOf = (lv) => { const v = tierFieldOf(lv, 'roofFall'); return ['north', 'south', 'east', 'west'].includes(v) ? v : null; };
       const tierOverhangOf = (lv) => { const v = Number(tierFieldOf(lv, 'roofOverhangFt')); return Number.isFinite(v) && v > 0 ? clamp(v, 0, 12) : null; };
+      // PER-SIDE, ON A STOREY. The house has always had four separate eaves;
+      // a storey had one number for all four. Daniel's upper roof carries 6 ft
+      // all round, and the south one now reaches 6 ft over a 7 ft greenhouse —
+      // correct geometry, and it shades the plants out. Shortening that ONE
+      // eave was not a thing the app could express. `roofOverhangFt` stays the
+      // storey's default; `roofOverhangSouthFt` and friends override one side.
+      const tierOverhangSideOf = (lv, side) => {
+        const one = Number(tierFieldOf(lv, `roofOverhang${side[0].toUpperCase()}${side.slice(1)}Ft`));
+        if (Number.isFinite(one) && one >= 0) return clamp(one, 0, 12);
+        return tierOverhangOf(lv);
+      };
       const OPPOSITE_SIDE = { north: 'south', south: 'north', east: 'west', west: 'east' };
       const basementH = basementInfo(spec.shell).heightFt;
       const wallHeight = roofSpec.highWallHeightFt + storeyLift;
@@ -586,8 +597,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const out = {};
           // a storey with its OWN overhang reaches that far past its walls on
           // every outward side (courtesy joints at neighbors stay tight)
-          const tOv = tierOverhangOf(segLevel);
           for (const side of WALL_SIDES) {
+            const tOv = tierOverhangSideOf(segLevel, side);
             const [px, py] = probes[side];
             if (!isUpper && coveredAbove(px, py, segLevel)) out[side] = 0.35;
             // AN UPPER STOREY'S EAVE OVER A LOWER ROOF IS STILL AN EAVE.

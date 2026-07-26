@@ -4855,6 +4855,32 @@ function UpperRoofControls({ spec, level, floors, onOps }) {
           onCommit={(v) => setPlate('roofOverhangFt', v)}
         />
       </label>
+      {/* ONE SIDE AT A TIME. The four eaves of a storey do different jobs: a
+          deep one on the sunny side shades the glass below it, and the same
+          depth over a greenhouse shades the plants out. The house has had four
+          separate eaves all along; a storey had one number for all four, so
+          "shorten just the south one" could not be said. 0 means that side
+          follows the figure above. */}
+      <div className="rz-field-num">
+        <span className="rz-field-lead">…or set one side on its own</span>
+      </div>
+      <div className="ctlChips" style={{ flexWrap: 'wrap', gap: 6 }}>
+        {WALL_SIDES.map((side) => {
+          const field = `roofOverhang${side[0].toUpperCase()}${side.slice(1)}Ft`;
+          const own = Number(plate[field]);
+          const shown = Number.isFinite(own) && own >= 0 ? own : ownOverhang;
+          return (
+            <label key={side} className="rz-field rz-field-num" style={{ flex: '0 0 auto', gap: 4 }}>
+              <span>{WALL_SIDE_LABELS[side] || side}</span>
+              <NumInput
+                value={Math.round(shown * 10) / 10}
+                min={0} max={12} step={0.5} unit="ft"
+                onCommit={(v) => setPlate(field, v)}
+              />
+            </label>
+          );
+        })}
+      </div>
       {floors > level && (
         <label className="rz-field">
           <span>Top of this floor, where the floor above steps back</span>
