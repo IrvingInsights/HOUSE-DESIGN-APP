@@ -2674,7 +2674,22 @@ export default function App() {
                 onClick={() => padUnder(el)}
               >▣ Reinforced pad under {el.name}</button>
             )}
-            {el && el.category === 'outbuilding' && (
+            {el && (el.category === 'carport' || el.category === 'porch' || el.roofType) && el.category !== 'floor' && el.category !== 'outbuilding' && (
+              // An open bay skinned in poly is a garage that still passes light.
+              <label className="rz-field">
+                <span>Walls — leave open, or skin it</span>
+                <select
+                  value={el.wallCovering || ''}
+                  onChange={(e2) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'wallCovering', value: e2.target.value }])}
+                >
+                  <option value="">Open on every side</option>
+                  {Object.values(ROOF_COVERINGS).map((c) => (
+                    <option key={c.key} value={c.key}>{c.label}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {el && (el.category === 'outbuilding' || el.wallCovering) && (
               // A shed with three doors out of it is a different building from
               // a shed with none. One width per side, 0 for a solid wall.
               <>

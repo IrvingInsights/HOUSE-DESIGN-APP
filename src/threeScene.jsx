@@ -3302,15 +3302,24 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           wallRun('South', true, oz1 - T / 2);
           wallRun('West', false, ox0 + T / 2);
           wallRun('East', false, ox1 - T / 2);
-          // A shed roof, low side away from the house, with a modest eave.
+          // THE OUTBUILDINGS DRAIN THE WAY THE HOUSE DRAINS. This tipped its
+          // roof "away from the house", which on Daniel's site pointed a shed
+          // south while the house sheds north — two roofs arguing about which
+          // way the weather goes. They now take their fall from the house's own
+          // roof profile, so the whole homestead sheds to the same side.
           const obCover = ROOF_COVERINGS[element.roofCovering] || null;
           const obRoofMat = obCover
             ? new THREE.MeshStandardMaterial({ color: obCover.color, roughness: obCover.translucent ? 0.15 : 0.8, transparent: Boolean(obCover.translucent), opacity: obCover.translucent ? 0.32 : 1, metalness: obCover.texture === 'metal' && !obCover.translucent ? 0.5 : 0 })
             : roofMat;
           const obOv = 1;
-          const rise = Math.max(0.8, element.d * 0.18);
+          const low = roofSpec.lowSide || 'north';
+          const fallsAlongZ = low === 'north' || low === 'south';
+          const runFt = fallsAlongZ ? element.d + obOv * 2 : element.w + obOv * 2;
+          const rise = Math.max(0.8, runFt * 0.18);
           const panel = box(element.w + obOv * 2, 0.3, element.d + obOv * 2, (ox0 + ox1) / 2, elevation + obH + rise / 2, (oz0 + oz1) / 2, obRoofMat);
-          panel.rotation.x = Math.atan2(rise, element.d + obOv * 2) * (oz0 >= depth / 2 ? 1 : -1);
+          // +x rotation drops the -z (north) edge; mirror it for a south fall.
+          if (fallsAlongZ) panel.rotation.x = Math.atan2(rise, runFt) * (low === 'north' ? -1 : 1);
+          else panel.rotation.z = Math.atan2(rise, runFt) * (low === 'west' ? 1 : -1);
           obPart(panel);
           const obHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
           mesh = box(element.w, obH, element.d, (ox0 + ox1) / 2, elevation + obH / 2, (oz0 + oz1) / 2, obHandle);
@@ -3429,14 +3438,64 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               canopyPart(panel);
             }
           } else {
+            // A shed canopy sheds the way the HOUSE sheds. It used to tip
+            // itself away from the middle of the house, which put a carport's
+            // fall on whichever side it happened to sit — the two roofs
+            // disagreeing about where the weather goes.
             const spanW = element.w + ow * 2;
             const spanD = element.d + ow * 2;
-            const towardX = Math.abs(cxm - width / 2) > Math.abs(czm - depth / 2);
-            const rise = Math.max(0.8, (towardX ? spanW : spanD) * 0.12);
+            const lowC = roofSpec.lowSide || 'north';
+            const alongZC = lowC === 'north' || lowC === 'south';
+            const rise = Math.max(0.8, (alongZC ? spanD : spanW) * 0.12);
             const panel = box(spanW, 0.16, spanD, cxm, eave + rise / 2, czm, roofMatC);
-            if (towardX) panel.rotation.z = (cxm >= width / 2 ? -1 : 1) * Math.atan2(rise, spanW);
-            else panel.rotation.x = (czm >= depth / 2 ? 1 : -1) * Math.atan2(rise, spanD);
+            if (alongZC) panel.rotation.x = Math.atan2(rise, spanD) * (lowC === 'north' ? -1 : 1);
+            else panel.rotation.z = Math.atan2(rise, spanW) * (lowC === 'west' ? 1 : -1);
             canopyPart(panel);
+          }
+          // POLY WALLS ON A CARPORT. An open bay is a carport; skin it and it
+          // is a garage that still lets the light through to the greenhouse
+          // behind it. Any side can take a doorway — a wide one reads as the
+          // barn door. Walls follow the element's own wallCovering, so clear
+          // poly stays clear.
+          const wallCov = ROOF_COVERINGS[element.wallCovering] || null;
+          if (wallCov) {
+            const wMat = new THREE.MeshStandardMaterial({
+              color: wallCov.color, roughness: wallCov.translucent ? 0.15 : 0.85,
+              transparent: Boolean(wallCov.translucent), opacity: wallCov.translucent ? 0.26 : 1,
+              side: THREE.DoubleSide
+            });
+            const dMat = new THREE.MeshStandardMaterial({
+              color: wallCov.color, roughness: 0.2, transparent: true,
+              opacity: wallCov.translucent ? 0.42 : 1, side: THREE.DoubleSide
+            });
+            const wT = 0.16;
+            const top = eave - 0.2;
+            const run = (side, horiz, cross) => {
+              const span = horiz ? element.w : element.d;
+              const a0 = horiz ? element.x : element.y;
+              const dw = Math.max(0, Math.min(Number(element[`door${side}Ft`]) || 0, span - 0.5));
+              const put = (from, to, yb, hg) => {
+                if (to - from < 0.05 || hg < 0.05) return;
+                const m = (from + to) / 2;
+                canopyPart(horiz
+                  ? box(to - from, hg, wT, m, deckTop + yb + hg / 2, cross, wMat)
+                  : box(wT, hg, to - from, cross, deckTop + yb + hg / 2, m, wMat));
+              };
+              const H = top - deckTop;
+              if (dw <= 0.5) { put(a0, a0 + span, 0, H); return; }
+              const ds = a0 + (span - dw) / 2;
+              const dh = Math.min(H - 0.3, 8);
+              put(a0, ds, 0, H);
+              put(ds + dw, a0 + span, 0, H);
+              put(ds, ds + dw, dh, H - dh);
+              canopyPart(horiz
+                ? box(dw - 0.15, dh - 0.15, 0.1, ds + dw / 2, deckTop + (dh - 0.15) / 2, cross, dMat)
+                : box(0.1, dh - 0.15, dw - 0.15, cross, deckTop + (dh - 0.15) / 2, ds + dw / 2, dMat));
+            };
+            run('North', true, element.y + wT / 2);
+            run('South', true, element.y + element.d - wT / 2);
+            run('West', false, element.x + wT / 2);
+            run('East', false, element.x + element.w - wT / 2);
           }
         }
 

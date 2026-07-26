@@ -3141,6 +3141,11 @@ export function applyBimOperations(currentSpec, plan) {
         const dv = Number(operation.value);
         if (Number.isFinite(dv) && dv > 0.5) target[operation.field] = clamp(dv, 2, 16);
         else delete target[operation.field];
+      } else if (operation.field === 'wallCovering') {
+        // Skinning an open structure: a carport with poly walls is a garage
+        // that still passes light to whatever stands behind it.
+        if (ROOF_COVERINGS[operation.value]) target.wallCovering = operation.value;
+        else delete target.wallCovering;
       } else if (operation.field === 'roofCovering') {
         // A structure can wear a different roof from the house — clear
         // polycarbonate over a carport so the greenhouse behind it still sees
