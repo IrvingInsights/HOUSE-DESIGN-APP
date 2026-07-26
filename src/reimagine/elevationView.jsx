@@ -654,9 +654,17 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
                 style={{ cursor: 'ns-resize' }}
                 onPointerDown={(e) => startWallDrag(e, side, tEnd, vTop)}
               />
+              {/* THE LABEL MUST SAY WHERE THE HANDLE IS. This handle sits at
+                  the top of the WHOLE wall — 20 ft on a two-storey house — and
+                  printed the shell's per-side figure, which is only the ground
+                  storey's 12. On a single-storey house the two are the same
+                  number and nobody noticed. Daniel shortened his second floor
+                  by 2 ft: the handle dropped, the drawing was right, and the
+                  label sat there still saying 12. Both numbers now, because
+                  both are true and the drag still sets the first one. */}
               <text x={X(tEnd) < run / 2 ? X(tEnd) + 0.9 : X(tEnd) - 0.9} y={Y(vTop) - 0.9}
                 textAnchor={X(tEnd) < run / 2 ? 'start' : 'end'} fontSize="1.05" fill="#3C6472" fontWeight="600" pointerEvents="none">
-                {capWord(side)} wall {hNow}′
+                {capWord(side)} wall {hNow}′{Math.abs(vTop - hNow) > 0.05 ? ` · ${Math.round(vTop * 10) / 10}′ to the eave` : ''}
               </text>
             </g>
           );
