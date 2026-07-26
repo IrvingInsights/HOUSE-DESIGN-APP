@@ -1154,6 +1154,25 @@ export function snapPlatesToShell(spec) {
     if (y0 > 0 && y0 < PLATE_SNAP_FT) { plate.y = 0; plate.d = Math.round(y1 * 10) / 10; }
     if (y1 < shellD && shellD - y1 < PLATE_SNAP_FT) plate.d = Math.round((shellD - (Number(plate.y) || 0)) * 10) / 10;
   }
+  // A DECK THAT ENDS A HAIR PAST THE HOUSE. Both of Daniel's second-floor
+  // decks ran to 40 ft on a 39 ft house, so each hung a one-foot sliver past
+  // the south wall — the kind of thing that happens when the house is resized
+  // under something that was drawn to a round number, and the kind of thing
+  // nobody draws on purpose. A deck that genuinely reaches out past the
+  // building (his east balcony stands 6 ft off the east wall) is untouched:
+  // only an end sitting within a few inches of a shell edge is a sliver, and
+  // it goes flush. Silent, like every other heal here — there is nothing for
+  // him to press about a foot of decking he never asked for.
+  const DECK_SNAP_FT = 1.25;
+  for (const deck of (spec.elements || []).filter((el) => el?.category === 'deck')) {
+    const x0 = Number(deck.x) || 0; const y0 = Number(deck.y) || 0;
+    const w = Number(deck.w) || 0; const d = Number(deck.d) || 0;
+    const x1 = x0 + w; const y1 = y0 + d;
+    if (Math.abs(x0) < DECK_SNAP_FT && x0 !== 0) { deck.x = 0; deck.w = Math.round(x1 * 10) / 10; }
+    if (Math.abs(x1 - shellW) < DECK_SNAP_FT && x1 !== shellW) deck.w = Math.round((shellW - (Number(deck.x) || 0)) * 10) / 10;
+    if (Math.abs(y0) < DECK_SNAP_FT && y0 !== 0) { deck.y = 0; deck.d = Math.round(y1 * 10) / 10; }
+    if (Math.abs(y1 - shellD) < DECK_SNAP_FT && y1 !== shellD) deck.d = Math.round((shellD - (Number(deck.y) || 0)) * 10) / 10;
+  }
   return spec;
 }
 
