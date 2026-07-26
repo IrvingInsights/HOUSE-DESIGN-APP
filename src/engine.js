@@ -4718,6 +4718,51 @@ export function deriveDesign(spec, wallSectionsParam) {
     const area = upperFloorArea + loftTowerArea;
     costReceipts.upperFloors = area > 0 ? [rline('Upper floor decks', area * 12, area, 'sf of deck', 12, 'joists + deck between storeys')] : [];
   }
+  { // furnishings — one line per kind of thing placed in the design
+    // Everything here is a piece you put in the plan: fixtures, built-ins,
+    // appliances, furniture, outdoor pieces. Lines carry the NEW price and the
+    // discount lands once at the bottom, so the saving is a number you can see
+    // rather than a quiet rebate buried in each item.
+    const groupLabelOf = (f) => ((FURNISHING_GROUPS.find((g) => g.key === f.group) || {}).label || f.group).toLowerCase();
+    const byKind = new Map();
+    for (const el of furnishingEls) {
+      const f = resolveFurnishing(el);
+      if (!f) continue;
+      byKind.set(f.key, { f, n: (byKind.get(f.key)?.n || 0) + 1 });
+    }
+    const lines = [];
+    for (const { f, n } of byKind.values()) {
+      if (!(f.cost > 0)) {
+        // Priced somewhere else (the heater rides with the heat system). Say so
+        // rather than dropping the row — a piece that is in the plan and costs
+        // nothing here needs to explain itself.
+        lines.push(rline(f.label, 0, null, '', null, f.note || `${groupLabelOf(f)} — priced with another system, not here`));
+      } else if (n > 1) {
+        lines.push(rline(f.label, n * f.cost, n, 'in the design', f.cost, groupLabelOf(f), true));
+      } else {
+        lines.push(rline(f.label, f.cost, null, '', null, groupLabelOf(f)));
+      }
+    }
+    const furnSaved = furnishingsCostRaw - furnishingsCost;
+    if (Math.abs(furnSaved) > 0.005) {
+      // Name which categories are actually discounted — a single piece marked
+      // used on its own card counts here exactly like a whole category set to
+      // salvaged, because that is how the price was worked out.
+      const kinds = new Map();
+      for (const el of furnishingEls) {
+        const f = resolveFurnishing(el);
+        if (!f || !(f.cost > 0)) continue;
+        const own = MATERIAL_SOURCES[el.source] ? el.source
+          : (el.reclaimed === true ? 'salvaged' : (el.reclaimed === false ? 'new' : null));
+        const src = own || sourcing[f.group];
+        if (!src || src === 'new' || !SOURCE_FACTORS[f.group]?.[src]) continue;
+        kinds.set(`${f.group}:${src}`, `${MATERIAL_SOURCES[src].short} ${groupLabelOf(f)}`);
+      }
+      lines.push(rline('Bought used or built yourself', -furnSaved, null, '', null,
+        kinds.size ? `${[...kinds.values()].join(', ')} — off the new price` : 'off the new price'));
+    }
+    costReceipts.furnishings = lines;
+  }
   { // outdoors
     const lines = [];
     for (const item of OUTDOOR_ITEMS) {
@@ -4840,6 +4885,11 @@ export const COST_ROWS = [
   { key: 'windows', label: 'Windows & doors', system: 'windows' },
   { key: 'upperFloors', label: 'Upper floors', system: 'shell' },
   { key: 'stairs', label: 'Stairs', system: 'rooms' },
+  // Everything placed inside and around the house. It was missing from this
+  // list for a long while, which meant its money reached the total without
+  // ever showing up as a row — the budget's lines did not add up to its own
+  // bottom line. Every key in `cost` belongs here; receipts_test pins that.
+  { key: 'furnishings', label: 'Fixtures & furniture', system: 'rooms' },
   { key: 'heat', label: 'Heat', system: 'heat' },
   { key: 'water', label: 'Water', system: 'water' },
   { key: 'waste', label: 'Waste', system: 'waste' },

@@ -3508,13 +3508,15 @@ function DoorwayControls({ spec, level, selectedId, onSelect, onSet, onRemove })
   );
 }
 
-// THE ONE CONTROL EVERY STAIR SHARES: which way you walk. Four buttons laid
-// out like a compass (north up, south down, east right, west left), the current
-// one filled. An interior stair, a set of deck steps, anything you climb — they
-// all use THIS, so "the stairs face the wrong way" is always the same one-click
-// fix wherever you meet it. Each button can be greyed with a reason (a deck
-// edge that leans on the house takes no steps); an interior stair's four are
-// always open. `options` is [{dir, ok, hint}]; onPick gets the chosen dir.
+// WHICH EDGE OF A DECK TAKES THE STEPS. Four buttons laid out like a compass
+// (north up, south down, east right, west left), the current one filled. This
+// is a choice you cannot make by hand on the plan — the steps hang off an edge
+// you pick, and edges that can't take them are greyed with the reason (one
+// leaning on the house, one already level).
+// An interior stair used to share this dial and no longer does: you select it
+// and shape it directly instead. Naming a compass direction for a thing you
+// are looking at is a translation step, and it earned its removal.
+// `options` is [{dir, ok, hint}]; onPick gets the chosen dir.
 const DIR_ARROW = { north: '↑', south: '↓', east: '→', west: '←' };
 const CAPDIR = (d) => d[0].toUpperCase() + d.slice(1);
 function DirectionDial({ heading, current, options, onPick }) {
@@ -3546,7 +3548,7 @@ function DirectionDial({ heading, current, options, onPick }) {
   );
 }
 
-// Deck steps, on the SAME dial as an interior stair. The four edges are the
+// Deck steps. The four edges are the
 // four directions; an edge that can't take steps is greyed with why. "Auto" is
 // gone from the face — an unset deck still auto-adds steps on a ground floor,
 // and the dial simply highlights whichever edge that lands on, so there is
@@ -3607,8 +3609,9 @@ function StairsAndSteps({ spec, level, selectedId, onSelect, onStair, onDeckStep
   );
 }
 
-// An interior stair's card. THREE things, in the order you decide them: which
-// way you climb (the dial — same one the deck steps use), what shape it is
+// An interior stair's card. You point it by hand: select it on the plan, drag
+// it, grab a corner, and use ↻ to swing it round. What's left on the card is
+// what the plan can't show you — what shape it is
 // (straight, or folded into an L or a U), and how wide. You never type a
 // length — the climb sets the risers, the risers set the treads, the treads
 // set the run. The rest (which way an L turns, where a U breaks, the tread
@@ -3617,7 +3620,6 @@ const STAIR_SHAPE_SHORT = { straight: 'Straight', l: 'L-turn', u: 'U-turn' };
 function StairControls({ spec, el, selected, onSelect, onStair, onMove }) {
   const st = resolveStair(spec, el);
   const [tune, setTune] = useState(false);
-  const dirs = STAIR_FACING_ORDER.map((dir) => ({ dir, ok: true }));
   // WHICH STAIR IS THIS? Two stairs both called "Stairs" is how you end up
   // turning one and watching the other — it reads as "the controls do nothing".
   // Every card says where its stair stands, and calls out one standing outside
@@ -3634,10 +3636,11 @@ function StairControls({ spec, el, selected, onSelect, onStair, onMove }) {
       {outside && (
         <div className="rz-shape-note"><b>⚠</b> This stair stands outside the building, so it climbs to open air — put a deck or a door where it lands, drag it inside, or remove it.</div>
       )}
-      <DirectionDial heading="Which way you climb" current={st.facing} options={dirs} onPick={(d) => onStair('facing', d)} />
-      {/* One-tap rotate, beside the absolute compass. Some turns you know by
-          name ("climb east"), some you just want to swing round until it sits
-          right — this is the second kind, and dropping it lost a real move. */}
+      {/* One-tap rotate. There used to be a four-way compass above this, naming
+          the direction you climb in the abstract. It went: you select the stair
+          and shape it by hand on the plan — drag it, grab a corner — and this
+          button swings it round. Choosing "east" off a dial while looking at a
+          drawing is a translation step nobody asked for. */}
       <button type="button" className="rz-floorbar-outline"
         onClick={() => onStair('facing', STAIR_FACING_ORDER[(STAIR_FACING_ORDER.indexOf(st.facing) + 1) % 4])}
       >↻ Turn it 90°</button>

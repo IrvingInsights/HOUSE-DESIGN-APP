@@ -7,7 +7,7 @@
 // (or vice versa), this fails and names the line.
 
 import {
-  seedSpec, getWallSections, deriveDesign, convertSpecApproach, resolveDeck, resolveDeckStairs
+  seedSpec, getWallSections, deriveDesign, convertSpecApproach, resolveDeck, resolveDeckStairs, COST_ROWS
 } from '../src/engine.js';
 
 const fixtures = () => {
@@ -87,6 +87,20 @@ for (const [name, spec] of Object.entries(fixtures())) {
   }
   const sweatSum = sweat.reduce((s, l) => s + l.amount, 0);
   ok(Math.abs(sweatSum + d.sweat) < 0.5, `${name}: sweat lines sum ${Math.round(sweatSum)} = -sweat ${Math.round(-d.sweat)}`);
+  // THE VISIBILITY LAW: the budget shows COST_ROWS and prints totalBeforeSweat
+  // underneath. A cost key that is not a row is money in the total with no line
+  // to explain it — which is exactly how furnishings hid $1,600 of his house.
+  // Every priced key must be visible; every row must be a real key.
+  const rowKeys = new Set(COST_ROWS.map((r) => r.key));
+  for (const key of Object.keys(d.cost)) {
+    ok(rowKeys.has(key), `${name}: cost.${key} has a budget row (it is in the total, so it must be on screen)`);
+  }
+  const rowsSum = COST_ROWS.reduce((s, r) => s + (d.cost[r.key] || 0), 0);
+  ok(Math.abs(rowsSum - d.totalBeforeSweat) < 0.5,
+    `${name}: budget rows sum ${Math.round(rowsSum)} = the total they sit under ${Math.round(d.totalBeforeSweat)}`);
+}
+for (const row of COST_ROWS) {
+  ok(row.key in deriveDesign(seedSpec, getWallSections(seedSpec)).cost, `COST_ROWS row "${row.key}" is a real cost key`);
 }
 
 // The slab-pad no-double-count law, pinned with explicit numbers:
