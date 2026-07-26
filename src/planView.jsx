@@ -7,6 +7,10 @@ import {
 import { Grid3X3, Plus } from 'lucide-react';
 import {
   clamp, floorCount, floorLabel, resolveOverhangs, utilitiesOf, resolveWallSide, PLAN_ELEMENT_HEX, planLabelInk,
+  isStair, resolveStair,
+} from './engine.js';
+import { ScaleGrid } from './scaleGrid.jsx';
+import {
   PLAN_ZONE_HEX, hexOf, sunspacePartitions
 } from './engine.js';
 
@@ -516,10 +520,17 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
       >{text}</text>
     );
   };
-  const gridStep = W > 60 ? 10 : 5;
-  const gridLines = [];
-  for (let gx = 0; gx <= W + 0.01; gx += gridStep) gridLines.push(<line key={`gx${gx}`} x1={gx} y1={0} x2={gx} y2={D} stroke="var(--line)" strokeWidth={0.06} opacity={0.5} />);
-  for (let gy = 0; gy <= D + 0.01; gy += gridStep) gridLines.push(<line key={`gy${gy}`} x1={0} y1={gy} x2={W} y2={gy} stroke="var(--line)" strokeWidth={0.06} opacity={0.5} />);
+  // The plan's grid used to stop at the walls, so anything you dragged outside
+  // the house — a deck, an outbuilding, a footing run — sat on blank paper with
+  // nothing to measure it against. It now covers the whole drawn extent, and
+  // it's the same ScaleGrid the wall, storeys and interior views use.
+  const gridLines = (
+    <ScaleGrid
+      xFt={[Math.floor(vb.x), Math.ceil(vb.x + vb.w)]}
+      yFt={[Math.floor(vb.y), Math.ceil(vb.y + vb.h)]}
+      labelSize={Math.max(0.7, vb.w / 90)}
+    />
+  );
 
   // Openings show on their own floor's plan — a 2nd-floor window draws on the
   // 2nd-floor layout, not the ground. (Roof openings are drawn in 3D only.)
@@ -760,6 +771,74 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                     })}
                   </>
                 )}
+              </g>
+            );
+          }
+          // A stair draws as what it IS — one or two runs with a landing
+          // between, treads ruled across each run, and an arrow showing which
+          // way you climb. Same resolveStair() the checks and the 3D use, so
+          // the drawing can never disagree with the model.
+          if (isStair(raw) && !raw.synthetic) {
+            const st = resolveStair(spec, el);
+            const dim = buildingContext ? 0.3 : 1;
+            return (
+              <g key={raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }} opacity={dim}
+                onPointerDown={(event) => startDrag(event, raw, 'move')}
+                onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}>
+                {st.parts.map((part, index) => (
+                  <rect key={index} x={part.x} y={part.y} width={part.w} height={part.d}
+                    fill={PLAN_ELEMENT_HEX.stair}
+                    fillOpacity={part.kind === 'landing' ? (isSel ? 0.98 : 0.85) : (isSel ? 0.9 : 0.72)}
+                    stroke={isSel ? 'var(--active-line)' : '#5a5348'} strokeWidth={isSel ? 0.4 : 0.22} />
+                ))}
+                {/* tread lines, ruled across the run at the real tread depth */}
+                {st.parts.filter((p) => p.kind === 'run').map((part) => {
+                  const along = part.climb === 'east' || part.climb === 'west';
+                  const n = Math.max(1, part.treads);
+                  return Array.from({ length: n - 1 }, (_, i) => {
+                    const t = (i + 1) / n;
+                    return along
+                      ? <line key={`${part.run}-${i}`} x1={part.x + part.w * t} y1={part.y} x2={part.x + part.w * t} y2={part.y + part.d}
+                        stroke="#f6f4ec" strokeWidth={0.09} opacity={0.75} pointerEvents="none" />
+                      : <line key={`${part.run}-${i}`} x1={part.x} y1={part.y + part.d * t} x2={part.x + part.w} y2={part.y + part.d * t}
+                        stroke="#f6f4ec" strokeWidth={0.09} opacity={0.75} pointerEvents="none" />;
+                  });
+                })}
+                {/* which way is up */}
+                {(() => {
+                  const r1 = st.parts.find((p) => p.kind === 'run');
+                  if (!r1) return null;
+                  const cx = r1.x + r1.w / 2; const cy = r1.y + r1.d / 2;
+                  const deg = { north: 0, east: 90, south: 180, west: 270 }[st.facing] || 0;
+                  return (
+                    <g transform={`translate(${cx} ${cy}) rotate(${deg})`} pointerEvents="none">
+                      <line x1={0} y1={1.1} x2={0} y2={-1.1} stroke="#f6f4ec" strokeWidth={0.16} opacity={0.95} />
+                      <path d="M -0.42 -0.6 L 0 -1.25 L 0.42 -0.6 Z" fill="#f6f4ec" opacity={0.95} />
+                    </g>
+                  );
+                })()}
+                {isSel && (
+                  <text x={st.bbox.x + st.bbox.w / 2} y={st.bbox.y + st.bbox.d + 1.2} textAnchor="middle"
+                    fontSize={0.95} fill="var(--ink)" fontWeight="600" pointerEvents="none">
+                    {st.risers} risers · {st.riserIn.toFixed(1)}″
+                  </text>
+                )}
+                {/* Corner handles, same as every other object. Drawing the stair
+                    as real treads replaced the generic element body — and took
+                    its grab handles with it, so a stair became the one thing on
+                    the plan you could not resize. They pull the stair's WIDTH
+                    (its run length is derived from the climb). */}
+                {isSel && onResize && ['nw', 'ne', 'sw', 'se'].map((corner) => {
+                  const hx = st.bbox.x + (corner.includes('e') ? st.bbox.w : 0);
+                  const hy = st.bbox.y + (corner.includes('s') ? st.bbox.d : 0);
+                  return (
+                    <g key={corner}>
+                      <circle cx={hx} cy={hy} r={0.9} fill="transparent" style={{ cursor: `${corner}-resize` }}
+                        onPointerDown={(event) => startDrag(event, raw, corner)} />
+                      <circle cx={hx} cy={hy} r={0.35} fill="var(--active-line)" stroke="#fff" strokeWidth={0.1} pointerEvents="none" />
+                    </g>
+                  );
+                })}
               </g>
             );
           }

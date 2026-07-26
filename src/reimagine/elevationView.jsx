@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { OPENING_TYPES, openingVerticalBand, storeyElevationFt, storeyHeightFt, footprintEdges, hasSegmentedFootprint, CLADDING_TYPES } from '../../backend/bim-core.mjs';
 import { resolveWallSide, upperPlateRect, resolveDeck } from '../engine.js';
 import { buildFaceLaw } from './faceLaw.js';
+import { ScaleGrid } from '../scaleGrid.jsx';
 
 // ElevationView — the chosen wall drawn face-on, from OUTSIDE the house, so
 // doors and windows can be placed the way you'd sketch them on paper: slide
@@ -464,6 +465,10 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
         }}
         onContextMenu={(event) => event.preventDefault()}
       >
+        {/* the same scaled grid the plan and the storeys view use — so a wall
+            you're reading face-on measures the same as the plan above it */}
+        <ScaleGrid xFt={[0, Math.ceil(run)]} yFt={[0, Math.ceil(maxTop)]} mapX={X} mapY={Y} labelSize={Math.max(0.5, run / 60)} />
+
         {/* ground: a soil band under the grade line */}
         <rect x={-pad} y={Y(0)} width={run + pad * 2} height={soil} fill="#d8cfbc" opacity="0.55" />
         <line x1={-pad} y1={Y(0)} x2={run + pad} y2={Y(0)} stroke="#8a8271" strokeWidth={0.12} />

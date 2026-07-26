@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { storeyElevationFt, storeyHeightFt, basementInfo } from '../../backend/bim-core.mjs';
 import { upperPlateRect, floorLabel, resolveDeck } from '../engine.js';
 import { buildFaceLaw } from './faceLaw.js';
+import { ScaleGrid } from '../scaleGrid.jsx';
 
 // StackView — the STOREYS drawn as blocks you can grab, the way the Wall
 // view draws one wall. Two kinds of face:
@@ -239,6 +240,7 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
         >
           {/* the site under the house */}
           <rect x={tx0} y={ty0} width={tx1 - tx0} height={ty1 - ty0} fill="#e6dfcd" opacity="0.4" />
+          <ScaleGrid xFt={[Math.floor(tx0), Math.ceil(tx1)]} yFt={[Math.floor(ty0), Math.ceil(ty1)]} labelSize={Math.max(0.6, (tx1 - tx0) / 70)} />
           {storeyList.map((b) => {
             const isDrag = drag && drag.lv === b.lv && drag.ghost?.rect;
             const r = isDrag ? drag.ghost.rect : b.rect;
@@ -438,6 +440,8 @@ export function StackView({ spec, floors, hasBasement, activeFloor, basementLeve
         onPointerUp={onPointerUp}
         onContextMenu={(event) => event.preventDefault()}
       >
+        <ScaleGrid xFt={[0, Math.ceil(run)]} yFt={[0, Math.ceil(maxTop)]} mapY={Y} labelSize={Math.max(0.5, run / 60)} />
+
         {/* ground: a soil band under the grade line (deep enough for a basement) */}
         <rect x={-pad} y={Y(0)} width={run + pad * 2} height={soil} fill="#d8cfbc" opacity="0.55" />
         <line x1={-pad} y1={Y(0)} x2={run + pad} y2={Y(0)} stroke="#8a8271" strokeWidth={0.12} />

@@ -7,7 +7,7 @@ import { StackView } from './stackView.jsx';
 import {
   applyBimOperations, clamp, basementInfo, BASEMENT_LEVEL, FRAME_TYPES, resolveFrameType, CLADDING_TYPES, PARTITION_TYPES, ROOF_COVERINGS, resolveRoofCovering, FURNISHINGS, FURNISHING_GROUPS,
   INSULATION_TYPES, resolveInsulation, OPENING_TYPES, openingVerticalBand,
-  FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, RECLAIMED_DEFAULTS, storeyHeightFt, storeyElevationFt,
+  FLOORING_TYPES, SUBFLOOR_TYPES, resolveFlooring, resolveSubfloor, MATERIAL_SOURCE_LABELS, sourcesFor, migrateSourcing, storeyHeightFt, storeyElevationFt,
   footprintPolygon, polygonArea, footprintBounds, footprintEdges, hasSegmentedFootprint, splitSouthEdgeAt, roofProfile, snapPlatesToShell
 } from '../../backend/bim-core.mjs';
 import {
@@ -17,7 +17,8 @@ import {
   WALL_SIDES, WALL_SIDE_LABELS, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS,
   ROOM_PRESETS, planNewRoomPlacements, roomPresetFromName,
   resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons, downloadFile,
-  DECK_SURFACES, resolveDeck, resolveDeckStairs, derivePartitionOps, interiorFixtures
+  DECK_SURFACES, resolveDeck, resolveDeckStairs, derivePartitionOps, interiorFixtures, sourceNote,
+  isStair, resolveStair, STAIR_SHAPES, STAIR_FACINGS, STAIR_TURNS, STAIR_DEFAULTS, STAIR_FACING_ORDER, HEATER_FACINGS
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms } from '../placement.js';
 import { STARTER_DESIGNS } from './starters.js';
@@ -435,6 +436,20 @@ export default function App() {
     }
   };
   const resizeObject = (id, x, y, w, d) => {
+    // A STAIR RESIZES BY WIDTH. Its run length is worked out from the climb —
+    // you cannot stretch a stair without changing how far it has to go — so a
+    // corner drag pulls the one dimension that IS yours: the width across the
+    // climb. Dragging the long axis simply does nothing, which is the truth.
+    const stairEl = (spec.elements || []).find((e) => e.id === id && isStair(e));
+    if (stairEl) {
+      const st = resolveStair(spec, stairEl);
+      const across = (st.facing === 'north' || st.facing === 'south') ? w : d;
+      const widthFt = clamp(Math.round(across * 2) / 2, 2.5, 8);
+      const preview = { ...stairEl, stair: { ...STAIR_DEFAULTS, ...(stairEl.stair || {}), widthFt } };
+      const after = resolveStair(spec, preview);
+      applyOps([{ type: 'set_stair', id, field: 'widthFt', value: widthFt, w: after.bbox.w, d: after.bbox.d }]);
+      return;
+    }
     // Same shared law as moveObject — see src/placement.js.
     const plan = planObjectResize(spec, id, x, y, w, d);
     if (plan) applyOps(plan.ops);
@@ -1282,11 +1297,11 @@ export default function App() {
   const addOrGlazeGreenhouse = () => {
     glazeForRoom(southPlantRoom());
   };
-  // --- finishes: floor, exterior cladding, reclaimed materials ---------------
+  // --- finishes: floor, exterior cladding, where materials come from ---------
   const setFlooring = (value) => applyOps([{ type: 'set_flooring', value }]);
   const setSubfloor = (value) => applyOps([{ type: 'set_flooring', field: 'subfloor', value }]);
   const setAllCladding = (value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, field: 'cladding', value })));
-  const setReclaimed = (system, on) => applyOps([{ type: 'set_reclaimed', system, value: on }]);
+  const setSourcing = (system, source) => applyOps([{ type: 'set_sourcing', system, value: source }]);
 
   // --- roof: shape, pitch, insulation, overhang, shed direction --------------
   const setRoofType = (value) => {
@@ -1816,14 +1831,52 @@ export default function App() {
                   <button
                     type="button"
                     className="rz-floorbar-outline"
-                    title="A 3½ × 10 ft stair on this floor — drag it where the climb should start; the checks make sure it's long enough for the rise"
+                    title="A stair on this floor — drag it where the climb should start. Its length is worked out from the climb, and you can turn it or fold it into an L or a U below."
                     onClick={() => {
                       const W = Number(spec.shell.widthFt) || 36;
                       const D = Number(spec.shell.depthFt) || 28;
-                      applyOps([{ type: 'add_element', name: 'Stairs', category: 'structure', x: Math.round(W / 2 - 1.5), y: Math.round(D / 2 - 5), w: 3.5, d: 10, h: 8, level: activeFloor }]);
+                      // Name it apart from the ones already there — two objects
+                      // called "Stairs" are indistinguishable in every list.
+                      const n = (spec.elements || []).filter(isStair).length;
+                      applyOps([{ type: 'add_element', name: n ? `Stairs ${n + 1}` : 'Stairs', category: 'stair', x: Math.round(W / 2 - 1.5), y: Math.round(D / 2 - 5), w: 3.5, d: 10, h: 8, level: activeFloor }]);
                     }}
-                  >＋ Stairs — connect the floors (3½ × 10 ft)</button>
+                  >＋ Stairs — connect the floors</button>
                 )}
+                <StairsAndSteps
+                  spec={spec}
+                  level={activeFloor >= 1 ? activeFloor : 1}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  onDeckSteps={(el, value) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'deckStairs', value }])}
+                  onMoveStair={(el, x, y) => moveObject(el.id, x, y)}
+                  onStair={(stairEl, field, value) => {
+                    const numeric = ['split', 'widthFt', 'treadIn'].includes(field);
+                    const v = numeric ? Number(value) : value;
+                    const before = resolveStair(spec, stairEl);
+                    const preview = { ...stairEl, stair: { ...STAIR_DEFAULTS, ...(stairEl.stair || {}), [field]: v } };
+                    const after = resolveStair(spec, preview);
+                    const ops = [{ type: 'set_stair', id: stairEl.id, field, value: v, w: after.bbox.w, d: after.bbox.d }];
+                    // A STAIR MUST TURN IN PLACE. x/y is the footprint's north-west
+                    // CORNER, so flipping 3.5 × 15.75 to 15.75 × 3.5 pivots the whole
+                    // run around that corner and flings it across the site — you press
+                    // "east" and the stair leaves the building, which reads as the
+                    // compass being broken. Keep its CENTRE where it was; the same
+                    // applies to any reshape (straight ↔ L ↔ U changes the footprint
+                    // too). One dispatch, so the move can't race the shape change.
+                    if (field === 'facing' || field === 'shape' || field === 'turn') {
+                      const cx = (Number(stairEl.x) || 0) + before.bbox.w / 2;
+                      const cy = (Number(stairEl.y) || 0) + before.bbox.d / 2;
+                      ops.push({
+                        type: 'move_object',
+                        targetId: stairEl.id,
+                        name: stairEl.name,
+                        x: Math.round((cx - after.bbox.w / 2) * 10) / 10,
+                        y: Math.round((cy - after.bbox.d / 2) * 10) / 10
+                      });
+                    }
+                    applyOps(ops);
+                  }}
+                />
                 <button
                   type="button"
                   className="rz-floorbar-outline"
@@ -1868,6 +1921,14 @@ export default function App() {
                     if (ops.length) applyOps(ops);
                   }}
                 >＋ Walls between rooms — one per shared boundary</button>
+                <DoorwayControls
+                  spec={spec}
+                  level={activeFloor >= 1 ? activeFloor : 1}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  onSet={(wall, field, value) => applyOps([{ type: 'update_object', targetId: wall.id, name: wall.name, field, value }])}
+                  onRemove={(wall) => removeObject(wall)}
+                />
                 {/* WHAT GOES IN IT — fixtures, built-ins, appliances, furniture
                     and outdoor pieces. Each drops on the floor you're on, in the
                     middle of the plan; drag it where it belongs, grab a corner to
@@ -1902,7 +1963,7 @@ export default function App() {
                 onFlooring={setFlooring}
                 onSubfloor={setSubfloor}
                 onCladding={setAllCladding}
-                onReclaimed={setReclaimed}
+                onSourcing={setSourcing}
                 onShell={setShellField}
               />
             )}
@@ -2002,6 +2063,7 @@ export default function App() {
                     onPitch={setRoofPitch}
                     onInsulation={setRoofInsulation}
                     onOverhang={setOverhang}
+                    onEave={(v) => applyOps([{ type: 'set_shell', field: 'eaveStyle', value: v }])}
                     onShedFall={setShedFall}
                     onGutters={setGutters}
                     onDischarge={setDischarge}
@@ -2442,58 +2504,7 @@ export default function App() {
                       <option value="gable">Covered — a little peak (gable)</option>
                     </select>
                   </label>
-                  {(() => {
-                    // EVERY EDGE, TESTED. Each chip says where those steps would
-                    // actually land, and an edge that can't take them is greyed
-                    // with the reason. Auto only ever fires on a GROUND-floor
-                    // deck (resolveDeck's needsSteps is level-1 only), so on an
-                    // upper deck that's stated instead of silently doing nothing.
-                    const choice = ['none', 'north', 'south', 'east', 'west'].includes(el.deckStairs) ? el.deckStairs : 'auto';
-                    const sides = ['north', 'south', 'east', 'west'].map((side) => {
-                      const t = resolveDeckStairs(spec, { ...el, deckStairs: side }, dk);
-                      const ok = Boolean(t && !t.blocked);
-                      return {
-                        side,
-                        ok,
-                        label: side[0].toUpperCase() + side.slice(1),
-                        where: ok ? (t.target === 'deck' ? `${t.up ? 'up to' : 'down to'} ${t.targetName}` : 'down to the ground') : (t?.flat ? 'already level' : 'blocked'),
-                        rise: ok ? Math.round(t.rise * 10) / 10 : null,
-                        treads: ok ? t.treads : null
-                      };
-                    });
-                    const autoDead = choice === 'auto' && !dk.needsSteps;
-                    const st = resolveDeckStairs(spec, el, dk);
-                    return (
-                      <div className="rz-field">
-                        <span>Steps — which edge you walk down</span>
-                        <div className="ctlChips">
-                          <button type="button" className={`rz-pick-chip${choice === 'none' ? ' on' : ''}`} onClick={() => setDk('deckStairs', 'none')}>No steps</button>
-                          <button type="button" className={`rz-pick-chip${choice === 'auto' ? ' on' : ''}`} title="Ground-floor decks only" onClick={() => setDk('deckStairs', 'auto')}>Auto</button>
-                          {sides.map((s) => (
-                            <button
-                              key={s.side}
-                              type="button"
-                              className={`rz-pick-chip${choice === s.side ? ' on' : ''}`}
-                              style={s.ok ? undefined : { opacity: 0.45 }}
-                              title={s.ok ? `${s.rise} ft, ${s.treads} treads — ${s.where}` : `No steps off this edge — ${s.where}`}
-                              onClick={() => setDk('deckStairs', s.side)}
-                            >{s.label}{s.ok ? ` · ${s.where}` : ' · blocked'}</button>
-                          ))}
-                        </div>
-                        {autoDead && (
-                          <div className="rz-shape-note">⚠ <b>Auto only adds steps to a ground-floor deck.</b> This one sits {Math.round(dk.topFt)} ft up — pick an edge above to run stairs down from it.</div>
-                        )}
-                        {st && !st.blocked && (
-                          <div className="rz-shape-note">Steps run {st.up ? 'up' : 'down'} the {st.side} edge — {Math.round(st.rise * 10) / 10} ft, {st.treads} treads, {st.target === 'deck' ? `${st.up ? 'up to' : 'down onto'} ${st.targetName}` : 'down to the ground'}.</div>
-                        )}
-                        {st && st.blocked && (
-                          <div className="rz-shape-note">{st.flat
-                            ? 'That edge is already level with what’s beside it — nothing to climb.'
-                            : 'That edge leans on the house or another deck at this level — pick one of the open edges above.'}</div>
-                        )}
-                      </div>
-                    );
-                  })()}
+                  <DeckStepControls spec={spec} el={el} dk={dk} onSet={(v) => setDk('deckStairs', v)} />
                   <div className="rz-shape-note">
                     Railings and their cost only grow on edges facing open air — push this deck against the house (a doorway) or against another deck (a wraparound) and the shared edge opens up.
                     {dk.needsSteps ? ' Its floor sits high, so steps come down the longest open side automatically.' : ''}
@@ -3446,6 +3457,251 @@ function StoreysControls({ spec, floors, hasBasement, activeFloor, onSelectFloor
 // roof. Openings carry the floor picked in the Floor selector — a 2nd-floor
 // window goes in the upper wall, and a dormer opens the roof to meet it.
 const DORMER_STYLES = [['gable', 'Gable dormer', 'peaked doghouse'], ['shed', 'Shed dormer', 'single slope']];
+// EVERY INTERIOR WALL ON THIS FLOOR, AND THE DOORWAY IN IT — in the Rooms
+// chapter, where the inside of the house is laid out. The same doorway was
+// always editable, but only by tapping a room and finding it in that room's
+// card; if you didn't know to tap, interior doors looked like they lived in
+// the Walls chapter, which is for the OUTSIDE of the house. Here they are with
+// the buttons that make them.
+function DoorwayControls({ spec, level, selectedId, onSelect, onSet, onRemove }) {
+  const walls = (spec.elements || []).filter((e) => e.category === 'partition' && Number(e.level || 1) === level);
+  if (!walls.length) return null;
+  return (
+    <div className="rz-found" data-cap="cap-rooms-doorways">
+      <div className="rz-found-head">Interior walls on this floor — and their doorways</div>
+      {walls.map((wall) => {
+        const runFt = Math.max(Number(wall.w) || 0, Number(wall.d) || 0);
+        const doorW = Math.round((Number(wall.doorWFt) || 0) * 10) / 10;
+        const con = PARTITION_TYPES[wall.construction] ? wall.construction : 'framed';
+        const sel = selectedId === wall.id;
+        return (
+          <div key={wall.id} className={sel ? 'rz-found rz-found-sel' : 'rz-found'} onPointerDown={() => onSelect(wall.id)}>
+            <div className="rz-field">
+              <span>{wall.name} <small style={{ color: 'var(--moss, #868a7c)' }}>({runFt.toFixed(1)}′ run)</small></span>
+              <select value={con} onChange={(e) => onSet(wall, 'construction', e.target.value)}>
+                {Object.entries(PARTITION_TYPES).map(([key, p]) => <option key={key} value={key}>{p.green ? '🌿 ' : ''}{p.label}</option>)}
+              </select>
+            </div>
+            {doorW > 0 ? (
+              <>
+                <label className="rz-field">
+                  <span>Doorway width</span>
+                  <input type="number" step="0.5" min="0.5" max={Math.max(2, Math.floor(runFt))} value={doorW}
+                    onChange={(e) => onSet(wall, 'doorWFt', Number(e.target.value))} />
+                </label>
+                <label className="rz-field">
+                  <span>How far along the wall it sits</span>
+                  <input type="range" min="0" max={Math.max(0, runFt - doorW)} step="0.5" value={Math.min(Number(wall.doorAtFt) || 0, Math.max(0, runFt - doorW))}
+                    onChange={(e) => onSet(wall, 'doorAtFt', Number(e.target.value))} />
+                </label>
+                <button type="button" className="rz-pick-chip" onClick={() => onSet(wall, 'doorWFt', 0)}>Wall it up — no doorway</button>
+              </>
+            ) : (
+              <button type="button" className="rz-pick-chip" onClick={() => onSet(wall, 'doorWFt', 3)}>＋ Doorway (3 ft)</button>
+            )}
+            <button type="button" className="rz-pick-chip" onClick={() => onRemove(wall)}>Remove this wall — leave the rooms open to each other</button>
+          </div>
+        );
+      })}
+      <div className="rz-shape-note">Outside walls and their windows and doors are their own chapter — <b>Walls &amp; openings</b>. These are the ones between rooms.</div>
+    </div>
+  );
+}
+
+// THE ONE CONTROL EVERY STAIR SHARES: which way you walk. Four buttons laid
+// out like a compass (north up, south down, east right, west left), the current
+// one filled. An interior stair, a set of deck steps, anything you climb — they
+// all use THIS, so "the stairs face the wrong way" is always the same one-click
+// fix wherever you meet it. Each button can be greyed with a reason (a deck
+// edge that leans on the house takes no steps); an interior stair's four are
+// always open. `options` is [{dir, ok, hint}]; onPick gets the chosen dir.
+const DIR_ARROW = { north: '↑', south: '↓', east: '→', west: '←' };
+const CAPDIR = (d) => d[0].toUpperCase() + d.slice(1);
+function DirectionDial({ heading, current, options, onPick }) {
+  const at = (dir) => options.find((o) => o.dir === dir);
+  const cell = (dir) => {
+    const o = at(dir);
+    if (!o) return <span />;
+    const off = o.ok === false;
+    return (
+      <button type="button"
+        className={`rz-pick-chip${current === dir ? ' on' : ''}`}
+        disabled={off} style={off ? { opacity: 0.4 } : undefined}
+        title={o.hint || ''} onClick={() => onPick(dir)}>
+        {DIR_ARROW[dir]} {CAPDIR(dir)}
+      </button>
+    );
+  };
+  // A plus-shaped compass: N on top, W·E in the middle, S below — so the button
+  // you press points the way the stair will point. Uses grid, no new CSS class.
+  return (
+    <div className="rz-field">
+      <span>{heading}</span>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, auto)', gap: 4, justifyContent: 'start', alignItems: 'center' }}>
+        <span />{cell('north')}<span />
+        {cell('west')}<span style={{ textAlign: 'center', opacity: 0.5, fontSize: 12 }}>▲N</span>{cell('east')}
+        <span />{cell('south')}<span />
+      </div>
+    </div>
+  );
+}
+
+// Deck steps, on the SAME dial as an interior stair. The four edges are the
+// four directions; an edge that can't take steps is greyed with why. "Auto" is
+// gone from the face — an unset deck still auto-adds steps on a ground floor,
+// and the dial simply highlights whichever edge that lands on, so there is
+// never a mystery mode, only a direction. A "No steps" toggle sits beside it.
+function DeckStepControls({ spec, el, dk, onSet }) {
+  const options = ['north', 'east', 'south', 'west'].map((dir) => {
+    const t = resolveDeckStairs(spec, { ...el, deckStairs: dir }, dk);
+    const ok = Boolean(t && !t.blocked);
+    return { dir, ok, hint: ok ? `${Math.round(t.rise * 10) / 10} ft down to ${t.target === 'deck' ? t.targetName : 'the ground'}` : (t?.flat ? 'already level with what’s beside it' : 'leans on the house or another deck') };
+  });
+  const isNone = el.deckStairs === 'none';
+  const resolved = resolveDeckStairs(spec, el, dk);
+  // the edge actually in effect — an explicit choice, else whatever auto found
+  const effective = isNone ? null
+    : (['north', 'south', 'east', 'west'].includes(el.deckStairs) ? el.deckStairs : (resolved && !resolved.blocked ? resolved.side : null));
+  return (
+    <>
+      <DirectionDial heading="Which edge you step down" current={effective} options={options} onPick={onSet} />
+      <div className="ctlChips">
+        <button type="button" className={`rz-pick-chip${isNone ? ' on' : ''}`} onClick={() => onSet('none')}>No steps</button>
+      </div>
+      <div className="rz-shape-note">
+        {isNone ? 'No steps off this deck.'
+          : effective && resolved && !resolved.blocked
+            ? `Steps run down the ${effective} edge — ${Math.round(resolved.rise * 10) / 10} ft, ${resolved.treads} treads, ${resolved.target === 'deck' ? `onto ${resolved.targetName}` : 'to the ground'}.`
+            : `This deck sits ${Math.round(dk.topFt)} ft up and has no steps yet — pick an open edge above.`}
+      </div>
+    </>
+  );
+}
+
+// EVERY WAY UP OR DOWN, IN ONE PLACE. Interior stairs and a deck's steps were
+// two unrelated controls in two unrelated places — the deck's only appeared if
+// you knew to tap the deck itself, which is how you end up with steps facing
+// the wrong way and no idea where to change it. This panel lists them all.
+function StairsAndSteps({ spec, level, selectedId, onSelect, onStair, onDeckSteps, onMoveStair }) {
+  const stairs = (spec.elements || []).filter((e) => isStair(e) && Number(e.level || 1) === level);
+  const decks = (spec.elements || []).filter((e) => e.category === 'deck' && Number(resolveDeck(spec, e).level || 1) === level);
+  if (!stairs.length && !decks.length) return null;
+  return (
+    <div className="rz-found" data-cap="cap-rooms-stair">
+      <div className="rz-found-head">Stairs &amp; steps on this floor</div>
+      {stairs.map((el) => (
+        <StairControls key={el.id} spec={spec} el={el} selected={selectedId === el.id}
+          onSelect={() => onSelect(el.id)} onStair={(f, v) => onStair(el, f, v)} onMove={onMoveStair ? (x, y) => onMoveStair(el, x, y) : null} />
+      ))}
+      {decks.map((el) => {
+        const dk = resolveDeck(spec, el);
+        return (
+          <div key={el.id} className={selectedId === el.id ? 'rz-found rz-found-sel' : 'rz-found'} onPointerDown={() => onSelect(el.id)}>
+            <div className="rz-found-head">{el.name} — steps off the deck</div>
+            <DeckStepControls spec={spec} el={el} dk={dk} onSet={(v) => onDeckSteps(el, v)} />
+          </div>
+        );
+      })}
+      <div className="rz-shape-note">Everything you climb, in one list — the stairs inside the house and the steps off every deck on this floor.</div>
+    </div>
+  );
+}
+
+// An interior stair's card. THREE things, in the order you decide them: which
+// way you climb (the dial — same one the deck steps use), what shape it is
+// (straight, or folded into an L or a U), and how wide. You never type a
+// length — the climb sets the risers, the risers set the treads, the treads
+// set the run. The rest (which way an L turns, where a U breaks, the tread
+// depth) is a rarely-touched fine-tune, tucked behind one line.
+const STAIR_SHAPE_SHORT = { straight: 'Straight', l: 'L-turn', u: 'U-turn' };
+function StairControls({ spec, el, selected, onSelect, onStair, onMove }) {
+  const st = resolveStair(spec, el);
+  const [tune, setTune] = useState(false);
+  const dirs = STAIR_FACING_ORDER.map((dir) => ({ dir, ok: true }));
+  // WHICH STAIR IS THIS? Two stairs both called "Stairs" is how you end up
+  // turning one and watching the other — it reads as "the controls do nothing".
+  // Every card says where its stair stands, and calls out one standing outside
+  // the walls (a run to open air) instead of leaving you to spot it in 3D.
+  const W = Number(spec.shell.widthFt) || 0;
+  const D = Number(spec.shell.depthFt) || 0;
+  const ex = Number(el.x) || 0; const ey = Number(el.y) || 0;
+  const outside = ex < -0.5 || ey < -0.5 || ex + st.bbox.w > W + 0.5 || ey + st.bbox.d > D + 0.5;
+  const where = `${Math.round(ex)}′ from the west wall · ${Math.round(ey)}′ from the north`;
+  return (
+    <div className={selected ? 'rz-found rz-found-sel' : 'rz-found'} onPointerDown={onSelect} data-cap="cap-rooms-stair">
+      <div className="rz-found-head">{el.name}{selected ? ' — selected' : ''}</div>
+      <div className="rz-shape-note" style={{ marginTop: -2 }}>{where}{outside ? ' · outside the walls' : ''}</div>
+      {outside && (
+        <div className="rz-shape-note"><b>⚠</b> This stair stands outside the building, so it climbs to open air — put a deck or a door where it lands, drag it inside, or remove it.</div>
+      )}
+      <DirectionDial heading="Which way you climb" current={st.facing} options={dirs} onPick={(d) => onStair('facing', d)} />
+      {/* One-tap rotate, beside the absolute compass. Some turns you know by
+          name ("climb east"), some you just want to swing round until it sits
+          right — this is the second kind, and dropping it lost a real move. */}
+      <button type="button" className="rz-floorbar-outline"
+        onClick={() => onStair('facing', STAIR_FACING_ORDER[(STAIR_FACING_ORDER.indexOf(st.facing) + 1) % 4])}
+      >↻ Turn it 90°</button>
+      <div className="rz-field">
+        <span>Shape</span>
+        <div className="ctlChips">
+          {Object.entries(STAIR_SHAPES).map(([key, s]) => (
+            <button key={key} type="button" className={`rz-pick-chip${st.shape === key ? ' on' : ''}`}
+              title={s.note} onClick={() => onStair('shape', key)}>{STAIR_SHAPE_SHORT[key]}</button>
+          ))}
+        </div>
+      </div>
+      <label className="rz-field">
+        <span>Width (ft)</span>
+        <input type="number" step="0.5" min="2.5" max="8" value={st.widthFt} onChange={(e) => onStair('widthFt', e.target.value)} />
+      </label>
+      {/* TYPE ITS POSITION. Dragging is fine when the stair is on screen, but a
+          stair that ends up out in the yard is a fiddly drag back across a
+          zoomed-out plan — and there was no other way to place one exactly.
+          Same two numbers the plan drag writes, so both paths agree. */}
+      {onMove && (
+        <div className="rz-field rz-field-num">
+          <span>Corner position (ft from west · from north)</span>
+          <span style={{ display: 'flex', gap: 6 }}>
+            <input type="number" step="0.5" value={Math.round(ex * 10) / 10}
+              onChange={(e) => onMove(Number(e.target.value), ey)} />
+            <input type="number" step="0.5" value={Math.round(ey * 10) / 10}
+              onChange={(e) => onMove(ex, Number(e.target.value))} />
+          </span>
+        </div>
+      )}
+      <div className="rz-shape-note">
+        {STAIR_SHAPES[st.shape].label} climbing {st.facing} — <b>{st.risers} steps up {fmtNum(st.rise)}′</b>
+        {st.twoRun ? `, ${st.run1Treads} + ${st.run2Treads} across a landing` : ''}. Takes {st.bbox.w.toFixed(1)}′ × {st.bbox.d.toFixed(1)}′. Drag it on the plan to place it.
+      </div>
+      {st.flags.map((flag, i) => <div key={i} className="rz-shape-note"><b>⚠</b> {flag}</div>)}
+      <button type="button" className="rz-linkish" style={{ background: 'none', border: 'none', padding: '2px 0', color: 'var(--moss, #868a7c)', cursor: 'pointer', font: 'inherit' }}
+        onClick={() => setTune((v) => !v)}>{tune ? '× hide fine-tune' : '⋯ fine-tune'}</button>
+      {tune && (
+        <>
+          {st.twoRun && (
+            <>
+              <label className="rz-field">
+                <span>Which way it turns</span>
+                <select value={st.turn} onChange={(e) => onStair('turn', e.target.value)}>
+                  {Object.entries(STAIR_TURNS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                </select>
+              </label>
+              <label className="rz-field">
+                <span>Where it breaks — {st.run1Treads} steps, landing, then {st.run2Treads}</span>
+                <input type="range" min="0.15" max="0.85" step="0.01" value={st.split} onChange={(e) => onStair('split', e.target.value)} />
+              </label>
+            </>
+          )}
+          <label className="rz-field">
+            <span>Tread depth (in)</span>
+            <input type="number" step="0.5" min="9" max="14" value={st.treadIn} onChange={(e) => onStair('treadIn', e.target.value)} />
+          </label>
+        </>
+      )}
+    </div>
+  );
+}
+
 function OpeningsControls({ spec, level = 1, wall = 'south', onWall, onAdd, onAddDormer, onGreenhouse }) {
   const openings = spec.openings || [];
   const onThisFloor = (o) => o.wall === 'roof' ? level === 1 : Number(o.level || 1) === level;
@@ -3639,6 +3895,17 @@ function SystemsControls({ spec, derived, onUtility }) {
           { value: 'wood_stove', label: 'Wood stove', desc: 'Simple, familiar.' },
           { value: 'minisplit', label: 'Mini-split', desc: 'Electric, draws power.' }
         ]} />
+      {derived?.heatFacingKey && (
+        <>
+          <label className="rz-field">
+            <span>What the heater wears — its facing</span>
+            <select value={derived.heatFacingKey} onChange={(e) => onUtility('heaterFacing', e.target.value)}>
+              {Object.entries(HEATER_FACINGS).map(([key, f]) => <option key={key} value={key}>{f.green ? '🌿 ' : ''}{f.label} — {fmtMoney(f.cost)}</option>)}
+            </select>
+          </label>
+          <div className="rz-shape-note">{HEATER_FACINGS[derived.heatFacingKey].note} The core is a kit either way — the facing is the part you choose, and it swings the price by thousands.</div>
+        </>
+      )}
       <label className="rz-nowall">
         <input type="checkbox" checked={Boolean(u.diyHeat)} onChange={(e) => onUtility('diyHeat', e.target.checked)} />
         <span>I'll build the heater myself (sweat equity)</span>
@@ -3652,17 +3919,17 @@ function SystemsControls({ spec, derived, onUtility }) {
 // cladding the weather hits, and whether the materials are new or salvaged.
 // Whole-house choices here; a single wall's face is tuned in Shell (wall by
 // wall) and a single room's floor by tapping it. Every pick moves the receipts.
-const RECLAIMED_ITEMS = [
-  { key: 'frame', label: 'Timber frame', note: 'salvaged beams & posts' },
-  { key: 'walls', label: 'Wall materials', note: 'reclaimed cladding / infill' },
-  { key: 'windows', label: 'Windows & doors', note: 'salvaged units' },
-  { key: 'roof', label: 'Roofing', note: 'reclaimed metal / tile' },
-  // Bought used — the furnishings catalog, group by group.
-  { key: 'appliance', label: 'Appliances', note: 'second-hand range, fridge, washer' },
-  { key: 'builtin', label: 'Counters & shelving', note: 'reclaimed slab wood' },
-  { key: 'furniture', label: 'Furniture', note: 'second-hand beds, tables, seating' },
-  { key: 'fixture', label: 'Fixtures', note: 'salvaged tub, sinks, tank' },
-  { key: 'outdoor', label: 'Outdoor pieces', note: 'used shed, cistern, coop' }
+const SOURCING_ITEMS = [
+  { key: 'frame', label: 'Timber frame', note: 'beams & posts' },
+  { key: 'walls', label: 'Wall materials', note: 'cladding / infill' },
+  { key: 'windows', label: 'Windows & doors', note: 'whole units' },
+  { key: 'roof', label: 'Roofing', note: 'metal / tile / battens' },
+  // Bought used or shop-built — the furnishings catalog, group by group.
+  { key: 'appliance', label: 'Appliances', note: 'range, fridge, washer' },
+  { key: 'builtin', label: 'Counters & shelving', note: 'slab wood' },
+  { key: 'furniture', label: 'Furniture', note: 'beds, tables, seating' },
+  { key: 'fixture', label: 'Fixtures', note: 'tub, sinks, tank' },
+  { key: 'outdoor', label: 'Outdoor pieces', note: 'shed, cistern, coop' }
 ];
 // Curated natural-finish colors — named the way a builder would say them.
 // '' = the material's own default (plaster shows its assembly color, the roof
@@ -3687,11 +3954,11 @@ function FinishColorSelect({ spec, field, label, onShell }) {
     </label>
   );
 }
-function FinishesControls({ spec, derived, onFlooring, onSubfloor, onCladding, onReclaimed, onShell }) {
+function FinishesControls({ spec, derived, onFlooring, onSubfloor, onCladding, onSourcing, onShell }) {
   const flooringKey = resolveFlooring(spec);
   const subfloorKey = resolveSubfloor(spec);
   const claddingKey = spec.walls?.south?.cladding || 'render';
-  const reclaimed = { ...RECLAIMED_DEFAULTS, ...(spec.reclaimed || {}) };
+  const sourcing = migrateSourcing(spec);
   const claddingVals = WALL_SIDES.map((side) => spec.walls?.[side]?.cladding || 'render');
   const claddingMixed = new Set(claddingVals).size > 1;
   return (
@@ -3719,11 +3986,13 @@ function FinishesControls({ spec, derived, onFlooring, onSubfloor, onCladding, o
           ))}
         </select>
       </label>
-      <label className="rz-nowall">
-        <input type="checkbox" checked={Boolean(reclaimed.flooring)} onChange={(e) => onReclaimed('flooring', e.target.checked)} />
-        <span>Reclaimed / salvaged floor (cuts cost &amp; carbon)</span>
+      <label className="rz-field">
+        <span>Where the boards come from</span>
+        <select value={sourcing.flooring} onChange={(e) => onSourcing('flooring', e.target.value)}>
+          {sourcesFor('flooring').map((key) => <option key={key} value={key}>{key === 'new' ? '' : '🌿 '}{MATERIAL_SOURCE_LABELS[key]}</option>)}
+        </select>
       </label>
-      <div className="rz-shape-note">{FLOORING_TYPES[flooringKey]?.note} Covers the {fmtNum(derived?.heatedFloor || 0)} sf heated floor — {fmtMoney(derived?.cost?.flooring || 0)} for deck + finish. A single room can differ (tap its floor).</div>
+      <div className="rz-shape-note">{FLOORING_TYPES[flooringKey]?.note} Covers the {fmtNum(derived?.heatedFloor || 0)} sf heated floor — {fmtMoney(derived?.cost?.flooring || 0)} for deck + finish. A single room can differ (tap its floor). {sourceNote(sourcing, 'flooring')}</div>
 
       <div className="rz-found-head" style={{ marginTop: 12 }}>What the weather hits — cladding</div>
       <label className="rz-field">
@@ -3737,14 +4006,17 @@ function FinishesControls({ spec, derived, onFlooring, onSubfloor, onCladding, o
       </label>
       <div className="rz-shape-note">Sets every wall's outer face at once. To give one wall its own look, tap it in the Shell chapter (wall by wall).</div>
 
-      <div className="rz-found-head" style={{ marginTop: 12 }} data-cap="cap-finishes-reclaimed">New or salvaged</div>
-      {RECLAIMED_ITEMS.map((item) => (
-        <label key={item.key} className="rz-nowall">
-          <input type="checkbox" checked={Boolean(reclaimed[item.key])} onChange={(e) => onReclaimed(item.key, e.target.checked)} />
-          <span>{item.label} — reclaimed <small style={{ color: 'var(--moss, #868a7c)' }}>({item.note})</small></span>
+      <div className="rz-found-head" style={{ marginTop: 12 }} data-cap="cap-finishes-reclaimed">New, salvaged, or milled</div>
+      {SOURCING_ITEMS.map((item) => (
+        <label key={item.key} className="rz-field">
+          <span>{item.label} <small style={{ color: 'var(--moss, #868a7c)' }}>({item.note})</small></span>
+          <select value={sourcing[item.key]} onChange={(e) => onSourcing(item.key, e.target.value)}>
+            {sourcesFor(item.key).map((key) => <option key={key} value={key}>{key === 'new' ? '' : '🌿 '}{MATERIAL_SOURCE_LABELS[key]}</option>)}
+          </select>
+          {sourceNote(sourcing, item.key) && <small className="rz-shape-note">{sourceNote(sourcing, item.key)}</small>}
         </label>
       ))}
-      <div className="rz-shape-note">Salvaged materials lean the budget and the carbon down — the receipts and the footprint follow each toggle.</div>
+      <div className="rz-shape-note">Salvaged stock and locally milled wood both lean the budget and the carbon down — the receipts and the footprint follow every pick. Milling trades money for time: you supply the sawing, the drying and the labour.</div>
     </div>
   );
 }
@@ -4313,7 +4585,7 @@ function UpperRoofControls({ spec, level, floors, onOps }) {
   );
 }
 
-function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOverhang, onShedFall, onGutters, onDischarge, onCovering }) {
+function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOverhang, onEave, onShedFall, onGutters, onDischarge, onCovering }) {
   const roofType = spec.shell.roofType || 'gable';
   const cover = resolveRoofCovering(spec.shell);
   const pitch = Number(spec.shell.roofPitch || 0.32);
@@ -4423,6 +4695,19 @@ function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOver
         {perSide ? '▾ one overhang all around' : '▸ a different overhang per side'}
       </button>
       <div className="rz-shape-note">A 2-ft overhang is the minimum that keeps rain off plastered natural walls; 2–3 ft on the south shades summer sun without blocking winter light.</div>
+
+      <div className="rz-field">
+        <span>Under the eave</span>
+        <div className="ctlChips">
+          <button type="button" className={`rz-pick-chip${(spec.shell.eaveStyle || 'open') === 'open' ? ' on' : ''}`}
+            onClick={() => onEave('open')}>Open — exposed rafter tails</button>
+          <button type="button" className={`rz-pick-chip${spec.shell.eaveStyle === 'soffit' ? ' on' : ''}`}
+            onClick={() => onEave('soffit')}>Boarded soffit</button>
+        </div>
+      </div>
+      <div className="rz-shape-note">{(spec.shell.eaveStyle || 'open') === 'open'
+        ? 'The rafter tails show under the overhang — the timber look, and less to build. Rain and critters reach the underside.'
+        : 'A boarded soffit closes the underside with a fascia at the edge — tidier and keeps birds and wind-driven rain out, a little more material and work.'}</div>
 
       <DrainageControls spec={spec} derived={derived} roofType={roofType} onGutters={onGutters} onDischarge={onDischarge} />
     </div>

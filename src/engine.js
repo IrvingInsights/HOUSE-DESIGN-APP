@@ -790,7 +790,23 @@ export function deckOpenSides(spec, el) {
     const ow = Math.max(1, Number(o.w) || 10); const od = Math.max(1, Number(o.d) || 8);
     return px > ox - 0.15 && px < ox + ow + 0.15 && pz > oy - 0.15 && pz < oy + od + 0.15;
   });
-  const blockedAt = (px, pz) => insideHouse(px, pz) || insideNeighbor(px, pz);
+  // A STAIR THAT CLIMBS TO THIS DECK OPENS ITS RAILING WHERE IT LANDS.
+  // Without this you walk twelve feet up a stair and meet a guard rail: the
+  // deck's own steps (deckStairs) open a gap, but a stair placed as its own
+  // object was invisible here. A stair standing on the storey BELOW tops out at
+  // this deck's walking height, so where its resolved footprint meets this
+  // edge, that stretch is a doorway, not a rail. Resolved once (not per probe)
+  // and read from the same resolveStair the plan and the 3D draw from, so the
+  // gap lands exactly where the treads do — for any shape, facing, or level.
+  const landingParts = [];
+  for (const o of (spec.elements || [])) {
+    if (!isStair(o)) continue;
+    if (Math.max(1, Number(o.level || 1)) + 1 !== level) continue;
+    resolveStair(spec, o).parts.forEach((p) => landingParts.push(p));
+  }
+  const stairLandsAt = (px, pz) => landingParts.some((p) => px > p.x - 0.15 && px < p.x + p.w + 0.15
+    && pz > p.y - 0.15 && pz < p.y + p.d + 0.15);
+  const blockedAt = (px, pz) => insideHouse(px, pz) || insideNeighbor(px, pz) || stairLandsAt(px, pz);
   // walk each edge, probing 0.85 ft OUTSIDE it (the add button drops decks
   // half a foot from the wall — a sub-foot gap still reads as "against"),
   // and merge the open runs into segments
@@ -899,9 +915,184 @@ export function resolveDeckStairs(spec, el, dkIn = null) {
   return { side, mid, gapA0: mid - gapW / 2, gapA1: mid + gapW / 2, gapW, rise, targetTop, target, targetName, up: targetTop > dk.topFt, treads };
 }
 
+// ---- STAIRS ---------------------------------------------------------------
+// A stair used to be a plain 3.5 × 10 box you could only drag. It is now a real
+// object: it knows which way you climb, whether it turns, and where it turns.
+// Everything below is DERIVED from the storey height — you never type a riser
+// count, you pick a shape and a direction and the arithmetic follows, the same
+// way the roof follows the wall heights.
+export const STAIR_SHAPES = {
+  straight: { label: 'Straight run', runs: 1, note: 'One flight, floor to floor. Simplest to build and the cheapest — but it needs the most uninterrupted length.' },
+  l: { label: 'L — quarter turn on a landing', runs: 2, note: 'Two flights at right angles with a landing in the corner. Tucks into a corner and breaks the fall.' },
+  u: { label: 'U — half turn, switchback', runs: 2, note: 'Two flights doubled back over a landing. The most compact footprint there is — the classic way upstairs in a small house.' }
+};
+// Which way you are walking as you climb. This is the 90° turn: pick a new
+// facing and the whole stair swings with it.
+export const STAIR_FACINGS = { north: 'Climbing north', south: 'Climbing south', east: 'Climbing east', west: 'Climbing west' };
+export const STAIR_TURNS = { right: 'Turn right at the landing', left: 'Turn left at the landing' };
+// Residential code, near enough for planning: 7¾″ max riser, 10″ min tread,
+// 36″ min width, 6′8″ headroom, and a landing at least as deep as the stair.
+export const STAIR_LIMITS = { maxRiserIn: 7.75, minTreadIn: 10, minWidthFt: 3, minHeadroomFt: 6.67 };
+export const STAIR_DEFAULTS = { shape: 'straight', facing: 'north', turn: 'right', split: 0.5, widthFt: 3.5, treadIn: 10.5 };
+// What a stair costs to build. Priced the way a carpenter quotes one: by the
+// TREAD (stringers, tread, riser — so a wider stair costs more per step), plus
+// the landing as a small framed platform, plus railing along every open side.
+// A stair is mostly LABOUR, which is why its salvaged/milled discounts (in
+// SOURCE_FACTORS.stairs) are shallower than the frame's — milling your own
+// stock cuts the boards, not the cutting of them.
+export const STAIR_COSTS = { treadPerFtWidth: 28, landingPsf: 28, railingPerLf: 45 };
+export const STAIR_CARBON = { treadPerFtWidth: 2.2, landingPsf: 2.2, railingPerLf: 1.6 };
+export const STAIR_FACING_ORDER = ['north', 'east', 'south', 'west'];
+
+export function isStair(el) {
+  return el?.category === 'stair' || (/stair/i.test(el?.name || '') && !/ladder/i.test(el?.name || ''));
+}
+// Rotate a local-frame point into the chosen facing. Local frame climbs toward
+// -y (north); the other three are 90° multiples of it, so every rotated rect
+// stays axis-aligned and the plan never has to draw a skewed box.
+function rotStair(x, y, facing) {
+  if (facing === 'east') return [-y, x];
+  if (facing === 'south') return [-x, -y];
+  if (facing === 'west') return [y, -x];
+  return [x, y];
+}
+function rotRect(r, facing) {
+  const [ax, ay] = rotStair(r.x, r.y, facing);
+  const [bx, by] = rotStair(r.x + r.w, r.y + r.d, facing);
+  return { ...r, x: Math.min(ax, bx), y: Math.min(ay, by), w: Math.abs(bx - ax), d: Math.abs(by - ay) };
+}
+
+// The whole stair, resolved once for the plan, the 3D, the inspector and the
+// checks — so none of them can disagree about where a tread is.
+export function resolveStair(spec, el) {
+  const raw = { ...STAIR_DEFAULTS, ...(el?.stair || {}) };
+  const shape = STAIR_SHAPES[raw.shape] ? raw.shape : 'straight';
+  // Before stairs knew which way they climbed, the only way to "turn" one was
+  // to drag its box wide instead of tall. Read that intent: a legacy stair
+  // wider than it is deep was an east–west stair, so start it facing east.
+  // Nothing to press, and picking a facing afterwards overrides it forever.
+  const legacyFacing = (!el?.stair?.facing && Number(el?.w) > Number(el?.d)) ? 'east' : null;
+  const facing = STAIR_FACINGS[raw.facing] && el?.stair?.facing ? raw.facing : (legacyFacing || 'north');
+  const turn = raw.turn === 'left' ? 'left' : 'right';
+  const level = Number(el?.level || 1);
+  // What this stair actually has to climb: floor to floor of the storey it
+  // starts on. Change the wall height and the stair re-treads itself.
+  const rise = Math.max(3, storeyHeightFt(spec?.shell, level) || Number(spec?.shell?.wallHeightFt) || 10);
+  const widthFt = clamp(Number(raw.widthFt) || 3.5, 2.5, 8);
+  const treadIn = clamp(Number(raw.treadIn) || 10.5, 9, 14);
+  const risers = Math.max(2, Math.ceil((rise * 12) / STAIR_LIMITS.maxRiserIn));
+  const riserIn = (rise * 12) / risers;
+  const treads = risers - 1;               // the top riser lands you on the floor
+  const twoRun = STAIR_SHAPES[shape].runs === 2;
+  const split = twoRun ? clamp(Number(raw.split ?? 0.5), 0.15, 0.85) : 1;
+  const run1Treads = twoRun ? clamp(Math.round(treads * split), 1, treads - 1) : treads;
+  const run2Treads = treads - run1Treads;
+  const run1Ft = (run1Treads * treadIn) / 12;
+  const run2Ft = (run2Treads * treadIn) / 12;
+  const W = widthFt;
+
+  // Local frame: run 1 climbs toward -y, arriving on a square landing.
+  const local = [{ kind: 'run', run: 1, treads: run1Treads, x: 0, y: -run1Ft, w: W, d: run1Ft, climb: 'north' }];
+  if (twoRun) {
+    const ly = -run1Ft - W;
+    local.push({ kind: 'landing', x: 0, y: ly, w: W, d: W });
+    if (shape === 'l') {
+      local.push(turn === 'right'
+        ? { kind: 'run', run: 2, treads: run2Treads, x: W, y: ly, w: run2Ft, d: W, climb: 'east' }
+        : { kind: 'run', run: 2, treads: run2Treads, x: -run2Ft, y: ly, w: run2Ft, d: W, climb: 'west' });
+    } else {
+      local.push(turn === 'right'
+        ? { kind: 'run', run: 2, treads: run2Treads, x: W, y: ly, w: W, d: run2Ft, climb: 'south' }
+        : { kind: 'run', run: 2, treads: run2Treads, x: -W, y: ly, w: W, d: run2Ft, climb: 'south' });
+    }
+  }
+  const turned = local.map((r) => rotRect(r, facing));
+  // Anchor the whole assembly at the element's x/y so dragging still works and
+  // el.w/el.d can stay the true bounding box.
+  const minX = Math.min(...turned.map((r) => r.x));
+  const minY = Math.min(...turned.map((r) => r.y));
+  const ox = (Number(el?.x) || 0) - minX;
+  const oy = (Number(el?.y) || 0) - minY;
+  const parts = turned.map((r) => ({ ...r, x: r.x + ox, y: r.y + oy }));
+  const maxX = Math.max(...parts.map((r) => r.x + r.w));
+  const maxY = Math.max(...parts.map((r) => r.y + r.d));
+  const bbox = { x: Number(el?.x) || 0, y: Number(el?.y) || 0, w: maxX - (Number(el?.x) || 0), d: maxY - (Number(el?.y) || 0) };
+
+  const flags = [];
+  if (treadIn < STAIR_LIMITS.minTreadIn) flags.push(`${treadIn.toFixed(1)}″ treads are under the 10″ minimum — steep underfoot.`);
+  if (widthFt < STAIR_LIMITS.minWidthFt) flags.push(`${widthFt.toFixed(1)}′ wide is under the 3′ minimum, and the landing with it.`);
+  if (twoRun && (run1Treads < 2 || run2Treads < 2)) flags.push('One of the two flights is barely a step — slide the split back toward the middle.');
+  return {
+    shape, facing, turn, level, rise, risers, riserIn, treadIn, treads, widthFt,
+    twoRun, split, run1Treads, run2Treads, run1Ft, run2Ft, landingFt: twoRun ? W : 0,
+    totalRunFt: run1Ft + run2Ft + (twoRun ? W : 0), parts, bbox, flags,
+    label: STAIR_SHAPES[shape].label,
+    // Quantities the receipts price. Railing runs the open side of every
+    // flight plus the landing edge — the code-required guard on an open stair.
+    railingLf: run1Ft + run2Ft + (twoRun ? W : 0),
+    landingSf: twoRun ? W * W : 0
+  };
+}
+
 // Interior fixtures & equipment that live inside the house as placed objects —
 // draggable in the 2D plan and rendered in 3D. The heater name follows the
 // chosen heat source so "the heater" is a real object you can position.
+// WHAT A HEAT SOURCE COSTS, SPLIT THE WAY YOU ACTUALLY BUY IT.
+//
+// `kit` is the appliance itself — the thing that arrives on a pallet with a
+// price on it. `install` is everything else it needs to work: facing, chimney,
+// hearth pad, and the trades. The split matters because **sweat equity can only
+// touch `install`** — no amount of your own labour makes refractory modules
+// cheaper, and the old flat-figure model let you discount them by 45%.
+//
+// `quoted: true` means the number is a real supplier price, not a placeholder.
+export const HEAT_SOURCES = {
+  masonry: {
+    label: 'Masonry heater', kit: 8980, install: 8000, quoted: true, faced: true, facingDefault: 'cob',
+    kitLabel: 'Temp-Cast standard kit with bake oven',
+    kitNote: 'the real kit price — refractory modules, mortar, firebox glass door, grate, cleanouts, bake-oven door and trim; shipping included, installation NOT',
+    installNote: 'insulated chimney ≈ $2,400 · concrete pad ≈ $600 · mason ≈ $5,000'
+  },
+  rocket_mass: {
+    label: 'Rocket mass heater', kit: 900, install: 1600, faced: true, facingDefault: 'cob',
+    kitLabel: 'Barrel, firebrick and clay',
+    kitNote: 'materials, not a kit — the cheapest real heat in the book if you build it yourself',
+    installNote: 'bench mass, flue and the labour to build it'
+  },
+  wood_stove: {
+    label: 'Wood stove', kit: 2600, install: 1800,
+    kitLabel: 'Stove',
+    installNote: 'hearth pad, insulated chimney and the fitter'
+  },
+  minisplit: {
+    label: 'Mini-split heat pump', kit: 3200, install: 1800,
+    kitLabel: 'Outdoor unit and head',
+    installNote: 'line set, mounts, electrician'
+  }
+};
+export function resolveHeatSource(key) {
+  return HEAT_SOURCES[key] ? key : 'wood_stove';
+}
+
+// WHAT THE HEATER WEARS. A masonry heater's core is a kit; its SKIN is a design
+// decision with a real spread — an earthen plaster you trowel on yourself and a
+// soapstone surround differ by thousands. Only masonry-class heaters are faced
+// (a mini-split wears nothing). carbon is kg CO2e for the whole facing.
+export const HEATER_FACINGS = {
+  cob: { label: 'Cob / earthen plaster', cost: 260, carbon: 30, green: true, note: 'Clay, sand and straw off your own site, troweled on. Nearly free in materials, generous with your time, and it re-radiates beautifully.' },
+  lime: { label: 'Lime plaster', cost: 420, carbon: 90, green: true, note: 'Harder and more washable than earth, still breathable and still a DIY job.' },
+  tile: { label: 'Handmade decorative tile', cost: 3200, carbon: 300, note: 'Artisan tile over the core — the traditional kachelofen face. The price is the tile and the setting; budget generously and buy extra.' },
+  brick: { label: 'Brick', cost: 2200, carbon: 420, note: 'Conventional and forgiving, but it wants a mason.' },
+  stucco: { label: 'Cement stucco', cost: 700, carbon: 140 },
+  soapstone: { label: 'Soapstone', cost: 4800, carbon: 260, note: 'The luxury face — dense, slow, and lovely to lean on. It is the most expensive skin here by a distance.' }
+};
+export function resolveHeaterFacing(spec, heatKey) {
+  const src = HEAT_SOURCES[heatKey] || {};
+  if (!src.faced) return null;
+  const key = (spec?.utilities || {}).heaterFacing;
+  return HEATER_FACINGS[key] ? key : (src.facingDefault || 'cob');
+}
+
 export const HEATER_NAMES = { rocket_mass: 'Rocket Mass Heater', masonry: 'Masonry Heater', wood_stove: 'Wood Stove', minisplit: 'Mini-Split Unit' };
 export const HEATER_SIZES = { rocket_mass: [6, 3], masonry: [4, 4], wood_stove: [3, 2.5], minisplit: [3, 1] };
 export function interiorFixtures(spec) {
@@ -910,7 +1101,7 @@ export function interiorFixtures(spec) {
   return [
     { key: 'heater', name: HEATER_NAMES[heat] || 'Heater', category: 'thermal', w: hw, d: hd, h: heat === 'masonry' ? 7 : 4 },
     { key: 'tank', name: 'Water Tank', category: 'water', w: 4, d: 4, h: 5 },
-    { key: 'stairs', name: 'Stairs', category: 'structure', w: 3.5, d: 10, h: 8 },
+    { key: 'stairs', name: 'Stairs', category: 'stair', w: 3.5, d: 10, h: 8 },
     { key: 'counter', name: 'Kitchen Counter', category: 'structure', w: 8, d: 2, h: 3 },
     { key: 'bath', name: 'Bath Fixtures', category: 'water', w: 5, d: 3, h: 2.5 },
     { key: 'closet', name: 'Built-in Storage', category: 'storage', w: 6, d: 2, h: 7 }
@@ -1631,27 +1822,105 @@ export function frameOf(spec) {
   return { type: 'load-bearing', storeyTypes: {}, ...(spec.frame || {}) };
 }
 
-// Which material systems are marked reclaimed / salvaged. Reclaimed materials
-// cut cost and (especially) embodied carbon — reused stock carries no new
-// manufacturing burden.
-export function reclaimedOf(spec) {
-  return { frame: false, walls: false, flooring: false, windows: false, roof: false, ...(spec.reclaimed || {}) };
-}
-export const RECLAIMED_FACTORS = {
-  frame: { cost: 0.4, carbon: 0.15 },
-  walls: { cost: 0.65, carbon: 0.3 },
-  flooring: { cost: 0.45, carbon: 0.25 },
-  windows: { cost: 0.4, carbon: 0.35 },
-  roof: { cost: 0.6, carbon: 0.3 },
-  // Bought used. Buying second-hand skips almost all the manufacturing carbon,
-  // so the carbon factor drops further than the price does. Slab-wood counters
-  // and shelving off reclaimed timber are the 'builtin' line.
-  fixture: { cost: 0.45, carbon: 0.3 },
-  builtin: { cost: 0.5, carbon: 0.2 },
-  appliance: { cost: 0.35, carbon: 0.2 },
-  furniture: { cost: 0.3, carbon: 0.15 },
-  outdoor: { cost: 0.5, carbon: 0.25 }
+// WHERE EACH MATERIAL SYSTEM'S STOCK COMES FROM. Buying new at a lumberyard is
+// the baseline. Salvaged stock skips manufacturing entirely — which is why its
+// carbon factor drops further than its price does. Locally milled (your own
+// logs, a neighbour with a bandsaw mill, a small local mill) skips the retail
+// markup, the kiln and the freight: you pay for sawing, and you pay in drying
+// time and your own labour instead.
+export const MATERIAL_SOURCES = {
+  new: { label: 'Bought new', short: 'new' },
+  salvaged: { label: 'Salvaged / reclaimed', short: 'salvaged', green: true },
+  milled: { label: 'Locally milled / your own wood', short: 'locally milled', green: true }
 };
+
+// factor 1 = full retail price / full new-material carbon. A source key absent
+// from a system means that source isn't offered there — you can salvage a
+// window or a fridge, you can't mill one. Milling factors bite hardest where
+// the line is nearly all wood (flooring, frame, built-ins) and barely at all
+// where wood is a minority of the assembly (bale walls, a metal roof's battens).
+// The `note` is what the discount actually BUYS you, in the language of the
+// thing itself — because a cost factor is only honest if you know which product
+// it describes. Milling the frame means rough stock and your own joinery; a
+// precut kit from a timber framer is a different (dearer) product entirely, and
+// that is 'bought new'. Getting those two confused is a five-figure mistake.
+export const SOURCE_FACTORS = {
+  frame: {
+    salvaged: { cost: 0.4, carbon: 0.15, note: 'Beams pulled from a barn or a teardown. Cheap and beautiful, but you take the sizes you find.' },
+    milled: { cost: 0.45, carbon: 0.35, note: 'Rough-sawn stock — and YOU cut the joinery, several hundred joints of it. A precut kit from a timber framer, every mortise cut and labelled, is “bought new”: it costs more than this, not less.' }
+  },
+  walls: {
+    salvaged: { cost: 0.65, carbon: 0.3 },
+    milled: { cost: 0.85, carbon: 0.8, note: 'Only the wood moves — battens, cladding, framing. Bales, cob and plaster cost the same either way.' }
+  },
+  flooring: {
+    salvaged: { cost: 0.45, carbon: 0.25, note: 'Reclaimed boards or tile. Budget for waste — salvage never arrives square.' },
+    milled: { cost: 0.35, carbon: 0.5, note: 'Sawing instead of buying. The boards still have to dry to about 8% before they go down, and someone has to plane and tongue-and-groove them. Lay them green and they cup and gap.' }
+  },
+  windows: {
+    salvaged: { cost: 0.4, carbon: 0.35, note: 'The cheapest carbon win there is — but you design the openings around what you find, not the other way round.' }
+  },
+  roof: {
+    salvaged: { cost: 0.6, carbon: 0.3 },
+    milled: { cost: 0.85, carbon: 0.85, note: 'Only the wood moves — battens, sheathing, rafters. Metal, tile and membrane cost the same either way.' }
+  },
+  // A stair is mostly the cutting, not the boards, so its discounts are the
+  // shallowest here — cheap timber does not make the stringers cut themselves.
+  stairs: {
+    salvaged: { cost: 0.75, carbon: 0.5, note: 'Reclaimed treads on new stringers. Worth doing for the look; it saves less than salvage usually does, because the work is the expensive part.' },
+    milled: { cost: 0.7, carbon: 0.6, note: 'Your own stock for treads, risers and stringers. Cuts the timber, not the cutting — a stair is mostly labour.' }
+  },
+  // Bought-used / shop-built categories for the furnishings catalog. Slab-wood
+  // counters and shelving are the 'builtin' line — the classic mill-it-yourself
+  // win alongside the floor.
+  fixture: { salvaged: { cost: 0.45, carbon: 0.3 } },
+  builtin: {
+    salvaged: { cost: 0.5, carbon: 0.2 },
+    milled: { cost: 0.4, carbon: 0.45, note: 'Slab-wood counters and shelving off your own logs — the classic mill-it-yourself win alongside the floor.' }
+  },
+  appliance: { salvaged: { cost: 0.35, carbon: 0.2 } },
+  furniture: { salvaged: { cost: 0.3, carbon: 0.15 }, milled: { cost: 0.45, carbon: 0.4 } },
+  outdoor: { salvaged: { cost: 0.5, carbon: 0.25 }, milled: { cost: 0.55, carbon: 0.5 } }
+};
+
+// What the chosen source means for this system, in plain words — '' when the
+// choice speaks for itself.
+export function sourceNote(sourcing, system) {
+  return SOURCE_FACTORS[system]?.[sourcing[system]]?.note || '';
+}
+export const SOURCING_SYSTEMS = Object.keys(SOURCE_FACTORS);
+
+// The sources actually offered for a system — drives every picker in the UI, so
+// no screen can offer "milled windows".
+export function sourcesFor(system) {
+  return ['new', ...Object.keys(SOURCE_FACTORS[system] || {})];
+}
+
+// Reads spec.sourcing, silently migrating pre-sourcing specs (spec.reclaimed
+// booleans) as it goes: true meant salvaged. Nothing to clean up, nothing for
+// Daniel to press.
+export function sourcingOf(spec) {
+  const explicit = spec.sourcing || {};
+  const legacy = spec.reclaimed || {};
+  const out = {};
+  for (const system of SOURCING_SYSTEMS) {
+    const key = explicit[system];
+    out[system] = (key === 'new' || SOURCE_FACTORS[system][key]) ? key
+      : (legacy[system] === true ? 'salvaged' : 'new');
+  }
+  return out;
+}
+export function sourceFactor(sourcing, system, kind) {
+  return SOURCE_FACTORS[system]?.[sourcing[system]]?.[kind] ?? 1;
+}
+// Boolean "is this system salvaged" view — what the schedule and the older
+// screens ask for.
+export function reclaimedOf(spec) {
+  const sourcing = sourcingOf(spec);
+  const out = {};
+  for (const system of SOURCING_SYSTEMS) out[system] = sourcing[system] === 'salvaged';
+  return out;
+}
 
 // Offline ZIP -> region estimate (the assistant/geocoder refines this later).
 export function zipRegionInfo(zip) {
@@ -3593,17 +3862,28 @@ export function detectIssues(spec) {
   if (basementBedroom) {
     issues.push({ severity: 'critical', title: `${basementBedroom.name} is a basement bedroom — egress required`, owner: 'Engineer', system: 'rooms', fix: 'A below-grade sleeping room needs an egress window or a walkout door (minimum clear opening per code). Plan the well or walkout on the downhill side.' });
   }
-  // A stair has real geometry now: enough run for its rise (7.75" risers,
-  // 10" treads). Only judged when it actually climbs somewhere.
-  for (const stairEl of (spec.elements || []).filter((el) => /stair/i.test(el.name || '') && !/ladder/i.test(el.name || ''))) {
+  // The stair's run is DERIVED from its rise now, so "too short for the climb"
+  // can no longer happen — you can't draw a stair that doesn't reach. What can
+  // still go wrong is that the resolved footprint walks out through a wall, or
+  // that the shape you picked is uncomfortable. Both are judged from the same
+  // resolveStair() the plan and the 3D draw from.
+  const stairFootprint = footprintPolygon(spec);
+  for (const stairEl of (spec.elements || []).filter(isStair)) {
     const stairLevel = Number(stairEl.level || 1);
     const climbs = stairLevel === BASEMENT_LEVEL ? basementCheck.present : Number(spec.shell.storeys || 1) > 1;
     if (!climbs) continue;
-    const rise = stairLevel === BASEMENT_LEVEL ? basementCheck.heightFt : Number(spec.shell.wallHeightFt || 10);
-    const run = Math.max(Number(stairEl.w) || 0, Number(stairEl.d) || 0);
-    const neededRun = Math.round(rise / 0.646) * 0.833;
-    if (run < neededRun * 0.85) {
-      issues.push({ severity: 'warning', title: `${stairEl.name} is too short for its ${Math.round(rise)}′ climb`, owner: 'Architect', system: 'rooms', fix: `About ${Math.ceil(neededRun)}′ of run is needed at code-friendly 7¾" risers / 10" treads — stretch the stair in the Plan, or accept a steeper ship-ladder knowingly.` });
+    const st = resolveStair(spec, stairEl);
+    for (const flag of st.flags) {
+      issues.push({ severity: 'warning', title: `${stairEl.name}: ${flag.split('—')[0].trim()}`, owner: 'Architect', system: 'rooms', fix: flag });
+    }
+    if (stairFootprint?.length && !rectInFootprint(stairFootprint, st.bbox)) {
+      issues.push({
+        severity: 'warning',
+        title: `${stairEl.name} runs outside the walls`,
+        owner: 'Architect',
+        system: 'rooms',
+        fix: `Its ${st.label.toLowerCase()} needs ${st.bbox.w.toFixed(1)}′ × ${st.bbox.d.toFixed(1)}′ of floor and part of that lands beyond the footprint. Turn it 90°, switch to a U (the most compact shape), or drag it further in.`
+      });
     }
   }
   if (String(spec.systems?.envelope || '').toLowerCase().includes('natural') && !String(spec.systems?.envelope || '').toLowerCase().includes('rainscreen')) {
@@ -4088,7 +4368,6 @@ export function deriveDesign(spec, wallSectionsParam) {
   const batteryKwh = Number(utilities.batteryOverrideKwh) > 0 ? Number(utilities.batteryOverrideKwh) : autoBattery;
 
   // Costs (add-on constants, keyed to the structured utility choices).
-  const heatCostBySource = { rocket_mass: 2500, masonry: 6000, wood_stove: 3000, minisplit: 4500 };
   const waterCostBySource = { well: 7500, spring: 2500, catchment: 3500, town: 1500 };
   const wasteCostByMethod = { septic: 8500, composting: 1500, reedbed: 1200 };
   const foundationCostPsf = { rubble: 8, stemwall: 12, slab: 15 };
@@ -4220,6 +4499,8 @@ export function deriveDesign(spec, wallSectionsParam) {
   // vs. upper storeys so each can run a different frame. A load-bearing wall has
   // no separate frame (cost 0). Reclaimed timber cuts cost + carbon sharply.
   const reclaimed = reclaimedOf(spec);
+  const sourcing = sourcingOf(spec);
+  const srcFac = (system, kind) => sourceFactor(sourcing, system, kind);
   const groundFrameKey = resolveFrameType(spec, 1);
   const upperFrameKey = resolveFrameType(spec, 2);
   // The sun-glazing bands are CARRIED BY THE FRAME — their slant area joins
@@ -4230,7 +4511,7 @@ export function deriveDesign(spec, wallSectionsParam) {
   const upperFrameArea = upperPerimeterFt * storeyExtraFt;
   const frameCostRaw = groundFrameArea * (FRAME_TYPES[groundFrameKey]?.costPsf ?? 0) + upperFrameArea * (FRAME_TYPES[upperFrameKey]?.costPsf ?? 0);
   const frameCarbonRaw = groundFrameArea * (FRAME_TYPES[groundFrameKey]?.carbonPsf ?? 0) + upperFrameArea * (FRAME_TYPES[upperFrameKey]?.carbonPsf ?? 0);
-  const frameCost = frameCostRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.cost : 1);
+  const frameCost = frameCostRaw * srcFac('frame', 'cost');
 
   const wallsCostRaw = wallsCost;
   const windowsCostRaw = totalGlass * (utilities.windowQuality === 'triple' ? 70 : 45);
@@ -4253,8 +4534,10 @@ export function deriveDesign(spec, wallSectionsParam) {
   // Bought used? Each catalog group has its own salvage toggle (Finishes →
   // "New or salvaged"), and a piece marked used on its own card wins over it.
   const furnFactor = (f, el, kindOf) => {
-    const used = el.reclaimed === true || (el.reclaimed !== false && reclaimed[f.group]);
-    return used ? (RECLAIMED_FACTORS[f.group]?.[kindOf] ?? 1) : 1;
+    const own = MATERIAL_SOURCES[el.source] ? el.source
+      : (el.reclaimed === true ? 'salvaged' : (el.reclaimed === false ? 'new' : null));
+    const src = own || sourcing[f.group];
+    return SOURCE_FACTORS[f.group]?.[src]?.[kindOf] ?? 1;
   };
   const furnishingsCostRaw = furnishingEls.reduce((sum, el) => sum + (resolveFurnishing(el)?.cost || 0), 0);
   const furnishingsCost = furnishingEls.reduce((sum, el) => {
@@ -4265,17 +4548,41 @@ export function deriveDesign(spec, wallSectionsParam) {
     const f = resolveFurnishing(el); if (!f) return sum;
     return sum + f.carbon * furnFactor(f, el, 'carbon');
   }, 0);
+  // The finish floor alone, after sourcing — the deck and its insulation are
+  // bought either way, so they ride outside the factor (and outside the
+  // savings math below, which used to subtract them by mistake).
+  const flooringFinishCost = flooringCostRaw * srcFac('flooring', 'cost');
+  // STAIRS — priced per tread, plus the landing and the railing. Every stair
+  // resolves through the SAME resolveStair the plan and the 3D draw from, so
+  // the receipt counts the steps you can actually see.
+  const heatKey = resolveHeatSource(utilities.heatSource);
+  const heatFacingKey = resolveHeaterFacing(spec, heatKey);
+  const heatFacing = heatFacingKey ? HEATER_FACINGS[heatFacingKey] : null;
+  const heatInstall = HEAT_SOURCES[heatKey].install + (heatFacing?.cost || 0);
+  const stairEls = (spec.elements || []).filter(isStair);
+  const stairBuilds = stairEls.map((el) => {
+    const st = resolveStair(spec, el);
+    const treads = st.treads * st.widthFt * STAIR_COSTS.treadPerFtWidth;
+    const landing = st.landingSf * STAIR_COSTS.landingPsf;
+    const railing = st.railingLf * STAIR_COSTS.railingPerLf;
+    const carbon = st.treads * st.widthFt * STAIR_CARBON.treadPerFtWidth
+      + st.landingSf * STAIR_CARBON.landingPsf + st.railingLf * STAIR_CARBON.railingPerLf;
+    return { el, st, treads, landing, railing, raw: treads + landing + railing, carbon };
+  });
+  const stairsCostRaw = stairBuilds.reduce((sum, b) => sum + b.raw, 0);
+  const stairsCarbonRaw = stairBuilds.reduce((sum, b) => sum + b.carbon, 0);
   const cost = {
     furnishings: furnishingsCost,
     foundation: foundationCostBase + foundationRunCost,
     frame: frameCost,
-    flooring: flooringCostRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.cost : 1) + subfloorCost + floorInsulCost,
+    flooring: flooringFinishCost + subfloorCost + floorInsulCost,
     upperFloors: (upperFloorArea + loftTowerArea) * 12,
+    stairs: stairsCostRaw * srcFac('stairs', 'cost'),
     outdoors: outdoorCost,
-    walls: wallsCostRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.cost : 1),
-    windows: windowsCostRaw * (reclaimed.windows ? RECLAIMED_FACTORS.windows.cost : 1),
-    roof: roofCostRaw * (reclaimed.roof ? RECLAIMED_FACTORS.roof.cost : 1),
-    heat: heatCostBySource[utilities.heatSource] ?? 3000,
+    walls: wallsCostRaw * srcFac('walls', 'cost'),
+    windows: windowsCostRaw * srcFac('windows', 'cost'),
+    roof: roofCostRaw * srcFac('roof', 'cost'),
+    heat: HEAT_SOURCES[heatKey].kit + heatInstall,
     water: (waterCostBySource[utilities.waterSource] ?? 5000) + (Number(utilities.tankGal) || 0) * 1.5,
     waste: wasteCostByMethod[utilities.wasteMethod] ?? 5000,
     power: utilities.powerMode === 'gridtie' ? 4200 : panels * 900 + batteryKwh * 500 + 3000
@@ -4292,7 +4599,9 @@ export function deriveDesign(spec, wallSectionsParam) {
 
   const sweat = (utilities.diyWalls ? cost.walls * sweatWallsFrac : 0)
     + (utilities.diyRoof ? cost.roof * sweatRoofFrac : 0)
-    + (utilities.diyHeat ? cost.heat * sweatHeatFrac : 0)
+    // Sweat only touches the INSTALL half — the kit is a purchase order, not a
+    // weekend. (This used to discount the appliance itself by 45%.)
+    + (utilities.diyHeat ? heatInstall * sweatHeatFrac : 0)
     + (utilities.diyFoundation ? cost.foundation * sweatFoundationFrac : 0)
     + (utilities.diyFrame ? cost.frame * sweatFrameFrac : 0);
   const total = totalBeforeSweat - sweat;
@@ -4301,32 +4610,40 @@ export function deriveDesign(spec, wallSectionsParam) {
   const foundationCarbonPsf = { rubble: 10, stemwall: 18, slab: 25 };
   const wallCarbonPsf = { 'straw-bale': 6, 'rammed-earth': 20, cob: 8, 'hemp-lime': 4, cordwood: 8, 'light-straw-clay': 7, framed: 8, sips: 14, 'ply-insulated': 9, icf: 26, glazed: 15 };
   const wallCarbonRaw = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0) + partitionCarbon + claddingCarbon;
-  const wallCarbon = wallCarbonRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.carbon : 1);
-  const frameCarbon = frameCarbonRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.carbon : 1);
+  const wallCarbon = wallCarbonRaw * srcFac('walls', 'carbon');
+  const frameCarbon = frameCarbonRaw * srcFac('frame', 'carbon');
   const drainageCarbon = drainage.gutterLf * GUTTER_CARBON_LF + (drainage.gutters !== 'none' ? (drainage.dischargeSpec?.carbon || 0) : 0);
   const roofCarbonRaw = roofArea * (roofCover.carbonPsf + INSULATION_TYPES[roofInsulKey].carbonPsf) + drainageCarbon;
-  const roofCarbon = roofCarbonRaw * (reclaimed.roof ? RECLAIMED_FACTORS.roof.carbon : 1);
-  const flooringCarbon = flooringCarbonRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.carbon : 1) + subfloorCarbon + floor * INSULATION_TYPES[floorInsulKey].carbonPsf;
+  const roofCarbon = roofCarbonRaw * srcFac('roof', 'carbon');
+  const flooringFinishCarbon = flooringCarbonRaw * srcFac('flooring', 'carbon');
+  const flooringCarbon = flooringFinishCarbon + subfloorCarbon + floor * INSULATION_TYPES[floorInsulKey].carbonPsf;
   const stemCarbonExtra = utilities.foundationType === 'stemwall' ? perimeterFt * Math.max(0, stemwallHeightFt - 1.5) * 40 : 0;
   // Basement concrete is carbon-heavy: wall face area + slab replace the
   // regular foundation's coefficient while present.
   const foundationCarbon = basement.present
     ? perimeterFt * basement.heightFt * 16 + floor * 12
     : (utilities.foundationType === 'slab' ? mainSlabArea : floor) * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra;
-  const carbonKg = foundationCarbon + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + deckCarbon + furnishingsCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
+  const stairsCarbon = stairsCarbonRaw * srcFac('stairs', 'carbon');
+  const carbonKg = foundationCarbon + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + deckCarbon + furnishingsCarbon + stairsCarbon + (heatFacing?.carbon || 0) + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
-  // What the reclaimed choices saved vs. buying everything new.
-  const reclaimedSavings = {
-    cost: (reclaimed.frame ? frameCostRaw - frameCost : 0)
-      + (reclaimed.walls ? wallsCostRaw - cost.walls : 0)
-      + (reclaimed.flooring ? flooringCostRaw - cost.flooring : 0)
-      + (reclaimed.windows ? windowsCostRaw - cost.windows : 0)
-      + (reclaimed.roof ? roofCostRaw - cost.roof : 0),
-    carbon: (reclaimed.frame ? frameCarbonRaw - frameCarbon : 0)
-      + (reclaimed.walls ? wallCarbonRaw - wallCarbon : 0)
-      + (reclaimed.flooring ? flooringCarbonRaw - flooringCarbon : 0)
-      + (reclaimed.roof ? roofCarbonRaw - roofCarbon : 0),
-    count: Object.values(reclaimed).filter(Boolean).length
+  // What the sourcing choices saved vs. buying every system new — salvage and
+  // local milling both land here.
+  const furnishingsCarbonRaw = furnishingEls.reduce((sum, el) => sum + (resolveFurnishing(el)?.carbon || 0), 0);
+  const sourcingSavings = {
+    cost: (frameCostRaw - frameCost)
+      + (wallsCostRaw - cost.walls)
+      + (flooringCostRaw - flooringFinishCost)
+      + (windowsCostRaw - cost.windows)
+      + (roofCostRaw - cost.roof)
+      + (furnishingsCostRaw - furnishingsCost),
+    carbon: (frameCarbonRaw - frameCarbon)
+      + (wallCarbonRaw - wallCarbon)
+      + (flooringCarbonRaw - flooringFinishCarbon)
+      + (roofCarbonRaw - roofCarbon)
+      + (furnishingsCarbonRaw - furnishingsCarbon),
+    count: SOURCING_SYSTEMS.filter((system) => sourcing[system] !== 'new').length,
+    milled: SOURCING_SYSTEMS.filter((system) => sourcing[system] === 'milled').length,
+    salvaged: SOURCING_SYSTEMS.filter((system) => sourcing[system] === 'salvaged').length
   };
 
   // ---- Receipts: the itemized math behind every cost line -------------------
@@ -4370,15 +4687,29 @@ export function deriveDesign(spec, wallSectionsParam) {
     const uRate = FRAME_TYPES[upperFrameKey]?.costPsf ?? 0;
     if (groundFrameArea > 0) lines.push(rline(`Ground frame — ${FRAME_TYPES[groundFrameKey]?.label || groundFrameKey}`, groundFrameArea * gRate, groundFrameArea, 'sf of frame plane', gRate, gRate === 0 ? 'load-bearing walls carry the roof themselves — no separate frame to buy' : 'perimeter × wall height' + (bandFrameArea > 0 ? ' + sun-glazing bands' : '')));
     if (upperFrameArea > 0) lines.push(rline(`Upper frame — ${FRAME_TYPES[upperFrameKey]?.label || upperFrameKey}`, upperFrameArea * uRate, upperFrameArea, 'sf of frame plane', uRate));
-    if (reclaimed.frame && frameCostRaw > 0) lines.push(rline('Reclaimed timber', -(frameCostRaw - frameCost), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.frame.cost * 100)}% of the new-material price`));
+    if (sourcing.frame !== 'new' && frameCostRaw > 0) lines.push(rline(`${MATERIAL_SOURCES[sourcing.frame].label} timber`, -(frameCostRaw - frameCost), null, '', null, `you pay ${Math.round(srcFac('frame', 'cost') * 100)}% of the new-material price`));
     costReceipts.frame = lines;
+  }
+  { // stairs — one block of lines per stair, counted in real treads
+    const lines = [];
+    for (const b of stairBuilds) {
+      const name = b.el.name || 'Stairs';
+      lines.push(rline(`${name} — ${b.st.treads} treads at ${b.st.widthFt.toFixed(1)}′ wide`, b.treads, b.st.treads, 'treads', b.st.widthFt * STAIR_COSTS.treadPerFtWidth, `${b.st.risers} risers at ${b.st.riserIn.toFixed(1)}″ for a ${b.st.rise.toFixed(1)}′ climb`));
+      if (b.landing > 0) lines.push(rline(`${name} — landing`, b.landing, b.st.landingSf, 'sf', STAIR_COSTS.landingPsf, `the turn in a ${b.st.label.toLowerCase()}`));
+      if (b.railing > 0) lines.push(rline(`${name} — railing`, b.railing, b.st.railingLf, 'lf', STAIR_COSTS.railingPerLf, 'guard along the open side'));
+    }
+    if (sourcing.stairs !== 'new' && stairsCostRaw > 0) {
+      lines.push(rline(`${MATERIAL_SOURCES[sourcing.stairs].label} stair timber`, -(stairsCostRaw - cost.stairs), null, '', null, `you pay ${Math.round(srcFac('stairs', 'cost') * 100)}% of new — a stair is mostly the cutting, so this discount is shallow on purpose`));
+    }
+    costReceipts.stairs = lines;
   }
   { // flooring
     const lines = [];
     const fRate = FLOORING_TYPES[flooringKey]?.costPsf ?? 4;
-    const finishFinal = flooringCostRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.cost : 1);
     lines.push(rline(`Finish floor — ${FLOORING_TYPES[flooringKey]?.label || flooringKey}`, flooringCostRaw, heatedFloor, 'sf of heated floor', fRate));
-    if (reclaimed.flooring) lines.push(rline('Reclaimed boards', -(flooringCostRaw - finishFinal), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.flooring.cost * 100)}% of new`));
+    if (sourcing.flooring !== 'new') lines.push(rline(`${MATERIAL_SOURCES[sourcing.flooring].label} boards`, -(flooringCostRaw - flooringFinishCost), null, '', null, sourcing.flooring === 'milled'
+      ? `sawing instead of buying — you pay ${Math.round(srcFac('flooring', 'cost') * 100)}% of the lumberyard price, and supply the drying time`
+      : `you pay ${Math.round(srcFac('flooring', 'cost') * 100)}% of new`));
     if (subfloorCost > 0) lines.push(rline(`Subfloor — ${SUBFLOOR_TYPES[subfloorKey]?.label || subfloorKey}`, subfloorCost, floor, 'sf of deck', SUBFLOOR_TYPES[subfloorKey]?.costPsf ?? 0));
     if (floorInsulCost > 0) lines.push(rline(`Floor insulation — ${INSULATION_TYPES[floorInsulKey]?.label || floorInsulKey}`, floorInsulCost, floor, 'sf of floor', INSULATION_TYPES[floorInsulKey].costPsf));
     costReceipts.flooring = lines;
@@ -4425,13 +4756,13 @@ export function deriveDesign(spec, wallSectionsParam) {
     }
     if (partitionCost > 0) lines.push(rline('Interior partitions', partitionCost, null, '', null, 'length × height × the partition rate'));
     if (claddingCost > 0) lines.push(rline('Exterior cladding', claddingCost, null, '', null, 'face area × the cladding rate (render is already in the wall price)'));
-    if (reclaimed.walls) lines.push(rline('Reclaimed wall materials', -(wallsCostRaw - cost.walls), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.walls.cost * 100)}% of new`));
+    if (sourcing.walls !== 'new') lines.push(rline(`${MATERIAL_SOURCES[sourcing.walls].label} wall materials`, -(wallsCostRaw - cost.walls), null, '', null, `you pay ${Math.round(srcFac('walls', 'cost') * 100)}% of new`));
     costReceipts.walls = lines;
   }
   { // windows
     const rate = utilities.windowQuality === 'triple' ? 70 : 45;
     const lines = [rline(`Glazing — ${utilities.windowQuality === 'triple' ? 'triple' : 'double'} pane`, windowsCostRaw, totalGlass, 'sf of glass', rate, 'every window, glazed door, skylight, and sun band')];
-    if (reclaimed.windows) lines.push(rline('Reclaimed windows', -(windowsCostRaw - cost.windows), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.windows.cost * 100)}% of new`));
+    if (sourcing.windows !== 'new') lines.push(rline(`${MATERIAL_SOURCES[sourcing.windows].label} windows`, -(windowsCostRaw - cost.windows), null, '', null, `you pay ${Math.round(srcFac('windows', 'cost') * 100)}% of new`));
     costReceipts.windows = lines;
   }
   { // roof
@@ -4442,12 +4773,17 @@ export function deriveDesign(spec, wallSectionsParam) {
     if (gutterCost > 0) lines.push(rline('Gutters', gutterCost, drainage.gutterLf, 'ft of eave', GUTTER_COST_LF));
     if (downspoutCost > 0) lines.push(rline('Downspouts', downspoutCost, drainage.downspouts, 'downspouts', DOWNSPOUT_COST, '', true));
     if (dischargeCost > 0) lines.push(rline(`Runoff — ${drainage.dischargeSpec.label}`, dischargeCost, null, '', null, drainage.dischargeSpec.note));
-    if (reclaimed.roof) lines.push(rline('Reclaimed roofing', -(roofCostRaw - cost.roof), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.roof.cost * 100)}% of new`));
+    if (sourcing.roof !== 'new') lines.push(rline(`${MATERIAL_SOURCES[sourcing.roof].label} roofing`, -(roofCostRaw - cost.roof), null, '', null, `you pay ${Math.round(srcFac('roof', 'cost') * 100)}% of new`));
     costReceipts.roof = lines;
   }
   { // heat / water / waste / power
-    const heatNames = { rocket_mass: 'Rocket mass heater', masonry: 'Masonry heater', wood_stove: 'Wood stove', minisplit: 'Mini-split heat pump' };
-    costReceipts.heat = [rline(heatNames[utilities.heatSource] || 'Heat source', heatCostBySource[utilities.heatSource] ?? 3000, null, '', null, 'installed, flat planning figure')];
+    const heatSrc = HEAT_SOURCES[heatKey];
+    costReceipts.heat = [
+      rline(`${heatSrc.label} — ${heatSrc.kitLabel}`, heatSrc.kit, null, '', null,
+        heatSrc.kitNote || (heatSrc.quoted ? 'supplier price' : 'planning figure')),
+      rline('Getting it working', heatSrc.install, null, '', null, heatSrc.installNote)
+    ];
+    if (heatFacing) costReceipts.heat.push(rline(`Facing — ${heatFacing.label}`, heatFacing.cost, null, '', null, heatFacing.note || 'the skin over the core'));
     const waterNames = { well: 'Drilled well', spring: 'Spring development', catchment: 'Roof catchment system', town: 'Town water hookup' };
     const waterLines = [rline(waterNames[utilities.waterSource] || 'Water source', waterCostBySource[utilities.waterSource] ?? 5000)];
     if ((Number(utilities.tankGal) || 0) > 0) waterLines.push(rline('Storage tank', Number(utilities.tankGal) * 1.5, Number(utilities.tankGal), 'gal of storage', 1.5));
@@ -4467,11 +4803,12 @@ export function deriveDesign(spec, wallSectionsParam) {
   if (utilities.diyFrame && cost.frame) sweatLines.push(rline('Frame — your own labor', -cost.frame * sweatFrameFrac, null, '', null, `${Math.round(sweatFrameFrac * 100)}% of that line is labor`));
   if (utilities.diyWalls && cost.walls) sweatLines.push(rline('Walls — your own labor', -cost.walls * sweatWallsFrac, null, '', null, `${Math.round(sweatWallsFrac * 100)}% of that line is labor`));
   if (utilities.diyRoof && cost.roof) sweatLines.push(rline('Roof — your own labor', -cost.roof * sweatRoofFrac, null, '', null, `${Math.round(sweatRoofFrac * 100)}% of that line is labor`));
-  if (utilities.diyHeat && cost.heat) sweatLines.push(rline('Heat — your own labor', -cost.heat * sweatHeatFrac, null, '', null, `${Math.round(sweatHeatFrac * 100)}% of that line is labor`));
+  if (utilities.diyHeat && heatInstall) sweatLines.push(rline('Heat — your own labor', -heatInstall * sweatHeatFrac, null, '', null, `${Math.round(sweatHeatFrac * 100)}% of the INSTALL half is labor — the kit itself is a purchase, not a weekend`));
 
   return {
     receipts: { systems: costReceipts, sweat: sweatLines },
-    site, utilities, reclaimed, reclaimedSavings, floor, heatedFloor, storeys, basement, basementRoomArea, basementHeated, roofArea, roofFootprint, overhangs, wallArea, glazedWallArea, wallR, southGlass, glassPct,
+    site, utilities, reclaimed, sourcing, sourcingSavings, floor,
+    heatKey, heatFacingKey, heatKit: HEAT_SOURCES[heatKey].kit, heatInstall, heatedFloor, storeys, basement, basementRoomArea, basementHeated, roofArea, roofFootprint, overhangs, wallArea, glazedWallArea, wallR, southGlass, glassPct,
     skylightArea, totalGlass, glazingU, stemwallHeightFt, azimuthDeg, solarFactor,
     sunWinterDeg, sunSummerDeg, winterShadeFrac, summerShadeFrac,
     frameGround: groundFrameKey, frameUpper: upperFrameKey, frameArea: groundFrameArea + upperFrameArea,
@@ -4502,6 +4839,7 @@ export const COST_ROWS = [
   { key: 'roof', label: 'Roof', system: 'roof' },
   { key: 'windows', label: 'Windows & doors', system: 'windows' },
   { key: 'upperFloors', label: 'Upper floors', system: 'shell' },
+  { key: 'stairs', label: 'Stairs', system: 'rooms' },
   { key: 'heat', label: 'Heat', system: 'heat' },
   { key: 'water', label: 'Water', system: 'water' },
   { key: 'waste', label: 'Waste', system: 'waste' },
@@ -4557,7 +4895,7 @@ export const SYSTEM_META = {
     reads: (dd) => [
       ['Ground frame', FRAME_TYPES[dd.frameGround]?.label.split(' (')[0] || dd.frameGround, '', ''],
       ...(dd.storeys > 1 ? [['Upper frame', FRAME_TYPES[dd.frameUpper]?.label.split(' (')[0] || dd.frameUpper, '', `${dd.storeys} storeys`]] : []),
-      ['This system', fmtMoney(dd.cost.frame), '', dd.reclaimed.frame ? 'reclaimed timber' : ''],
+      ['This system', fmtMoney(dd.cost.frame), '', dd.sourcing.frame !== 'new' ? `${MATERIAL_SOURCES[dd.sourcing.frame].short} timber` : ''],
       ...(dd.utilities.diyFrame ? [['You save', fmtMoney(dd.cost.frame * 0.6), '', 'raising it yourself']] : [])
     ]
   },
@@ -4567,7 +4905,7 @@ export const SYSTEM_META = {
     feeds: ['Cost'],
     reads: (dd) => [
       ['Subfloor', (SUBFLOOR_TYPES[dd.subfloor]?.label || dd.subfloor).split(' —')[0], '', ''],
-      ['Finish', FLOORING_TYPES[dd.flooring]?.label || dd.flooring, '', dd.reclaimed.flooring ? 'reclaimed' : ''],
+      ['Finish', FLOORING_TYPES[dd.flooring]?.label || dd.flooring, '', dd.sourcing.flooring !== 'new' ? MATERIAL_SOURCES[dd.sourcing.flooring].short : ''],
       ['This system', fmtMoney(dd.cost.flooring), '', `${fmtNum(dd.heatedFloor)} sf`]
     ]
   },
@@ -4733,7 +5071,7 @@ export const PLAN_ELEMENT_HEX = {
   homestead: '#8e7049', landscape: '#6d8c55', storage: '#8a7768', site: '#9a8f70',
   garden: '#5f8d49', animal: '#b0895b', floor: '#8d8473', loft: '#6f7f6a',
   tower: '#7a5f49', outbuilding: '#a08a5f', foundation: '#8f8b80', partition: '#6b6257',
-  chimney: '#9a5944', deck: '#8e7049', custom: '#8b786d'
+  chimney: '#9a5944', deck: '#8e7049', custom: '#8b786d', stair: '#7d6a52'
 };
 
 // 🌿 marks green/natural methods and materials in every options list, with a

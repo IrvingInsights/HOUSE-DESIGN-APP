@@ -17,7 +17,7 @@ import {
 import {
   DEFAULT_OUTDOOR_GRID_SIZE_FT, clamp, padExtension, sitePadRect, objectBounds, titleCase, roofProfile, storeyInfo,
   upperPlateRect, resolveOverhangs, FOUNDATION_RUN_TYPES, DEFAULT_MODEL_LAYERS, siteOf, utilitiesOf, getSpecialBimObjects, wallAssemblyProfile,
-  WALL_SIDES, resolveWallSide, resolveDeck, resolveDeckStairs, sunspacePartitions
+  WALL_SIDES, resolveWallSide, resolveDeck, resolveDeckStairs, sunspacePartitions, isStair, resolveStair
 } from './engine.js';
 
 // Some browsers run with graphics acceleration (WebGL) turned off — locked-
@@ -994,10 +994,29 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       const tS = wallResolved.south.thicknessFt;
       const tE = wallResolved.east.thicknessFt;
       const tW = wallResolved.west.thicknessFt;
-      const hN = roofSpec.roofType === 'shed' ? northWallHeight : wallResolved.north.heightFt + storeyLift;
-      const hS = roofSpec.roofType === 'shed' ? southWallHeight : wallResolved.south.heightFt + storeyLift;
+      // DAYLIGHT ALONG THE LOW WALL. A shed's FLAT sides (the two at the level
+      // eaves) were built to one height sampled at the wall LINE — but the roof
+      // underside keeps sloping across the wall's OWN THICKNESS. On the low side
+      // the roof lifts away from that flat top and opens a wedge you can see sky
+      // through, widening from nothing at the outer face to inches at the inner
+      // face. Sample the eave at BOTH faces of the wall and keep the higher one
+      // (never lower than before, so no wall can shrink): the wall now always
+      // reaches its roof, burying a hair of itself in the slab instead.
+      const shedFlatTop = (base, ax, az, bx, bz) => (roofSpec.roofType !== 'shed' ? base
+        : Math.max(base,
+          shedEaveAt(ax, az) + storeyLift + JOINTS.LAP,
+          shedEaveAt(bx, bz) + storeyLift + JOINTS.LAP));
+      const hN = roofSpec.roofType === 'shed'
+        ? shedFlatTop(northWallHeight, width / 2, 0, width / 2, tN)
+        : wallResolved.north.heightFt + storeyLift;
+      const hS = roofSpec.roofType === 'shed'
+        ? shedFlatTop(southWallHeight, width / 2, depth, width / 2, depth - tS)
+        : wallResolved.south.heightFt + storeyLift;
       const hE = wallResolved.east.heightFt + storeyLift;
       const hW = wallResolved.west.heightFt + storeyLift;
+      // The east/west pair are the flat ones when the shed falls east–west.
+      const hWshed = shedFlatTop(westWallHeight, 0, depth / 2, tW, depth / 2);
+      const hEshed = shedFlatTop(eastWallHeight, width, depth / 2, width - tE, depth / 2);
       // Upper bands ring the storey's EXTENT plate — a second storey can sit
       // over only one side of the building. No plate = the full footprint.
       const plate2 = upperPlateRect(spec, 2) || { x: 0, y: 0, w: width, d: depth };
@@ -1365,8 +1384,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // The two walls at the level eaves build flat; the two along the slope
         // rake. Which is which depends on the fall axis.
         if (shedEW) {
-          pushSideBoxes('west', westWallHeight, tW, (t, h, lift, s0 = 0, s1 = depth) => wallRunMeshes({ horizontal: false, thickCenter: t / 2, t, a0: s0, a1: s1, hAt: () => h, mat: wallMatFor('west'), gaps: gapsFor('west'), yBase: sideReveal.west }));
-          pushSideBoxes('east', eastWallHeight, tE, (t, h, lift, s0 = 0, s1 = depth) => wallRunMeshes({ horizontal: false, thickCenter: width - t / 2, t, a0: s0, a1: s1, hAt: () => h, mat: wallMatFor('east'), gaps: gapsFor('east'), yBase: sideReveal.east }));
+          pushSideBoxes('west', hWshed, tW, (t, h, lift, s0 = 0, s1 = depth) => wallRunMeshes({ horizontal: false, thickCenter: t / 2, t, a0: s0, a1: s1, hAt: () => h, mat: wallMatFor('west'), gaps: gapsFor('west'), yBase: sideReveal.west }));
+          pushSideBoxes('east', hEshed, tE, (t, h, lift, s0 = 0, s1 = depth) => wallRunMeshes({ horizontal: false, thickCenter: width - t / 2, t, a0: s0, a1: s1, hAt: () => h, mat: wallMatFor('east'), gaps: gapsFor('east'), yBase: sideReveal.east }));
         } else {
           pushSideBoxes('north', hN, tN, (t, h, lift, s0 = 0, s1 = width) => wallRunMeshes({ horizontal: true, thickCenter: t / 2, t, a0: s0, a1: s1, hAt: () => h, mat: wallMatFor('north'), gaps: gapsFor('north'), yBase: sideReveal.north }));
           pushSideBoxes('south', hS, tS, (t, h, lift, s0 = 0, s1 = width) => wallRunMeshes({ horizontal: true, thickCenter: depth - t / 2, t, a0: s0, a1: s1, hAt: () => h, mat: wallMatFor('south'), gaps: gapsFor('south'), yBase: sideReveal.south }));
@@ -2772,6 +2791,45 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             elementHeight = 0.22;
           }
           elevation = 0;
+        } else if (isStair(element)) {
+          // Real steps, not a block: each tread is its own box climbing at the
+          // resolved riser height, with a flat landing between the two runs.
+          // Same resolveStair() the plan draws from, so a stair turned 90° in
+          // the inspector is turned 90° here too.
+          const st = resolveStair(spec, element);
+          const stairMat = new THREE.MeshStandardMaterial({ color: 0x9a8163, roughness: 0.85, map: grainTexture('wood') });
+          const riseFt = st.riserIn / 12;
+          let climbed = 0;
+          for (const part of st.parts) {
+            if (part.kind === 'landing') {
+              const m = box(part.w, 0.35, part.d, part.x + part.w / 2, elevation + climbed - 0.17, part.y + part.d / 2, stairMat);
+              m.userData.roomId = element.id; m.userData.generated = true; group.add(m);
+              continue;
+            }
+            const n = Math.max(1, part.treads);
+            const alongX = part.climb === 'east' || part.climb === 'west';
+            const stepLen = (alongX ? part.w : part.d) / n;
+            for (let i = 0; i < n; i += 1) {
+              climbed += riseFt;
+              // step i measured from the low end of THIS run
+              const forward = part.climb === 'north' || part.climb === 'west' ? (n - 1 - i) : i;
+              const sx = alongX ? part.x + forward * stepLen + stepLen / 2 : part.x + part.w / 2;
+              const sz = alongX ? part.y + part.d / 2 : part.y + forward * stepLen + stepLen / 2;
+              // A stair stops at the roof's underside like a partition does —
+              // a run climbing under a low stepped wing used to poke its top
+              // treads out through the metal.
+              if (Number(element.level || 1) !== BASEMENT_LEVEL
+                && elevation + climbed > roofUnderAt(sx, sz) - 0.12) continue;
+              const m = box(alongX ? stepLen : part.w, 0.3, alongX ? part.d : stepLen, sx, elevation + climbed - 0.15, sz, stairMat);
+              m.userData.roomId = element.id; m.userData.generated = true; group.add(m);
+            }
+          }
+          elementHeight = Math.max(1, climbed);
+          // Full-volume invisible box = the select/drag target, sized to the
+          // RESOLVED footprint (an L or U is wider than the element's own box).
+          const stairHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.05, depthWrite: false });
+          mesh = box(st.bbox.w, elementHeight, st.bbox.d,
+            st.bbox.x + st.bbox.w / 2, elevation + elementHeight / 2, st.bbox.y + st.bbox.d / 2, stairHandle);
         } else if (element.category === 'partition') {
           // An interior partition wall: a real thin wall between rooms, with an
           // optional doorway (doorWFt/doorAtFt along the run). Segments and the
@@ -3112,45 +3170,6 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const deckHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
           mesh = box(ew0, Math.max(1, railTop - deckTopY), ed0, ex0 + ew0 / 2, (deckTopY + railTop) / 2, ey0 + ed0 / 2, deckHandle);
           elementHeight = railTop - deckTopY;
-        } else if (/stair/i.test(element.name || '') && !/ladder/i.test(element.name || '')) {
-          // A real stair run: treads and risers climbing the storey (or out of
-          // the basement), not a floating box. The invisible full-volume box
-          // stays as the drag/select handle.
-          const alongX = element.w >= element.d;
-          const runLen = Math.max(3, alongX ? element.w : element.d);
-          const stairWide = Math.max(2, alongX ? element.d : element.w);
-          const lvlS = Number(element.level || 1);
-          const rise = lvlS === BASEMENT_LEVEL
-            ? Math.max(4, basementH)
-            : (storeys > 1 ? storeyHeightFt(spec.shell, Math.max(1, lvlS)) + 0.45 : Math.max(4, Number(element.h) || 8));
-          elementHeight = rise;
-          const treadMat = new THREE.MeshStandardMaterial({ color: 0x8a6f4e, roughness: 0.8, map: grainTexture('wood') });
-          const steps = Math.max(3, Math.round(rise / 0.646));
-          const treadD = runLen / steps;
-          const stepH = rise / steps;
-          for (let s = 0; s < steps; s += 1) {
-            const topY = elevation + (s + 1) * stepH;
-            // Stairs stop at the roof's underside like partitions do — a run
-            // whose top lands under a low stepped wing used to poke its last
-            // treads out through the metal.
-            const treadCx = alongX ? element.x + s * treadD + treadD / 2 : element.x + stairWide / 2;
-            const treadCz = alongX ? element.y + stairWide / 2 : element.y + s * treadD + treadD / 2;
-            if (lvlS !== BASEMENT_LEVEL && topY > roofUnderAt(treadCx, treadCz) - 0.12) continue;
-            const tread = alongX
-              ? box(treadD, 0.22, stairWide, element.x + s * treadD + treadD / 2, topY - 0.11, element.y + stairWide / 2, treadMat)
-              : box(stairWide, 0.22, treadD, element.x + stairWide / 2, topY - 0.11, element.y + s * treadD + treadD / 2, treadMat);
-            tread.userData.roomId = element.id;
-            tread.userData.generated = true;
-            group.add(tread);
-            const riser = alongX
-              ? box(0.16, stepH, stairWide, element.x + s * treadD + 0.1, topY - stepH / 2, element.y + stairWide / 2, treadMat)
-              : box(stairWide, stepH, 0.16, element.x + stairWide / 2, topY - stepH / 2, element.y + s * treadD + 0.1, treadMat);
-            riser.userData.roomId = element.id;
-            riser.userData.generated = true;
-            group.add(riser);
-          }
-          const stairHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.05, depthWrite: false });
-          mesh = box(element.w, rise, element.d, element.x + element.w / 2, elevation + rise / 2, element.y + element.d / 2, stairHandle);
         } else if (element.roofType || element.category === 'carport' || element.category === 'porch') {
           // An open-air structure (carport, porch, covered deck) is a canopy
           // on posts over a low deck — NOT a building-sized translucent ghost
@@ -3590,6 +3609,79 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           roofMat.transparent = true;
           roofMat.opacity = layers.xray ? 0.4 : 0.55;
         }
+        // WHAT FILLS THE EAVE — the user's choice (Roof chapter). A generous
+        // overhang (natural walls want a big hat) was drawing as an OPEN gap;
+        // now it is drawn one of two ways, both sampled from the SAME roof
+        // underside the walls meet, so they follow every slope and roof type:
+        //   • 'open' (default) — exposed rafter tails / lookouts at frame o.c.
+        //   • 'soffit' — a boarded panel under the overhang + a fascia edge.
+        // Finished-view only (rides the roof layer); the full frame view still
+        // owns the whole skeleton. Round cone roofs have no eave to fill.
+        const eaveStyle = spec.shell.eaveStyle === 'soffit' ? 'soffit' : 'open';
+        if (!roundFp) {
+          const sides = [
+            { side: 'north', runAxisZ: true, along: width, aIn: 0, aOut: -oAll.north, ov: oAll.north, s: (a) => [a, 0], sOut: (a) => [a, -oAll.north] },
+            { side: 'south', runAxisZ: true, along: width, aIn: depth, aOut: depth + oAll.south, ov: oAll.south, s: (a) => [a, depth], sOut: (a) => [a, depth + oAll.south] },
+            { side: 'west', runAxisZ: false, along: depth, aIn: 0, aOut: -oAll.west, ov: oAll.west, s: (a) => [0, a], sOut: (a) => [-oAll.west, a] },
+            { side: 'east', runAxisZ: false, along: depth, aIn: width, aOut: width + oAll.east, ov: oAll.east, s: (a) => [width, a], sOut: (a) => [width + oAll.east, a] }
+          ];
+          if (eaveStyle === 'soffit') {
+            // A boarded soffit: piecewise-flat panels tucked just under the roof
+            // (sampled from roofUnderAt at each step, so any slope is followed),
+            // plus a shallow fascia lip hanging at the eave edge. Same walk as
+            // the tails, but filled panels instead of beams.
+            const soffitMat = new THREE.MeshStandardMaterial({ color: 0xe8e0cf, roughness: 0.9, map: grainTexture('plaster') });
+            const SF = 0.14; const faceH = 0.5; const STEP = 3;
+            for (const S of sides) {
+              if (!(S.ov > 0.5)) continue;
+              const n = Math.max(1, Math.round(S.along / STEP));
+              for (let i = 0; i < n; i += 1) {
+                const a0 = (S.along * i) / n; const a1 = (S.along * (i + 1)) / n; const am = (a0 + a1) / 2;
+                const yOut = roofUnderAt(...S.sOut(am));
+                if (!Number.isFinite(yOut)) continue;
+                const seg = a1 - a0;
+                const panel = S.runAxisZ
+                  ? box(seg, SF, Math.abs(S.aOut - S.aIn), S.runAxisZ ? am : 0, yOut - SF / 2, (S.aIn + S.aOut) / 2, soffitMat)
+                  : box(Math.abs(S.aOut - S.aIn), SF, seg, (S.aIn + S.aOut) / 2, yOut - SF / 2, am, soffitMat);
+                panel.userData.generated = true; panel.userData.roomId = 'roof-main';
+                group.add(panel);
+                const fascia = S.runAxisZ
+                  ? box(seg, faceH, SF, am, yOut - faceH / 2, S.aOut, soffitMat)
+                  : box(SF, faceH, seg, S.aOut, yOut - faceH / 2, am, soffitMat);
+                fascia.userData.generated = true; fascia.userData.roomId = 'roof-main';
+                group.add(fascia);
+              }
+            }
+          } else {
+            // OPEN — exposed rafter tails (eave sides) / lookouts (rake sides).
+            const rOC = 2; const tW = 0.28; const tH = 0.55; // ~3.5" × 6.5" timber
+            const tail = (runAxisZ, aInner, aOuter, cross, sampleInner, sampleOuter) => {
+              const yI = roofUnderAt(sampleInner[0], sampleInner[1]);
+              const yO = roofUnderAt(sampleOuter[0], sampleOuter[1]);
+              if (!Number.isFinite(yI) || !Number.isFinite(yO)) return;
+              const da = aOuter - aInner; const dy = yO - yI;
+              const len = Math.hypot(da, dy);
+              if (len < 0.3) return;
+              const cx = runAxisZ ? cross : (aInner + aOuter) / 2;
+              const cz = runAxisZ ? (aInner + aOuter) / 2 : cross;
+              const m = runAxisZ
+                ? box(tW, tH, len, cx, (yI + yO) / 2 - tH / 2, cz, frameMat)
+                : box(len, tH, tW, cx, (yI + yO) / 2 - tH / 2, cz, frameMat);
+              m.rotation.x = runAxisZ ? -Math.atan2(dy, da) : 0;
+              m.rotation.z = runAxisZ ? 0 : Math.atan2(dy, da);
+              m.castShadow = true; m.userData.generated = true; m.userData.roomId = 'roof-main';
+              group.add(m);
+            };
+            for (const S of sides) {
+              if (!(S.ov > 0.5)) continue;
+              const n = Math.max(2, Math.round(S.along / rOC));
+              for (let i = 0; i <= n; i += 1) {
+                const a = (S.along * i) / n;
+                tail(S.runAxisZ, S.aIn, S.aOut, a, S.s(a), S.sOut(a));
+              }
+            }
+          }
+        }
         const fpAreaNow = customFp ? polygonArea(fpPoly) : width * depth;
         const groundEave = roofSpec.highWallHeightFt;
         // ROUND house wears an elliptical CONE (a flat roof = a low disc). No
@@ -3802,19 +3894,45 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         }
       }
 
-      // The flat reference grid only makes sense on flat ground — on a sloped
-      // site it floats downhill and buries uphill; the contour lines take over
-      // as the scale/elevation reference there.
-      if (groundSlope <= 0) {
-        const grid = new THREE.GridHelper(fixedGridSize, Math.max(48, Math.round(fixedGridSize / 4)), 0x6e6a58, 0x8b8672);
-        grid.material.transparent = true;
-        grid.material.opacity = 0.8;
-        // Just above the pad's top surface (y=0) so the scale grid peeks through
-        // the site pad instead of being buried under it.
-        grid.position.set(width / 2, 0.03, depth / 2);
-        grid.name = `Fixed outdoor reference grid (${fixedGridSize}' x ${fixedGridSize}')`;
-        grid.userData.generated = true;
-        group.add(grid);
+      // EVERY VIEW STANDS ON A SCALED GRID. On flat ground a plain GridHelper
+      // does it. On a slope a flat grid floats downhill and buries uphill, so
+      // this used to draw NO grid at all and a sloped site lost its sense of
+      // scale entirely — the drawn views all have one, so the 3D must too.
+      // The fix is to DRAPE it: the same square grid, but every line follows
+      // the ground it crosses.
+      {
+        const gridStepFt = fixedGridSize > 150 ? 25 : fixedGridSize > 60 ? 10 : 5;
+        const gx0 = width / 2 - fixedGridSize / 2;
+        const gz0 = depth / 2 - fixedGridSize / 2;
+        if (groundSlope <= 0) {
+          const grid = new THREE.GridHelper(fixedGridSize, Math.max(48, Math.round(fixedGridSize / 4)), 0x6e6a58, 0x8b8672);
+          grid.material.transparent = true;
+          grid.material.opacity = 0.8;
+          // Just above the pad's top surface (y=0) so the scale grid peeks through
+          // the site pad instead of being buried under it.
+          grid.position.set(width / 2, 0.03, depth / 2);
+          grid.name = `Fixed outdoor reference grid (${fixedGridSize}' x ${fixedGridSize}')`;
+          grid.userData.generated = true;
+          group.add(grid);
+        } else {
+          const drapeMat = new THREE.LineBasicMaterial({ color: 0x7b7563, transparent: true, opacity: 0.55 });
+          const sample = 3; // ft between points along a draped line
+          const drape = (fixed, isAlongX) => {
+            const pts = [];
+            for (let t = 0; t <= fixedGridSize + 1e-6; t += sample) {
+              const x = isAlongX ? gx0 + t : fixed;
+              const z = isAlongX ? fixed : gz0 + t;
+              pts.push(new THREE.Vector3(x, gradeElevationAt(spec, x, z) + 0.05, z));
+            }
+            const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), drapeMat);
+            line.userData.generated = true;
+            group.add(line);
+          };
+          for (let g = 0; g <= fixedGridSize + 1e-6; g += gridStepFt) {
+            drape(gz0 + g, true);
+            drape(gx0 + g, false);
+          }
+        }
       }
       }
 

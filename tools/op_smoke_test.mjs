@@ -12,6 +12,8 @@ import {
   basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, storeyElevationFt, storeyHeightFt, roofProfile,
   openingVerticalBand
 } from '../backend/bim-core.mjs';
+// The stair GEOMETRY lives engine-side (bim-core only validates the op values).
+import * as engine from '../src/engine.js';
 
 function near(a, b, eps = 0.01) { return Math.abs(a - b) <= eps; }
 
@@ -140,8 +142,120 @@ r = apply(freshSpec(), [{ type: 'set_flooring', value: 'cork' }, { type: 'set_fl
 ok(r.spec.flooring.type === 'cork' && r.spec.flooring.subfloor === 'insulated', 'set_flooring type + subfloor');
 r = apply(freshSpec(), [{ type: 'set_frame', value: 'timber' }, { type: 'set_frame', value: 'stick', level: 2 }]);
 ok(r.spec.frame.type === 'timber' && r.spec.frame.storeyTypes['2'] === 'stick', 'set_frame base + per-storey');
+// --- stairs: a real object, not a box ---------------------------------------
+{
+  const withStair = (extra = {}) => {
+    const s = freshSpec();
+    s.shell.storeys = 2; s.shell.wallHeightFt = 10;
+    s.elements = [{ id: 'st1', name: 'Stairs', category: 'stair', x: 4, y: 4, w: 3.5, d: 10, h: 8, level: 1, ...extra }];
+    return s;
+  };
+  r = apply(withStair(), [{ type: 'set_stair', id: 'st1', field: 'facing', value: 'east' }]);
+  ok(r.spec.elements[0].stair.facing === 'east', 'set_stair turns the stair 90°');
+  r = apply(withStair(), [{ type: 'set_stair', id: 'st1', field: 'shape', value: 'u' }]);
+  ok(r.spec.elements[0].stair.shape === 'u', 'set_stair splits it into a switchback');
+  r = apply(withStair(), [{ type: 'set_stair', id: 'st1', field: 'shape', value: 'zigzag' }]);
+  ok((r.spec.elements[0].stair?.shape || 'straight') === 'straight', 'set_stair rejects an unknown shape');
+  r = apply(withStair(), [{ type: 'set_stair', id: 'st1', field: 'split', value: 9 }]);
+  ok(r.spec.elements[0].stair.split === 0.85, 'set_stair clamps the run split');
+  r = apply(withStair(), [{ type: 'set_stair', id: 'st1', field: 'shape', value: 'l', w: 12, d: 9 }]);
+  ok(r.spec.elements[0].w === 12 && r.spec.elements[0].d === 9, 'set_stair stores the resolved footprint, so the box matches the shape');
+
+  // geometry: the run is derived from the climb, and turning it 90° swaps the
+  // bounding box rather than changing how far you have to walk.
+  const st = engine.resolveStair(withStair(), withStair().elements[0]);
+  ok(st.risers === 16 && Math.abs(st.riserIn - 7.5) < 0.01, `10' climb → 16 risers at 7.5" (got ${st.risers} / ${st.riserIn.toFixed(2)})`);
+  ok(st.treads === 15 && Math.abs(st.totalRunFt - 13.125) < 0.01, `15 treads = 13.125' of run (got ${st.totalRunFt.toFixed(3)})`);
+  const sN = engine.resolveStair(withStair({ stair: { shape: 'straight', facing: 'north' } }), withStair({ stair: { shape: 'straight', facing: 'north' } }).elements[0]);
+  const sE = engine.resolveStair(withStair({ stair: { shape: 'straight', facing: 'east' } }), withStair({ stair: { shape: 'straight', facing: 'east' } }).elements[0]);
+  ok(Math.abs(sN.bbox.w - sE.bbox.d) < 0.01 && Math.abs(sN.bbox.d - sE.bbox.w) < 0.01, 'turning 90° swaps the footprint, same run');
+  const sU = engine.resolveStair(withStair({ stair: { shape: 'u', facing: 'north', split: 0.5 } }), withStair({ stair: { shape: 'u', facing: 'north', split: 0.5 } }).elements[0]);
+  ok(sU.run1Treads + sU.run2Treads === sU.treads, 'a split stair still climbs every tread');
+  ok(sU.bbox.d < sN.bbox.d, `the U is shorter than the straight run (${sU.bbox.d.toFixed(1)}' vs ${sN.bbox.d.toFixed(1)}')`);
+  ok(sU.parts.filter((p) => p.kind === 'run').length === 2 && sU.parts.some((p) => p.kind === 'landing'), 'a U has two runs and a landing');
+  // every part must stay anchored at the element's x/y
+  ok(Math.abs(sU.bbox.x - 4) < 0.001 && Math.abs(sU.bbox.y - 4) < 0.001, 'the resolved stair stays anchored where it was dragged');
+
+  // a stair is no longer free — priced per tread, plus landing and railing
+  const priced = engine.deriveDesign(withStair());
+  const lines = priced.receipts.systems.stairs || [];
+  ok(priced.cost.stairs > 0 && lines.length > 0, `a stair costs money and shows its working (${Math.round(priced.cost.stairs)}, ${lines.length} lines)`);
+  ok(Math.abs(lines.reduce((a, l) => a + l.amount, 0) - priced.cost.stairs) < 0.01, 'stair receipt lines sum to the stair line');
+  const noStair = withStair(); noStair.elements = [];
+  ok(engine.deriveDesign(noStair).cost.stairs === 0, 'no stair, no stair cost');
+  // the U costs MORE than the straight run (a landing and more railing) —
+  // it buys floor space, not money
+  const uSpec = withStair({ stair: { shape: 'u' } });
+  ok(engine.deriveDesign(uSpec).cost.stairs > priced.cost.stairs, 'a switchback costs more than a straight run — it buys space, not money');
+  // milling your own stock is a SHALLOW discount here: a stair is labour
+  const milledSpec = withStair(); milledSpec.sourcing = { stairs: 'milled' };
+  const mCost = engine.deriveDesign(milledSpec).cost.stairs;
+  ok(mCost < priced.cost.stairs && mCost > priced.cost.stairs * 0.5, `milled stair stock saves some, not half (${Math.round(mCost)} vs ${Math.round(priced.cost.stairs)})`);
+
+  // A CORNER DRAG RESIZES A STAIR'S WIDTH, NEVER ITS RUN. The run is derived
+  // from the climb, so widening must leave the tread count and run length alone
+  // — otherwise dragging a corner would silently change how far the stair has
+  // to travel, which the climb does not allow.
+  {
+    const wide = withStair({ stair: { shape: 'straight', facing: 'north', widthFt: 5 } });
+    const narrow = withStair({ stair: { shape: 'straight', facing: 'north', widthFt: 3 } });
+    const a = engine.resolveStair(wide, wide.elements[0]);
+    const b = engine.resolveStair(narrow, narrow.elements[0]);
+    ok(Math.abs(a.bbox.d - b.bbox.d) < 0.001 && a.treads === b.treads,
+      `widening a stair leaves its run alone (${a.bbox.d.toFixed(2)}′, ${a.treads} treads both ways)`);
+    ok(a.bbox.w > b.bbox.w, `width is the axis that actually moves (${b.bbox.w} → ${a.bbox.w})`);
+  }
+
+  // TURNING A STAIR PIVOTS IT IN PLACE. x/y is the north-west CORNER, so a
+  // footprint flipping 3.5×15.75 → 15.75×3.5 would swing the run around that
+  // corner and hurl it across the site ("the compass is broken"). The UI keeps
+  // the CENTRE fixed by pairing set_stair with a move_object; this pins the
+  // arithmetic that pairing depends on.
+  {
+    const el = { id: 'st1', name: 'Stairs', category: 'stair', x: 10, y: 4, w: 3.5, d: 15.75, h: 8, level: 1, stair: { shape: 'straight', facing: 'north' } };
+    const base = { ...freshSpec(), shell: { ...freshSpec().shell, storeys: 2, wallHeightFt: 10 } };
+    const bN = engine.resolveStair(base, el);
+    const bE = engine.resolveStair(base, { ...el, stair: { ...el.stair, facing: 'east' } });
+    const cx = el.x + bN.bbox.w / 2; const cy = el.y + bN.bbox.d / 2;
+    const nx = cx - bE.bbox.w / 2; const ny = cy - bE.bbox.d / 2;
+    ok(Math.abs((nx + bE.bbox.w / 2) - cx) < 0.001 && Math.abs((ny + bE.bbox.d / 2) - cy) < 0.001,
+      'a turned stair keeps its centre — the re-anchor arithmetic holds');
+    ok(Math.abs(nx - el.x) > 1, `turning actually re-anchors the corner (${el.x} → ${nx.toFixed(1)}), it does not sit still and swing`);
+  }
+
+  // A STAIR CLIMBING TO A DECK OPENS ITS RAILING WHERE IT LANDS — otherwise you
+  // walk a full storey up into a guard rail. The gap must appear ONLY where the
+  // treads actually meet the edge, and every other edge must stay railed.
+  const deckSpec = (withStairEl) => {
+    const s = freshSpec();
+    s.shell.storeys = 2; s.shell.wallHeightFt = 10;
+    s.elements = [{ id: 'dk', name: 'Deck', category: 'deck', x: 0, y: 30, w: 20, d: 8, h: 0.35, level: 2, z: 10 }];
+    // a stair on the storey BELOW, landing on the deck's north edge (y=30)
+    if (withStairEl) s.elements.push({ id: 'st', name: 'Stairs', category: 'stair', x: 6, y: 30 - 13.125, w: 3.5, d: 13.125, h: 8, level: 1, stair: { shape: 'straight', facing: 'south' } });
+    return s;
+  };
+  const railOf = (s) => engine.resolveDeck(s, s.elements[0]).railLf;
+  const bare = railOf(deckSpec(false));
+  const landed = railOf(deckSpec(true));
+  ok(landed < bare, `a landing stair opens the rail (${landed.toFixed(1)} lf vs ${bare.toFixed(1)} bare)`);
+  ok(bare - landed >= 2 && bare - landed <= 6, `the opening is stair-width, not the whole edge (${(bare - landed).toFixed(1)} lf removed)`);
+  // a stair on the SAME level as the deck tops out a storey higher — it must NOT
+  // open this deck's rail
+  const wrongLevel = deckSpec(true); wrongLevel.elements[1].level = 2;
+  ok(Math.abs(railOf(wrongLevel) - bare) < 0.01, 'a stair that does not climb to this deck leaves its rail alone');
+}
+
 r = apply(freshSpec(), [{ type: 'set_reclaimed', system: 'windows', value: true }]);
-ok(r.spec.reclaimed.windows === true, 'set_reclaimed');
+ok(r.spec.sourcing.windows === 'salvaged', 'set_reclaimed true still means salvaged');
+r = apply(freshSpec(), [{ type: 'set_sourcing', system: 'flooring', value: 'milled' }]);
+ok(r.spec.sourcing.flooring === 'milled', 'set_sourcing milled');
+r = apply(freshSpec(), [{ type: 'set_sourcing', system: 'windows', value: 'milled' }]);
+ok(r.spec.sourcing.windows === 'new', 'set_sourcing refuses milled windows — you cannot mill a window');
+r = apply(freshSpec(), [{ type: 'set_sourcing', system: 'frame', value: 'nonsense' }]);
+ok(r.spec.sourcing.frame === 'new', 'set_sourcing rejects unknown source');
+// A pre-sourcing spec migrates silently: the old boolean map folds in and goes.
+r = apply({ ...freshSpec(), reclaimed: { roof: true, frame: true } }, [{ type: 'set_sourcing', system: 'flooring', value: 'milled' }]);
+ok(r.spec.sourcing.roof === 'salvaged' && r.spec.sourcing.frame === 'salvaged' && r.spec.reclaimed === undefined, 'legacy reclaimed booleans migrate to sourcing and are dropped');
 r = apply(freshSpec(), [{ type: 'set_assembly', field: 'envelope', value: 'cob walls with earthen plaster' }]);
 ok(/cob/.test(r.spec.systems.envelope), 'set_assembly envelope');
 
@@ -427,7 +541,7 @@ ok(WALL_ASSEMBLIES['ply-insulated'] && WALL_ASSEMBLIES.sips && WALL_ASSEMBLIES.i
 ok(WALL_ASSEMBLIES['straw-bale'].green === true && !WALL_ASSEMBLIES.sips.green, 'green flags mark natural methods');
 ok(WALL_ASSEMBLIES.glazed && WALL_ASSEMBLIES.glazed.rValue === 2, 'glazed glass-wall assembly present');
 ok(Object.keys(FRAME_TYPES).length === 6, 'FRAME_TYPES table');
-ok(Object.keys(FLOORING_TYPES).length === 6 && Object.keys(SUBFLOOR_TYPES).length === 4, 'floor tables');
+ok(Object.keys(FLOORING_TYPES).length === 7 && FLOORING_TYPES.pine.costPsf < FLOORING_TYPES.wood.costPsf && Object.keys(SUBFLOOR_TYPES).length === 4, 'floor tables — pine sits under hardwood');
 ok(Object.keys(OPENING_TYPES).length === 16, 'OPENING_TYPES table');
 
 // --- transaction truth (UX review 2026-07-10) --------------------------------

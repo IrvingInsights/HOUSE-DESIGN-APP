@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { ScaleGrid } from '../scaleGrid.jsx';
 
 // A dedicated face-on 2D surface for ONE interior wall (partition) — the same
 // idea as the exterior Wall view, but an interior wall is far simpler: just a
@@ -98,6 +99,8 @@ export function InteriorWallView({ el, spec, partitions = [], onSetDoor, onPickW
         onPointerUp={onUp}
         onPointerLeave={onUp}
       >
+        <ScaleGrid xFt={[0, Math.ceil(run)]} yFt={[0, Math.ceil(height)]} mapY={Y} labelSize={Math.max(0.4, run / 55)} />
+
         {/* floor line */}
         <line x1={-pad} y1={Y(0)} x2={run + pad} y2={Y(0)} stroke="#8a8271" strokeWidth="0.09" />
         {/* the wall face */}

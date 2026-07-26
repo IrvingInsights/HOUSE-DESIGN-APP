@@ -1422,7 +1422,11 @@ export function operationDescription(operation, spec) {
   if (op.type === 'set_wall_height') return `Set ${op.wall || 'wall'} height to ${op.h || op.value}'.`;
   if (op.type === 'set_wall_side') return `Set ${op.wall || 'wall'} wall ${op.field || 'property'} to ${op.value}.`;
   if (op.type === 'set_frame') return `Set ${Number(op.level) > 1 ? `storey ${op.level} ` : ''}frame${op.value ? ` to ${op.value}` : ''}.`;
-  if (op.type === 'set_reclaimed') return `Marked ${op.system || 'materials'} as ${op.value ? 'reclaimed / salvaged' : 'new'}.`;
+  if (op.type === 'set_stair') return `Stair ${op.field || 'shape'} → ${op.value}.`;
+  if (op.type === 'set_sourcing' || op.type === 'set_reclaimed') {
+    const source = MATERIAL_SOURCE_KEYS.includes(String(op.value)) ? String(op.value) : (op.value ? 'salvaged' : 'new');
+    return `${op.system || 'Materials'}: ${MATERIAL_SOURCE_LABELS[source]}.`;
+  }
   if (op.type === 'set_flooring') return `Set flooring${op.value ? ` to ${op.value}` : ''}.`;
   if (op.type === 'set_shell' || op.type === 'add_pad_extension') return `Updated shell ${op.field || 'padExtensionFt'} to ${op.value || op.w}.`;
   if (op.type === 'set_footprint') return 'Set the building footprint outline.';
@@ -1542,7 +1546,8 @@ export const FRAME_DEFAULTS = { type: 'load-bearing', storeyTypes: {} };
 export const FLOORING_TYPES = {
   earthen: { label: 'Earthen / lime slab', costPsf: 4, carbonPsf: 2, note: 'Poured earth or lime; high thermal mass, very low carbon, DIY-friendly.', green: true },
   concrete: { label: 'Polished concrete', costPsf: 9, carbonPsf: 14, note: 'Durable mass floor, but the most embodied carbon of the floors.' },
-  wood: { label: 'Wood boards', costPsf: 10, carbonPsf: 4, note: 'Warm underfoot; reclaimed boards cut cost and carbon sharply.' },
+  pine: { label: 'Pine / softwood plank', costPsf: 6, carbonPsf: 3, green: true, note: 'Wide softwood planks — the cheap warm floor, and the one worth milling locally. It dents and it patinas; that is the deal.' },
+  wood: { label: 'Hardwood boards', costPsf: 10, carbonPsf: 4, note: 'Oak, maple, ash — harder-wearing than pine and about twice the price. Salvaged or milled boards cut that sharply.' },
   cork: { label: 'Cork', costPsf: 8, carbonPsf: 2, note: 'Soft, warm, renewable; good over radiant.', green: true },
   tile: { label: 'Tile / stone', costPsf: 12, carbonPsf: 6, note: 'Hard-wearing mass floor, good in wet cores and sun-tempered rooms.' },
   bamboo: { label: 'Bamboo', costPsf: 7, carbonPsf: 3, note: 'Fast-renewable and hard; a warm low-carbon choice.', green: true }
@@ -1588,12 +1593,54 @@ export function resolveInsulation(key, fallback = 'cellulose') {
   return INSULATION_TYPES[key] ? key : fallback;
 }
 
-export const RECLAIMED_SYSTEMS = ['frame', 'walls', 'flooring', 'windows', 'roof',
-  // Bought-used categories for the furnishings catalog — salvaged appliances,
-  // slab-wood counters and shelving, second-hand furniture, salvaged fixtures.
+// Stair vocabulary the op layer validates against. Mirrors STAIR_SHAPES /
+// STAIR_FACINGS / STAIR_DEFAULTS in src/engine.js, which owns the geometry —
+// this side only decides what is a legal value.
+export const STAIR_SHAPE_KEYS = ['straight', 'l', 'u'];
+export const STAIR_FACING_KEYS = ['north', 'south', 'east', 'west'];
+export const STAIR_FIELDS = ['shape', 'facing', 'turn', 'split', 'widthFt', 'treadIn'];
+export const STAIR_FIELD_DEFAULTS = { shape: 'straight', facing: 'north', turn: 'right', split: 0.5, widthFt: 3.5, treadIn: 10.5 };
+export function isStairElement(el) {
+  return el?.category === 'stair' || (/stair/i.test(el?.name || '') && !/ladder/i.test(el?.name || ''));
+}
+function clampStair(value, min, max, fallback) {
+  return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+}
+
+// Where each material system's stock comes from. Mirrors MATERIAL_SOURCES /
+// SOURCE_FACTORS in src/engine.js (the same backend-vs-client duplication as
+// roofProfile and WALL_ASSEMBLIES) — engine.js prices it, this validates it.
+export const SOURCING_SYSTEMS = ['frame', 'walls', 'flooring', 'windows', 'roof', 'stairs',
+  // Bought-used / shop-built categories for the furnishings catalog — salvaged
+  // appliances, slab-wood counters and shelving, second-hand furniture.
   'fixture', 'builtin', 'appliance', 'furniture', 'outdoor'];
-export const RECLAIMED_DEFAULTS = { frame: false, walls: false, flooring: false, windows: false, roof: false,
-  fixture: false, builtin: false, appliance: false, furniture: false, outdoor: false };
+export const MATERIAL_SOURCE_KEYS = ['new', 'salvaged', 'milled'];
+export const MATERIAL_SOURCE_LABELS = { new: 'bought new', salvaged: 'salvaged / reclaimed', milled: 'locally milled / your own wood' };
+// Milling only applies where the line is actually wood — you can salvage a
+// window or a fridge, you can't mill one.
+export const MILLABLE_SYSTEMS = ['frame', 'walls', 'flooring', 'roof', 'stairs', 'builtin', 'furniture', 'outdoor'];
+export const SOURCING_DEFAULTS = Object.fromEntries(SOURCING_SYSTEMS.map((system) => [system, 'new']));
+
+// The sources actually offered for a system — drives every picker, so no
+// screen can offer "milled windows".
+export function sourcesFor(system) {
+  return MATERIAL_SOURCE_KEYS.filter((source) => sourceAllowed(system, source));
+}
+export function sourceAllowed(system, source) {
+  if (!SOURCING_SYSTEMS.includes(system) || !MATERIAL_SOURCE_KEYS.includes(source)) return false;
+  return source !== 'milled' || MILLABLE_SYSTEMS.includes(system);
+}
+
+// Pre-sourcing specs stored booleans in spec.reclaimed (true = salvaged). Fold
+// them into spec.sourcing silently — nothing for anyone to press or clean up.
+export function migrateSourcing(spec) {
+  const out = { ...SOURCING_DEFAULTS };
+  const legacy = spec?.reclaimed || {};
+  for (const system of SOURCING_SYSTEMS) if (legacy[system] === true) out[system] = 'salvaged';
+  const current = spec?.sourcing || {};
+  for (const system of SOURCING_SYSTEMS) if (sourceAllowed(system, current[system])) out[system] = current[system];
+  return out;
+}
 
 // The frame in effect on a given storey — a per-storey override falls back to
 // the base frame type. level 1 (or unset) is the ground/base.
@@ -1612,7 +1659,7 @@ export function resolveFrameType(spec, level = 1) {
 const SHELL_FIELD_NAMES = new Set(['widthFt', 'depthFt', 'wallHeightFt', 'padExtensionFt', 'storeys',
   'basementHeightFt', 'basementHeated', 'upperStoreyHeightFt', 'overhangFt', 'roofType',
   'designApproach', 'projectName', 'sitePad', 'gutters', 'discharge', 'roofCovering',
-  'wallColorHex', 'roofColorHex', 'floorColorHex']);
+  'wallColorHex', 'roofColorHex', 'floorColorHex', 'eaveStyle']);
 
 export const parseWxD = (value) => {
   const m = /^\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*$/i.exec(String(value || ''));
@@ -1883,6 +1930,7 @@ export function applyBimOperations(currentSpec, plan) {
         delete next.shell.overhangs;
       }
       else if (field === 'roofType') next.shell.roofType = String(operation.value || next.shell.roofType || 'gable');
+      else if (field === 'eaveStyle') next.shell.eaveStyle = operation.value === 'soffit' ? 'soffit' : 'open';
       else if (field === 'designApproach') next.shell.designApproach = operation.value === 'standard' ? 'standard' : 'natural';
       else if (field === 'projectName') next.projectName = String(operation.value || next.projectName || 'Untitled Natural Building Study');
       else if (field === 'sitePad') {
@@ -2447,12 +2495,45 @@ export function applyBimOperations(currentSpec, plan) {
       continue;
     }
 
-    if (operation.type === 'set_reclaimed') {
-      next.reclaimed ||= { ...RECLAIMED_DEFAULTS };
-      const system = RECLAIMED_SYSTEMS.includes(operation.system) ? operation.system : null;
+    // A stair's SHAPE, not its box. The client hands back the resolved bounding
+    // box with the op, so the stored w/d always matches the footprint the plan
+    // draws — you can never have a 3 ft box holding an L-shaped stair.
+    if (operation.type === 'set_stair') {
+      const target = (next.elements || []).find((element) => element.id === operation.id)
+        || (next.elements || []).find((element) => isStairElement(element));
+      const field = STAIR_FIELDS.includes(operation.field) ? operation.field : null;
+      if (target && field) {
+        const stair = { ...STAIR_FIELD_DEFAULTS, ...(target.stair || {}) };
+        const value = operation.value;
+        if (field === 'shape' && STAIR_SHAPE_KEYS.includes(value)) stair.shape = value;
+        else if (field === 'facing' && STAIR_FACING_KEYS.includes(value)) stair.facing = value;
+        else if (field === 'turn') stair.turn = value === 'left' ? 'left' : 'right';
+        else if (field === 'split') stair.split = clampStair(Number(value), 0.15, 0.85, stair.split);
+        else if (field === 'widthFt') stair.widthFt = clampStair(Number(value), 2.5, 8, stair.widthFt);
+        else if (field === 'treadIn') stair.treadIn = clampStair(Number(value), 9, 14, stair.treadIn);
+        target.stair = stair;
+        target.category = 'stair';
+        if (Number(operation.w) > 0) target.w = Number(operation.w);
+        if (Number(operation.d) > 0) target.d = Number(operation.d);
+        actions.push(`${target.name || 'Stair'}: ${field} set to ${stair[field]}.`);
+      }
+      continue;
+    }
+
+    // Where a system's material comes from. set_reclaimed is the older boolean
+    // spelling of the same thing (true = salvaged) and still works; both write
+    // spec.sourcing, and the legacy spec.reclaimed map is folded in and dropped.
+    if (operation.type === 'set_sourcing' || operation.type === 'set_reclaimed') {
+      next.sourcing = migrateSourcing(next);
+      delete next.reclaimed;
+      const system = SOURCING_SYSTEMS.includes(operation.system) ? operation.system : null;
       if (system) {
-        next.reclaimed[system] = operation.value === true || operation.value === 'true' || operation.value === 1 || operation.value === '1';
-        actions.push(`Marked ${system} materials as ${next.reclaimed[system] ? 'reclaimed / salvaged' : 'new'}.`);
+        const asked = String(operation.value ?? '');
+        const source = MATERIAL_SOURCE_KEYS.includes(asked) ? asked
+          : ((operation.value === true || asked === 'true' || operation.value === 1 || asked === '1') ? 'salvaged' : 'new');
+        // Only offer what the system can actually be: no milled windows.
+        next.sourcing[system] = sourceAllowed(system, source) ? source : 'new';
+        actions.push(`${system} materials: ${MATERIAL_SOURCE_LABELS[next.sourcing[system]]}.`);
       }
       continue;
     }

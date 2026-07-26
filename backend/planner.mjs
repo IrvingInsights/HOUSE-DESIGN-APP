@@ -33,7 +33,7 @@ const operationSchema = {
               // Ops the prompt teaches MUST be in this enum or Gemini cannot
               // emit them — per-side walls/cladding, frame, flooring, segments
               // were being silently dropped from traces and chat plans.
-              'set_wall_side', 'set_frame', 'set_reclaimed', 'set_flooring', 'resize_wall_segment'
+              'set_wall_side', 'set_frame', 'set_reclaimed', 'set_sourcing', 'set_flooring', 'resize_wall_segment', 'set_stair'
             ]
           },
           id: { type: 'string' },
