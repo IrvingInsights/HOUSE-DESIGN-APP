@@ -63,7 +63,8 @@
       "pitch": 0.32
     },
     "issues": [
-      "warning:Framed wall has no frame to carry it"
+      "warning:Framed wall has no frame to carry it",
+      "warning:Nothing here cools the house in summer"
     ],
     "phases": [
       "site-prep:1.5:0.08",
@@ -219,7 +220,8 @@
       "pitch": 0.32
     },
     "issues": [
-      "critical:Straw bale walls sit too near the ground"
+      "critical:Straw bale walls sit too near the ground",
+      "warning:Nothing here cools the house in summer"
     ],
     "phases": [
       "site-prep:1.5:0.08",

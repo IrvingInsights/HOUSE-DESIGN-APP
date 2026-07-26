@@ -18,7 +18,8 @@ import {
   ROOM_PRESETS, planNewRoomPlacements, roomPresetFromName,
   resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons, downloadFile,
   DECK_SURFACES, resolveDeck, resolveDeckStairs, derivePartitionOps, interiorFixtures, sourceNote,
-  isStair, resolveStair, STAIR_SHAPES, STAIR_FACINGS, STAIR_TURNS, STAIR_DEFAULTS, STAIR_FACING_ORDER, HEATER_FACINGS
+  isStair, resolveStair, STAIR_SHAPES, STAIR_FACINGS, STAIR_TURNS, STAIR_DEFAULTS, STAIR_FACING_ORDER, HEATER_FACINGS,
+  SHADE_DEVICES
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms } from '../placement.js';
 import { STARTER_DESIGNS } from './starters.js';
@@ -757,6 +758,32 @@ export default function App() {
     applyOps([{
       type: 'add_element', name, category: 'foundation', construction: 'slabpad',
       x: Number(spec.shell.widthFt) + 3, y: 2 + runs.length * 3, w: pad.w, d: pad.d, h: 0.35, level: 1
+    }]);
+  };
+  // SHADE, ON A SIDE OF THE HOUSE. It lands standing off that wall, the way
+  // the real thing does — a tree twelve feet out, an awning right on the
+  // glass — so the plan shows you what is actually shading what. Drag it after;
+  // what makes it work is which wall it is on, and that is what it remembers.
+  const placeShade = (dev, side) => {
+    const W = Number(spec.shell.widthFt) || 36;
+    const D = Number(spec.shell.depthFt) || 28;
+    const out = Math.max(1.5, Number(dev.projectionFt) || 3);
+    const run = Math.min(side === 'north' || side === 'south' ? W : D, 14);
+    const box = {
+      north: { x: (W - run) / 2, y: -out - 0.5, w: run, d: out },
+      south: { x: (W - run) / 2, y: D + 0.5, w: run, d: out },
+      east: { x: W + 0.5, y: (D - run) / 2, w: out, d: run },
+      west: { x: -out - 0.5, y: (D - run) / 2, w: out, d: run }
+    }[side];
+    const same = (spec.elements || []).filter((el) => el.category === 'shade' && el.kind === dev.key).length;
+    applyOps([{
+      type: 'add_element',
+      name: same === 0 ? dev.label.split(' —')[0] : `${dev.label.split(' —')[0]} ${same + 1}`,
+      category: 'shade', kind: dev.key, side,
+      x: Math.round(box.x * 10) / 10, y: Math.round(box.y * 10) / 10,
+      w: Math.round(box.w * 10) / 10, d: Math.round(box.d * 10) / 10,
+      h: dev.key === 'deciduous' ? 18 : 8,
+      level: 1
     }]);
   };
   // A PAD UNDER SOMETHING HEAVY. The masonry heater, its bench, a cistern full
@@ -1983,7 +2010,13 @@ export default function App() {
               </div>
             )}
             {activeChapter === 'systems' && (
-              <SystemsControls spec={spec} derived={derived} onUtility={setUtilityField} />
+              <SystemsControls
+                spec={spec}
+                derived={derived}
+                onUtility={setUtilityField}
+                onAddShade={placeShade}
+                onRemoveShade={(d) => removeObject((spec.elements || []).find((el) => el.id === d.id))}
+              />
             )}
             {activeChapter === 'finishes' && (
               <FinishesControls
@@ -3957,7 +3990,89 @@ function PickRow({ label, value, options, onChange }) {
 // Systems chapter: the working parts — water, waste, power, heat. Plain choices
 // that drive the receipts and the council checks; DIY toggles turn labor into
 // sweat equity. (Mirrors the classic app's system pages, one dispatch each.)
-function SystemsControls({ spec, derived, onUtility }) {
+// SUMMER & COOLING — the half of the year this app never had a word for. It
+// asked how you stay warm and never how you stay cool, which in a house this
+// well insulated is the harder question: the same envelope that holds January
+// heat in holds August heat in too.
+// Everything here is passive except one fan, because in this climate cooling
+// IS shade, cross-ventilation and a cool night — not equipment.
+const SHADE_SIDES = ['south', 'east', 'west', 'north'];
+function SummerControls({ derived, onUtility, onAddShade, onRemoveShade }) {
+  const th = derived?.thermal;
+  const [side, setSide] = useState('west');
+  if (!th) return null;
+  const u = derived.utilities;
+  const pct = (v) => `${Math.round(v * 100)}%`;
+  const swing = th.summerSwingF;
+  const verdict = !Number.isFinite(swing) ? 'no mass at all to steady it'
+    : swing > 20 ? 'it will get hot and stay hot'
+    : swing > 12 ? 'warm afternoons — worth shading'
+    : 'steady enough';
+  return (
+    <div className="rz-found" data-cap="cap-systems-summer">
+      <div className="rz-found-head">Summer &amp; cooling</div>
+      <div className="rz-summer-grid">
+        <div><b>{Math.round(th.summerGainBtu / 1000)}k</b><small>BTU of sun on a hot clear day</small></div>
+        <div><b>{Math.round(th.thermalMassBtuF).toLocaleString()}</b><small>BTU/°F of mass to soak it up</small></div>
+        <div><b>{Number.isFinite(swing) ? `${Math.round(swing)}°F` : '—'}</b><small>how far it drifts — {verdict}</small></div>
+      </div>
+      <div className="rz-shape-note">
+        Glass east {Math.round(th.glassByFace.east)} sf · west {Math.round(th.glassByFace.west)} sf ·
+        south {Math.round(th.glassByFace.south)} sf. The roof shades your south glass
+        {th.topStorey > 1 ? ' on the top floor only' : ''} ({pct(th.shadeSummer.south)} in July)
+        {th.shadeGround ? `, and nothing downstairs — a ${th.topStorey === 2 ? 'two' : 'three'}-storey eave is too high up to help` : ''}.
+        East and west it shades {pct((th.shadeSummer.east + th.shadeSummer.west) / 2)}, because that sun
+        comes in almost level and walks straight under any overhang.
+      </div>
+
+      <label className="rz-nowall">
+        <input type="checkbox" checked={Boolean(u.wholeHouseFan)} onChange={(e) => onUtility('wholeHouseFan', e.target.checked)} />
+        <span>Whole-house fan — pulls the cool night in after sundown</span>
+      </label>
+      <div className="rz-shape-note">
+        Windows that open: {Math.round(th.operableGlass)} sf, {(th.ventRatio * 100).toFixed(1)}% of the floor
+        ({th.ventRatio >= 0.04 ? 'enough to flush the house overnight' : 'thin — about 4% is what it takes'}).
+        Air can cross {th.crossVents ? 'from one side to the other' : 'nowhere — the openable windows are all on one side'}.
+      </div>
+
+      <div className="rz-found-head">Shade you build or plant</div>
+      <div className="ctlChips">
+        {SHADE_SIDES.map((s) => (
+          <button key={s} type="button" className={`rz-pick-chip${side === s ? ' on' : ''}`} onClick={() => setSide(s)}>
+            {titleCaseWord(s)}
+          </button>
+        ))}
+      </div>
+      <div className="rz-found-palette">
+        {Object.values(SHADE_DEVICES).map((dev) => (
+          <button key={dev.key} type="button" title={dev.note} onClick={() => onAddShade(dev, side)}>
+            <b>{dev.green ? '🌿 ' : ''}{dev.label}</b>
+            <small>{fmtMoney(dev.cost)} · shades {pct(dev.summer)} in July, {pct(dev.winter)} in January</small>
+          </button>
+        ))}
+      </div>
+      <div className="rz-shape-note">
+        Goes on the <b>{side}</b> wall. The leafy ones are the clever trick: shade when it is hot,
+        bare branches when you want the sun. A fixed awning shades both seasons alike — right on
+        east and west, a trade-off on the south.
+      </div>
+      {th.devices.length > 0 && (
+        <div className="rz-found-list">
+          {th.devices.map((d) => (
+            <div key={d.id} className="rz-found-run">
+              <div className="rz-found-run-top">
+                <span className="rz-found-pick">{SHADE_DEVICES[d.kind]?.label || d.name}<small>{d.side} wall{d.level > 1 ? `, floor ${d.level}` : ''}</small></span>
+                <button type="button" className="rz-x" title="Remove this" onClick={() => onRemoveShade(d)}>×</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+const titleCaseWord = (s) => String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1);
+function SystemsControls({ spec, derived, onUtility, onAddShade, onRemoveShade }) {
   const u = utilitiesOf(spec);
   const gpd = Math.round(Number(derived?.septicGpd) || 0);
   return (
@@ -4016,6 +4131,8 @@ function SystemsControls({ spec, derived, onUtility }) {
         <input type="checkbox" checked={Boolean(u.diyHeat)} onChange={(e) => onUtility('diyHeat', e.target.checked)} />
         <span>I'll build the heater myself (sweat equity)</span>
       </label>
+
+      <SummerControls derived={derived} onUtility={onUtility} onAddShade={onAddShade} onRemoveShade={onRemoveShade} />
       <div className="rz-shape-note">Design flow ≈ {gpd} gal/day. A septic field must sit at least 100 ft from a well; composting sidesteps most of that. Each choice updates the receipts.</div>
     </div>
   );

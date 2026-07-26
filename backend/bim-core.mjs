@@ -1487,7 +1487,8 @@ export const UTILITY_DEFAULTS = {
   diyRoof: false,
   diyHeat: false,
   diyFoundation: false,
-  diyFrame: false
+  diyFrame: false,
+  wholeHouseFan: false
 };
 
 // Topography: the site is not flat. slopeFt = total fall of grade across the
@@ -2503,7 +2504,11 @@ export function applyBimOperations(currentSpec, plan) {
       else if (field === 'roofRValue') next.utilities.roofRValue = clamp(Number(operation.value) || 38, 10, 100);
       else if (field === 'panelCount') next.utilities.panelCount = clamp(Math.round(Number(operation.value) || 0), 0, 200);
       else if (field === 'batteryOverrideKwh') next.utilities.batteryOverrideKwh = clamp(Number(operation.value) || 0, 0, 500);
-      else if (field === 'diyWalls' || field === 'diyRoof' || field === 'diyHeat' || field === 'diyFoundation' || field === 'diyFrame') {
+      else if (field === 'diyWalls' || field === 'diyRoof' || field === 'diyHeat' || field === 'diyFoundation' || field === 'diyFrame'
+        // A whole-house fan: the one piece of cooling KIT this house might
+        // own. Everything else about staying cool is shape, shade and when
+        // you open the windows.
+        || field === 'wholeHouseFan') {
         next.utilities[field] = value === 'true' || operation.value === true || value === '1';
       } else if (allowed[field]) {
         next.utilities[field] = allowed[field].includes(value) ? value : next.utilities[field];
@@ -2834,6 +2839,11 @@ export function applyBimOperations(currentSpec, plan) {
         if (longAxis === 'w') { element.d = Number(operation.d) > 0 && Number(operation.d) <= 2 ? Number(operation.d) : thick; }
         else { element.w = Number(operation.w) > 0 && Number(operation.w) <= 2 ? Number(operation.w) : thick; }
         if (!Number(operation.h)) element.h = Math.max(7, Number(next.shell.wallHeightFt || 10) - 0.5);
+      }
+      // A shade device is defined by WHICH WALL it stands in front of — that,
+      // not its position, is what decides the sun it blocks.
+      if (element.category === 'shade' && ['north', 'south', 'east', 'west'].includes(operation.side)) {
+        element.side = operation.side;
       }
       if (element.category === 'deck') {
         // deck options ride the add op (the Patio button, planner asks like

@@ -655,7 +655,8 @@ export const UTILITY_DEFAULTS = {
   diyWalls: false,
   diyRoof: false,
   diyHeat: false,
-  diyFoundation: false
+  diyFoundation: false,
+  wholeHouseFan: false
 };
 
 // Per-side roof overhang: shell.overhangFt is the global value, optional
@@ -1073,6 +1074,60 @@ export const HEAT_SOURCES = {
 export function resolveHeatSource(key) {
   return HEAT_SOURCES[key] ? key : 'wood_stove';
 }
+
+// WHAT A HEAT SOURCE CAN ACTUALLY PUT OUT, against the load the house asks for.
+// The app knew the house needed 17 kBTU/hr and knew you had chosen a Temp-Cast,
+// and never once compared the two numbers.
+//
+// `outputKbtu` is SUSTAINED average output over a whole day, not the peak on
+// the label — which is the only figure that means anything against a design
+// load. A batch heater is the honest case: it burns hot for two hours and
+// releases for twenty, so what matters is the total heat per firing spread
+// across the cycle, and how many times a day you are willing to light it.
+// These are planning figures, deliberately conservative.
+export const HEAT_OUTPUT = {
+  masonry: { outputKbtu: 20, batch: true, firings: 2, note: 'two firings a day, heat released slowly over the whole cycle. One firing a day carries about half this.' },
+  rocket_mass: { outputKbtu: 14, batch: true, firings: 2, note: 'smaller core than a masonry heater, same batch rhythm — most of the heat comes back out of the bench.' },
+  wood_stove: { outputKbtu: 25, batch: false, note: 'sustained with regular reloading through the day; the number on the label is a peak you cannot hold.' },
+  minisplit: { outputKbtu: 12, batch: false, derateCold: true, note: 'one head, and heat pumps lose output as it gets colder — near 0°F expect appreciably less than this.' }
+};
+
+// SHADE YOU BUILD OR PLANT. The overhang shades the top storey and nothing
+// else, and no overhang on earth shades an east or west window — the sun comes
+// in almost horizontally at breakfast and dinner. These are the things that
+// actually do the job, as real objects you place on a side of the house.
+//
+// `summer` / `winter` are the fraction of that window band each one shades in
+// each season. The whole point of the leafy ones is the SPREAD between those
+// two numbers: shade in July, bare branches in January. A fixed awning has no
+// spread — it shades both, which is why a retractable one is worth the money on
+// a south wall and an irrelevance on the east.
+export const SHADE_DEVICES = {
+  awning: { key: 'awning', label: 'Awning — fixed', summer: 0.75, winter: 0.6, cost: 420, carbon: 60, projectionFt: 3, note: 'Cloth or metal over the window. Shades July and January alike, so it is a straight win on east and west and a trade-off on the south.' },
+  awning_retract: { key: 'awning_retract', label: 'Awning — retractable', summer: 0.75, winter: 0.05, cost: 1100, carbon: 90, projectionFt: 4, note: 'Out in summer, rolled up in winter. You get the shade and keep the winter sun — the price is the mechanism and remembering to work it.' },
+  trellis: { key: 'trellis', label: 'Trellis with vines', summer: 0.7, winter: 0.25, cost: 380, carbon: 40, projectionFt: 5, green: true, note: 'Grapes, hops, kiwi. Leafs out as the heat arrives and drops in autumn — the cheapest seasonal shade there is, and it feeds you.' },
+  deciduous: { key: 'deciduous', label: 'Deciduous tree', summer: 0.65, winter: 0.2, cost: 250, carbon: -600, projectionFt: 12, green: true, note: 'Bare branches still cut maybe a fifth of the winter sun, which is the honest cost of the July shade. Plant it far enough out that it shades the glass, not the roof.' },
+  shutter: { key: 'shutter', label: 'Exterior shutters', summer: 0.9, winter: 0, cost: 600, carbon: 70, projectionFt: 0, note: 'Closed on a hot afternoon, open the rest of the time. The most effective and the most manual — shading glass from OUTSIDE beats any blind indoors.' }
+};
+export function resolveShadeDevice(el = {}) {
+  return SHADE_DEVICES[el?.kind] || null;
+}
+
+// HOW MUCH SUN LANDS ON A WALL, per square foot of glass, on a clear day, by
+// the season and the way it faces. Planning figures for a temperate northern
+// latitude (~43°N) in BTU/sf/day on a VERTICAL surface — the classic
+// passive-solar tables, rounded honestly.
+//
+// The whole summer story is in this table: in January the south wall collects
+// three times what an east or west wall does, and in July that reverses. South
+// glass in summer is nearly self-protecting because the sun is overhead. East
+// and west glass is not, and cannot be made so with an overhang.
+export const SOLAR_ON_GLASS = {
+  winter: { south: 1000, east: 300, west: 300, north: 90, roof: 500 },
+  summer: { south: 380, east: 780, west: 780, north: 240, roof: 2000 }
+};
+// What gets through the glass itself (solar heat gain coefficient).
+export const GLASS_SHGC = { double: 0.55, triple: 0.45 };
 
 // WHAT THE HEATER WEARS. A masonry heater's core is a kit; its SKIN is a design
 // decision with a real spread — an earthen plaster you trowel on yourself and a
@@ -3284,6 +3339,11 @@ export function applyStructuredDesignPlan(currentSpec, plan) {
         else { element.w = Number(operation.w) > 0 && Number(operation.w) <= 2 ? Number(operation.w) : thick; }
         if (!Number(operation.h)) element.h = Math.max(7, Number(next.shell.wallHeightFt || 10) - 0.5);
       }
+      // Mirror of bim-core: a shade device is defined by which wall it stands
+      // in front of, not by where it happens to sit.
+      if (element.category === 'shade' && ['north', 'south', 'east', 'west'].includes(operation.side)) {
+        element.side = operation.side;
+      }
       if (element.category === 'deck') {
         // deck options ride the add op (the Patio button, planner asks like
         // "a covered composite deck") — resolveDeck validates the values
@@ -4066,6 +4126,106 @@ export function detectIssues(spec) {
       }
     }
   }
+  // 1c. THE SUMMER, WHICH NOTHING USED TO ASK ABOUT. Every check above this
+  // point is about a cold night. A house this well insulated is just as good
+  // at holding heat IN in July, and the same south glass that pays for itself
+  // in January is a liability in a heat wave if nothing was designed for it.
+  const th = derivedForChecks.thermal;
+  if (th) {
+    // East and west glass is the one that cannot be fixed with a roof. The
+    // sun is twenty degrees up when it lands on those walls; it walks straight
+    // in under any overhang. This is the single most useful thing the app can
+    // say about summer, and it could not say it at all.
+    const ewShaded = (th.shadeSummer.east + th.shadeSummer.west) / 2;
+    if (th.eastWestGlass > 80 && ewShaded < 0.3) {
+      issues.push({
+        severity: th.eastWestGlass > 250 ? 'critical' : 'warning',
+        title: `${Math.round(th.eastWestGlass)} sf of east and west glass with nothing shading it`,
+        owner: 'Natural Builder', system: 'windows', fixId: 'shade-east-west',
+        fix: 'Morning and evening sun comes in almost level — no roof overhang can stop it, which is why east and west glass overheats a house and south glass does not. Plant a deciduous tree, grow a trellis, or hang a retractable awning on those walls (Systems → Summer & cooling), or move some of that glass round to the south.'
+      });
+    }
+    // Glass against mass. Bale walls insulate wonderfully and store nothing;
+    // if the mass is not there, the heat the glass gathers has nowhere to go
+    // but into the air, and straight back out at 3am.
+    if (Number.isFinite(th.winterSwingF) && th.winterSwingF > 8) {
+      issues.push({
+        severity: th.winterSwingF > 16 ? 'critical' : 'warning',
+        title: `A sunny winter day swings this house about ${Math.round(th.winterSwingF)}°F`,
+        owner: 'Natural Builder', system: 'walls',
+        fix: `The glass gathers roughly ${Math.round(th.winterGainBtu / 1000)}k BTU on a clear day and there is only ${Math.round(th.thermalMassBtuF).toLocaleString()} BTU/°F of mass to hold it, so it goes into the air and leaves overnight. More mass inside the insulation is the fix — an earthen floor or slab, a cob wall in the sun's path, a bigger heater bench. Insulation is not mass; bale walls do nothing for this.`
+      });
+    } else if (!Number.isFinite(th.winterSwingF) && th.winterGainBtu > 20000) {
+      issues.push({
+        severity: 'warning', title: 'Sun coming in, and no mass at all to hold it',
+        owner: 'Natural Builder', system: 'walls',
+        fix: 'There is nothing in this design that stores heat — no slab, no earthen wall, no masonry heater. Every bit of sun that comes through the glass heats the air and is gone by morning.'
+      });
+    }
+    // Overheating in summer: gain plus the household, against the mass, with
+    // whatever venting the house can actually do.
+    if (Number.isFinite(th.summerSwingF) && th.summerSwingF > 12 && !th.nightFlushOk) {
+      issues.push({
+        severity: 'warning',
+        title: 'Nothing here cools the house in summer',
+        owner: 'Natural Builder', system: 'windows', fixId: 'summer-cooling',
+        fix: `A hot clear day puts about ${Math.round(th.summerLoadBtu / 1000)}k BTU into this house and there is no way to get it back out: the windows that open are too few or all on one side, and there is no fan. Cross-ventilation (openable windows on opposite walls) plus a cool night is the whole cooling strategy in this climate.`
+      });
+    }
+    if (!th.crossVents && th.operableGlass > 0) {
+      issues.push({
+        severity: 'warning', title: 'No cross-ventilation — the windows are all on one side',
+        owner: 'Architect', system: 'windows',
+        fix: 'Air needs a way in and a way out. Openable windows on opposite walls let a breeze cross the house and flush the day\'s heat on a cool night; windows on one side only stir the same air around.'
+      });
+    }
+    // The comparison nobody was making: heater against load.
+    if (th.heatCoverage !== null && th.heatCoverage < 1) {
+      issues.push({
+        severity: th.heatCoverage < 0.7 ? 'critical' : 'warning',
+        title: `The ${HEAT_SOURCES[resolveHeatSource(derivedForChecks.utilities.heatSource)].label.toLowerCase()} is smaller than this house's coldest night`,
+        owner: 'Engineer', system: 'heat',
+        fix: `This house needs about ${derivedForChecks.heatLoadKbtu.toFixed(0)} thousand BTU an hour when it is 0°F out, and that heat source sustains roughly ${th.heatOutputKbtu}. Tighten the envelope, add a second heat source for the coldest weeks, or accept that a cold snap means a cooler house.`
+      });
+    }
+    // An attached greenhouse is a buffer in January and an oven in July —
+    // which one depends entirely on whether it can vent its heat and be shut
+    // off from the house. Neither is a detail you can leave to later.
+    const plantRooms = (spec.rooms || []).filter((room) => room.type === 'plant');
+    for (const gh of plantRooms) {
+      // Which wall the greenhouse leans on, and the stretch of it the
+      // greenhouse occupies — an opening only counts as THIS room's vent if it
+      // sits in that stretch, not merely somewhere on the house.
+      const ghX = Number(gh.x) || 0; const ghY = Number(gh.y) || 0;
+      const ghW = Number(gh.w) || 0; const ghD = Number(gh.d) || 0;
+      const shellW = Number(spec.shell.widthFt) || 0; const shellD = Number(spec.shell.depthFt) || 0;
+      const nearest = [
+        { side: 'south', gap: Math.abs(shellD - (ghY + ghD)), from: ghX, to: ghX + ghW },
+        { side: 'north', gap: Math.abs(ghY), from: ghX, to: ghX + ghW },
+        { side: 'east', gap: Math.abs(shellW - (ghX + ghW)), from: ghY, to: ghY + ghD },
+        { side: 'west', gap: Math.abs(ghX), from: ghY, to: ghY + ghD }
+      ].sort((a, b) => a.gap - b.gap)[0];
+      const inSpan = (o) => {
+        const at = Number(o.positionFt) || 0;
+        return o.wall === nearest.side && at >= nearest.from - 2 && at <= nearest.to + 2;
+      };
+      const ghGlass = (spec.openings || []).some((o) => inSpan(o));
+      // High vent: hot air leaves at the top or it does not leave.
+      const highVent = (spec.openings || []).some((o) => (o.wall === 'roof')
+        || (['clerestory', 'awning'].includes(o.type) && inSpan(o)));
+      const shutOff = (spec.elements || []).some((el) => el.category === 'partition'
+        && Number(el.x) < ghX + ghW + 1 && Number(el.x) + Number(el.w) > ghX - 1
+        && Number(el.y) < ghY + ghD + 1 && Number(el.y) + Number(el.d) > ghY - 1);
+      if (ghGlass && (!highVent || !shutOff)) {
+        issues.push({
+          severity: 'warning',
+          title: `${gh.name || 'The greenhouse'}: ${!highVent && !shutOff ? 'no way to vent it, no way to shut it off' : !highVent ? 'no high vent to let the heat out' : 'no wall between it and the house'}`,
+          owner: 'Natural Builder', system: 'rooms',
+          fix: 'An attached greenhouse only works both ways if it can dump its heat and be closed off. It wants an opening high up (a clerestory, an awning window, or a roof vent) to let hot air out in July, and a real wall with a door so you can shut it away on a January night instead of letting it drain the house.'
+        });
+      }
+    }
+  }
   // 2. Bent/bay spacing beyond timber norms.
   const frameKeyPr = resolveFrameType(spec, 1);
   const bayPr = Number(spec.frame?.baySpacingFt) || 8;
@@ -4434,6 +4594,216 @@ export function deriveDesign(spec, wallSectionsParam) {
   const bedrooms = Math.max(1, spec.rooms.filter((room) => room.type === 'sleeping').length);
   const people = bedrooms + 1;
 
+  // ---- THE OTHER HALF OF THE YEAR ------------------------------------------
+  // Everything above this line is about keeping heat IN. This block is about
+  // the summer, the swing, and whether the heat source can actually meet the
+  // load — three questions the app had no answer to. It thought about heating
+  // and never once about cooling.
+  //
+  // Every number here is a planning figure. They are for comparing choices —
+  // "does a trellis on the west beat triple glazing" — not for sizing
+  // equipment. The point is that the questions stop being invisible.
+
+  // 1. GLASS, BY THE WAY IT FACES. One total was hiding the whole story: south
+  // glass and west glass do opposite things in July.
+  const glassByFace = { south: 0, east: 0, west: 0, north: 0, roof: 0 };
+  const operableByFace = { south: 0, east: 0, west: 0, north: 0, roof: 0 };
+  for (const opening of (spec.openings || [])) {
+    const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
+    if (!profile.glazed) continue;
+    const face = profile.roof || opening.wall === 'roof' ? 'roof' : opening.wall;
+    if (!(face in glassByFace)) continue;
+    const area = face === 'roof'
+      ? (Number(opening.widthFt) || 2.5) ** 2
+      : (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1) * (profile.liteFrac ?? 1);
+    glassByFace[face] += area;
+    // A picture window is a hole you cannot open — it gains heat in July and
+    // gives you no way to let it back out at night.
+    if (!['picture', 'clerestory', 'bay'].includes(opening.type) && face !== 'roof') operableByFace[face] += area * 0.45;
+  }
+  for (const band of sunBands) if (band.side in glassByFace) glassByFace[band.side] += band.glass;
+  for (const side of WALL_SIDES) {
+    const r = resolveWallSide(spec, side);
+    if (r.assemblyKey === 'glazed' && !r.omitted) {
+      const sect = wallSections.filter((w) => w.side === side && w.assemblyKey === 'glazed');
+      glassByFace[side] += sect.reduce((sum, w) => sum + wallFaceArea(w), 0) * GLAZED_WALL_GLASS_FRAC;
+    }
+  }
+
+  // 2. SHADE, STOREY BY STOREY. The old model asked one question — "what does
+  // the roof overhang do to a window 3 to 7 feet off the ground" — and applied
+  // the answer to the whole house. On a two-storey house that is wrong twice:
+  // the eave is twenty feet up and shades the GROUND floor not at all, while
+  // the upstairs windows it does shade get no credit for it.
+  const shadeDevices = (spec.elements || []).filter((el) => el.category === 'shade' && resolveShadeDevice(el));
+  const overhangBySide = resolveOverhangs(spec.shell);
+  const topStorey = Math.max(1, Number(storeys) || 1);
+  // WHICH SUN TO MEASURE THE OVERHANG AGAINST. The old model used the noon
+  // altitude for every wall, which quietly credited the roof with shading the
+  // east and west windows. It does not. Sun only lands on an east wall in the
+  // morning and a west wall in the evening, and at those hours it is barely
+  // twenty degrees above the horizon — it comes in under any overhang ever
+  // built. That is the whole reason east and west glass overheats a house and
+  // south glass does not, and using one number for all four walls hid it.
+  const altOnFace = (side, season) => {
+    if (side === 'south') return season === 'summer' ? sunSummerDeg : sunWinterDeg;
+    if (side === 'north') return season === 'summer' ? 14 : 0;
+    return season === 'summer' ? 25 : 12; // east and west, when the sun is on them
+  };
+  const shadeFor = (side, level, season) => {
+    const alt = altOnFace(side, season);
+    // The roof eave only hangs over the TOP storey's windows. Below that there
+    // is nothing up there but more wall.
+    let frac = 0;
+    if (Number(level) === topStorey) {
+      const elev = topStorey > 1 ? storeyElevationFt(spec.shell, topStorey) : 0;
+      const eaveTop = elev + Math.max(2, resolveWallSide(spec, side, topStorey).heightFt);
+      const drop = (Number(overhangBySide[side]) || 0) * Math.tan(alt * Math.PI / 180);
+      const head = elev + 7; const sill = elev + 3;
+      frac = clamp((head - (eaveTop - drop)) / (head - sill), 0, 1);
+    }
+    // Anything you built or planted in front of that wall, on that floor.
+    for (const dev of shadeDevices) {
+      const spec2 = resolveShadeDevice(dev);
+      if ((dev.side || 'south') !== side) continue;
+      if (Number(dev.level || 1) !== Number(level)) continue;
+      frac = 1 - (1 - frac) * (1 - (season === 'summer' ? spec2.summer : spec2.winter));
+    }
+    return clamp(frac, 0, 1);
+  };
+  // Glass split by storey so the shading lands on the right windows.
+  const glassByFaceStorey = {};
+  for (const opening of (spec.openings || [])) {
+    const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
+    if (!profile.glazed) continue;
+    const face = profile.roof || opening.wall === 'roof' ? 'roof' : opening.wall;
+    if (!(face in glassByFace)) continue;
+    const lvl = Math.max(1, Number(opening.level || 1));
+    const area = face === 'roof'
+      ? (Number(opening.widthFt) || 2.5) ** 2
+      : (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1) * (profile.liteFrac ?? 1);
+    glassByFaceStorey[`${face}:${lvl}`] = (glassByFaceStorey[`${face}:${lvl}`] || 0) + area;
+  }
+  // Whatever wasn't an opening (sun bands, glazed walls) rides on the top storey.
+  for (const face of Object.keys(glassByFace)) {
+    const counted = Object.entries(glassByFaceStorey)
+      .filter(([k]) => k.startsWith(`${face}:`)).reduce((s, [, v]) => s + v, 0);
+    const rest = glassByFace[face] - counted;
+    if (rest > 0.01) glassByFaceStorey[`${face}:${topStorey}`] = (glassByFaceStorey[`${face}:${topStorey}`] || 0) + rest;
+  }
+
+  // 3. WHAT COMES THROUGH, on a clear day, in each season.
+  const shgc = GLASS_SHGC[utilities.windowQuality === 'triple' ? 'triple' : 'double'];
+  const gainOn = (season) => {
+    let total = 0;
+    for (const [key, area] of Object.entries(glassByFaceStorey)) {
+      const [face, lvlStr] = key.split(':');
+      const lvl = Number(lvlStr);
+      const incident = SOLAR_ON_GLASS[season][face] || 0;
+      // A roof window has no wall to shade it and no season that spares it.
+      const shaded = face === 'roof' ? 0 : shadeFor(face, lvl, season);
+      // Only the south face cares which way the house is turned.
+      const aim = face === 'south' ? Math.max(0, solarFactor) : 1;
+      total += area * incident * shgc * (1 - shaded) * aim;
+    }
+    return total;
+  };
+  const winterGainBtu = gainOn('winter');
+  const summerGainBtu = gainOn('summer');
+
+  // 4. MASS: what holds the heat once it is in. Bale walls insulate superbly
+  // and store almost nothing — the two jobs are not the same, and a house with
+  // great glass and no mass is the classic swing: too warm by three, cold by
+  // dawn. Counted in BTU per °F, and ONLY what sits inside the insulation
+  // where the room's air can actually reach it.
+  const massParts = [];
+  // Resolved here rather than borrowed from the cost block below — this block
+  // runs first, and both resolvers are pure functions of the spec.
+  const thermHeatKey = resolveHeatSource(utilities.heatSource);
+  const thermFacingKey = resolveHeaterFacing(spec, thermHeatKey);
+  const heatMass = { masonry: 1400, rocket_mass: 2200, wood_stove: 80, minisplit: 0 }[thermHeatKey] || 0;
+  if (heatMass) massParts.push({ label: `${HEAT_SOURCES[thermHeatKey].label} core`, btuF: heatMass });
+  const facingMass = { soapstone: 900, brick: 700, tile: 400, stucco: 200, lime: 120, cob: 260 }[thermFacingKey] || 0;
+  if (facingMass) massParts.push({ label: `${HEATER_FACINGS[thermFacingKey].label} facing`, btuF: facingMass });
+  // Earthen and masonry partitions: volume × about 25 BTU/°F per cubic foot.
+  const massPartitionBtuF = (spec.elements || []).filter((el) => el.category === 'partition'
+    && ['cob', 'adobe'].includes(el.construction))
+    .reduce((sum, el) => {
+      const runFt = Math.max(Number(el.w) || 0, Number(el.d) || 0);
+      const thick = PARTITION_TYPES[el.construction]?.thicknessFt || 0.7;
+      const hgt = Number(el.h) || Math.max(7, Number(spec.shell.wallHeightFt || 10) - 0.5);
+      return sum + runFt * thick * hgt * 25;
+    }, 0);
+  if (massPartitionBtuF > 0) massParts.push({ label: 'Earthen interior walls', btuF: massPartitionBtuF });
+  // A slab you can feel: only when the floor IS concrete and not carpeted over
+  // by a raised deck. About 10 BTU/°F per square foot for 4 inches.
+  const slabFloor = utilities.foundationType === 'slab';
+  if (slabFloor) massParts.push({ label: 'Concrete floor slab', btuF: floor * 10 });
+  // Earthen plaster on the inside faces of natural walls — thin, but there is
+  // a lot of it. Three quarters of an inch, both faces of the natural walls.
+  const plasterMassBtuF = wallSections
+    .filter((w) => !['framed', 'sips', 'ply-insulated', 'icf', 'glazed'].includes(w.assemblyKey))
+    .reduce((sum, w) => sum + wallFaceArea(w) * (0.75 / 12) * 25, 0);
+  if (plasterMassBtuF > 0) massParts.push({ label: 'Earthen plaster, inside faces', btuF: plasterMassBtuF });
+  const thermalMassBtuF = massParts.reduce((sum, p) => sum + p.btuF, 0);
+
+  // 5. THE SWING. Heat that arrives and cannot be stored has to go somewhere,
+  // and where it goes is into the air — fast. Surplus over the day's own heat
+  // loss, divided by the mass, is roughly how far the room temperature moves.
+  // Under about 8°F is comfortable; past 15°F you are opening windows in
+  // January, which means you paid for the glass and threw the heat away.
+  const winterDayLossBtu = heatUA * 40 * 10; // ~40°F difference across 10 daylight hours
+  const winterSurplusBtu = Math.max(0, winterGainBtu - winterDayLossBtu);
+  const winterSwingF = thermalMassBtuF > 0 ? winterSurplusBtu / thermalMassBtuF : Infinity;
+  // Summer: gain plus the household's own heat, with no heat loss to speak of.
+  const internalGainBtu = people * 350 * 16 + 8000;
+  const summerLoadBtu = summerGainBtu + internalGainBtu;
+  const summerSwingF = thermalMassBtuF > 0 ? summerLoadBtu / thermalMassBtuF : Infinity;
+
+  // 6. LETTING IT BACK OUT. A house that cannot cross-ventilate cannot use a
+  // cool night, and a cool night is the whole cooling strategy in this climate.
+  const opposedNS = Math.min(operableByFace.north, operableByFace.south);
+  const opposedEW = Math.min(operableByFace.east, operableByFace.west);
+  const crossVents = opposedNS > 3 || opposedEW > 3;
+  const operableGlass = Object.values(operableByFace).reduce((sum, v) => sum + v, 0);
+  // Rule of thumb: openable area worth about 4% of the floor lets a house
+  // flush itself overnight. A whole-house fan does the job on a still night.
+  const ventRatio = floor > 0 ? operableGlass / heatedFloor : 0;
+  const wholeHouseFan = Boolean(utilities.wholeHouseFan);
+  const nightFlushOk = (crossVents && ventRatio >= 0.04) || wholeHouseFan;
+
+  // 7. CAN THE HEATER ACTUALLY DO IT. The comparison the app never made.
+  const heatOut = HEAT_OUTPUT[thermHeatKey] || null;
+  const heatCoverage = heatOut && heatLoadKbtu > 0 ? heatOut.outputKbtu / heatLoadKbtu : null;
+
+  const thermal = {
+    glassByFace,
+    glassByFaceStorey,
+    operableByFace,
+    operableGlass,
+    ventRatio,
+    crossVents,
+    wholeHouseFan,
+    nightFlushOk,
+    eastWestGlass: glassByFace.east + glassByFace.west,
+    shadeSummer: { south: shadeFor('south', topStorey, 'summer'), east: shadeFor('east', topStorey, 'summer'), west: shadeFor('west', topStorey, 'summer') },
+    shadeGround: topStorey > 1
+      ? { south: shadeFor('south', 1, 'summer'), east: shadeFor('east', 1, 'summer'), west: shadeFor('west', 1, 'summer') }
+      : null,
+    devices: shadeDevices.map((el) => ({ id: el.id, name: el.name, side: el.side || 'south', level: Number(el.level || 1), kind: el.kind })),
+    winterGainBtu,
+    summerGainBtu,
+    summerLoadBtu,
+    internalGainBtu,
+    thermalMassBtuF,
+    massParts,
+    winterSwingF,
+    summerSwingF,
+    heatOutputKbtu: heatOut ? heatOut.outputKbtu : null,
+    heatCoverage,
+    topStorey
+  };
+
   // Water: what you use vs what the source can give (gal/day).
   const waterGpd = people * 50;
   const catchmentGpd = roofArea * (Number(site.rainInYr) || 0) * 0.6 * 0.623 / 365;
@@ -4562,6 +4932,12 @@ export function deriveDesign(spec, wallSectionsParam) {
     + [...deckBuckets.rail.values()].reduce((s, b) => s + b.lf * b.rate, 0)
     + [...deckBuckets.roof.values()].reduce((s, b) => s + b.area * b.rate, 0)
     + deckStepsCost;
+  // Shade you build or plant — awnings, a trellis, a tree. They are outdoor
+  // pieces and they price like outdoor pieces, but they earn their line here
+  // by changing the summer numbers, which nothing else in this budget does.
+  const shadeEls = (spec.elements || []).filter((el) => el.category === 'shade' && resolveShadeDevice(el));
+  const shadeCost = shadeEls.reduce((sum, el) => sum + (resolveShadeDevice(el)?.cost || 0), 0);
+  const shadeCarbon = shadeEls.reduce((sum, el) => sum + (resolveShadeDevice(el)?.carbon || 0), 0);
   const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => {
     if (!outdoorItemPresent(spec, item)) return sum;
     if (item.key === 'greenhouse') {
@@ -4570,7 +4946,7 @@ export function deriveDesign(spec, wallSectionsParam) {
         .reduce((s, element) => s + Math.max(24, (Number(element.w) || item.w) * (Number(element.d) || item.d)) * greenhouseCostSf, 0);
     }
     return sum + item.cost;
-  }, 0) + outbuildingCost + canopyCost + deckCost;
+  }, 0) + outbuildingCost + canopyCost + deckCost + shadeCost;
 
   // Floor assembly = finished floor over the whole heated area + the structural
   // subfloor deck under the ground floor (a slab foundation is its own deck, so
@@ -4711,7 +5087,9 @@ export function deriveDesign(spec, wallSectionsParam) {
     ? perimeterFt * basement.heightFt * 16 + floor * 12
     : (utilities.foundationType === 'slab' ? mainSlabArea : floor) * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra;
   const stairsCarbon = stairsCarbonRaw * srcFac('stairs', 'carbon');
-  const carbonKg = foundationCarbon + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + deckCarbon + furnishingsCarbon + stairsCarbon + (heatFacing?.carbon || 0) + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
+  // shadeCarbon can be NEGATIVE — a planted tree is the one line in this whole
+  // model that takes carbon back out of the air instead of putting it in.
+  const carbonKg = foundationCarbon + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + deckCarbon + furnishingsCarbon + stairsCarbon + shadeCarbon + (heatFacing?.carbon || 0) + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
   // What the sourcing choices saved vs. buying every system new — salvage and
   // local milling both land here.
@@ -4875,6 +5253,18 @@ export function deriveDesign(spec, wallSectionsParam) {
       lines.push(rline(`Deck roof — ${b.label.split(' —')[0].toLowerCase()}`, b.area * b.rate, b.area, 'sf covered', b.rate, 'posts and a light metal roof over the deck'));
     }
     if (deckStepsCount > 0) lines.push(rline('Deck steps', deckStepsCost, deckStepsCount, deckStepsCount === 1 ? 'stair' : 'stairs', null, 'each run priced by its climb — deck to ground, or deck to deck between levels', true));
+    // Shade, by kind — the cheapest thing in this budget that changes how the
+    // house feels in August.
+    const shadeKinds = new Map();
+    for (const el of shadeEls) {
+      const s = resolveShadeDevice(el);
+      shadeKinds.set(s.key, { s, n: (shadeKinds.get(s.key)?.n || 0) + 1 });
+    }
+    for (const { s, n } of shadeKinds.values()) {
+      lines.push(n > 1
+        ? rline(s.label, n * s.cost, n, 'on the house', s.cost, `shades about ${Math.round(s.summer * 100)}% of that glass in summer`, true)
+        : rline(s.label, s.cost, null, '', null, `shades about ${Math.round(s.summer * 100)}% of that glass in summer, ${Math.round(s.winter * 100)}% in winter`));
+    }
     costReceipts.outdoors = lines;
   }
   { // walls
@@ -4944,6 +5334,8 @@ export function deriveDesign(spec, wallSectionsParam) {
     // sheet's own switches read these, so what a trade is "worth" on screen is
     // the same fraction the total is actually computed from.
     sweatFractions: { sweatWallsFrac, sweatRoofFrac, sweatHeatFrac, sweatFoundationFrac, sweatFrameFrac },
+    // Summer, the swing, and whether the heater covers the load.
+    thermal,
     heatKey, heatFacingKey, heatKit: HEAT_SOURCES[heatKey].kit, heatInstall, heatedFloor, storeys, basement, basementRoomArea, basementHeated, roofArea, roofFootprint, overhangs, wallArea, glazedWallArea, wallR, southGlass, glassPct,
     skylightArea, totalGlass, glazingU, stemwallHeightFt, azimuthDeg, solarFactor,
     sunWinterDeg, sunSummerDeg, winterShadeFrac, summerShadeFrac,

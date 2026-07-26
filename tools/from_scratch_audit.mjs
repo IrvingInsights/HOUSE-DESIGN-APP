@@ -68,6 +68,7 @@ const PROBES = [
   { id: 'roof-profile', label: 'Roof shape, pitch, and fall direction', ops: ['set_roof_profile'], has: (s) => Boolean(s.shell?.roofType) },
   { id: 'roof-planes', label: 'Extra roof planes (dormers, lean-tos over an outdoor room)', ops: ['add_roof_plane', 'add_element'], has: (s) => (s.roofPlanes || []).length > 0 || (s.elements || []).some((e) => e.roofType) },
   { id: 'sunspace', label: 'A greenhouse / sunspace (glazed south band)', ops: ['set_wall_side'], field: 'sunGlazing', has: (s) => (s.rooms || []).some((r) => r.type === 'plant') },
+  { id: 'shade', label: 'Shade you build or plant — awnings, a trellis, a tree', ops: ['add_element'], has: (s) => (s.elements || []).some((e) => e.category === 'shade') },
   { id: 'flooring', label: 'Floor finish + subfloor', ops: ['set_flooring'], has: (s) => Boolean(s.flooring) },
   { id: 'sourcing', label: 'Where each material comes from', ops: ['set_sourcing'], has: (s) => Boolean(s.sourcing) },
   { id: 'utilities', label: 'Heat / water / waste / power', ops: ['set_utility'], has: (s) => Boolean(s.utilities) },

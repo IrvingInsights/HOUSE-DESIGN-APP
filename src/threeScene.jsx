@@ -3187,6 +3187,46 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           }
           const openHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
           mesh = box(element.w, Math.max(7.4, elementHeight), element.d, element.x + element.w / 2, elevation + Math.max(7.4, elementHeight) / 2, element.y + element.d / 2, openHandle);
+        } else if (element.category === 'shade') {
+          // Shade you built or planted. A tree is a trunk and a crown; anything
+          // else is a panel leaning off the wall it protects. The full-volume
+          // invisible handle stays, so it selects and drags like everything
+          // else — but it never renders as a giant ghost box, which is what a
+          // generic element would have done to a tree.
+          const leafy = element.kind === 'deciduous' || element.kind === 'trellis';
+          const shadeMat = new THREE.MeshStandardMaterial({
+            color: leafy ? 0x6f8f52 : 0xb8a184, roughness: 0.9,
+            transparent: true, opacity: element.id === selectedRoom ? 0.95 : 0.8
+          });
+          const cx = element.x + element.w / 2;
+          const cz = element.y + element.d / 2;
+          const part = (m) => { m.userData.roomId = element.id; m.userData.generated = true; group.add(m); };
+          if (element.kind === 'deciduous') {
+            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b533b, roughness: 0.95 });
+            part(box(0.9, elementHeight * 0.55, 0.9, cx, elevation + elementHeight * 0.275, cz, trunkMat));
+            const crown = new THREE.Mesh(
+              new THREE.SphereGeometry(Math.max(3, Math.min(element.w, element.d) * 0.8), 12, 10),
+              shadeMat
+            );
+            crown.position.set(cx, elevation + elementHeight * 0.72, cz);
+            part(crown);
+          } else {
+            // An awning, a trellis, a shutter: a panel standing off the wall at
+            // head height, tipped down the way the real thing sheds sun.
+            const alongX = element.w >= element.d;
+            const panel = box(element.w, 0.14, element.d, cx, elevation + 7.4, cz, shadeMat);
+            if (alongX) panel.rotation.x = (element.y > (depth / 2) ? -1 : 1) * 0.32;
+            else panel.rotation.z = (element.x > (width / 2) ? 1 : -1) * 0.32;
+            part(panel);
+            if (element.kind === 'trellis') {
+              const postMat = new THREE.MeshStandardMaterial({ color: 0x7a5c3e, roughness: 0.8 });
+              [[element.x + 0.3, element.y + 0.3], [element.x + element.w - 0.3, element.y + element.d - 0.3]]
+                .forEach(([px, pz]) => part(box(0.35, 7.4, 0.35, px, elevation + 3.7, pz, postMat)));
+            }
+          }
+          const shadeHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
+          mesh = box(Math.max(1, element.w), Math.max(2, elementHeight), Math.max(1, element.d),
+            cx, elevation + Math.max(2, elementHeight) / 2, cz, shadeHandle);
         } else if (element.category === 'furnishing') {
           // Fixtures, built-ins, appliances, furniture, outdoor pieces — a solid
           // block in the catalog's own color, standing on its floor.

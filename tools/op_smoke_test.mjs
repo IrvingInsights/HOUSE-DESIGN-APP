@@ -762,6 +762,20 @@ async function httpSanity() {
   ok(cov?.deckRail === 'cable' && cov?.deckRoof === 'gable', 'add_element keeps the covered deck\'s railing and roof choices');
 }
 
+// --- shade devices and the whole-house fan ----------------------------------
+{
+  const r = apply(freshSpec(), [
+    { type: 'add_element', name: 'Trellis', category: 'shade', kind: 'trellis', side: 'west', x: -6, y: 8, w: 5, d: 14, h: 8, level: 1 },
+    { type: 'set_utility', field: 'wholeHouseFan', value: 'true' }
+  ]).spec;
+  const tr = r.elements.find((e) => e.category === 'shade');
+  ok(tr?.kind === 'trellis', 'a shade device keeps which KIND it is');
+  ok(tr?.side === 'west', 'a shade device keeps which WALL it stands in front of — that is what decides the sun it blocks');
+  ok(r.utilities.wholeHouseFan === true, 'set_utility turns the whole-house fan on');
+  const r2 = apply(freshSpec(), [{ type: 'add_element', name: 'Awning', category: 'shade', kind: 'awning', side: 'nowhere', x: 2, y: 2, w: 4, d: 3, h: 8 }]).spec;
+  ok(!r2.elements[0].side, 'a nonsense side is dropped rather than stored');
+}
+
 const wantHttp = process.argv.includes('--http');
 (async () => {
   if (wantHttp) await httpSanity();

@@ -455,6 +455,13 @@
 .rz-diy-worth { font-size: 12px; white-space: nowrap; color: var(--moss, #868a7c); font-weight: 600; }
 .rz-diy-row.on .rz-diy-worth { color: var(--good, #3e7b53); }
 
+/* Summer at a glance: what lands on the house, what holds it, how far it
+   drifts. Three numbers, because the fourth would be one too many. */
+.rz-summer-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 6px 0 2px; }
+.rz-summer-grid > div { display: flex; flex-direction: column; gap: 2px; padding: 7px 8px; border-radius: 8px; background: color-mix(in srgb, var(--line, #dbd9ce) 22%, transparent); }
+.rz-summer-grid b { font-size: 15px; color: var(--ink, #22251f); }
+.rz-summer-grid small { font-size: 10px; line-height: 1.3; color: var(--moss, #868a7c); }
+
 /* SURFACE 4b — the Ask bar, bottom center */
 .rz-ask {
   bottom: 20px; left: 50%; transform: translateX(-50%);

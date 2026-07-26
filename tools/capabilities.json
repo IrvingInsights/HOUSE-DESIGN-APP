@@ -162,6 +162,14 @@
       "site": "quick"
     },
     {
+      "id": "systems.summer",
+      "chapter": "systems",
+      "label": "Summer & cooling — shade you build or plant, the whole-house fan, and how far the house drifts on a hot day",
+      "marker": "cap-systems-summer",
+      "site": "more",
+      "classic": "SummerControls"
+    },
+    {
       "id": "budget.sweat",
       "chapter": "",
       "label": "Take a trade on yourself — walls, frame, foundation, roof, heat — in the budget where the total is",
