@@ -4940,6 +4940,10 @@ export function deriveDesign(spec, wallSectionsParam) {
   return {
     receipts: { systems: costReceipts, sweat: sweatLines },
     site, utilities, reclaimed, sourcing, sourcingSavings, floor,
+    // The labour share of each trade you can take on yourself — the Budget
+    // sheet's own switches read these, so what a trade is "worth" on screen is
+    // the same fraction the total is actually computed from.
+    sweatFractions: { sweatWallsFrac, sweatRoofFrac, sweatHeatFrac, sweatFoundationFrac, sweatFrameFrac },
     heatKey, heatFacingKey, heatKit: HEAT_SOURCES[heatKey].kit, heatInstall, heatedFloor, storeys, basement, basementRoomArea, basementHeated, roofArea, roofFootprint, overhangs, wallArea, glazedWallArea, wallR, southGlass, glassPct,
     skylightArea, totalGlass, glazingU, stemwallHeightFt, azimuthDeg, solarFactor,
     sunWinterDeg, sunSummerDeg, winterShadeFrac, summerShadeFrac,

@@ -162,6 +162,14 @@
       "site": "quick"
     },
     {
+      "id": "budget.sweat",
+      "chapter": "",
+      "label": "Take a trade on yourself — walls, frame, foundation, roof, heat — in the budget where the total is",
+      "marker": "cap-budget-sweat",
+      "site": "sheet",
+      "classic": "BudgetSheet"
+    },
+    {
       "id": "roof.plane",
       "chapter": "roof",
       "label": "Add a second roof away from the main one — a lean-to on posts over part of the plan",

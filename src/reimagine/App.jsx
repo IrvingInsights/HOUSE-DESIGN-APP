@@ -2307,7 +2307,11 @@ export default function App() {
       {/* SURFACE 4a — the Budget sheet: the first live Sheet. Every line opens
           to its math; the math is emitted by the engine itself. */}
       {budgetOpen && (
-        <BudgetSheet derived={derived} onClose={() => setBudgetOpen(false)} />
+        <BudgetSheet
+          derived={derived}
+          onClose={() => setBudgetOpen(false)}
+          onToggleDiy={(field, value) => applyOps([{ type: 'set_utility', field, value }])}
+        />
       )}
 
       {/* SURFACE 3 — the Card (tap any part → vitals, receipts) */}
@@ -3216,7 +3220,22 @@ function ReceiptLine({ line }) {
 // The Budget sheet — where every dollar shows its work. Rows come from the
 // engine's own receipts (built inside deriveDesign), so what you read here IS
 // the math that produced the total, not a retelling of it.
-function BudgetSheet({ derived, onClose }) {
+// THE TRADES YOU CAN TAKE ON YOURSELF, and what each one is worth. The engine
+// has always known these five and priced them; only the heater had a switch in
+// this app, which left about ninety thousand dollars of decision with no
+// control attached to it. They live HERE, in the budget, because that is where
+// you are standing when the question comes up.
+// The fraction is the LABOUR share of that line — the part your own hands can
+// replace. Heat is the honest one: it sweats against the install only, because
+// you cannot labour your way out of buying the refractory core.
+const DIY_TRADES = [
+  { field: 'diyWalls', label: 'Walls', costKey: 'walls', fracField: 'sweatWallsFrac', frac: 0.8, note: 'raising and plastering the walls' },
+  { field: 'diyFrame', label: 'Frame', costKey: 'frame', fracField: 'sweatFrameFrac', frac: 0.6, note: 'cutting and raising the frame' },
+  { field: 'diyFoundation', label: 'Foundation', costKey: 'foundation', fracField: 'sweatFoundationFrac', frac: 0.5, note: 'digging, forming, pouring' },
+  { field: 'diyRoof', label: 'Roof', costKey: 'roof', fracField: 'sweatRoofFrac', frac: 0.55, note: 'sheathing and covering the roof' },
+  { field: 'diyHeat', label: 'Heat', costKey: 'heat', fracField: 'sweatHeatFrac', frac: 0.45, installOnly: true, note: 'setting the heater — the kit is still bought' }
+];
+function BudgetSheet({ derived, onClose, onToggleDiy }) {
   const [openKey, setOpenKey] = useState(null);
   const rows = COST_ROWS
     .map((row) => ({ ...row, amount: derived.cost[row.key] || 0, lines: derived.receipts.systems[row.key] || [] }))
@@ -3247,6 +3266,30 @@ function BudgetSheet({ derived, onClose }) {
           </div>
         ))}
       </div>
+      {onToggleDiy && (
+        <div className="rz-budget-diy" data-cap="cap-budget-sweat">
+          <div className="rz-bfoot-row"><span><b>What you'll do yourself</b></span><span /></div>
+          {DIY_TRADES.map((trade) => {
+            const on = Boolean(derived.utilities[trade.field]);
+            const base = trade.installOnly ? (derived.heatInstall || 0) : (derived.cost[trade.costKey] || 0);
+            const frac = Number(derived.sweatFractions?.[trade.fracField] ?? trade.frac);
+            const worth = base * frac;
+            if (base <= 0) return null;
+            return (
+              <label key={trade.field} className={`rz-diy-row${on ? ' on' : ''}`}>
+                <input type="checkbox" checked={on} onChange={() => onToggleDiy(trade.field, !on)} />
+                <span className="rz-diy-label">{trade.label}<small>{trade.note}</small></span>
+                <b className="rz-diy-worth">{on ? `−${fmtMoney(worth)}` : `saves ${fmtMoney(worth)}`}</b>
+              </label>
+            );
+          })}
+          <div className="rz-budget-note">
+            Each one takes the labour out of that line and puts it on your own back — the
+            materials are still bought. Turning them all on is a full owner-build, and
+            years of weekends.
+          </div>
+        </div>
+      )}
       <div className="rz-budget-foot">
         <div className="rz-bfoot-row"><span>Everything, bought new</span><b>{fmtMoney(derived.totalBeforeSweat)}</b></div>
         {derived.receipts.sweat.map((line, i) => (

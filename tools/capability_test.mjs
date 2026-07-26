@@ -82,6 +82,20 @@ const chaptersSrc = (() => {
 // --- the checks ------------------------------------------------------------
 for (const cap of manifest.capabilities) {
   const tag = `[${cap.id}] ${cap.label}`;
+  // site:"sheet" — a control that lives in a SHEET, not a chapter (the Budget
+  // sheet, opened from the receipts). There is no chapter branch for it to sit
+  // in, so the contract is: the marker is inside the named component, and that
+  // component is actually rendered somewhere. Added when the sweat-equity
+  // switches went into the budget — the trades you take on yourself are worth
+  // tens of thousands, and they belong where you read the total.
+  if (cap.site === 'sheet') {
+    const sheet = cap.classic ? sliceFunction(cap.classic) : null;
+    ok(src.includes(`data-cap="${cap.marker}"`), `${tag} — no control carries data-cap="${cap.marker}" anywhere`);
+    ok(Boolean(sheet), `${tag} — sheet component '${cap.classic}' not found`);
+    ok(Boolean(sheet && sheet.includes(cap.marker)), `${tag} — marker '${cap.marker}' missing from ${cap.classic}`);
+    ok(src.includes(`<${cap.classic}`), `${tag} — ${cap.classic} is never rendered, so nothing can open it`);
+    continue;
+  }
   ok(chaptersSrc.includes(`id: '${cap.chapter}'`), `${tag} — chapter '${cap.chapter}' missing from CHAPTERS`);
   ok(src.includes(`data-cap="${cap.marker}"`), `${tag} — no control carries data-cap="${cap.marker}" anywhere`);
   const branch = branches[cap.chapter] || '';
@@ -96,7 +110,7 @@ for (const cap of manifest.capabilities) {
     ok(branch.includes(`cap-more-${cap.chapter}`) || branch.includes('onMore'),
       `${tag} — the '${cap.chapter}' quick row has no More signpost, so this capability is invisible in the default look`);
   } else {
-    ok(false, `${tag} — unknown site '${cap.site}' (use 'quick' or 'more')`);
+    ok(false, `${tag} — unknown site '${cap.site}' (use 'quick', 'more', or 'sheet')`);
   }
 }
 
