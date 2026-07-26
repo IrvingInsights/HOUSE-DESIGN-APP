@@ -452,9 +452,19 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // correct geometry, and it shades the plants out. Shortening that ONE
       // eave was not a thing the app could express. `roofOverhangFt` stays the
       // storey's default; `roofOverhangSouthFt` and friends override one side.
+      // 0 IS A REAL ANSWER, BUT ONLY IF SOMEONE SET IT. `>= 0` on its own
+      // treats "no field here" as "no eave here": tierFieldOf answers null for
+      // the ground floor, Number(null) is 0, and every ground-floor eave in the
+      // model silently went to zero. The greenhouse roof lost its 4 ft, the
+      // rafter tails over that overhang found no roof above them, took the
+      // open-sky fallback of +40 ft, and drew themselves fifty feet into the
+      // air. An absent field must be absent, not zero.
       const tierOverhangSideOf = (lv, side) => {
-        const one = Number(tierFieldOf(lv, `roofOverhang${side[0].toUpperCase()}${side.slice(1)}Ft`));
-        if (Number.isFinite(one) && one >= 0) return clamp(one, 0, 12);
+        const raw = tierFieldOf(lv, `roofOverhang${side[0].toUpperCase()}${side.slice(1)}Ft`);
+        if (raw !== null && raw !== undefined && raw !== '') {
+          const one = Number(raw);
+          if (Number.isFinite(one) && one >= 0) return clamp(one, 0, 12);
+        }
         return tierOverhangOf(lv);
       };
       const OPPOSITE_SIDE = { north: 'south', south: 'north', east: 'west', west: 'east' };
