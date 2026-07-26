@@ -2947,7 +2947,8 @@ export function operationDescription(operation, spec) {
   if (op.type === 'add_room') return `Added ${op.name || 'room'} at ${op.w}' x ${op.d}'.`;
   if (op.type === 'add_element' || op.type === 'add_site_element' || op.type === 'add_loft' || op.type === 'add_tower' || op.type === 'add_floor') return `Added ${op.name || 'building element'} as ${op.category || 'custom BIM object'}.`;
   if (op.type === 'add_level' || op.type === 'edit_level') return `Added/edited ${op.name || `Level ${op.level || 2}`} in the BIM model.`;
-  if (op.type === 'set_roof' || op.type === 'set_roof_profile' || op.type === 'add_roof_plane') return `Set roof to ${op.roofType || spec.shell.roofType || 'roof'}${op.southWallHeightFt && op.northWallHeightFt ? ` with S ${op.southWallHeightFt}' / N ${op.northWallHeightFt}' wall heights` : op.eastWallHeightFt && op.westWallHeightFt ? ` with E ${op.eastWallHeightFt}' / W ${op.westWallHeightFt}' wall heights` : ''}.`;
+  if (op.type === 'add_roof_plane') return `Added a ${op.roofType || 'shed'} roof plane on posts${op.targetId ? ` over ${op.targetId}` : ''}.`;
+  if (op.type === 'set_roof' || op.type === 'set_roof_profile') return `Set roof to ${op.roofType || spec.shell.roofType || 'roof'}${op.southWallHeightFt && op.northWallHeightFt ? ` with S ${op.southWallHeightFt}' / N ${op.northWallHeightFt}' wall heights` : op.eastWallHeightFt && op.westWallHeightFt ? ` with E ${op.eastWallHeightFt}' / W ${op.westWallHeightFt}' wall heights` : ''}.`;
   if (op.type === 'set_assembly' || op.type === 'set_wall_assembly' || op.type === 'set_wall_segment_assembly') return `Updated ${op.field || op.wall || 'assembly'} to ${op.value}.`;
   if (op.type === 'set_wall_height') return `Set ${op.wall || 'wall'} height to ${op.h || op.value}'.`;
   if (op.type === 'set_shell' || op.type === 'add_pad_extension') return `Updated shell ${op.field || 'padExtensionFt'} to ${op.value || op.w}.`;
@@ -3069,7 +3070,48 @@ export function applyStructuredDesignPlan(currentSpec, plan) {
       continue;
     }
 
-    if (operation.type === 'set_roof' || operation.type === 'set_roof_profile' || operation.type === 'add_roof_plane') {
+    // Mirror of bim-core's add_roof_plane: a real plane on posts over a patch
+    // of the plan, not a rename of the whole house's roof. See the note there.
+    if (operation.type === 'add_roof_plane') {
+      const kind = String(operation.roofType || '').toLowerCase() === 'gable' ? 'gable' : 'shed';
+      const wanted = String(operation.targetId || operation.target || operation.over || '').trim().toLowerCase();
+      const host = wanted
+        ? next.elements.find((el) => String(el.id || '').toLowerCase() === wanted || String(el.name || '').toLowerCase() === wanted)
+        : null;
+      if (wanted && !host) {
+        actions.push(`Couldn't find "${operation.targetId || operation.target || operation.over}" to roof over.`);
+        continue;
+      }
+      if (host) {
+        if (host.category === 'deck') host.deckRoof = kind;
+        else host.roofType = kind;
+        actions.push(`Roofed ${host.name} with a ${kind} plane on posts.`);
+        continue;
+      }
+      const planeName = String(operation.name || '').replace(/[^a-zA-Z0-9]/g, '').length >= 2 ? operation.name : 'Roof plane';
+      const plane = {
+        id: uniqueObjectId(next, operation.id || planeName),
+        name: planeName,
+        category: 'canopy',
+        note: 'A roof plane on posts — open on every side.',
+        roofType: kind,
+        x: Number(operation.x || 0) || Number(next.shell.widthFt || 24) + 3,
+        y: Number(operation.y || 0) || 3,
+        z: Number(operation.z || 0),
+        w: Math.max(2, Number(operation.w || 0) || 12),
+        d: Math.max(2, Number(operation.d || 0) || 10),
+        h: Math.max(0.2, Number(operation.h || 0) || 0.3),
+        level: Number(operation.level || 1),
+        construction: '',
+        kind: '',
+        type: 'canopy'
+      };
+      next.elements.push({ ...plane, ...clampObjectPosition(next, plane, plane.x, plane.y) });
+      actions.push(`Added ${planeName} — a ${kind} roof plane, ${Math.round(plane.w)}′ × ${Math.round(plane.d)}′ on posts.`);
+      continue;
+    }
+
+    if (operation.type === 'set_roof' || operation.type === 'set_roof_profile') {
       if (operation.roofType) next.shell.roofType = operation.roofType;
       // Mirror of bim-core: naming a pair picks the shed's fall axis and
       // resets the other pair, so the profile is never ambiguous.
@@ -3978,6 +4020,51 @@ export function detectIssues(spec) {
   const removedPr = (spec.frame?.removedMembers || []).length;
   if (removedPr > 0) {
     issues.push({ severity: removedPr > 3 ? 'critical' : 'warning', title: `${removedPr} piece${removedPr === 1 ? '' : 's'} removed from the frame skeleton`, owner: 'Engineer', system: 'frame', fix: 'Every removed post or beam carried something. Make sure a wall, your own post, or a beam takes over its load — or bring the pieces back (Frame chapter → “Bring back all removed pieces”).' });
+  }
+  // 1b. THE HEAVIEST THING IN THE HOUSE STANDS ON SOMETHING. A masonry heater
+  // with its bench is measured in TONS, not pounds — a Temp-Cast core, its
+  // facing and a mass bench land somewhere between 2 and 5 of them, all of it
+  // on a footprint the size of a small table. That load has to reach the
+  // ground through something that was designed to carry it: a thickened,
+  // reinforced patch of slab, or its own footing under a raised floor. A
+  // normal floor deck will not do it, and neither will 4 inches of unthickened
+  // slab. This is the one thing every masonry-heater build gets asked about
+  // and the app had no way to say it or to draw it.
+  const massHeat = ['masonry', 'rocket_mass'].includes(utilitiesOf(spec).heatSource);
+  const heaterEls = (spec.elements || []).filter((el) => el.kind === 'heater'
+    || (/(masonry|rocket|mass)\s*(heater|stove|bench)?|heater core|bake oven/i.test(String(el.name || '')) && el.category !== 'foundation'));
+  if (massHeat && heaterEls.length) {
+    const pads = (spec.elements || []).filter((el) => el.category === 'foundation');
+    for (const heat of heaterEls) {
+      const hx = Number(heat.x) || 0; const hy = Number(heat.y) || 0;
+      const hw = Number(heat.w) || 0; const hd = Number(heat.d) || 0;
+      const lvl = Number(heat.level || 1);
+      if (lvl > 1) {
+        issues.push({
+          severity: 'critical',
+          title: `${heat.name || 'The masonry heater'} stands on an upper floor`,
+          owner: 'Engineer', system: 'foundation',
+          fix: 'Several tons on a floor deck is an engineered detail, not a choice you can make on a plan — it needs posts or a bearing wall carrying the load straight down to a footing. Move it to the ground floor, or have an engineer design what holds it up.'
+        });
+        continue;
+      }
+      // Covered = a foundation pad that reaches past the heater on every side.
+      const covered = pads.some((p) => {
+        const px = Number(p.x) || 0; const py = Number(p.y) || 0;
+        return px <= hx + 0.1 && py <= hy + 0.1
+          && px + (Number(p.w) || 0) >= hx + hw - 0.1
+          && py + (Number(p.d) || 0) >= hy + hd - 0.1;
+      });
+      if (!covered) {
+        issues.push({
+          severity: 'warning',
+          title: `${heat.name || 'The heater'} has no footing under it`,
+          owner: 'Engineer', system: 'foundation',
+          fixId: 'heater-footing', elementId: heat.id,
+          fix: 'A masonry heater and its bench weigh a few tons on a small patch of floor. Give it its own reinforced pad, sized a foot past the heater on every side and carried down to undisturbed ground — the Foundation chapter can drop one, or use the button below.'
+        });
+      }
+    }
   }
   // 2. Bent/bay spacing beyond timber norms.
   const frameKeyPr = resolveFrameType(spec, 1);

@@ -1417,7 +1417,8 @@ export function operationDescription(operation, spec) {
   if (op.type === 'add_room') return `Added ${op.name || 'room'} at ${op.w}' x ${op.d}'.`;
   if (op.type === 'add_element' || op.type === 'add_site_element' || op.type === 'add_loft' || op.type === 'add_tower' || op.type === 'add_floor') return `Added ${op.name || 'building element'} as ${op.category || 'custom BIM object'}.`;
   if (op.type === 'add_level' || op.type === 'edit_level') return `Added/edited ${op.name || `Level ${op.level || 2}`} in the BIM model.`;
-  if (op.type === 'set_roof' || op.type === 'set_roof_profile' || op.type === 'add_roof_plane') return `Set roof to ${op.roofType || spec.shell.roofType || 'roof'}${op.southWallHeightFt && op.northWallHeightFt ? ` with S ${op.southWallHeightFt}' / N ${op.northWallHeightFt}' wall heights` : op.eastWallHeightFt && op.westWallHeightFt ? ` with E ${op.eastWallHeightFt}' / W ${op.westWallHeightFt}' wall heights` : ''}.`;
+  if (op.type === 'add_roof_plane') return `Added a ${op.roofType || 'shed'} roof plane on posts${op.targetId ? ` over ${op.targetId}` : ''}.`;
+  if (op.type === 'set_roof' || op.type === 'set_roof_profile') return `Set roof to ${op.roofType || spec.shell.roofType || 'roof'}${op.southWallHeightFt && op.northWallHeightFt ? ` with S ${op.southWallHeightFt}' / N ${op.northWallHeightFt}' wall heights` : op.eastWallHeightFt && op.westWallHeightFt ? ` with E ${op.eastWallHeightFt}' / W ${op.westWallHeightFt}' wall heights` : ''}.`;
   if (op.type === 'set_assembly' || op.type === 'set_wall_assembly' || op.type === 'set_wall_segment_assembly') return `Updated ${op.field || op.wall || 'assembly'} to ${op.value}.`;
   if (op.type === 'set_wall_height') return `Set ${op.wall || 'wall'} height to ${op.h || op.value}'.`;
   if (op.type === 'set_wall_side') return `Set ${op.wall || 'wall'} wall ${op.field || 'property'} to ${op.value}.`;
@@ -1958,7 +1959,60 @@ export function applyBimOperations(currentSpec, plan) {
       continue;
     }
 
-    if (operation.type === 'set_roof' || operation.type === 'set_roof_profile' || operation.type === 'add_roof_plane') {
+    // A ROOF PLANE IS A ROOF PLANE. This op used to fall straight through to
+    // the handler below — it reshaped the WHOLE HOUSE's roof, reported success,
+    // and added no plane anywhere. An op that lies about what it did is worse
+    // than one that refuses.
+    // What it means now is the thing the scene already knows how to draw: a
+    // sloped panel on four posts over a patch of the plan — a lean-to, a porch
+    // roof, a cover over the woodpile. Name something that already exists and
+    // the plane goes over THAT; name nothing and it drops as its own covered
+    // area you can drag and size like any other object.
+    if (operation.type === 'add_roof_plane') {
+      const kind = String(operation.roofType || '').toLowerCase() === 'gable' ? 'gable' : 'shed';
+      const wanted = String(operation.targetId || operation.target || operation.over || '').trim().toLowerCase();
+      const host = wanted
+        ? next.elements.find((el) => String(el.id || '').toLowerCase() === wanted || String(el.name || '').toLowerCase() === wanted)
+        : null;
+      if (wanted && !host) {
+        rejectedOperations.push(operation);
+        warnings.push(`I couldn't find "${operation.targetId || operation.target || operation.over}" to roof over — nothing was added.`);
+        continue;
+      }
+      if (host) {
+        // A deck says it in the deck's own language, so its card and its price
+        // agree with the roof it just grew.
+        if (host.category === 'deck') host.deckRoof = kind;
+        else host.roofType = kind;
+        actions.push(`Roofed ${host.name} with a ${kind} plane on posts.`);
+        continue;
+      }
+      const planeName = String(operation.name || '').replace(/[^a-zA-Z0-9]/g, '').length >= 2 ? operation.name : 'Roof plane';
+      const id = uniqueObjectId(next, operation.id || planeName);
+      const plane = {
+        id,
+        name: planeName,
+        category: 'canopy',
+        sourceCategory: 'AI Planner',
+        note: 'A roof plane on posts — open on every side.',
+        roofType: kind,
+        x: Number(operation.x || 0) || Number(next.shell.widthFt || 24) + 3,
+        y: Number(operation.y || 0) || 3,
+        z: Number(operation.z || 0),
+        w: Math.max(2, Number(operation.w || 0) || 12),
+        d: Math.max(2, Number(operation.d || 0) || 10),
+        h: Math.max(0.2, Number(operation.h || 0) || 0.3),
+        level: Number(operation.level || 1),
+        construction: '',
+        kind: '',
+        type: 'canopy'
+      };
+      next.elements.push({ ...plane, ...clampObjectPosition(next, plane, plane.x, plane.y) });
+      actions.push(`Added ${planeName} — a ${kind} roof plane, ${Math.round(plane.w)}′ × ${Math.round(plane.d)}′ on posts.`);
+      continue;
+    }
+
+    if (operation.type === 'set_roof' || operation.type === 'set_roof_profile') {
       if (operation.roofType) next.shell.roofType = operation.roofType;
       // A shed falls along ONE axis: naming a pair picks that axis and resets
       // the other pair to the base height, so the profile is never ambiguous.

@@ -103,9 +103,11 @@ const PLANNER_CONTROL_OPS = ['no_change', 'request_clarification', 'trace_image_
 // An op with no button is only a GAP if no other op gives you the same
 // capability — 'add_floor' has no button because the Floor bar builds a storey
 // out of set_shell + add_element instead, and that is fine.
-// add_roof_plane is a lie: in bim-core it falls through to the SAME handler as
-// set_roof_profile. It does not add a plane, so its missing button is not a gap.
-const SUPERSEDED_OPS = { add_roof_plane: 'set_roof_profile (it is the same handler — the op name lies)', add_floor: 'set_shell storeys + add_element', add_level: 'set_shell storeys', add_loft: 'add_element', add_tower: 'add_element', edit_level: 'resize_object', set_reclaimed: 'set_sourcing', set_roof: 'set_roof_profile', set_wall_assembly: 'set_wall_side', set_wall_segment_assembly: 'resize_wall_segment', add_site_element: 'add_element', add_pad_extension: 'add_element' };
+// add_roof_plane used to be listed here as a lie — it fell through to the same
+// handler as set_roof_profile and added no plane at all. It has its own handler
+// now and its own button in the Roof chapter, so it is a real op with a real
+// screen and belongs in neither list.
+const SUPERSEDED_OPS = { add_floor: 'set_shell storeys + add_element', add_level: 'set_shell storeys', add_loft: 'add_element', add_tower: 'add_element', edit_level: 'resize_object', set_reclaimed: 'set_sourcing', set_roof: 'set_roof_profile', set_wall_assembly: 'set_wall_side', set_wall_segment_assembly: 'resize_wall_segment', add_site_element: 'add_element', add_pad_extension: 'add_element' };
 const orphanOps = opTypes.filter((op) => !emittedInUi(op) && !PLANNER_CONTROL_OPS.includes(op));
 
 const args = process.argv.slice(2);

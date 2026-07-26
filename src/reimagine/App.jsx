@@ -759,6 +759,25 @@ export default function App() {
       x: Number(spec.shell.widthFt) + 3, y: 2 + runs.length * 3, w: pad.w, d: pad.d, h: 0.35, level: 1
     }]);
   };
+  // A PAD UNDER SOMETHING HEAVY. The masonry heater, its bench, a cistern full
+  // of water — things whose weight lands on one small patch of floor. The pad
+  // arrives already under the object and a foot proud of it on every side,
+  // because that is the sizing rule, and it stays a normal foundation pad
+  // afterwards: drag it, stretch it, price it, delete it.
+  const padUnder = (el) => {
+    if (!el) return;
+    const margin = 1;
+    const w = Math.max(2, (Number(el.w) || 4) + margin * 2);
+    const d = Math.max(2, (Number(el.d) || 4) + margin * 2);
+    const taken = (spec.elements || []).filter((e) => e.category === 'foundation' && /pad under/i.test(e.name || '')).length;
+    applyOps([{
+      type: 'add_element',
+      name: taken === 0 ? `Pad under ${el.name}` : `Pad under ${el.name} ${taken + 1}`,
+      category: 'foundation', construction: 'slabpad',
+      x: (Number(el.x) || 0) - margin, y: (Number(el.y) || 0) - margin,
+      w, d, h: 0.5, level: 1
+    }]);
+  };
   // Set a run's size numerically — no dragging needed. For a strip run the
   // number IS its length (the long axis, thin dimension kept); a pad takes
   // width × depth.
@@ -1697,6 +1716,16 @@ export default function App() {
                   </button>
                 );
               })()}
+              {f.fixId === 'heater-footing' && (() => {
+                const heat = (spec.elements || []).find((e) => e.id === f.elementId);
+                if (!heat) return null;
+                return (
+                  <button type="button" className="rz-fresh" style={{ alignSelf: 'flex-start', marginTop: 4 }}
+                    onClick={() => padUnder(heat)}>
+                    ▣ Pour a pad under it — a foot proud on every side
+                  </button>
+                );
+              })()}
               {f.fixId === 'fit-opening' && Number.isFinite(f.openingIndex) && (() => {
                 const op = spec.openings?.[f.openingIndex];
                 if (!op) return null;
@@ -2067,6 +2096,12 @@ export default function App() {
                     onShedFall={setShedFall}
                     onGutters={setGutters}
                     onDischarge={setDischarge}
+                    onAddPlane={() => {
+                      const W = Number(spec.shell.widthFt) || 36;
+                      const report = applyOps([{ type: 'add_roof_plane', roofType: 'shed', name: 'Roof plane', x: W + 3, y: 3, w: 12, d: 10, level: 1 }]);
+                      const made = (report?.spec?.elements || []).slice(-1)[0];
+                      if (made) setSelectedId(made.id);
+                    }}
                   />
                 ) : (
                   <UpperRoofControls spec={spec} level={activeFloor} floors={floors} onOps={applyOps} />
@@ -2543,6 +2578,31 @@ export default function App() {
                   >match the main roof ({Math.round(Number(spec.shell.roofPitch || 0.32) * 12 * 10) / 10}/12)</button>
                 )}
               </>
+            )}
+            {el && el.category !== 'foundation' && Number(el.level || 1) === 1
+              && (el.kind === 'heater' || /heater|stove|masonry|rocket|bench|cistern|tank|chimney/i.test(`${el.name || ''} ${el.kind || ''}`)) && (
+              // Heavy things get their own footing. Offered on the object's own
+              // card so you can do it the moment you place the heater, instead
+              // of finding out from a flag later.
+              <button
+                type="button" className="rz-fresh" style={{ alignSelf: 'flex-start' }}
+                title="Drops a reinforced slab pad under this object, one foot proud on every side. Drag or stretch it afterwards like any other pad."
+                onClick={() => padUnder(el)}
+              >▣ Reinforced pad under {el.name}</button>
+            )}
+            {el && el.roofType && el.category !== 'floor' && (
+              // Anything carrying its own roof — a roof plane, a carport, a
+              // porch — picks its shape here, on the same card that moves it.
+              <div className="rz-field">
+                <span>Roof shape</span>
+                <div className="ctlChips">
+                  {[['shed', 'Shed — one slope'], ['gable', 'Gable — a peak']].map(([k, label]) => (
+                    <button key={k} type="button" className={`rz-pick-chip${el.roofType === k ? ' on' : ''}`}
+                      onClick={() => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'roofType', value: k }])}
+                    >{label}</button>
+                  ))}
+                </div>
+              </div>
             )}
             <p className="rz-muted">Drag it in the plan to move it; grab a corner to resize.</p>
             {el && (
@@ -4588,7 +4648,7 @@ function UpperRoofControls({ spec, level, floors, onOps }) {
   );
 }
 
-function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOverhang, onEave, onShedFall, onGutters, onDischarge, onCovering }) {
+function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOverhang, onEave, onShedFall, onGutters, onDischarge, onCovering, onAddPlane }) {
   const roofType = spec.shell.roofType || 'gable';
   const cover = resolveRoofCovering(spec.shell);
   const pitch = Number(spec.shell.roofPitch || 0.32);
@@ -4669,6 +4729,20 @@ function RoofControls({ spec, derived, onRoofType, onPitch, onInsulation, onOver
           <span>Steepness · {Math.round(pitch * 12)}/12</span>
           <NumInput value={Math.round(pitch * 12)} min={1} max={18} step={1} unit="/12" onCommit={(v) => onPitch(clamp(v / 12, 0.02, 1.5))} />
         </label>
+      )}
+
+      {/* A SECOND ROOF, AWAY FROM THE MAIN ONE. Everything above shapes the one
+          roof over the house. This is the other kind: a lean-to on the north
+          side, a cover over the woodpile, a porch roof. It lands as its own
+          object — select it, drag it, grab a corner — and its card picks
+          whether it slopes one way or peaks. */}
+      {onAddPlane && (
+        <button
+          type="button" className="rz-fresh" style={{ alignSelf: 'flex-start' }}
+          data-cap="cap-roof-plane"
+          title="A roof on four posts, open on every side. Drops beside the house — drag it where it belongs and grab a corner to resize"
+          onClick={onAddPlane}
+        >＋ Roof plane — a lean-to on posts (12 × 10 ft)</button>
       )}
 
       <label className="rz-field">

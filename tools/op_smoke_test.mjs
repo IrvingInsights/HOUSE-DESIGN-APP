@@ -142,6 +142,33 @@ r = apply(freshSpec(), [{ type: 'set_flooring', value: 'cork' }, { type: 'set_fl
 ok(r.spec.flooring.type === 'cork' && r.spec.flooring.subfloor === 'insulated', 'set_flooring type + subfloor');
 r = apply(freshSpec(), [{ type: 'set_frame', value: 'timber' }, { type: 'set_frame', value: 'stick', level: 2 }]);
 ok(r.spec.frame.type === 'timber' && r.spec.frame.storeyTypes['2'] === 'stick', 'set_frame base + per-storey');
+// --- add_roof_plane: it must ADD A PLANE ------------------------------------
+// It used to fall through to set_roof_profile: it reshaped the whole house's
+// roof, said "ok", and added nothing. These checks pin the difference.
+{
+  const before = freshSpec();
+  const roofWas = { type: before.shell.roofType, pitch: before.shell.roofPitch, high: before.shell.wallHeightFt };
+  r = apply(freshSpec(), [{ type: 'add_roof_plane', roofType: 'shed', name: 'Woodshed cover', x: 40, y: 3, w: 12, d: 10 }]);
+  const plane = (r.spec.elements || []).find((el) => el.name === 'Woodshed cover');
+  ok(Boolean(plane), 'add_roof_plane adds an element');
+  ok(plane?.roofType === 'shed', 'add_roof_plane: the element carries the roof kind, so the scene draws a panel on posts');
+  ok(plane?.w === 12 && plane?.d === 10, 'add_roof_plane keeps the size it was given');
+  ok(r.spec.shell.roofType === roofWas.type && r.spec.shell.roofPitch === roofWas.pitch && r.spec.shell.wallHeightFt === roofWas.high,
+    'add_roof_plane leaves the HOUSE roof alone — the old bug reshaped it');
+  r = apply(freshSpec(), [{ type: 'add_roof_plane' }]);
+  const bare = (r.spec.elements || []).slice(-1)[0];
+  ok(bare?.category === 'canopy' && bare.w >= 2 && bare.d >= 2 && bare.roofType === 'shed',
+    'add_roof_plane with nothing named still lands a real, sized plane');
+  // over an existing thing
+  const withDeck = freshSpec();
+  withDeck.elements = [{ id: 'dk1', name: 'Deck', category: 'deck', x: 8, y: 30, w: 12, d: 8, h: 0.35, level: 1 }];
+  r = apply(withDeck, [{ type: 'add_roof_plane', targetId: 'Deck', roofType: 'gable' }]);
+  ok(r.spec.elements.length === 1 && r.spec.elements[0].deckRoof === 'gable',
+    'add_roof_plane over a named deck roofs THAT deck instead of adding a second object');
+  r = apply(freshSpec(), [{ type: 'add_roof_plane', targetId: 'the pergola that is not there' }]);
+  ok((r.spec.elements || []).length === 0 && (r.warnings || []).some((w) => /couldn.t find/i.test(w)),
+    'add_roof_plane over something that does not exist says so instead of guessing');
+}
 // --- stairs: a real object, not a box ---------------------------------------
 {
   const withStair = (extra = {}) => {

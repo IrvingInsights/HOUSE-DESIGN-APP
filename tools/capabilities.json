@@ -162,6 +162,14 @@
       "site": "quick"
     },
     {
+      "id": "roof.plane",
+      "chapter": "roof",
+      "label": "Add a second roof away from the main one — a lean-to on posts over part of the plan",
+      "marker": "cap-roof-plane",
+      "site": "more",
+      "classic": "RoofControls"
+    },
+    {
       "id": "roof.drainage",
       "chapter": "roof",
       "label": "Gutters and where the water goes",

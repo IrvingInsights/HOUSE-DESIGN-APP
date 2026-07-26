@@ -3174,11 +3174,17 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // An open-air structure (carport, porch, covered deck) is a canopy
           // on posts over a low deck — NOT a building-sized translucent ghost
           // box. The full-volume handle stays for select/drag.
-          const deckMat = new THREE.MeshStandardMaterial({ color: 0x9c8265, roughness: 0.9, map: grainTexture('wood') });
-          const deck = box(element.w, 0.28, element.d, element.x + element.w / 2, elevation + 0.14, element.y + element.d / 2, deckMat);
-          deck.userData.roomId = element.id;
-          deck.userData.generated = true;
-          group.add(deck);
+          // A bare roof plane (a lean-to, a cover over the woodpile) is posts
+          // and a panel over whatever is already there — grass, gravel, the
+          // patio you laid. Drawing a wooden platform under it would invent a
+          // floor nobody asked for and double up on the surface below.
+          if (element.category !== 'canopy') {
+            const deckMat = new THREE.MeshStandardMaterial({ color: 0x9c8265, roughness: 0.9, map: grainTexture('wood') });
+            const deck = box(element.w, 0.28, element.d, element.x + element.w / 2, elevation + 0.14, element.y + element.d / 2, deckMat);
+            deck.userData.roomId = element.id;
+            deck.userData.generated = true;
+            group.add(deck);
+          }
           const openHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
           mesh = box(element.w, Math.max(7.4, elementHeight), element.d, element.x + element.w / 2, elevation + Math.max(7.4, elementHeight) / 2, element.y + element.d / 2, openHandle);
         } else if (element.category === 'furnishing') {
