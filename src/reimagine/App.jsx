@@ -2720,7 +2720,7 @@ export default function App() {
                 )}
               </>
             )}
-            {el && (el.category === 'carport' || el.category === 'porch' || el.roofType) && el.category !== 'floor' && el.category !== 'outbuilding' && (
+            {el && STRUCTURE_CATS.has(el.category) && (
               // An open bay skinned in poly is a garage that still passes light.
               <label className="rz-field">
                 <span>Walls — leave open, or skin it</span>
@@ -2753,6 +2753,25 @@ export default function App() {
                   ))}
                 </div>
               </>
+            )}
+            {el && STRUCTURE_CATS.has(el.category) && (
+              // WHICH WAY THIS BUILDING SHEDS. It follows the house unless you
+              // say otherwise: a shed tucked against a slope or a bank often
+              // has to throw its water the other way. The same choice a storey
+              // plate has always had, on every structure.
+              <label className="rz-field">
+                <span>Which way its roof drains</span>
+                <select
+                  value={['north', 'south', 'east', 'west'].includes(el.roofFall) ? el.roofFall : ''}
+                  onChange={(e2) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'roofFall', value: e2.target.value }])}
+                >
+                  <option value="">Same way as the house</option>
+                  <option value="north">Drains north</option>
+                  <option value="south">Drains south</option>
+                  <option value="east">Drains east</option>
+                  <option value="west">Drains west</option>
+                </select>
+              </label>
             )}
             {el && (el.category === 'outbuilding' || el.roofType || el.category === 'carport') && el.category !== 'floor' && (
               <label className="rz-field">

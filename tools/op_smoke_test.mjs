@@ -869,6 +869,27 @@ async function httpSanity() {
   ok(r.elements[0].roofCovering === undefined, 'a covering that does not exist clears back to the house roof');
 }
 
+// --- a structure sheds where you tell it, and can be skinned ---------------
+// One building, one roof: Daniel's carport and workshop are a poly-walled bay
+// with an insulated room framed inside its north end. That needs a shed to take
+// a wall covering (only open canopies could), and a roof that drains where the
+// building needs it rather than always copying the house.
+{
+  const s = freshSpec();
+  s.elements = [{ id: 'bay', name: 'Bay', category: 'outbuilding', construction: 'pole', x: 60, y: 60, w: 20, d: 20, h: 10, level: 1 }];
+  let r = apply(s, [
+    { type: 'update_object', targetId: 'bay', field: 'wallCovering', value: 'polycarb' },
+    { type: 'update_object', targetId: 'bay', field: 'roofFall', value: 'east' }
+  ]).spec;
+  let b = r.elements[0];
+  ok(b.wallCovering === 'polycarb', 'any structure can be skinned, not just the open ones');
+  ok(b.roofFall === 'east', 'and it sheds where the building needs it, not always where the house does');
+  r = apply(r, [{ type: 'update_object', targetId: 'bay', field: 'roofFall', value: '' }]).spec;
+  ok(r.elements[0].roofFall === undefined, 'clearing it hands the fall back to the house');
+  r = apply(r, [{ type: 'update_object', targetId: 'bay', field: 'roofFall', value: 'sideways' }]).spec;
+  ok(r.elements[0].roofFall === undefined, 'and a direction that is not a direction is refused');
+}
+
 const wantHttp = process.argv.includes('--http');
 (async () => {
   if (wantHttp) await httpSanity();

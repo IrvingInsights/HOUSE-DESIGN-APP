@@ -3271,7 +3271,20 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const ox0 = element.x; const oz0 = element.y;
           const ox1 = element.x + element.w; const oz1 = element.y + element.d;
           const obPart = (m) => { m.userData.roomId = element.id; m.userData.generated = true; group.add(m); return m; };
-          const obWallMat = new THREE.MeshStandardMaterial({ color: 0xbfae8e, roughness: 0.9, map: grainTexture('plaster'), bumpMap: bumpTexture('plaster'), bumpScale: 0.1 });
+          // A STRUCTURE CAN BE SKINNED IN ANYTHING, not just plaster. Daniel's
+          // carport and workshop are ONE building under ONE roof: a poly-walled
+          // bay with an insulated room framed inside its north end, which is
+          // how such a building actually goes up. That needs a shed to take a
+          // wallCovering the way a canopy already could — so the same field
+          // now works on every structure instead of only the open ones.
+          const obWallCov = ROOF_COVERINGS[element.wallCovering] || null;
+          const obWallMat = obWallCov
+            ? new THREE.MeshStandardMaterial({
+              color: obWallCov.color, roughness: obWallCov.translucent ? 0.15 : 0.85,
+              transparent: Boolean(obWallCov.translucent), opacity: obWallCov.translucent ? 0.26 : 1,
+              side: THREE.DoubleSide
+            })
+            : new THREE.MeshStandardMaterial({ color: 0xbfae8e, roughness: 0.9, map: grainTexture('plaster'), bumpMap: bumpTexture('plaster'), bumpScale: 0.1 });
           const obDoorMat = new THREE.MeshStandardMaterial({ color: 0x7a5c3e, roughness: 0.75, map: grainTexture('wood') });
           obPart(box(element.w, 0.3, element.d, (ox0 + ox1) / 2, elevation + 0.15, (oz0 + oz1) / 2, obWallMat));
           // Each side: a solid run, or two runs and a header around a doorway.
@@ -3312,7 +3325,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             ? new THREE.MeshStandardMaterial({ color: obCover.color, roughness: obCover.translucent ? 0.15 : 0.8, transparent: Boolean(obCover.translucent), opacity: obCover.translucent ? 0.32 : 1, metalness: obCover.texture === 'metal' && !obCover.translucent ? 0.5 : 0 })
             : roofMat;
           const obOv = 1;
-          const low = roofSpec.lowSide || 'north';
+          // Which way THIS building sheds. It follows the house unless the
+          // structure says otherwise — Daniel's carport/workshop drains east
+          // while the house drains north, because of where it sits and where
+          // the water should go. Same field a storey plate already uses.
+          const low = ['north', 'south', 'east', 'west'].includes(element.roofFall)
+            ? element.roofFall : (roofSpec.lowSide || 'north');
           const fallsAlongZ = low === 'north' || low === 'south';
           const runFt = fallsAlongZ ? element.d + obOv * 2 : element.w + obOv * 2;
           const rise = Math.max(0.8, runFt * 0.18);
@@ -3450,7 +3468,8 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             // disagreeing about where the weather goes.
             const spanW = element.w + ow * 2;
             const spanD = element.d + ow * 2;
-            const lowC = roofSpec.lowSide || 'north';
+            const lowC = ['north', 'south', 'east', 'west'].includes(element.roofFall)
+              ? element.roofFall : (roofSpec.lowSide || 'north');
             const alongZC = lowC === 'north' || lowC === 'south';
             const rise = Math.max(0.8, (alongZC ? spanD : spanW) * 0.12);
             const panel = box(spanW, 0.16, spanD, cxm, eave + rise / 2, czm, roofMatC);
