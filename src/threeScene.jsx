@@ -10,7 +10,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { FRAME_MEMBERS } from './frameDrawings.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
-  OPENING_TYPES, openingVerticalBand, resolveFrameType, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, decomposeFootprint, subtractRect,
+  OPENING_TYPES, openingVerticalBand, openingWallPlane, resolveFrameType, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, decomposeFootprint, subtractRect,
   subtractRectFromFootprint, pointInFootprint, edgeForOpening, gradeElevationAt, basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, resolveRoofCovering, resolveFurnishing, storeyElevationFt, storeyHeightFt,
   isRoundFootprint, clipRectToRoundShell
 } from '../backend/bim-core.mjs';
@@ -3403,8 +3403,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // Plan position of the opening centre — used by raked height, the shade
         // eyebrow, and the dormer.
         const oHoriz = opening.wall === 'north' || opening.wall === 'south';
-        const oPx = oHoriz ? (Number(opening.x) || 0) + size / 2 : (opening.wall === 'east' ? width : 0);
-        const oPz = oHoriz ? (opening.wall === 'south' ? depth : 0) : (Number(opening.y) || 0) + size / 2;
+        // An upper-storey window sits on ITS STOREY's wall, which is that
+        // storey's own outline — not the footprint. They are the same thing
+        // until you set a storey back, and then they are 7 ft apart and the
+        // window hangs in mid-air over the roof below. (openingWallPlane is
+        // the one answer; the band law samples the roof at the same plane.)
+        const oPlane = openingWallPlane(spec, opening.wall, oLevel);
+        const oPx = oHoriz ? (Number(opening.x) || 0) + size / 2 : oPlane;
+        const oPz = oHoriz ? oPlane : (Number(opening.y) || 0) + size / 2;
         // A raked gable window climbs to just under the roof, so it fills the
         // gable peak instead of stopping square. Sample the roof at both ends of
         // the window and take the LOWER, so the square top never pokes through
@@ -3619,8 +3625,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // chosen style: SHED (one low slope) or GABLE (a peaked doghouse).
         if (layers.roof && oLevel > 1 && opening.wall !== 'roof' && profile.glazed) {
           const horiz = opening.wall === 'north' || opening.wall === 'south';
-          const px = horiz ? (Number(opening.x) || 0) + size / 2 : (opening.wall === 'east' ? width : 0);
-          const pz = horiz ? (opening.wall === 'south' ? depth : 0) : (Number(opening.y) || 0) + size / 2;
+          // Same plane as the window itself — a dormer built on the footprint
+          // for a set-back storey would sprout 7 ft away from its own window.
+          const dPlane = openingWallPlane(spec, opening.wall, oLevel);
+          const px = horiz ? (Number(opening.x) || 0) + size / 2 : dPlane;
+          const pz = horiz ? dPlane : (Number(opening.y) || 0) + size / 2;
           const windowTop = sill + openH;
           const roofHere = roofUnderAt(px, pz);
           const explicit = opening.dormerStyle === 'gable' || opening.dormerStyle === 'shed';

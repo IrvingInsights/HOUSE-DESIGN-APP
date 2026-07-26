@@ -10,7 +10,7 @@ import {
   WALL_ASSEMBLIES, FRAME_TYPES, FLOORING_TYPES, SUBFLOOR_TYPES, OPENING_TYPES,
   gradeElevationAt, maxFoundationExposureFt, resolveWallSide, footprintEdges,
   basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, storeyElevationFt, storeyHeightFt, roofProfile,
-  openingVerticalBand
+  openingVerticalBand, openingWallPlane
 } from '../backend/bim-core.mjs';
 // The stair GEOMETRY lives engine-side (bim-core only validates the op values).
 import * as engine from '../src/engine.js';
@@ -762,38 +762,47 @@ async function httpSanity() {
   ok(cov?.deckRail === 'cable' && cov?.deckRoof === 'gable', 'add_element keeps the covered deck\'s railing and roof choices');
 }
 
-// --- a storey set back from a wall has NO wall on that side ------------------
-// Daniel's south face, 2026-07-26. The second storey is 28x32 on a 28x39 house
-// — set back 7 ft from the south wall. Five south windows were marked for
-// floor 2, where there is no floor-2 wall to hold them. The band law's
-// spansHere() asked only "does the plate cover this stretch ALONG the wall"
-// (it does — full width) and never "does the plate REACH this wall" (it does
-// not). The 3D caught it sideways, via its roof test finding open sky; the
-// elevation view, which passes no roof function, drew them two storeys up.
-// Same spec, two answers, from the law that exists to give one.
+// --- an upper storey's windows live on THAT STOREY'S wall -------------------
+// Daniel's south face, 2026-07-26. His house was 28x32 with a 28x32 second
+// storey — the two south edges coincided, and everything looked right. He then
+// deepened the house to 39 ft to make room for a greenhouse and an entry as
+// their own walled-off spaces, and left the second storey at 32. Its walls
+// moved with it (the scene has always drawn those from the plate); its WINDOWS
+// stayed pinned to the footprint, 7 ft further south, hanging over the
+// greenhouse roof where no second storey exists. One number, two owners.
+// openingWallPlane is now the single answer, and the band law samples the roof
+// at the same place, so a set-back storey keeps its windows instead of
+// dropping them to the floor below.
 {
   const s = freshSpec();
   s.shell.storeys = 2;
   s.shell.widthFt = 28; s.shell.depthFt = 39;
   s.elements = [{ id: 'storey-2-extent', name: 'Storey 2 extent', category: 'floor', x: 0, y: 0, w: 28, d: 32, h: 0.4, level: 2, z: 12 }];
   s.openings = [
-    { type: 'window', wall: 'south', x: 10, widthFt: 6, sillFt: 1.5, level: 2, label: 'orphan south' },
-    { type: 'window', wall: 'east', y: 10, widthFt: 6, sillFt: 1.5, level: 2, label: 'good east' },
-    { type: 'window', wall: 'north', x: 10, widthFt: 6, sillFt: 1.5, level: 2, label: 'good north' }
+    { type: 'window', wall: 'south', x: 10, widthFt: 6, sillFt: 1.5, level: 2, label: 'over the greenhouse roof' },
+    { type: 'window', wall: 'south', x: 10, widthFt: 6, sillFt: 1.5, level: 1, label: 'in the greenhouse wall' },
+    { type: 'window', wall: 'east', y: 10, widthFt: 6, sillFt: 1.5, level: 2, label: 'east upstairs' }
   ];
+  ok(openingWallPlane(s, 'south', 1) === 39, 'the GROUND floor south wall is the footprint — 39 ft back');
+  ok(openingWallPlane(s, 'south', 2) === 32, "the SECOND floor's south wall is its own outline — 32 ft back, over the single-storey strip");
+  ok(openingWallPlane(s, 'east', 2) === 28, 'a side the storey does reach keeps the footprint plane');
   const bandOf = (spec, i) => openingVerticalBand(spec, spec.openings[i]);
-  ok(bandOf(s, 0).level === 1, 'a window on floor 2 of a wall floor 2 does not reach drops to the wall that is really there');
-  ok(bandOf(s, 0).reason === 'no-storey-here', 'and it says WHY, so the drawing can dash it and the flag can name it');
-  ok(bandOf(s, 1).level === 2, 'the east wall, which the storey DOES reach, keeps its second-floor window');
-  ok(bandOf(s, 2).level === 2, 'so does the north');
-  // Stretch the storey to the south wall and the window belongs there again.
-  const grown = apply(s, [{ type: 'resize_object', targetId: 'storey-2-extent', name: 'Storey 2 extent', w: 28, d: 39, h: 0.4 }]).spec;
-  ok(bandOf(grown, 0).level === 2, 'stretch the storey out to that wall and the window is home — the fix the flag offers');
-  // A full-footprint storey must be unaffected: this is the common case.
+  ok(bandOf(s, 0).level === 2, 'a second-floor window on a set-back wall STAYS on the second floor');
+  ok(bandOf(s, 1).level === 1, 'and a ground-floor window on the same side stays on the ground');
+  ok(bandOf(s, 2).level === 2, 'the east upstairs window is untouched');
+  // The two planes must not be confused when the storey is full-footprint.
   const full = freshSpec();
   full.shell.storeys = 2;
   full.openings = [{ type: 'window', wall: 'south', x: 10, widthFt: 6, sillFt: 1.5, level: 2 }];
-  ok(openingVerticalBand(full, full.openings[0]).level === 2, 'a storey with no plate at all is a full-footprint stack and keeps every wall');
+  ok(openingWallPlane(full, 'south', 2) === (Number(full.shell.depthFt) || 28),
+    'a storey with no plate is a full-footprint stack: its wall IS the footprint');
+  ok(openingVerticalBand(full, full.openings[0]).level === 2, 'and its upstairs windows stay upstairs');
+  // A window past the plate ALONG the wall is still a real orphan.
+  const past = structuredClone(s);
+  past.elements[0] = { ...past.elements[0], x: 0, y: 0, w: 12, d: 32 };
+  past.openings = [{ type: 'window', wall: 'south', x: 22, widthFt: 4, sillFt: 1.5, level: 2 }];
+  ok(openingVerticalBand(past, past.openings[0]).level === 1,
+    'a window beyond where the storey reaches ALONG the wall still drops — that orphan is real');
 }
 
 // --- shade devices and the whole-house fan ----------------------------------

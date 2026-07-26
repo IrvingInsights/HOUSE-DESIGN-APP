@@ -1743,32 +1743,6 @@ export default function App() {
                   </button>
                 );
               })()}
-              {f.fixId === 'storey-reach-wall' && (() => {
-                const plate = (spec.elements || []).find((el) => el.id === f.plateId);
-                if (!plate) return null;
-                const W = Number(spec.shell.widthFt) || 0;
-                const D = Number(spec.shell.depthFt) || 0;
-                // Stretch the storey out to the wall its windows are on — the
-                // edge that moves is the one facing that wall, so the other
-                // three stay exactly where they are.
-                const grow = () => {
-                  const x = Number(plate.x) || 0; const y = Number(plate.y) || 0;
-                  const w = Number(plate.w) || 0; const d = Number(plate.d) || 0;
-                  const box = f.wall === 'south' ? { x, y, w, d: D - y }
-                    : f.wall === 'north' ? { x, y: 0, w, d: d + y }
-                    : f.wall === 'east' ? { x, y, w: W - x, d }
-                    : { x: 0, y, w: w + x, d };
-                  applyOps([
-                    { type: 'move_object', targetId: plate.id, name: plate.name, x: box.x || 0.01, y: box.y || 0.01 },
-                    { type: 'resize_object', targetId: plate.id, name: plate.name, w: box.w, d: box.d, h: Number(plate.h) || 0.4 }
-                  ]);
-                };
-                return (
-                  <button type="button" className="rz-fresh" style={{ alignSelf: 'flex-start', marginTop: 4 }} onClick={grow}>
-                    ⬒ Stretch floor {f.level} out to the {f.wall} wall ({Math.round(f.gapFt)} ft)
-                  </button>
-                );
-              })()}
               {f.fixId === 'heater-footing' && (() => {
                 const heat = (spec.elements || []).find((e) => e.id === f.elementId);
                 if (!heat) return null;

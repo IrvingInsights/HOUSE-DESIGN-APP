@@ -1739,6 +1739,39 @@ export function storeyElevationFt(shell, lvl) {
 // know the real roof pass `roofUnderAt(px,pz)`; spec-level callers get a
 // deliberately GENEROUS roof bound so checks never false-flag a design the
 // renderer covers with roof.
+// WHERE A WALL ACTUALLY STANDS, for a given side and storey.
+//
+// The ground walls are the footprint. An upper storey's walls are its OWN
+// outline, which is not the same thing the moment that storey is set back —
+// and setting one back is how you get a single-storey stretch with a roof deck
+// over it, which is exactly what Daniel's greenhouse and entry are.
+//
+// This was the whole "what happened to the S face" bug. His house was 28x32
+// and the second storey was 28x32, so the two edges coincided and everything
+// looked right. He then deepened the house to 39 ft to make room for the
+// greenhouse and the entry; the upper storey stayed at 32. Its walls moved
+// with it — the scene has always drawn those from the plate — but the windows
+// on them were still pinned to the footprint, 7 ft further south, floating
+// where no second storey exists. One number, two owners.
+export function openingWallPlane(spec, side, level) {
+  const shell = spec?.shell || {};
+  const width = Number(shell.widthFt) || 36;
+  const depth = Number(shell.depthFt) || 28;
+  const outer = { south: depth, north: 0, east: width, west: 0 };
+  const lv = Number(level) || 1;
+  if (lv <= 1 || !WALL_SIDES.includes(side)) return outer[side] ?? 0;
+  const plate = (spec?.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === lv);
+  if (!plate) return outer[side] ?? 0; // full-footprint storey: the outer wall IS its wall
+  const px0 = Number(plate.x) || 0;
+  const pz0 = Number(plate.y) || 0;
+  const px1 = px0 + Math.max(1, Number(plate.w) || width);
+  const pz1 = pz0 + Math.max(1, Number(plate.d) || depth);
+  if (side === 'south') return Math.min(pz1, depth);
+  if (side === 'north') return Math.max(pz0, 0);
+  if (side === 'east') return Math.min(px1, width);
+  return Math.max(px0, 0); // west
+}
+
 export function openingVerticalBand(spec, opening, { roofUnderAt = null } = {}) {
   const shell = spec?.shell || {};
   const profile = OPENING_TYPES[opening?.type] || OPENING_TYPES.window;
@@ -1759,8 +1792,14 @@ export function openingVerticalBand(spec, opening, { roofUnderAt = null } = {}) 
     + Math.max(width, depth) * Math.max(0.02, Number(shell.roofPitch) || 0.32) + 4;
   const roofAbs = (() => {
     if (typeof roofUnderAt !== 'function') return conservativeRoof;
-    const pz = side === 'south' ? depth : side === 'north' ? 0 : (a0 + w / 2);
-    const px = side === 'east' ? width : side === 'west' ? 0 : (a0 + w / 2);
+    // Sample the roof over the wall this opening is REALLY on. Sampling the
+    // footprint edge for a set-back storey asked "what is above the greenhouse
+    // roof?" — open sky — and dropped a perfectly good second-floor window to
+    // the ground floor for it.
+    const lvHere = Math.min(Math.max(1, Math.round(Number(opening.level || 1))), storeys);
+    const plane = openingWallPlane(spec, side, lvHere);
+    const pz = side === 'south' || side === 'north' ? plane : (a0 + w / 2);
+    const px = side === 'east' || side === 'west' ? plane : (a0 + w / 2);
     const e0 = horiz ? roofUnderAt(a0, pz) : roofUnderAt(px, a0);
     const e1 = horiz ? roofUnderAt(a0 + w, pz) : roofUnderAt(px, a0 + w);
     const r = Math.min(Number(e0), Number(e1));
@@ -1784,16 +1823,7 @@ export function openingVerticalBand(spec, opening, { roofUnderAt = null } = {}) 
     const lo = horiz ? (Number(el.x) || 0) : (Number(el.y) || 0);
     const hi = lo + Math.max(1, Number(horiz ? el.w : el.d) || (horiz ? width : depth));
     const c = a0 + w / 2;
-    if (!(c > lo - 0.1 && c < hi + 0.1)) return false;
-    const px0 = Number(el.x) || 0;
-    const pz0 = Number(el.y) || 0;
-    const px1 = px0 + Math.max(1, Number(el.w) || width);
-    const pz1 = pz0 + Math.max(1, Number(el.d) || depth);
-    const tol = 0.5;
-    if (side === 'south') return pz1 >= depth - tol;
-    if (side === 'north') return pz0 <= tol;
-    if (side === 'east') return px1 >= width - tol;
-    return px0 <= tol; // west
+    return c > lo - 0.1 && c < hi + 0.1;
   };
   let level = Math.min(Math.max(1, Math.round(Number(opening.level || 1))), storeys);
   let dropped = false;
