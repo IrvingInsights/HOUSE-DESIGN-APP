@@ -4374,7 +4374,26 @@ export function detectIssues(spec) {
         const gap = side === 'south' ? depthPr - (ry + rd) : side === 'north' ? ry : side === 'east' ? widthPr - (rx + rw) : rx;
         return gap < 4;
       });
-      if (!pokes && !covered && !glazedNear) {
+      // …and the glass this app's OWN remedy builds: a greenhouse opening in
+      // the wall the room sits against, over the room's own stretch of it.
+      // The check never looked for one, so pressing "glaze the greenhouse"
+      // added the glass and left the warning standing — the remedy could not
+      // clear its own flag, which is exactly how an app teaches you not to
+      // trust it.
+      const nearSide = [
+        { side: 'south', gap: depthPr - (ry + rd), from: rx, to: rx + rw, horiz: true },
+        { side: 'north', gap: ry, from: rx, to: rx + rw, horiz: true },
+        { side: 'east', gap: widthPr - (rx + rw), from: ry, to: ry + rd, horiz: false },
+        { side: 'west', gap: rx, from: ry, to: ry + rd, horiz: false }
+      ].sort((a, b) => a.gap - b.gap)[0];
+      const glazedOpening = (spec.openings || []).some((o) => {
+        if (o.type !== 'greenhouse' || o.wall !== nearSide.side) return false;
+        const at = Number(nearSide.horiz ? o.x : o.y);
+        if (!Number.isFinite(at)) return false;
+        const end = at + (Number(o.widthFt) || 0);
+        return end > nearSide.from - 2 && at < nearSide.to + 2;
+      });
+      if (!pokes && !covered && !glazedNear && !glazedOpening) {
         issues.push({ severity: 'warning', title: `${room.name || 'The greenhouse'} has no glass — it’s only a floor zone right now`, owner: 'Natural Builder', system: 'walls', fixId: 'greenhouse-glass', roomId: room.id, fix: 'A greenhouse needs a glazed face. One tap below slides the room past the south wall so its own kneewall + slanted glass build over just its stretch — the house wall behind it keeps its own system and weather face.' });
       }
     });
