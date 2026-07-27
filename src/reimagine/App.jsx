@@ -30,20 +30,30 @@ import './siteTable.css';
 
 // The Trail — the spine of the app. Shape comes FIRST (settle the footprint),
 // then Rooms fill it, then everything the shell implies. One chapter open at a
-// time; each opens with a plain-sentence greeting (the "foreman" voice).
-// planContext puts the plan view in that chapter's editing mode (footprint
-// edges for Shape, room dragging for Rooms, door/window gaps for Openings) —
-// so each chapter looks and acts like what it's for.
+// time. planContext puts the plan view in that chapter's editing mode
+// (footprint edges for Shape, room dragging for Rooms, door/window gaps for
+// Openings) — so each chapter looks and acts like what it's for.
+//
+// NO GREETINGS. Each chapter used to carry a `greet` sentence for a card over
+// the model; Daniel had that card removed in update 48 ("it is obscuring the
+// model") because it covered the drawing and repeated what the controls said.
+// The sentences outlived the card by 124 updates, unread by anyone. Removed in
+// update 172 — a chapter explains itself through its controls and its notes.
 const CHAPTERS = [
-  { id: 'shape', label: 'Shape', view: 'plan', planContext: 'shell', greet: (d) => `Shape the whole building — a plain rectangle, an L, T, U, or round — or pick any room or element from the dropdown to size just that one. Right now the house is ${fmtNum(d.floor)} sq ft.` },
-  { id: 'storeys', label: 'Storeys', view: 'storeys', planContext: 'rooms', greet: (d) => `How the house stacks — ${fmtNum(d.storeys)} storey${d.storeys === 1 ? '' : 's'} right now, drawn face-on in the Storeys view: drag a floor's top edge for height, its side handles for size. Add a floor, sink a basement — and jump from any floor straight to its rooms, its walls, or its roof.` },
-  { id: 'rooms', label: 'Rooms', view: 'plan', planContext: 'rooms', greet: () => 'Lay the rooms out flat, from above. Use the Floor selector (top left) to add a floor or switch between them — each floor keeps its own rooms and its own outline. Drag a room to move it, a corner to resize.' },
-  { id: 'foundation', label: 'Foundation', view: 'plan', planContext: 'foundation', greet: () => 'What the house sits on. Pick the main type below — and the foundation doesn’t have to match the rooms: drop extra footings and drag them under whatever they carry, even outside the walls.' },
-  { id: 'walls', label: 'Walls & openings', view: 'wall', planContext: 'windows', greet: () => 'One chapter for each wall and everything in it. Pick a side, then build it — height, system, weather face — and pierce it: doors, windows, and the greenhouse glass all land on the same wall you’re looking at.' },
-  { id: 'frame', label: 'Frame', view: 'frame', greet: () => 'What holds the roof up. Load-bearing walls carry it themselves — the usual choice for bale and cob — or a timber frame, posts and beams, or stick framing stands inside the walls. The Frame view shows just the bones on their foundation.' },
-  { id: 'roof', label: 'Roof', view: '3d', greet: () => 'Choose how the roof sheds weather and sun. Pick the shape, how steep it runs, what insulates it, and how far it reaches past the walls.' },
-  { id: 'systems', label: 'Systems', view: '3d', greet: () => 'Heat, water, power, waste — the working parts. Each shows its own receipts.' },
-  { id: 'finishes', label: 'Finishes', view: '3d', greet: () => 'Materials and surfaces, inside and out — natural or conventional, wall by wall.' }
+  { id: 'shape', label: 'Shape', view: 'plan', planContext: 'shell' },
+  { id: 'storeys', label: 'Storeys', view: 'storeys', planContext: 'rooms' },
+  { id: 'rooms', label: 'Rooms', view: 'plan', planContext: 'rooms' },
+  { id: 'foundation', label: 'Foundation', view: 'plan', planContext: 'foundation' },
+  { id: 'walls', label: 'Walls & openings', view: 'wall', planContext: 'windows' },
+  { id: 'frame', label: 'Frame', view: 'frame' },
+  { id: 'roof', label: 'Roof', view: '3d' },
+  // Everything that stands OUTSIDE the walls. Until update 172 these lived in
+  // Rooms — because Rooms owns the plan view, anything you *place* landed there
+  // regardless of what it was, and a garden shed ended up filed as a room.
+  // Rooms is now what its name says: the space inside. This is the rest.
+  { id: 'outbuildings', label: 'Outbuildings', view: 'plan', planContext: 'rooms' },
+  { id: 'systems', label: 'Systems', view: '3d' },
+  { id: 'finishes', label: 'Finishes', view: '3d' }
 ];
 
 // 3D "Show" presets — null = everything (ThreeScene's defaults). "Bones" is
@@ -65,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 160 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 197 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -906,6 +916,71 @@ export default function App() {
     roofType: el.roofType || ''
   }]);
 
+  // --- the placers, one each, shared by BOTH looks ---------------------------
+  // These were written inline in the classic panel's JSX, which is why the
+  // quick toolbar could never offer them: the site look would have had to
+  // duplicate the handler, and a duplicated handler is the thing that drifts.
+  // Lifted here in update 172 so the same click lands the same object whether
+  // it is pressed in the quick row or the More panel.
+  const addStair = () => {
+    const W = Number(spec.shell.widthFt) || 36;
+    const D = Number(spec.shell.depthFt) || 28;
+    // Name it apart from the ones already there — two objects called "Stairs"
+    // are indistinguishable in every list (and he turned the wrong one).
+    const n = (spec.elements || []).filter(isStair).length;
+    applyOps([{ type: 'add_element', name: n ? `Stairs ${n + 1}` : 'Stairs', category: 'stair', x: Math.round(W / 2 - 1.5), y: Math.round(D / 2 - 5), w: 3.5, d: 10, h: 8, level: Math.max(1, activeFloor) }]);
+  };
+  const setDeckSteps = (el, value) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'deckStairs', value }]);
+  const setStairField = (stairEl, field, value) => {
+    const numeric = ['split', 'widthFt', 'treadIn'].includes(field);
+    const v = numeric ? Number(value) : value;
+    const before = resolveStair(spec, stairEl);
+    const preview = { ...stairEl, stair: { ...STAIR_DEFAULTS, ...(stairEl.stair || {}), [field]: v } };
+    const after = resolveStair(spec, preview);
+    const ops = [{ type: 'set_stair', id: stairEl.id, field, value: v, w: after.bbox.w, d: after.bbox.d }];
+    // A STAIR MUST TURN IN PLACE. x/y is the footprint's north-west CORNER, so
+    // flipping 3.5 × 15.75 to 15.75 × 3.5 pivots the whole run around that
+    // corner and flings it across the site — you press "east" and the stair
+    // leaves the building, which reads as the compass being broken. Keep its
+    // CENTRE where it was; the same applies to any reshape (straight ↔ L ↔ U
+    // changes the footprint too). One dispatch, so the move can't race the
+    // shape change.
+    if (field === 'facing' || field === 'shape' || field === 'turn') {
+      const cx = (Number(stairEl.x) || 0) + before.bbox.w / 2;
+      const cy = (Number(stairEl.y) || 0) + before.bbox.d / 2;
+      ops.push({
+        type: 'move_object',
+        targetId: stairEl.id,
+        name: stairEl.name,
+        x: Math.round((cx - after.bbox.w / 2) * 10) / 10,
+        y: Math.round((cy - after.bbox.d / 2) * 10) / 10
+      });
+    }
+    applyOps(ops);
+  };
+  const addDeck = () => {
+    const W = Number(spec.shell.widthFt) || 36;
+    const D = Number(spec.shell.depthFt) || 28;
+    const lvl = activeFloor >= 1 ? activeFloor : 1;
+    applyOps([{ type: 'add_element', name: lvl > 1 ? `${floorLabel(spec, lvl)} deck` : 'Deck', category: 'deck', x: Math.round(W / 2 - 5), y: D + 0.5, w: 10, d: 8, h: 0.35, level: lvl, z: lvl >= 2 ? storeyElevationFt(spec.shell, lvl) : 0 }]);
+  };
+  const addPatio = () => {
+    const W = Number(spec.shell.widthFt) || 36;
+    const D = Number(spec.shell.depthFt) || 28;
+    applyOps([{ type: 'add_element', name: 'Patio', category: 'deck', x: Math.round(W / 2 - 6), y: D + 0.5, w: 12, d: 10, h: 0.25, level: 1, z: 0, deckSurface: 'stone', deckPlacement: 'grade' }]);
+  };
+  const addStructure = (p) => {
+    const W = Number(spec.shell.widthFt) || 36;
+    const lvl = activeFloor >= 1 ? activeFloor : 1;
+    const report = applyOps([{
+      type: 'add_element', name: p.name, category: p.category,
+      construction: p.construction || '', roofType: p.roofType || '',
+      x: W + 6, y: 3, w: p.w, d: p.d, h: p.h, level: lvl
+    }]);
+    const made = (report?.spec?.elements || []).slice(-1)[0];
+    if (made) setSelectedId(made.id);
+  };
+
   // --- cut / copy / paste of the selected room or element --------------------
   const selectedObj = () => spec.rooms.find((r) => r.id === selectedId)
     || (spec.elements || []).find((e) => e.id === selectedId) || null;
@@ -1523,7 +1598,7 @@ export default function App() {
             onMoveOpening={moveOpening}
             context={planContext}
             onContext={timelineOpen ? null : openContext}
-            activeFloor={activeChapter === 'rooms' || activeChapter === 'walls' || activeChapter === 'storeys' ? activeFloor : 1}
+            activeFloor={activeChapter === 'rooms' || activeChapter === 'walls' || activeChapter === 'storeys' || activeChapter === 'outbuildings' ? activeFloor : 1}
           />
         ) : (
           <ThreeScene
@@ -1667,6 +1742,7 @@ export default function App() {
               onPlaceOutdoorPad={placeOutdoorPad} onPlacePad={placeSlabPad} onPlaceRun={placeFoundationRun}
               fitInfo={fitWorthIt ? fitPreview : null} onFitWalls={fitWalls}
               onPickWall={setOpenWall} onGreenhouse={addOrGlazeGreenhouse}
+              onAddStair={addStair} onAddDeck={addDeck} onAddPatio={addPatio}
             />
             <button className={`st-more ${moreOpen ? 'on' : ''}`} onClick={() => setMoreOpen((v) => !v)}>
               {moreOpen ? '× Close' : 'More ▾'}
@@ -1854,7 +1930,7 @@ export default function App() {
         )}
       </div>}
 
-      {/* SURFACE 2 — the Trail (chapters + foreman greeting) */}
+      {/* SURFACE 2 — the Trail (the chapter strip and its controls) */}
       <aside className="rz-trail">
           <div className="rz-trail-body">
             <nav className="rz-chapters rz-chapters-top">
@@ -1880,22 +1956,49 @@ export default function App() {
               />
             )}
             {activeChapter === 'storeys' && (
-              <StoreysControls
-                spec={spec}
-                floors={floors}
-                hasBasement={hasBasement}
-                activeFloor={activeFloor}
-                onSelectFloor={setActiveFloor}
-                onAddFloor={addFloor}
-                onRemoveFloor={removeFloor}
-                onResizeFloor={resizeFloor}
-                onFloorHeight={setFloorHeight}
-                onChooseFoundation={chooseFoundation}
-                onShell={setShellField}
-                onOps={applyOps}
-                onSelectPlate={(id) => { setSelectedId(id); setViewMode('plan'); }}
-                onJump={jumpTo}
-              />
+              <>
+                <StoreysControls
+                  spec={spec}
+                  floors={floors}
+                  hasBasement={hasBasement}
+                  activeFloor={activeFloor}
+                  onSelectFloor={setActiveFloor}
+                  onAddFloor={addFloor}
+                  onRemoveFloor={removeFloor}
+                  onResizeFloor={resizeFloor}
+                  onFloorHeight={setFloorHeight}
+                  onChooseFoundation={chooseFoundation}
+                  onShell={setShellField}
+                  onOps={applyOps}
+                  onSelectPlate={(id) => { setSelectedId(id); setViewMode('plan'); }}
+                  onJump={jumpTo}
+                />
+                {/* STAIRS BELONG WITH THE STOREYS THEY CONNECT. They sat in
+                    Rooms until update 172 only because Rooms owned the plan
+                    view — but a stair is not a room, it is the thing that
+                    makes a second storey reachable, and every flag about one
+                    ("upper space has no stair") is a storeys question. */}
+                {(floors > 1 || hasBasement) && (
+                  <div className="rz-found">
+                    <div className="rz-found-head">Stairs — what connects the floors</div>
+                    <button
+                      type="button"
+                      className="rz-floorbar-outline"
+                      title="A stair on this floor — drag it where the climb should start. Its length is worked out from the climb, and you can turn it or fold it into an L or a U below."
+                      onClick={addStair}
+                    >＋ Stairs — connect the floors</button>
+                    <StairsAndSteps
+                      spec={spec}
+                      level={activeFloor >= 1 ? activeFloor : 1}
+                      selectedId={selectedId}
+                      onSelect={setSelectedId}
+                      onDeckSteps={setDeckSteps}
+                      onMoveStair={(el, x, y) => moveObject(el.id, x, y)}
+                      onStair={setStairField}
+                    />
+                  </div>
+                )}
+              </>
             )}
             {activeChapter === 'rooms' && (
               <div className="rz-found">
@@ -1928,79 +2031,6 @@ export default function App() {
                   </select>
                 </label>
                 <CustomRoomAdd onAdd={(preset) => addRoomPreset(preset)} />
-                {(floors > 1 || hasBasement) && (
-                  <button
-                    type="button"
-                    className="rz-floorbar-outline"
-                    title="A stair on this floor — drag it where the climb should start. Its length is worked out from the climb, and you can turn it or fold it into an L or a U below."
-                    onClick={() => {
-                      const W = Number(spec.shell.widthFt) || 36;
-                      const D = Number(spec.shell.depthFt) || 28;
-                      // Name it apart from the ones already there — two objects
-                      // called "Stairs" are indistinguishable in every list.
-                      const n = (spec.elements || []).filter(isStair).length;
-                      applyOps([{ type: 'add_element', name: n ? `Stairs ${n + 1}` : 'Stairs', category: 'stair', x: Math.round(W / 2 - 1.5), y: Math.round(D / 2 - 5), w: 3.5, d: 10, h: 8, level: activeFloor }]);
-                    }}
-                  >＋ Stairs — connect the floors</button>
-                )}
-                <StairsAndSteps
-                  spec={spec}
-                  level={activeFloor >= 1 ? activeFloor : 1}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onDeckSteps={(el, value) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'deckStairs', value }])}
-                  onMoveStair={(el, x, y) => moveObject(el.id, x, y)}
-                  onStair={(stairEl, field, value) => {
-                    const numeric = ['split', 'widthFt', 'treadIn'].includes(field);
-                    const v = numeric ? Number(value) : value;
-                    const before = resolveStair(spec, stairEl);
-                    const preview = { ...stairEl, stair: { ...STAIR_DEFAULTS, ...(stairEl.stair || {}), [field]: v } };
-                    const after = resolveStair(spec, preview);
-                    const ops = [{ type: 'set_stair', id: stairEl.id, field, value: v, w: after.bbox.w, d: after.bbox.d }];
-                    // A STAIR MUST TURN IN PLACE. x/y is the footprint's north-west
-                    // CORNER, so flipping 3.5 × 15.75 to 15.75 × 3.5 pivots the whole
-                    // run around that corner and flings it across the site — you press
-                    // "east" and the stair leaves the building, which reads as the
-                    // compass being broken. Keep its CENTRE where it was; the same
-                    // applies to any reshape (straight ↔ L ↔ U changes the footprint
-                    // too). One dispatch, so the move can't race the shape change.
-                    if (field === 'facing' || field === 'shape' || field === 'turn') {
-                      const cx = (Number(stairEl.x) || 0) + before.bbox.w / 2;
-                      const cy = (Number(stairEl.y) || 0) + before.bbox.d / 2;
-                      ops.push({
-                        type: 'move_object',
-                        targetId: stairEl.id,
-                        name: stairEl.name,
-                        x: Math.round((cx - after.bbox.w / 2) * 10) / 10,
-                        y: Math.round((cy - after.bbox.d / 2) * 10) / 10
-                      });
-                    }
-                    applyOps(ops);
-                  }}
-                />
-                <button
-                  type="button"
-                  className="rz-floorbar-outline"
-                  title="A railed outdoor deck on this floor — drops beside the south wall; drag it to any side, grab a corner to resize"
-                  onClick={() => {
-                    const W = Number(spec.shell.widthFt) || 36;
-                    const D = Number(spec.shell.depthFt) || 28;
-                    const lvl = activeFloor >= 1 ? activeFloor : 1;
-                    applyOps([{ type: 'add_element', name: lvl > 1 ? `${floorLabel(spec, lvl)} deck` : 'Deck', category: 'deck', x: Math.round(W / 2 - 5), y: D + 0.5, w: 10, d: 8, h: 0.35, level: lvl, z: lvl >= 2 ? storeyElevationFt(spec.shell, lvl) : 0 }]);
-                  }}
-                >＋ Deck — outdoor platform on this floor (10 × 8 ft)</button>
-                {activeFloor === 1 && (
-                  <button
-                    type="button"
-                    className="rz-floorbar-outline"
-                    title="A stone terrace laid right on the ground — no posts, no railing; drag it anywhere, grab a corner to resize"
-                    onClick={() => {
-                      const W = Number(spec.shell.widthFt) || 36;
-                      const D = Number(spec.shell.depthFt) || 28;
-                      applyOps([{ type: 'add_element', name: 'Patio', category: 'deck', x: Math.round(W / 2 - 6), y: D + 0.5, w: 12, d: 10, h: 0.25, level: 1, z: 0, deckSurface: 'stone', deckPlacement: 'grade' }]);
-                    }}
-                  >＋ Patio — stone terrace on the ground (12 × 10 ft)</button>
-                )}
                 <button
                   type="button"
                   className="rz-floorbar-outline"
@@ -2030,24 +2060,11 @@ export default function App() {
                   onSet={(wall, field, value) => applyOps([{ type: 'update_object', targetId: wall.id, name: wall.name, field, value }])}
                   onRemove={(wall) => removeObject(wall)}
                 />
-                {/* WHAT GOES IN IT — fixtures, built-ins, appliances, furniture
-                    and outdoor pieces. Each drops on the floor you're on, in the
-                    middle of the plan; drag it where it belongs, grab a corner to
+                {/* WHAT GOES IN IT — fixtures, built-ins, appliances and
+                    furniture. Each drops on the floor you're on, in the middle
+                    of the plan; drag it where it belongs, grab a corner to
                     resize, and its card renames/duplicates/removes it like any
                     other object. Every piece carries its cost and carbon. */}
-                <StructurePalette
-                  onAdd={(p) => {
-                    const W = Number(spec.shell.widthFt) || 36;
-                    const lvl = activeFloor >= 1 ? activeFloor : 1;
-                    const report = applyOps([{
-                      type: 'add_element', name: p.name, category: p.category,
-                      construction: p.construction || '', roofType: p.roofType || '',
-                      x: W + 6, y: 3, w: p.w, d: p.d, h: p.h, level: lvl
-                    }]);
-                    const made = (report?.spec?.elements || []).slice(-1)[0];
-                    if (made) setSelectedId(made.id);
-                  }}
-                />
                 <FurnishPalette
                   onAdd={(f) => {
                     const W = Number(spec.shell.widthFt) || 36;
@@ -2062,9 +2079,48 @@ export default function App() {
                     }]);
                   }}
                 />
-                <div className="rz-shape-note">Tap a placed deck to pick its surface, railing, roof, and how it sits. Two decks pushed together join into one wraparound.</div>
                 {roomNote && <div className="rz-shape-note">{roomNote}</div>}
                 <div className="rz-shape-note">Tap a room on the plan to rename or remove it (or press Delete). Right-click for more.</div>
+                <div className="rz-shape-note">
+                  Decks, patios and the buildings that stand apart moved to their own chapter
+                  {' '}<button type="button" className="rz-storey-link-inline" onClick={() => jumpTo('outbuildings')}>outbuildings ›</button>,
+                  and stairs went with the storeys they connect
+                  {' '}<button type="button" className="rz-storey-link-inline" onClick={() => jumpTo('storeys')}>storeys ›</button>.
+                </div>
+              </div>
+            )}
+            {activeChapter === 'outbuildings' && (
+              <div className="rz-found">
+                {floors > 1 && (
+                  <FloorBar
+                    spec={spec} floors={floors} activeFloor={activeFloor} hasBasement={hasBasement}
+                    onSelect={setActiveFloor} onAdd={addFloor} onRemove={removeFloor}
+                    onSelectOutline={(() => {
+                      const plate = (spec.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === activeFloor);
+                      return plate ? () => setSelectedId(plate.id) : null;
+                    })()}
+                  />
+                )}
+                <div className="rz-found-head">Off the house — decks &amp; patios</div>
+                <button
+                  type="button"
+                  className="rz-floorbar-outline"
+                  data-cap="cap-outbuildings-deck"
+                  title="A railed outdoor deck on this floor — drops beside the south wall; drag it to any side, grab a corner to resize"
+                  onClick={addDeck}
+                >＋ Deck — outdoor platform on this floor (10 × 8 ft)</button>
+                {activeFloor === 1 && (
+                  <button
+                    type="button"
+                    className="rz-floorbar-outline"
+                    data-cap="cap-outbuildings-patio"
+                    title="A stone terrace laid right on the ground — no posts, no railing; drag it anywhere, grab a corner to resize"
+                    onClick={addPatio}
+                  >＋ Patio — stone terrace on the ground (12 × 10 ft)</button>
+                )}
+                <div className="rz-shape-note">Tap a placed deck to pick its surface, railing, roof, and how it sits. Two decks pushed together join into one wraparound. A stair that climbs to a deck opens its railing where it lands — stairs live with the <button type="button" className="rz-storey-link-inline" onClick={() => jumpTo('storeys')}>storeys ›</button>.</div>
+                <StructurePalette onAdd={addStructure} />
+                <div className="rz-shape-note">The pad one of these sits on is foundation work — carport, patio, porch and walkway pads are in <button type="button" className="rz-storey-link-inline" onClick={() => jumpTo('foundation')}>foundation ›</button>.</div>
               </div>
             )}
             {activeChapter === 'systems' && (
@@ -2999,8 +3055,9 @@ export default function App() {
         // The ground pad the house stands on (tapped in 3D).
         if (idStr === 'site-pad') {
           return (
-            <Menu title="The ground around the house" h={170}>
+            <Menu title="The ground around the house" h={200}>
               <button onClick={() => { setActiveChapter('foundation'); setViewMode('plan'); closeMenu(); }}>Foundation &amp; outdoor pads…</button>
+              <button onClick={() => { setActiveChapter('outbuildings'); setViewMode('plan'); closeMenu(); }}>Decks, patios &amp; outbuildings…</button>
               <button onClick={() => { setActiveChapter('rooms'); setViewMode('plan'); closeMenu(); }}>Lay out the rooms…</button>
             </Menu>
           );
@@ -3652,9 +3709,9 @@ function ShapeControls({ spec, onShapeBuilding, onSizeBuilding, fitInfo = null, 
   );
 }
 
-// Floor selector — lives INSIDE the left bar (at the top of the Rooms and
-// Openings chapters), so the wide bar never covers it. Pick a floor to lay it
-// out; add or remove the top one right here.
+// Floor selector — lives INSIDE the left bar (at the top of the Rooms,
+// Outbuildings and Openings chapters), so the wide bar never covers it. Pick a
+// floor to lay it out; add or remove the top one right here.
 function FloorBar({ spec, floors, activeFloor, hasBasement, onSelect, onAdd, onRemove, onSelectOutline = null }) {
   return (
     <div className="rz-floorbar">
@@ -3967,7 +4024,7 @@ function StairsAndSteps({ spec, level, selectedId, onSelect, onStair, onDeckStep
   const decks = (spec.elements || []).filter((e) => e.category === 'deck' && Number(resolveDeck(spec, e).level || 1) === level);
   if (!stairs.length && !decks.length) return null;
   return (
-    <div className="rz-found" data-cap="cap-rooms-stair">
+    <div className="rz-found" data-cap="cap-storeys-stair">
       <div className="rz-found-head">Stairs &amp; steps on this floor</div>
       {stairs.map((el) => (
         <StairControls key={el.id} spec={spec} el={el} selected={selectedId === el.id}
@@ -4008,7 +4065,7 @@ function StairControls({ spec, el, selected, onSelect, onStair, onMove }) {
   const outside = ex < -0.5 || ey < -0.5 || ex + st.bbox.w > W + 0.5 || ey + st.bbox.d > D + 0.5;
   const where = `${Math.round(ex)}′ from the west wall · ${Math.round(ey)}′ from the north`;
   return (
-    <div className={selected ? 'rz-found rz-found-sel' : 'rz-found'} onPointerDown={onSelect} data-cap="cap-rooms-stair">
+    <div className={selected ? 'rz-found rz-found-sel' : 'rz-found'} onPointerDown={onSelect} data-cap="cap-storeys-stair">
       <div className="rz-found-head">{el.name}{selected ? ' — selected' : ''}</div>
       <div className="rz-shape-note" style={{ marginTop: -2 }}>{where}{outside ? ' · outside the walls' : ''}</div>
       {outside && (
@@ -5325,7 +5382,11 @@ const FLAG_CHAPTER = {
   shell: 'shape', rooms: 'rooms', foundation: 'foundation', walls: 'walls',
   frame: 'frame', roof: 'roof', windows: 'walls', water: 'systems',
   power: 'systems', heat: 'systems', waste: 'systems', systems: 'systems',
-  flooring: 'finishes', finishes: 'finishes', budget: 'finishes'
+  flooring: 'finishes', finishes: 'finishes', budget: 'finishes',
+  // A flag has to light the chapter that can FIX it. When decks and stairs
+  // left Rooms (update 172) their flags had to leave with them, or the dot
+  // would keep pointing at a chapter with no control for the problem.
+  stairs: 'storeys', outdoors: 'outbuildings'
 };
 function chapterFlagged(flags, chapterId) {
   return (flags || []).some((f) => FLAG_CHAPTER[f.system] === chapterId);
@@ -5337,7 +5398,7 @@ function SiteQuickRow({
   onFoundation, onSelectWall, onFrame, onRoofType, onPitch, onShedFall,
   onAddOpening, onCladding, onJump, onMore, onPickStorey,
   onPlaceOutdoorPad, onPlacePad, onPlaceRun, fitInfo, onFitWalls,
-  onPickWall, onGreenhouse
+  onPickWall, onGreenhouse, onAddStair, onAddDeck, onAddPatio
 }) {
   const shell = spec.shell || {};
   if (chapter === 'shape') {
@@ -5366,6 +5427,7 @@ function SiteQuickRow({
   }
   if (chapter === 'storeys') {
     const hasBasement = basementInfo(shell).present;
+    const stairCount = (spec.elements || []).filter(isStair).length;
     return (
       <>
         <span className="st-toolbar-label">Storeys</span>
@@ -5383,7 +5445,12 @@ function SiteQuickRow({
           title="A full storey below grade — it IS the foundation choice"
           onClick={() => onFoundation(hasBasement ? (utilitiesOf(spec).foundationType || 'rubble') : 'basement')}>
           Basement<small>{hasBasement ? 'built — tap to remove' : 'dig one below'}</small></button>
-        <button className="st-pill" data-cap="cap-more-storeys" onClick={onMore}>+ more…<small>each floor’s numbers</small></button>
+        {(floors > 1 || hasBasement) && (
+          <button className="st-pill" data-cap="cap-storeys-stair-add"
+            title="A stair on the floor you're on — drag it where the climb should start. Shape it (straight, L or U), turn it, and set where its runs break under More."
+            onClick={onAddStair}>+ Stairs<small>{stairCount ? `${stairCount} placed` : 'connect the floors'}</small></button>
+        )}
+        <button className="st-pill" data-cap="cap-more-storeys" onClick={onMore}>+ more…<small>each floor’s numbers · shape a stair</small></button>
       </>
     );
   }
@@ -5397,7 +5464,31 @@ function SiteQuickRow({
           <span key={r.id} className="st-chip">{r.name} <b>{Math.round((Number(r.w) || 0) * (Number(r.d) || 0))} sf</b></span>
         ))}
         {(spec.rooms || []).length > chips.length && <span className="st-toolbar-note">+{(spec.rooms || []).length - chips.length} more</span>}
-        <button className="st-pill" data-cap="cap-more-rooms" onClick={onMore}>+ add room<small>stairs · decks too</small></button>
+        <button className="st-pill" data-cap="cap-more-rooms" onClick={onMore}>+ add room<small>partitions · furniture too</small></button>
+      </>
+    );
+  }
+  // OUTBUILDINGS — everything outside the walls. Decks and patios are one tap
+  // (they are what people place most); the sheds, shops, barns, garage and
+  // carport are a palette of eleven, too many for a slim row, so they sit one
+  // More tap away with the signpost below.
+  if (chapter === 'outbuildings') {
+    const els = spec.elements || [];
+    const decks = els.filter((e) => e.category === 'deck').length;
+    const built = els.filter((e) => ['outbuilding', 'carport', 'porch'].includes(e.category)).length;
+    return (
+      <>
+        <span className="st-toolbar-label">Outbuildings</span>
+        <button className="st-pill" data-cap="cap-outbuildings-deck"
+          title="A railed outdoor deck on the floor you're on — drops beside the south wall; drag it to any side, grab a corner to resize"
+          onClick={onAddDeck}>+ Deck<small>{decks ? `${decks} placed` : '10 × 8 ft, railed'}</small></button>
+        {activeFloor <= 1 && (
+          <button className="st-pill" data-cap="cap-outbuildings-patio"
+            title="A stone terrace laid right on the ground — no posts, no railing; drag it anywhere, grab a corner to resize"
+            onClick={onAddPatio}>+ Patio<small>12 × 10 ft, on grade</small></button>
+        )}
+        {built > 0 && <span className="st-chip">{built} standing apart</span>}
+        <button className="st-pill" data-cap="cap-more-outbuildings" onClick={onMore}>+ more…<small>shed · shop · barn · garage · carport</small></button>
       </>
     );
   }

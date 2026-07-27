@@ -52,19 +52,26 @@
       "classic": "StoreysControls"
     },
     {
-      "id": "rooms.add",
-      "chapter": "rooms",
-      "label": "Add a room / stairs / deck (the More panel palette)",
-      "marker": "cap-more-rooms",
+      "id": "storeys.stair-add",
+      "chapter": "storeys",
+      "label": "Add a stair — the thing that makes the floor above reachable",
+      "marker": "cap-storeys-stair-add",
       "site": "quick"
     },
     {
-      "id": "rooms.stair",
-      "chapter": "rooms",
+      "id": "storeys.stair",
+      "chapter": "storeys",
       "label": "Shape a stair — turn it 90°, fold it into an L or a U, set where the two runs break",
-      "marker": "cap-rooms-stair",
+      "marker": "cap-storeys-stair",
       "site": "more",
       "classic": "StairControls"
+    },
+    {
+      "id": "rooms.add",
+      "chapter": "rooms",
+      "label": "Add a room, an interior wall, or a furnishing (the More panel palette)",
+      "marker": "cap-more-rooms",
+      "site": "quick"
     },
     {
       "id": "rooms.doorways",
@@ -290,11 +297,25 @@
       "classic": "FinishesControls"
     },
     {
-      "id": "structures.add",
-      "chapter": "",
-      "label": "Add a structure — shed, workshop, barn, garage, carport, porch",
+      "id": "outbuildings.deck",
+      "chapter": "outbuildings",
+      "label": "Add a deck — a railed outdoor platform on this floor",
+      "marker": "cap-outbuildings-deck",
+      "site": "quick"
+    },
+    {
+      "id": "outbuildings.patio",
+      "chapter": "outbuildings",
+      "label": "Add a patio — a stone terrace laid on the ground",
+      "marker": "cap-outbuildings-patio",
+      "site": "quick"
+    },
+    {
+      "id": "outbuildings.structures",
+      "chapter": "outbuildings",
+      "label": "Add a structure that stands apart — shed, workshop, studio, barn, garage, guest cabin, greenhouse, sauna, carport, porch",
       "marker": "cap-structures-add",
-      "site": "sheet",
+      "site": "more",
       "classic": "StructurePalette"
     }
   ]

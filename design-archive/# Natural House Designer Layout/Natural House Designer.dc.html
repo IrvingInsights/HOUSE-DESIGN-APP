@@ -1,0 +1,1964 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --canvas-0:#faf5ec; --canvas-1:#f2e8d5; --canvas-2:#e8d9c0; --canvas-3:#dccfb0;
+      --chrome-0:#28180a; --chrome-1:#48321c; --chrome-2:#6a4e34; --chrome-3:#9a8068;
+      --border-subtle:#d8c8a8; --border-default:#b8a070; --border-strong:#8a6c48;
+      --accent-0:#7a5828; --accent-1:#9a7240; --accent-2:#b88e58; --accent-bg:#f0e6d0;
+      --sage-0:#3c5c38; --sage-1:#4e7248; --sage-2:#d8ecd4;
+      --copper-0:#8a5a18; --copper-1:#ae7630; --copper-2:#f5e8cc;
+      --brick-0:#782c1c; --brick-1:#9e3c28; --brick-2:#f5dcd8;
+      --slate-0:#2c4858; --slate-1:#3c5e74; --slate-2:#d8e8f0;
+      --title-color:#3a5c2e;
+      --font-display:'Playfair Display',Georgia,serif;
+      --font-body:'DM Sans','Helvetica Neue',sans-serif;
+      --font-mono:'JetBrains Mono','Fira Code',monospace;
+      --sp-1:2px;--sp-2:4px;--sp-3:6px;--sp-4:8px;--sp-5:12px;--sp-6:16px;
+      --sp-7:20px;--sp-8:24px;--sp-9:32px;--sp-10:40px;
+      --radius-sm:2px;--radius-md:3px;--radius-lg:5px;
+      --shadow-sm:0 1px 2px rgba(40,24,10,.10);
+      --shadow-md:0 2px 8px rgba(40,24,10,.14);
+      --shadow-lg:0 4px 24px rgba(40,24,10,.22);
+      --shadow-inset:inset 0 1px 3px rgba(40,24,10,.12);
+      --ease:.14s ease;
+    }
+    .compact {
+      --font-size-base:11px; --sp-4:6px; --sp-5:9px; --sp-6:12px;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+    html,body{height:100%;overflow:hidden;}
+    body{font-family:var(--font-body);font-size:13px;color:var(--chrome-0);background:var(--canvas-0);-webkit-font-smoothing:antialiased;}
+
+    /* ── APP SHELL ── */
+    .app-shell{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+
+    /* ── APP BAR ── */
+    .app-bar{
+      height:42px;min-height:42px;
+      background:var(--chrome-0);
+      display:flex;align-items:center;padding:0 var(--sp-6);gap:var(--sp-4);
+      flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.06);
+    }
+    .app-logo{font-family:var(--font-display);font-size:14px;color:#e8d8b8;font-weight:600;letter-spacing:.01em;margin-right:var(--sp-4);}
+    .app-logo span{color:var(--accent-2);font-size:12px;font-weight:400;}
+    .app-divider{width:1px;height:20px;background:rgba(255,255,255,.1);margin:0 var(--sp-3);}
+    .app-btn{
+      display:inline-flex;align-items:center;gap:4px;
+      font-family:var(--font-body);font-size:11px;font-weight:500;
+      color:rgba(255,255,255,.55);background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.12);border-radius:var(--radius-md);
+      padding:4px 10px;cursor:pointer;transition:background var(--ease),color var(--ease);
+    }
+    .app-btn:hover{background:rgba(255,255,255,.12);color:rgba(255,255,255,.8);}
+    .app-btn.primary{background:var(--accent-0);border-color:var(--accent-0);color:#f5e8d0;font-weight:600;}
+    .app-btn.primary:hover{background:var(--accent-1);}
+    .app-warning{
+      display:inline-flex;align-items:center;gap:4px;
+      font-family:var(--font-mono);font-size:10px;color:var(--copper-1);
+      background:rgba(174,118,48,.12);border:1px solid rgba(174,118,48,.25);
+      border-radius:var(--radius-md);padding:3px 8px;cursor:pointer;
+    }
+    .app-spacer{flex:1;}
+
+    /* ── MODE BAR ── */
+    .mode-bar{
+      height:38px;min-height:38px;flex-shrink:0;
+      background:var(--canvas-1);border-bottom:1px solid var(--border-default);
+      display:flex;align-items:center;padding:0 var(--sp-6);gap:var(--sp-2);
+    }
+    .mode-btn{
+      display:flex;align-items:center;gap:var(--sp-3);
+      padding:5px 14px;border-radius:var(--radius-md);
+      font-size:12px;font-weight:500;font-family:var(--font-body);
+      cursor:pointer;border:1px solid transparent;
+      color:var(--chrome-2);background:transparent;
+      transition:background var(--ease),color var(--ease),border-color var(--ease);
+    }
+    .mode-btn:hover{background:var(--canvas-2);color:var(--chrome-1);}
+    .mode-btn.active{background:var(--accent-0);color:var(--canvas-0);border-color:var(--accent-0);}
+    .mode-btn-icon{font-size:13px;}
+    .mode-bar-spacer{flex:1;}
+    .mode-compact-toggle{
+      display:flex;align-items:center;gap:var(--sp-3);
+      font-family:var(--font-mono);font-size:10px;color:var(--chrome-3);cursor:pointer;
+    }
+    .toggle-sm{
+      width:28px;height:16px;border-radius:8px;
+      background:var(--canvas-3);border:1px solid var(--border-default);
+      position:relative;cursor:pointer;transition:background var(--ease);flex-shrink:0;
+    }
+    .toggle-sm.on{background:var(--accent-0);border-color:var(--accent-0);}
+    .toggle-sm::after{
+      content:'';position:absolute;top:2px;left:2px;
+      width:10px;height:10px;border-radius:50%;
+      background:white;box-shadow:0 1px 2px rgba(40,24,10,.2);
+      transition:left var(--ease);
+    }
+    .toggle-sm.on::after{left:14px;}
+
+    /* ── CONTENT AREA ── */
+    .content-area{flex:1;display:flex;overflow:hidden;}
+    .mode-view{display:none;flex:1;overflow:hidden;}
+    .mode-view.active{display:flex;}
+
+    /* ── STATUS BAR ── */
+    .status-bar{
+      height:26px;min-height:26px;flex-shrink:0;
+      background:var(--chrome-0);border-top:1px solid rgba(255,255,255,.06);
+      display:flex;align-items:center;padding:0 var(--sp-6);gap:var(--sp-6);
+    }
+    .status-item{
+      font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;
+      text-transform:uppercase;color:rgba(255,255,255,.35);
+      display:flex;align-items:center;gap:var(--sp-3);
+    }
+    .status-value{color:rgba(255,255,255,.65);}
+    .status-dot{width:4px;height:4px;border-radius:50%;flex-shrink:0;}
+
+    /* ── START MODE ── */
+    .start-view{
+      flex:1;display:flex;flex-direction:column;
+      align-items:center;justify-content:center;
+      background:var(--canvas-0);padding:var(--sp-10);gap:var(--sp-8);
+    }
+    .start-hero{text-align:center;max-width:480px;}
+    .start-eyebrow{font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--chrome-3);margin-bottom:var(--sp-4);}
+    .start-title{font-family:var(--font-display);font-size:32px;font-weight:600;color:var(--title-color);line-height:1.2;margin-bottom:var(--sp-4);}
+    .start-desc{font-size:14px;color:var(--chrome-2);line-height:1.65;}
+    .start-paths{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-5);max-width:560px;width:100%;}
+    .start-path{
+      display:flex;flex-direction:column;gap:var(--sp-3);
+      padding:var(--sp-6) var(--sp-7);
+      background:var(--canvas-1);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);
+      cursor:pointer;transition:background var(--ease),border-color var(--ease),box-shadow var(--ease);
+    }
+    .start-path:hover{background:var(--canvas-2);border-color:var(--border-default);box-shadow:var(--shadow-sm);}
+    .start-path.featured{background:var(--accent-bg);border-color:var(--border-default);}
+    .start-path.featured:hover{border-color:var(--accent-0);}
+    .start-path-icon{font-size:22px;}
+    .start-path-name{font-size:14px;font-weight:600;color:var(--chrome-0);}
+    .start-path-desc{font-size:11px;color:var(--chrome-3);line-height:1.5;}
+    .start-path-arrow{font-size:18px;color:var(--accent-0);align-self:flex-end;margin-top:auto;padding-top:var(--sp-4);}
+
+    /* ornament divider */
+    .orn{display:flex;align-items:center;gap:var(--sp-5);max-width:560px;width:100%;}
+    .orn::before,.orn::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--border-subtle),transparent);}
+    .orn span{font-family:var(--font-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--chrome-3);white-space:nowrap;}
+
+    /* ── VIEWPORT ── */
+    .viewport{
+      flex:1;background:#18120c;position:relative;overflow:hidden;
+      background-image:
+        linear-gradient(rgba(255,220,160,.03) 1px,transparent 1px),
+        linear-gradient(90deg,rgba(255,220,160,.03) 1px,transparent 1px);
+      background-size:40px 40px;
+    }
+    .viewport-label{
+      position:absolute;top:10px;left:12px;
+      font-family:var(--font-mono);font-size:9px;letter-spacing:.10em;text-transform:uppercase;
+      color:rgba(255,255,255,.18);user-select:none;
+    }
+    .viewport-house{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;}
+    .viewport-axis{
+      position:absolute;bottom:12px;left:12px;
+      display:flex;flex-direction:column;gap:2px;
+    }
+    .axis-item{display:flex;align-items:center;gap:4px;}
+    .axis-line{height:2px;border-radius:1px;}
+    .axis-label{font-family:var(--font-mono);font-size:8px;font-weight:500;}
+    .viewport-tools{
+      position:absolute;top:10px;right:12px;
+      display:flex;gap:var(--sp-2);
+    }
+    .viewport-tool{
+      background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);
+      border-radius:var(--radius-sm);padding:4px 8px;
+      font-family:var(--font-mono);font-size:9px;color:rgba(255,255,255,.45);
+      cursor:pointer;transition:background var(--ease);
+    }
+    .viewport-tool:hover{background:rgba(255,255,255,.14);color:rgba(255,255,255,.7);}
+    .viewport-tool.on{background:rgba(122,88,40,.4);border-color:rgba(122,88,40,.6);color:rgba(255,220,160,.7);}
+
+    /* layers floating panel */
+    .layers-float{
+      position:absolute;bottom:12px;right:12px;
+    }
+    .layers-toggle-btn{
+      display:flex;align-items:center;gap:var(--sp-3);
+      background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.18);
+      border-radius:var(--radius-md);padding:5px 10px;
+      font-family:var(--font-mono);font-size:9px;color:rgba(255,255,255,.6);
+      cursor:pointer;backdrop-filter:blur(4px);transition:background var(--ease);
+    }
+    .layers-toggle-btn:hover{background:rgba(255,255,255,.16);}
+    .layers-panel{
+      position:absolute;bottom:34px;right:0;
+      background:rgba(22,15,8,.94);border:1px solid rgba(255,255,255,.14);
+      border-radius:var(--radius-md);padding:var(--sp-4) var(--sp-5);
+      min-width:150px;display:none;flex-direction:column;gap:3px;
+      backdrop-filter:blur(8px);
+    }
+    .layers-panel.open{display:flex;}
+    .layers-section-label{
+      font-family:var(--font-mono);font-size:8px;letter-spacing:.12em;text-transform:uppercase;
+      color:rgba(255,255,255,.25);margin-bottom:2px;margin-top:4px;padding-bottom:2px;
+      border-bottom:1px solid rgba(255,255,255,.08);
+    }
+    .layers-section-label:first-child{margin-top:0;}
+    .layer-row{
+      display:flex;align-items:center;gap:var(--sp-3);
+      padding:2px var(--sp-2);border-radius:2px;cursor:pointer;
+    }
+    .layer-row:hover{background:rgba(255,255,255,.06);}
+    .layer-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+    .layer-name{font-family:var(--font-mono);font-size:9px;color:rgba(255,255,255,.65);flex:1;}
+    .layer-eye{font-size:10px;color:rgba(255,255,255,.5);transition:opacity var(--ease);}
+    .layer-eye.off{opacity:.22;}
+
+    /* ── PREVIEW SIDEBAR ── */
+    .preview-sidebar{
+      width:110px;min-width:110px;flex-shrink:0;
+      background:var(--canvas-1);border-right:1px solid var(--border-subtle);
+      overflow-y:auto;padding:var(--sp-3);display:flex;flex-direction:column;gap:2px;
+    }
+    .preview-sidebar-label{
+      font-family:var(--font-mono);font-size:8px;letter-spacing:.12em;text-transform:uppercase;
+      color:var(--chrome-3);padding:var(--sp-2) var(--sp-3) var(--sp-3);
+    }
+    .acc-item{border:1px solid var(--border-subtle);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:2px;}
+    .acc-header{
+      display:flex;align-items:center;gap:var(--sp-3);padding:5px var(--sp-3);
+      background:var(--canvas-2);cursor:pointer;user-select:none;
+    }
+    .acc-icon{font-size:10px;}
+    .acc-name{font-size:10px;font-weight:500;color:var(--chrome-1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .acc-body{
+      padding:4px var(--sp-3) 5px;background:var(--canvas-0);
+      border-top:1px solid var(--border-subtle);
+    }
+    .acc-value{font-family:var(--font-mono);font-size:8px;color:var(--chrome-2);line-height:1.8;}
+    .acc-warn{
+      width:14px;height:14px;border-radius:7px;
+      background:var(--copper-0);color:white;font-family:var(--font-mono);
+      font-size:8px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;
+    }
+
+    /* ── EDIT PANEL ── */
+    .edit-layout{flex:1;display:flex;overflow:hidden;}
+    .edit-panel{
+      width:272px;min-width:272px;flex-shrink:0;
+      display:flex;flex-direction:column;overflow:hidden;
+      background:var(--canvas-1);border-right:1px solid var(--border-default);
+    }
+    .compact .edit-panel{width:240px;min-width:240px;}
+
+    .edit-panel-header{
+      display:flex;align-items:center;gap:var(--sp-3);
+      padding:var(--sp-4) var(--sp-6);
+      background:var(--canvas-2);border-bottom:1px solid var(--border-default);
+      flex-shrink:0;
+    }
+    .edit-panel-title{font-family:var(--font-display);font-size:14px;font-weight:600;color:var(--title-color);flex:1;}
+    .panel-compact-btn{
+      font-family:var(--font-mono);font-size:9px;color:var(--chrome-3);
+      background:var(--canvas-1);border:1px solid var(--border-subtle);
+      border-radius:var(--radius-sm);padding:2px 6px;cursor:pointer;
+    }
+
+    /* Section nav tabs */
+    .section-nav{
+      display:flex;overflow-x:auto;flex-shrink:0;
+      background:var(--canvas-1);border-bottom:1px solid var(--border-default);
+    }
+    .section-nav::-webkit-scrollbar{height:2px;}
+    .section-nav::-webkit-scrollbar-thumb{background:var(--border-default);}
+    .sec-tab{
+      display:flex;align-items:center;gap:3px;
+      padding:6px 10px;
+      font-size:10px;font-family:var(--font-body);font-weight:500;
+      color:var(--chrome-2);border-bottom:2px solid transparent;
+      cursor:pointer;white-space:nowrap;background:transparent;border-top:none;border-left:none;border-right:none;
+      transition:color var(--ease),border-color var(--ease),background var(--ease);
+    }
+    .sec-tab:hover{background:var(--canvas-2);color:var(--chrome-1);}
+    .sec-tab.active{color:var(--accent-0);border-bottom-color:var(--accent-0);background:var(--canvas-0);}
+    .sec-tab-warn{
+      width:13px;height:13px;border-radius:7px;
+      background:var(--copper-0);color:white;font-family:var(--font-mono);
+      font-size:7px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;
+    }
+
+    /* Section fields */
+    .section-fields{flex:1;overflow-y:auto;padding:var(--sp-5) var(--sp-5);}
+    .section-fields::-webkit-scrollbar{width:4px;}
+    .section-fields::-webkit-scrollbar-thumb{background:var(--border-subtle);}
+    .sec-panel{display:none;flex-direction:column;gap:var(--sp-5);}
+    .sec-panel.active{display:flex;}
+
+    .field-group{display:flex;flex-direction:column;gap:2px;}
+    .field-label{
+      font-family:var(--font-mono);font-size:9px;letter-spacing:.10em;text-transform:uppercase;
+      color:var(--chrome-3);
+    }
+    .field-select{
+      appearance:none;width:100%;
+      background:var(--canvas-0) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236a4e34' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E") no-repeat right 8px center;
+      border:1px solid var(--border-default);border-radius:var(--radius-md);
+      padding:5px 24px 5px 8px;font-family:var(--font-body);font-size:11px;color:var(--chrome-0);
+      cursor:pointer;outline:none;box-shadow:var(--shadow-inset);transition:border-color var(--ease);
+    }
+    .field-select:focus{border-color:var(--accent-0);}
+    .slider-row{display:flex;align-items:center;gap:var(--sp-3);}
+    .slider-track{
+      flex:1;height:3px;background:var(--canvas-3);border-radius:2px;
+      border:1px solid var(--border-subtle);position:relative;
+    }
+    .slider-fill{height:100%;border-radius:2px;background:var(--accent-0);}
+    .slider-thumb{
+      width:13px;height:13px;border-radius:50%;
+      background:var(--accent-0);border:2px solid var(--canvas-0);
+      box-shadow:0 1px 3px rgba(40,24,10,.25);
+      position:absolute;top:50%;transform:translate(-50%,-50%);
+      cursor:pointer;
+    }
+    .slider-val{font-family:var(--font-mono);font-size:10px;color:var(--chrome-1);min-width:36px;text-align:right;}
+    .field-input{
+      width:100%;background:var(--canvas-0);border:1px solid var(--border-default);
+      border-radius:var(--radius-md);padding:5px 8px;
+      font-family:var(--font-body);font-size:11px;color:var(--chrome-0);
+      outline:none;box-shadow:var(--shadow-inset);transition:border-color var(--ease);
+    }
+    .field-input:focus{border-color:var(--accent-0);}
+    .field-hint{font-size:10px;color:var(--chrome-3);line-height:1.5;}
+    .field-inline-badge{
+      display:inline-flex;align-items:center;gap:4px;
+      font-family:var(--font-mono);font-size:9px;
+      border-radius:var(--radius-sm);padding:2px 6px;
+    }
+    .badge-sage{background:var(--sage-2);color:var(--sage-0);border:1px solid rgba(60,92,56,.2);}
+    .badge-copper{background:var(--copper-2);color:var(--copper-0);border:1px solid rgba(138,90,24,.2);}
+    .badge-brick{background:var(--brick-2);color:var(--brick-0);border:1px solid rgba(120,44,28,.2);}
+    .field-divider{height:1px;background:var(--border-subtle);margin:var(--sp-3) 0;}
+    .field-section-label{
+      font-family:var(--font-display);font-size:12px;font-weight:600;color:var(--title-color);
+      margin-bottom:var(--sp-2);margin-top:var(--sp-2);
+    }
+    .check-row{display:flex;align-items:center;gap:var(--sp-3);cursor:pointer;font-size:11px;color:var(--chrome-1);}
+    .check-box{
+      width:13px;height:13px;border-radius:2px;
+      border:1.5px solid var(--border-default);background:var(--canvas-0);
+      display:flex;align-items:center;justify-content:center;flex-shrink:0;
+      transition:background var(--ease),border-color var(--ease);
+    }
+    .check-box.on{background:var(--accent-0);border-color:var(--accent-0);}
+    .check-box.on::after{content:'';width:7px;height:4px;border-left:1.5px solid white;border-bottom:1.5px solid white;transform:rotate(-45deg) translateY(-1px);}
+
+    /* outbuilding list */
+    .ob-item{
+      background:var(--canvas-0);border:1px solid var(--border-subtle);
+      border-radius:var(--radius-md);padding:var(--sp-4) var(--sp-5);
+      display:flex;justify-content:space-between;align-items:center;
+    }
+    .ob-name{font-size:11px;font-weight:500;color:var(--chrome-0);}
+    .ob-meta{font-family:var(--font-mono);font-size:9px;color:var(--chrome-3);}
+    .ob-del{font-size:11px;color:var(--chrome-3);cursor:pointer;padding:2px 4px;border-radius:2px;}
+    .ob-del:hover{background:var(--brick-2);color:var(--brick-0);}
+    .add-btn{
+      width:100%;padding:6px;background:transparent;
+      border:1px dashed var(--border-default);border-radius:var(--radius-md);
+      font-size:11px;color:var(--chrome-2);cursor:pointer;text-align:center;
+      transition:background var(--ease),border-color var(--ease),color var(--ease);
+    }
+    .add-btn:hover{background:var(--canvas-2);border-color:var(--border-strong);color:var(--chrome-0);}
+
+    /* alert inline */
+    .alert-inline{
+      display:flex;gap:var(--sp-3);padding:var(--sp-3) var(--sp-4);
+      border-radius:var(--radius-md);border-left:2px solid transparent;
+      font-size:10px;line-height:1.5;
+    }
+    .alert-inline.warning{background:var(--copper-2);border-color:var(--copper-0);color:var(--copper-0);}
+    .alert-inline.success{background:var(--sage-2);border-color:var(--sage-0);color:var(--sage-0);}
+    .alert-inline.error{background:var(--brick-2);border-color:var(--brick-0);color:var(--brick-0);}
+
+    /* ── OUTPUT MODE ── */
+    .output-layout{flex:1;display:flex;overflow:hidden;}
+    .output-sidebar{
+      width:190px;min-width:190px;flex-shrink:0;
+      background:var(--canvas-1);border-right:1px solid var(--border-default);
+      display:flex;flex-direction:column;
+    }
+    .output-sidebar-header{
+      padding:var(--sp-5) var(--sp-6);border-bottom:1px solid var(--border-subtle);
+      background:var(--canvas-2);
+    }
+    .output-sidebar-title{font-family:var(--font-display);font-size:13px;font-weight:600;color:var(--title-color);}
+    .output-sidebar-sub{font-size:10px;color:var(--chrome-3);margin-top:2px;}
+    .output-nav{display:flex;flex-direction:column;padding:var(--sp-4);}
+    .output-group-label{
+      font-family:var(--font-mono);font-size:8px;letter-spacing:.12em;text-transform:uppercase;
+      color:var(--chrome-3);padding:var(--sp-4) var(--sp-3) var(--sp-2);
+    }
+    .output-item{
+      display:flex;align-items:center;gap:var(--sp-3);
+      padding:var(--sp-3) var(--sp-3);border-radius:var(--radius-sm);
+      font-size:11px;color:var(--chrome-2);cursor:pointer;
+      transition:background var(--ease),color var(--ease);
+    }
+    .output-item:hover{background:var(--canvas-2);color:var(--chrome-1);}
+    .output-item.active{background:var(--accent-bg);color:var(--accent-0);font-weight:500;}
+    .output-item-icon{font-size:12px;}
+    .output-main{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--canvas-0);}
+    .output-toolbar{
+      height:38px;flex-shrink:0;
+      background:var(--canvas-1);border-bottom:1px solid var(--border-subtle);
+      display:flex;align-items:center;padding:0 var(--sp-6);gap:var(--sp-4);
+    }
+    .output-toolbar-title{font-size:12px;font-weight:500;color:var(--chrome-1);flex:1;}
+    .output-action{
+      font-family:var(--font-mono);font-size:9px;
+      background:var(--canvas-0);border:1px solid var(--border-default);
+      border-radius:var(--radius-sm);padding:3px 8px;color:var(--chrome-2);cursor:pointer;
+    }
+    .output-action:hover{background:var(--canvas-2);}
+    .output-action.primary{background:var(--accent-0);color:var(--canvas-0);border-color:var(--accent-0);}
+    .output-canvas{
+      flex:1;display:flex;align-items:center;justify-content:center;
+      background:#fff;position:relative;overflow:hidden;
+    }
+    .output-canvas-inner{
+      position:relative;display:flex;align-items:center;justify-content:center;
+      width:100%;height:100%;
+    }
+    .output-canvas-label{
+      position:absolute;bottom:12px;left:16px;
+      font-family:var(--font-mono);font-size:9px;color:#888;letter-spacing:.08em;
+    }
+    .output-scale{
+      position:absolute;bottom:12px;right:16px;
+      font-family:var(--font-mono);font-size:9px;color:#888;
+    }
+    .output-3d-thumb{
+      position:absolute;top:12px;right:12px;
+      width:80px;height:56px;border-radius:var(--radius-md);
+      border:1px solid var(--border-default);
+      background:#1a140c;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;
+      box-shadow:var(--shadow-md);overflow:hidden;
+    }
+    .output-3d-thumb-label{
+      position:absolute;bottom:4px;left:0;right:0;text-align:center;
+      font-family:var(--font-mono);font-size:7px;color:rgba(255,255,255,.35);
+      letter-spacing:.06em;
+    }
+
+    /* ── WIZARD MODAL ── */
+    .wizard-backdrop{
+      position:fixed;inset:0;z-index:100;
+      background:rgba(40,24,10,.62);backdrop-filter:blur(3px);
+      display:none;align-items:center;justify-content:center;
+    }
+    .wizard-backdrop.open{display:flex;}
+    .wizard-modal{
+      background:var(--canvas-0);width:520px;max-height:82vh;
+      border-radius:var(--radius-lg);overflow:hidden;
+      box-shadow:var(--shadow-lg);display:flex;flex-direction:column;
+    }
+    .wizard-header{
+      display:flex;align-items:flex-start;gap:var(--sp-5);
+      padding:var(--sp-7) var(--sp-8);border-bottom:1px solid var(--border-subtle);
+      background:var(--canvas-1);flex-shrink:0;
+    }
+    .wizard-step-badge{
+      font-family:var(--font-mono);font-size:9px;letter-spacing:.10em;text-transform:uppercase;
+      color:var(--accent-0);background:var(--accent-bg);border:1px solid var(--border-default);
+      border-radius:var(--radius-sm);padding:2px 7px;white-space:nowrap;margin-top:2px;
+    }
+    .wizard-title{font-family:var(--font-display);font-size:20px;font-weight:600;color:var(--title-color);line-height:1.2;}
+    .wizard-subtitle{font-size:12px;color:var(--chrome-2);margin-top:var(--sp-2);}
+    .wizard-close{
+      margin-left:auto;width:26px;height:26px;border-radius:var(--radius-sm);
+      border:1px solid var(--border-subtle);background:var(--canvas-2);
+      color:var(--chrome-2);display:flex;align-items:center;justify-content:center;
+      cursor:pointer;font-size:13px;flex-shrink:0;
+    }
+    .wizard-progress{height:3px;background:var(--canvas-2);flex-shrink:0;}
+    .wizard-progress-fill{height:100%;background:var(--accent-0);transition:width .28s ease;}
+    .wizard-body{padding:var(--sp-8);flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:var(--sp-6);}
+    .wizard-step{display:none;flex-direction:column;gap:var(--sp-6);}
+    .wizard-step.active{display:flex;}
+
+    /* radio cards */
+    .radio-cards{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4);}
+    .radio-card{
+      padding:var(--sp-5);border:2px solid var(--border-subtle);border-radius:var(--radius-lg);
+      cursor:pointer;transition:border-color var(--ease),background var(--ease);
+      background:var(--canvas-1);
+    }
+    .radio-card:hover{border-color:var(--border-default);}
+    .radio-card.selected{border-color:var(--accent-0);background:var(--accent-bg);}
+    .radio-card-icon{display:flex;align-items:center;margin-bottom:var(--sp-3);color:var(--accent-0);}
+    .radio-card.selected .radio-card-icon{color:var(--accent-0);}
+    .sec-tab{display:flex;align-items:center;gap:4px;}
+    .radio-card-name{font-size:12px;font-weight:600;color:var(--chrome-0);}
+    .radio-card-desc{font-size:10px;color:var(--chrome-3);margin-top:2px;line-height:1.4;}
+
+    /* large slider */
+    .large-slider-wrap{display:flex;flex-direction:column;gap:var(--sp-3);}
+    .large-slider-row{display:flex;align-items:center;gap:var(--sp-5);}
+    .large-slider{
+      -webkit-appearance:none;flex:1;height:5px;
+      background:var(--canvas-3);border-radius:3px;outline:none;border:1px solid var(--border-subtle);
+    }
+    .large-slider::-webkit-slider-thumb{
+      -webkit-appearance:none;width:20px;height:20px;
+      border-radius:50%;background:var(--accent-0);
+      border:3px solid var(--canvas-0);box-shadow:0 1px 4px rgba(40,24,10,.25);cursor:pointer;
+    }
+    .large-slider-val{
+      font-family:var(--font-mono);font-size:20px;font-weight:500;color:var(--chrome-0);
+      min-width:80px;text-align:right;
+    }
+    .large-slider-ticks{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:9px;color:var(--chrome-3);}
+
+    .wizard-footer{
+      padding:var(--sp-6) var(--sp-8);border-top:1px solid var(--border-subtle);
+      background:var(--canvas-1);display:flex;justify-content:space-between;align-items:center;
+      flex-shrink:0;
+    }
+    .wizard-dots{display:flex;gap:var(--sp-2);}
+    .wizard-dot{
+      height:5px;border-radius:3px;background:var(--border-default);
+      transition:all .2s ease;width:5px;
+    }
+    .wizard-dot.active{width:16px;background:var(--accent-0);}
+    .wizard-dot.done{background:var(--sage-1);}
+    .wizard-nav{display:flex;gap:var(--sp-4);}
+    .wiz-btn{
+      display:inline-flex;align-items:center;gap:var(--sp-3);
+      font-family:var(--font-body);font-size:13px;font-weight:500;
+      border-radius:var(--radius-md);border:1px solid transparent;
+      padding:7px 16px;cursor:pointer;transition:background var(--ease);
+    }
+    .wiz-btn-back{background:var(--canvas-0);border-color:var(--border-default);color:var(--chrome-2);}
+    .wiz-btn-back:hover{background:var(--canvas-2);}
+    .wiz-btn-next{background:var(--accent-0);border-color:var(--accent-0);color:var(--canvas-0);}
+    .wiz-btn-next:hover{background:var(--accent-1);}
+
+    /* ── ICON SYSTEM ── */
+    .nhd-icon { display:block; flex-shrink:0; }
+    .nhd-icon-inline { display:inline-block; vertical-align:middle; flex-shrink:0; }
+
+    /* ── OUTPUT MULTI-VIEWS ── */
+    .out-view { display:none; width:100%; height:100%; }
+    .out-view.active { display:flex; }
+
+    /* BOM table */
+    .bom-wrap { flex:1; overflow-y:auto; padding:var(--sp-8) var(--sp-9); }
+    .bom-title { font-family:var(--font-display); font-size:18px; font-weight:600; color:var(--title-color); margin-bottom:var(--sp-2); }
+    .bom-subtitle { font-family:var(--font-mono); font-size:10px; color:var(--chrome-3); margin-bottom:var(--sp-7); }
+    .bom-table { width:100%; border-collapse:collapse; font-size:11px; }
+    .bom-table th { font-family:var(--font-mono); font-size:9px; letter-spacing:.10em; text-transform:uppercase; color:var(--chrome-3); text-align:left; padding:var(--sp-3) var(--sp-4); border-bottom:2px solid var(--border-default); }
+    .bom-table th.num { text-align:right; }
+    .bom-table td { padding:var(--sp-3) var(--sp-4); border-bottom:1px solid var(--border-subtle); color:var(--chrome-1); vertical-align:top; }
+    .bom-table td.num { font-family:var(--font-mono); font-size:10px; text-align:right; color:var(--chrome-0); }
+    .bom-table tr:hover td { background:var(--canvas-1); }
+    .bom-table .bom-group td { background:var(--canvas-2); font-weight:600; color:var(--chrome-0); font-size:10px; font-family:var(--font-mono); letter-spacing:.06em; text-transform:uppercase; }
+    .bom-table .bom-total td { background:var(--chrome-0); color:var(--canvas-0); font-weight:600; }
+    .bom-table .bom-total td.num { color:var(--accent-2); font-size:13px; }
+    .bom-item-name { font-weight:500; color:var(--chrome-0); }
+    .bom-item-spec { font-size:9px; color:var(--chrome-3); margin-top:1px; }
+
+    /* Compliance checklist */
+    .compliance-wrap { flex:1; overflow-y:auto; padding:var(--sp-8) var(--sp-9); display:flex; flex-direction:column; gap:var(--sp-7); }
+    .compliance-section-title { font-family:var(--font-display); font-size:16px; font-weight:600; color:var(--title-color); margin-bottom:var(--sp-4); }
+    .compliance-table { width:100%; border-collapse:collapse; font-size:11px; }
+    .compliance-table th { font-family:var(--font-mono); font-size:9px; letter-spacing:.10em; text-transform:uppercase; color:var(--chrome-3); text-align:left; padding:var(--sp-3) var(--sp-4); border-bottom:2px solid var(--border-default); }
+    .compliance-table td { padding:var(--sp-3) var(--sp-4); border-bottom:1px solid var(--border-subtle); vertical-align:middle; }
+    .compliance-table tr:hover td { background:var(--canvas-1); }
+    .c-badge { display:inline-flex; align-items:center; gap:4px; font-family:var(--font-mono); font-size:9px; padding:2px 7px; border-radius:10px; font-weight:600; white-space:nowrap; }
+    .c-badge.pass { background:var(--sage-2); color:var(--sage-0); }
+    .c-badge.warn { background:var(--copper-2); color:var(--copper-0); }
+    .c-badge.fail { background:var(--brick-2); color:var(--brick-0); }
+    .c-badge.na { background:var(--canvas-2); color:var(--chrome-3); }
+    .compliance-code { font-family:var(--font-mono); font-size:9px; color:var(--chrome-3); }
+    .compliance-note { font-size:10px; color:var(--chrome-2); }
+
+    /* Compact mode — meaningful density */
+    .compact .app-bar { height:34px; min-height:34px; }
+    .compact .mode-bar { height:30px; min-height:30px; }
+    .compact .mode-btn { padding:3px 10px; font-size:11px; }
+    .compact .status-bar { height:20px; min-height:20px; }
+    .compact .status-item { font-size:8px; }
+    .compact .field-label { font-size:8px; }
+    .compact .field-select { padding:3px 22px 3px 6px; font-size:10px; }
+    .compact .field-input { padding:3px 6px; font-size:10px; }
+    .compact .slider-val { font-size:9px; }
+    .compact .sec-tab { padding:4px 7px; font-size:9px; }
+    .compact .edit-panel-header { padding:var(--sp-3) var(--sp-5); }
+    .compact .edit-panel-title { font-size:12px; }
+    .compact .section-fields { padding:var(--sp-4); gap:var(--sp-4); }
+    .compact .sec-panel { gap:var(--sp-4); }
+    .compact .field-group { gap:1px; }
+    .compact .field-section-label { font-size:10px; }
+    .compact .alert-inline { padding:var(--sp-2) var(--sp-3); font-size:9px; }
+    .compact .acc-header { padding:3px var(--sp-3); }
+    .compact .acc-name { font-size:9px; }
+
+    /* ── CHAT PANEL ── */
+    .chat-float-btn{
+      position:fixed;bottom:40px;right:16px;z-index:50;
+      width:40px;height:40px;border-radius:50%;
+      background:var(--accent-0);border:2px solid var(--accent-bg);
+      display:flex;align-items:center;justify-content:center;
+      font-size:18px;cursor:pointer;box-shadow:var(--shadow-lg);
+      transition:background var(--ease),transform var(--ease);
+    }
+    .chat-float-btn:hover{background:var(--accent-1);transform:scale(1.05);}
+    .chat-panel-wrap{
+      position:fixed;bottom:40px;right:16px;z-index:51;
+      width:280px;
+      background:var(--canvas-0);border:1px solid var(--border-default);
+      border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);
+      display:none;flex-direction:column;overflow:hidden;
+      max-height:380px;
+    }
+    .chat-panel-wrap.open{display:flex;}
+    .chat-panel-header{
+      display:flex;align-items:center;gap:var(--sp-4);
+      padding:var(--sp-4) var(--sp-6);
+      background:var(--chrome-0);border-bottom:1px solid rgba(255,255,255,.08);
+    }
+    .chat-panel-title{font-size:12px;font-weight:500;color:rgba(255,255,255,.8);flex:1;}
+    .chat-panel-close{font-size:13px;color:rgba(255,255,255,.4);cursor:pointer;padding:2px 4px;}
+    .chat-messages{flex:1;overflow-y:auto;padding:var(--sp-5);display:flex;flex-direction:column;gap:var(--sp-4);}
+    .chat-msg{display:flex;gap:var(--sp-3);max-width:100%;}
+    .chat-msg.user{flex-direction:row-reverse;}
+    .chat-avatar{
+      width:22px;height:22px;border-radius:3px;border:1px solid var(--border-subtle);
+      display:flex;align-items:center;justify-content:center;
+      font-family:var(--font-mono);font-size:8px;flex-shrink:0;
+    }
+    .chat-avatar.ai{background:var(--accent-bg);color:var(--accent-0);border-color:var(--border-default);}
+    .chat-avatar.user{background:var(--canvas-2);color:var(--chrome-2);}
+    .chat-bubble{
+      padding:var(--sp-3) var(--sp-4);border-radius:var(--radius-lg);
+      font-size:11px;line-height:1.5;max-width:85%;
+    }
+    .chat-bubble.ai{background:var(--canvas-1);border:1px solid var(--border-subtle);color:var(--chrome-0);border-top-left-radius:2px;}
+    .chat-bubble.user{background:var(--accent-0);color:var(--canvas-0);border-top-right-radius:2px;}
+    .chat-input-row{
+      display:flex;gap:var(--sp-3);align-items:flex-end;
+      padding:var(--sp-4) var(--sp-5);border-top:1px solid var(--border-subtle);
+      background:var(--canvas-1);
+    }
+    .chat-textarea{
+      flex:1;background:var(--canvas-0);border:1px solid var(--border-default);
+      border-radius:var(--radius-md);padding:5px 8px;
+      font-family:var(--font-body);font-size:11px;color:var(--chrome-0);
+      resize:none;outline:none;min-height:32px;
+    }
+    .chat-send{
+      padding:5px 10px;background:var(--accent-0);border:none;border-radius:var(--radius-md);
+      color:var(--canvas-0);font-size:11px;font-weight:500;cursor:pointer;
+    }
+  </style>
+</helmet>
+
+<svg id="nhd-icons" style="display:none;position:absolute;" xmlns="http://www.w3.org/2000/svg">
+  <!-- Structural sections (12×12) -->
+  <symbol id="i-house" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6.5L6 2L11 6.5"/><path d="M2.5 6V10.5H5V8h2v2.5H9.5V6"/></symbol>
+  <symbol id="i-walls" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><rect x="1" y="2" width="10" height="2.5" rx=".3"/><rect x="1" y="5.5" width="4.5" height="2.5" rx=".3"/><rect x="6.5" y="5.5" width="4.5" height="2.5" rx=".3"/><rect x="1" y="9" width="10" height="1.5" rx=".3"/></symbol>
+  <symbol id="i-roof" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M.5 6.5L6 1.5L11.5 6.5"/><rect x="2" y="6.5" width="8" height="4"/><line x1="5" y1="10.5" x2="5" y2="6.5"/><line x1="7" y1="10.5" x2="7" y2="6.5"/></symbol>
+  <symbol id="i-foundation" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="3" y="5" width="6" height="5"/><line x1="4" y1="5" x2="4" y2="2"/><line x1="8" y1="5" x2="8" y2="2"/><line x1="2" y1="2" x2="10" y2="2"/><line x1="1" y1="10" x2="11" y2="10"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="6" cy="6" r="2"/><line x1="6" y1="1" x2="6" y2="2.8"/><line x1="6" y1="9.2" x2="6" y2="11"/><line x1="1" y1="6" x2="2.8" y2="6"/><line x1="9.2" y1="6" x2="11" y2="6"/><line x1="2.5" y1="2.5" x2="3.8" y2="3.8"/><line x1="8.2" y1="8.2" x2="9.5" y2="9.5"/><line x1="9.5" y1="2.5" x2="8.2" y2="3.8"/><line x1="3.8" y1="8.2" x2="2.5" y2="9.5"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M6 1C4 1 2.5 2.6 2.5 4.5C2.5 7 6 11 6 11C6 11 9.5 7 9.5 4.5C9.5 2.6 8 1 6 1Z"/><circle cx="6" cy="4.5" r="1.3"/></symbol>
+  <symbol id="i-barn" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M.5 5.5L6 1.5L11.5 5.5V11H.5V5.5Z"/><rect x="4" y="7" width="4" height="4"/><line x1="6" y1="1.5" x2="6" y2="5.5"/></symbol>
+  <!-- Mode bar (14×14) -->
+  <symbol id="i-start" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><polygon points="7,1 13,7 7,13 1,7"/><line x1="7" y1="4" x2="7" y2="10"/><line x1="4" y1="7" x2="10" y2="7"/></symbol>
+  <symbol id="i-eye-md" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M1 7C1 7 3.5 2 7 2S13 7 13 7 10.5 12 7 12 1 7 1 7Z"/><circle cx="7" cy="7" r="2"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2L12 4L5.5 10.5L3 11L3.5 8.5L10 2Z"/><line x1="8.5" y1="3.5" x2="10.5" y2="5.5"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 1H9L11 3V13H3V1Z"/><line x1="8.5" y1="1" x2="8.5" y2="3.5"/><line x1="8.5" y1="3.5" x2="11" y2="3.5"/><line x1="5" y1="6" x2="9" y2="6"/><line x1="5" y1="8" x2="9" y2="8"/><line x1="5" y1="10" x2="7" y2="10"/></symbol>
+  <!-- Utility -->
+  <symbol id="i-eye-sm" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M1 6C1 6 3 2 6 2S11 6 11 6 9 10 6 10 1 6 1 6Z"/><circle cx="6" cy="6" r="1.8"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 1L11 10.5H1L6 1Z"/><line x1="6" y1="4.5" x2="6" y2="7.5"/><circle cx="6" cy="9" r=".5" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-hex" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><polygon points="7,1 12.2,4 12.2,10 7,13 1.8,10 1.8,4"/><polygon points="7,4 9.5,5.5 9.5,8.5 7,10 4.5,8.5 4.5,5.5"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 2H16V13H9.5L6 16V13H2V2Z"/><circle cx="6" cy="7.5" r=".8" fill="currentColor" stroke="none"/><circle cx="9" cy="7.5" r=".8" fill="currentColor" stroke="none"/><circle cx="12" cy="7.5" r=".8" fill="currentColor" stroke="none"/></symbol>
+  <!-- Output nav (12×12) -->
+  <symbol id="i-grid" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="4.5" height="4.5"/><rect x="6.5" y="1" width="4.5" height="4.5"/><rect x="1" y="6.5" width="4.5" height="4.5"/><rect x="6.5" y="6.5" width="4.5" height="4.5"/></symbol>
+  <symbol id="i-sections" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><rect x="1" y="1.5" width="10" height="2.5"/><rect x="1" y="5" width="10" height="2.5"/><rect x="1" y="8.5" width="10" height="2"/></symbol>
+  <symbol id="i-elevation" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 7L6 2.5L11 7"/><rect x="2" y="7" width="8" height="3.5"/><rect x="4.5" y="8" width="3" height="2.5"/></symbol>
+  <symbol id="i-zoom" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="5" cy="5" r="3.5"/><line x1="7.5" y1="7.5" x2="11" y2="11"/></symbol>
+  <symbol id="i-triangle" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 10L6.5 1L12 10H1Z"/><line x1="1" y1="10" x2="12" y2="10"/></symbol>
+  <symbol id="i-stamp" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><rect x="2" y="1" width="8" height="7.5" rx="1"/><line x1="4" y1="3.5" x2="8" y2="3.5"/><line x1="4" y1="5.5" x2="8" y2="5.5"/><rect x="1" y="9.5" width="10" height="1.5"/></symbol>
+  <symbol id="i-columns" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6,1 1,3.5 11,3.5"/><line x1="3" y1="3.5" x2="3" y2="10"/><line x1="6" y1="3.5" x2="6" y2="10"/><line x1="9" y1="3.5" x2="9" y2="10"/><line x1="1" y1="10" x2="11" y2="10"/></symbol>
+  <symbol id="i-list" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="2.5" cy="3" r=".8" fill="currentColor" stroke="none"/><line x1="5" y1="3" x2="11" y2="3"/><circle cx="2.5" cy="6" r=".8" fill="currentColor" stroke="none"/><line x1="5" y1="6" x2="11" y2="6"/><circle cx="2.5" cy="9" r=".8" fill="currentColor" stroke="none"/><line x1="5" y1="9" x2="9" y2="9"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><rect x="1" y="2" width="10" height="9" rx="1"/><line x1="1" y1="5" x2="11" y2="5"/><line x1="4" y1="1" x2="4" y2="3.5"/><line x1="8" y1="1" x2="8" y2="3.5"/><circle cx="4" cy="7.5" r=".7" fill="currentColor" stroke="none"/><circle cx="8" cy="7.5" r=".7" fill="currentColor" stroke="none"/><circle cx="4" cy="9.5" r=".7" fill="currentColor" stroke="none"/></symbol>
+  <!-- Wizard structure types (22×22) -->
+  <symbol id="i-timber" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="19" x2="4" y2="5"/><line x1="18" y1="19" x2="18" y2="5"/><line x1="4" y1="5" x2="18" y2="5"/><line x1="4" y1="11" x2="18" y2="11"/><line x1="4" y1="19" x2="18" y2="19"/><line x1="11" y1="5" x2="11" y2="19"/></symbol>
+  <symbol id="i-adobe" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="5" width="18" height="3" rx=".5"/><rect x="2" y="9.5" width="18" height="3" rx=".5"/><rect x="2" y="14" width="18" height="3" rx=".5"/><line x1="2" y1="17" x2="20" y2="17"/></symbol>
+  <symbol id="i-hybrid" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11H10L14 6"/><path d="M10 11L14 16"/><circle cx="17" cy="6" r="2"/><circle cx="17" cy="16" r="2"/><circle cx="3" cy="11" r="2"/></symbol>
+  <!-- Water systems (20×20) -->
+  <symbol id="i-well" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="10" height="6" rx="1"/><line x1="11" y1="9" x2="11" y2="19"/><path d="M7 19 Q11 15 15 19"/><line x1="4" y1="3" x2="18" y2="3"/></symbol>
+  <symbol id="i-municipal" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="10" width="16" height="9"/><path d="M1 10L11 3L21 10"/><line x1="8" y1="19" x2="8" y2="14"/><line x1="14" y1="19" x2="14" y2="14"/><rect x="8" y="14" width="6" height="5"/></symbol>
+  <symbol id="i-rainwater" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4 Q16 9 16 13 A5 5 0 0 1 6 13 Q6 9 11 4Z"/><path d="M8 17 Q11 15 14 17"/><line x1="11" y1="19" x2="11" y2="21"/></symbol>
+  <!-- Start paths (22×22) -->
+  <symbol id="i-compass" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="11" cy="11" r="9"/><circle cx="11" cy="11" r="2"/><line x1="11" y1="2" x2="11" y2="5"/><line x1="11" y1="17" x2="11" y2="20"/><line x1="2" y1="11" x2="5" y2="11"/><line x1="17" y1="11" x2="20" y2="11"/><line x1="11" y1="11" x2="15" y2="7"/></symbol>
+  <symbol id="i-house-lg" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 11L11 3.5L20 11"/><path d="M4 10V19H8.5V14H13.5V19H18V10"/></symbol>
+  <symbol id="i-import" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2H14L18 6V20H5V2Z"/><line x1="13" y1="2" x2="13" y2="7"/><line x1="13" y1="7" x2="18" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/><line x1="8" y1="14" x2="14" y2="14"/><line x1="8" y1="17" x2="11" y2="17"/></symbol>
+  <symbol id="i-chat-lg" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3H20V15H12L8 19V15H2V3Z"/><circle cx="7" cy="9" r="1" fill="currentColor" stroke="none"/><circle cx="11" cy="9" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="9" r="1" fill="currentColor" stroke="none"/></symbol>
+</svg>
+
+<div class="app-shell" id="appShell">
+
+  <!-- ── APP BAR ── -->
+  <div class="app-bar">
+    <div class="app-logo">Natural House <span>Designer</span></div>
+    <div class="app-divider"></div>
+    <button class="app-btn">BOM / Budget</button>
+    <button class="app-btn">Export ▾</button>
+    <div class="app-spacer"></div>
+    <div class="app-warning" id="warningBadge"><svg class="nhd-icon-inline" width="11" height="11" style="margin-right:3px;"><use href="#i-warn"/></svg>2 advisories</div>
+    <div class="app-divider"></div>
+    <button class="app-btn primary" id="generateBtn"><svg class="nhd-icon-inline" width="13" height="13" style="margin-right:4px;"><use href="#i-hex"/></svg>Generate Model</button>
+  </div>
+
+  <!-- ── MODE BAR ── -->
+  <div class="mode-bar">
+    <button class="mode-btn" data-mode="start" id="modeStart"><svg class="nhd-icon" width="14" height="14"><use href="#i-start"/></svg>Start Here</button>
+    <button class="mode-btn" data-mode="preview" id="modePreview"><svg class="nhd-icon" width="14" height="14"><use href="#i-eye-md"/></svg>Preview</button>
+    <button class="mode-btn active" data-mode="edit" id="modeEdit"><svg class="nhd-icon" width="14" height="14"><use href="#i-pencil"/></svg>Edit</button>
+    <button class="mode-btn" data-mode="output" id="modeOutput"><svg class="nhd-icon" width="14" height="14"><use href="#i-doc"/></svg>Output</button>
+    <div class="mode-bar-spacer"></div>
+    <label class="mode-compact-toggle" id="compactToggleWrap">
+      <div class="toggle-sm" id="compactToggle"></div>
+      Compact
+    </label>
+  </div>
+
+  <!-- ── CONTENT AREA ── -->
+  <div class="content-area">
+
+    <!-- ─── START MODE ─── -->
+    <div class="mode-view" data-view="start">
+      <div class="start-view">
+        <div class="start-hero">
+          <div class="start-eyebrow">Natural Building Design Suite</div>
+          <h1 class="start-title">Design your natural house,<br>from sketch to permit.</h1>
+          <p class="start-desc">Procedural 3D modeling for strawbale, timber frame, and adobe construction. Live BOM pricing, PE-ready compliance packages, and AI-assisted code review.</p>
+        </div>
+
+        <div class="orn"><span>Begin your project</span></div>
+
+        <div class="start-paths">
+          <div class="start-path featured" id="startWizard">
+            <div class="start-path-icon"><svg class="nhd-icon" width="22" height="22"><use href="#i-compass"/></svg></div>
+            <div class="start-path-name">Guided Wizard</div>
+            <div class="start-path-desc">14 questions walk you through every parameter. Best for new projects. ~8 minutes.</div>
+            <div class="start-path-arrow">›</div>
+          </div>
+          <div class="start-path" id="startExample">
+            <div class="start-path-icon"><svg class="nhd-icon" width="22" height="22"><use href="#i-house-lg"/></svg></div>
+            <div class="start-path-name">Load an example</div>
+            <div class="start-path-desc">Montana strawbale, 1,280 ft² · fully configured with BOM and compliance.</div>
+            <div class="start-path-arrow">›</div>
+          </div>
+          <div class="start-path" id="startJSON">
+            <div class="start-path-icon"><svg class="nhd-icon" width="22" height="22"><use href="#i-import"/></svg></div>
+            <div class="start-path-name">Import JSON manifest</div>
+            <div class="start-path-desc">Resume a previous project or import a manifest from another tool.</div>
+            <div class="start-path-arrow">›</div>
+          </div>
+          <div class="start-path" id="startAI">
+            <div class="start-path-icon"><svg class="nhd-icon" width="22" height="22"><use href="#i-chat-lg"/></svg></div>
+            <div class="start-path-name">Describe in AI chat</div>
+            <div class="start-path-desc">Upload a sketch, PDF, or describe your project in plain language.</div>
+            <div class="start-path-arrow">›</div>
+          </div>
+        </div>
+
+        <div class="orn"><span>or</span></div>
+        <button class="app-btn" id="startJumpEdit" style="padding:8px 20px;font-size:12px;">Jump to Edit mode with defaults →</button>
+      </div>
+    </div>
+
+    <!-- ─── PREVIEW MODE ─── -->
+    <div class="mode-view" data-view="preview">
+      <!-- thin summary sidebar -->
+      <div class="preview-sidebar">
+        <div class="preview-sidebar-label">Parameters</div>
+        <div class="acc-item">
+          <div class="acc-header"><svg class="nhd-icon" width="11" height="11"><use href="#i-house"/></svg><span class="acc-name">Envelope</span></div>
+          <div class="acc-body"><div class="acc-value">36 × 48 ft<br>1 story</div></div>
+        </div>
+        <div class="acc-item">
+          <div class="acc-header"><svg class="nhd-icon" width="11" height="11"><use href="#i-walls"/></svg><span class="acc-name">Walls</span></div>
+          <div class="acc-body"><div class="acc-value">Strawbale LB<br>18 in · R-38</div></div>
+        </div>
+        <div class="acc-item">
+          <div class="acc-header"><svg class="nhd-icon" width="11" height="11"><use href="#i-roof"/></svg><span class="acc-name">Roof</span></div>
+          <div class="acc-body"><div class="acc-value">Timber · 6:12<br>R-60 cellulose</div></div>
+        </div>
+        <div class="acc-item">
+          <div class="acc-header"><svg class="nhd-icon" width="11" height="11"><use href="#i-foundation"/></svg><span class="acc-name">Foundation</span></div>
+          <div class="acc-body"><div class="acc-value">Rubble trench<br>4 in drain tile</div></div>
+        </div>
+        <div class="acc-item">
+          <div class="acc-header"><svg class="nhd-icon" width="11" height="11"><use href="#i-gear"/></svg><span class="acc-name">Systems</span><div class="acc-warn">2</div></div>
+        </div>
+        <div class="acc-item">
+          <div class="acc-header"><svg class="nhd-icon" width="11" height="11"><use href="#i-pin"/></svg><span class="acc-name">Site</span></div>
+          <div class="acc-body"><div class="acc-value">Ravalli MT<br>Zone 6B</div></div>
+        </div>
+        <div class="acc-item">
+          <div class="acc-header"><svg class="nhd-icon" width="11" height="11"><use href="#i-barn"/></svg><span class="acc-name">Outbuildings</span></div>
+          <div class="acc-body"><div class="acc-value">Shop 24×30<br>Greenhouse</div></div>
+        </div>
+      </div>
+      <!-- dominant viewport -->
+      <div class="viewport">
+        <div class="viewport-label">Three.js · Live 3D Preview</div>
+        <div class="viewport-tools">
+          <div class="viewport-tool on">Wireframe</div>
+          <div class="viewport-tool">Solid</div>
+          <div class="viewport-tool">Section cut</div>
+        </div>
+        <div class="viewport-house">
+          <svg width="260" height="190" viewBox="0 0 260 190" fill="none" xmlns="http://www.w3.org/2000/svg" style="opacity:.55;">
+            <!-- main house -->
+            <rect x="40" y="90" width="180" height="100" stroke="rgba(255,210,140,.7)" stroke-width="1.5"/>
+            <polygon points="30,90 130,28 230,90" stroke="rgba(255,220,160,.85)" stroke-width="1.5" fill="none"/>
+            <!-- ridge line -->
+            <line x1="130" y1="28" x2="130" y2="90" stroke="rgba(255,210,140,.4)" stroke-width="1" stroke-dasharray="4,3"/>
+            <!-- door -->
+            <rect x="108" y="150" width="24" height="40" stroke="rgba(255,210,140,.5)" stroke-width="1"/>
+            <!-- windows -->
+            <rect x="56" y="108" width="28" height="22" stroke="rgba(255,210,140,.4)" stroke-width="1"/>
+            <rect x="96" y="108" width="28" height="22" stroke="rgba(255,210,140,.4)" stroke-width="1"/>
+            <rect x="136" y="108" width="28" height="22" stroke="rgba(255,210,140,.4)" stroke-width="1"/>
+            <rect x="176" y="108" width="28" height="22" stroke="rgba(255,210,140,.4)" stroke-width="1"/>
+            <!-- foundation shadow -->
+            <rect x="36" y="190" width="188" height="4" fill="rgba(255,210,140,.06)" rx="2"/>
+            <!-- outbuilding suggestion -->
+            <rect x="8" y="140" width="28" height="50" stroke="rgba(100,160,80,.4)" stroke-width="1" stroke-dasharray="3,2"/>
+            <polygon points="4,140 22,126 40,140" stroke="rgba(100,160,80,.35)" stroke-width="1" stroke-dasharray="3,2" fill="none"/>
+            <!-- dimension lines -->
+            <line x1="40" y1="182" x2="220" y2="182" stroke="rgba(255,210,140,.2)" stroke-width="1"/>
+            <line x1="40" y1="179" x2="40" y2="185" stroke="rgba(255,210,140,.2)" stroke-width="1"/>
+            <line x1="220" y1="179" x2="220" y2="185" stroke="rgba(255,210,140,.2)" stroke-width="1"/>
+          </svg>
+        </div>
+        <div class="viewport-axis">
+          <div class="axis-item"><div class="axis-line" style="width:22px;background:#c44;"></div><span class="axis-label" style="color:#c66;">X</span></div>
+          <div class="axis-item"><div class="axis-line" style="width:16px;background:#4a4;"></div><span class="axis-label" style="color:#6a6;">Y</span></div>
+          <div class="axis-item"><div class="axis-line" style="width:12px;background:#44a;"></div><span class="axis-label" style="color:#66a;">Z</span></div>
+        </div>
+        <!-- layer controls -->
+        <div class="layers-float">
+          <div class="layers-toggle-btn" id="layersTogglePreview"><svg class="nhd-icon-inline" width="11" height="11" style="margin-right:4px;"><use href="#i-eye-sm"/></svg>Layers ▾</div>
+          <div class="layers-panel" id="layersPanelPreview">
+            <div class="layers-section-label">Structure</div>
+            <div class="layer-row"><div class="layer-dot" style="background:#b8a070;"></div><div class="layer-name">Envelope</div><svg class="nhd-icon" width="11" height="11"><use href="#i-eye-sm"/></svg></div>
+            <div class="layer-row"><div class="layer-dot" style="background:#8a6a48;"></div><div class="layer-name">Interior</div><svg class="nhd-icon" width="11" height="11"><use href="#i-eye-sm"/></svg></div>
+            <div class="layer-row"><div class="layer-dot" style="background:#5c8048;"></div><div class="layer-name">Roof</div><svg class="nhd-icon" width="11" height="11"><use href="#i-eye-sm"/></svg></div>
+            <div class="layer-row"><div class="layer-dot" style="background:#7a6040;"></div><div class="layer-name">Foundation</div><svg class="nhd-icon" width="11" height="11"><use href="#i-eye-sm"/></svg></div>
+            <div class="layers-section-label">Systems</div>
+            <div class="layer-row"><div class="layer-dot" style="background:#3c5e74;"></div><div class="layer-name">Plumbing</div><svg class="nhd-icon" width="11" height="11"><use href="#i-eye-sm"/></svg></div>
+            <div class="layer-row"><div class="layer-dot" style="background:#ae7630;"></div><div class="layer-name">Heating</div><svg class="nhd-icon" width="11" height="11" style="opacity:.25;"><use href="#i-eye-sm"/></svg></div>
+            <div class="layer-row"><div class="layer-dot" style="background:#b8a030;"></div><div class="layer-name">Power / Solar</div><svg class="nhd-icon" width="11" height="11"><use href="#i-eye-sm"/></svg></div>
+            <div class="layers-section-label">Site</div>
+            <div class="layer-row"><div class="layer-dot" style="background:#4e7248;"></div><div class="layer-name">Outbuildings</div><svg class="nhd-icon" width="11" height="11"><use href="#i-eye-sm"/></svg></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── EDIT MODE ─── -->
+    <div class="mode-view active" data-view="edit">
+      <div class="edit-layout">
+        <!-- edit panel -->
+        <div class="edit-panel">
+          <div class="edit-panel-header">
+            <div class="edit-panel-title">Parameters</div>
+            <button class="panel-compact-btn" id="panelCompactBtn">Compact</button>
+          </div>
+          <!-- section tabs -->
+          <div class="section-nav">
+            <button class="sec-tab active" data-sec="envelope"><svg class="nhd-icon" width="12" height="12"><use href="#i-house"/></svg>Envelope</button>
+            <button class="sec-tab" data-sec="walls"><svg class="nhd-icon" width="12" height="12"><use href="#i-walls"/></svg>Walls</button>
+            <button class="sec-tab" data-sec="roof"><svg class="nhd-icon" width="12" height="12"><use href="#i-roof"/></svg>Roof</button>
+            <button class="sec-tab" data-sec="foundation"><svg class="nhd-icon" width="12" height="12"><use href="#i-foundation"/></svg>Found.</button>
+            <button class="sec-tab" data-sec="systems"><svg class="nhd-icon" width="12" height="12"><use href="#i-gear"/></svg>Systems<div class="sec-tab-warn">2</div></button>
+            <button class="sec-tab" data-sec="site"><svg class="nhd-icon" width="12" height="12"><use href="#i-pin"/></svg>Site</button>
+            <button class="sec-tab" data-sec="outbuildings"><svg class="nhd-icon" width="12" height="12"><use href="#i-barn"/></svg>Outbldgs</button>
+          </div>
+          <!-- fields scroll area -->
+          <div class="section-fields">
+
+            <!-- ENVELOPE -->
+            <div class="sec-panel active" data-panel="envelope">
+              <div class="field-section-label">Footprint</div>
+              <div class="field-group">
+                <div class="field-label">Plan shape</div>
+                <select class="field-select"><option>Rectangle</option><option>L-shape</option><option>U-shape</option></select>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Width — <span style="font-family:var(--font-mono);color:var(--chrome-1);">36 ft</span></div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:55%;"></div><div class="slider-thumb" style="left:55%;"></div></div><span class="slider-val">36 ft</span></div>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Length — <span style="font-family:var(--font-mono);color:var(--chrome-1);">48 ft</span></div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:68%;"></div><div class="slider-thumb" style="left:68%;"></div></div><span class="slider-val">48 ft</span></div>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Stories</div>
+                <select class="field-select"><option>Single story</option><option>Two story</option><option>1.5 story / loft</option></select>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Ceiling height</div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:55%;"></div><div class="slider-thumb" style="left:55%;"></div></div><span class="slider-val">9 ft</span></div>
+              </div>
+              <div class="field-divider"></div>
+              <div class="field-section-label">Conditioned area</div>
+              <div style="display:flex;justify-content:space-between;align-items:baseline;">
+                <div style="font-family:var(--font-mono);font-size:18px;font-weight:500;color:var(--chrome-0);">1,728 ft²</div>
+                <div class="field-inline-badge badge-sage">✓ IRC compliant</div>
+              </div>
+            </div>
+
+            <!-- WALLS -->
+            <div class="sec-panel" data-panel="walls">
+              <div class="field-section-label">Wall assembly</div>
+              <div class="field-group">
+                <div class="field-label">System type</div>
+                <select class="field-select"><option>Strawbale — load bearing</option><option>Strawbale — infill</option><option>Timber frame + straw infill</option><option>Adobe / rammed earth</option></select>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Nominal bale thickness</div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:50%;"></div><div class="slider-thumb" style="left:50%;"></div></div><span class="slider-val">18 in</span></div>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Plaster system</div>
+                <select class="field-select"><option>Earth plaster (2 coat)</option><option>Lime plaster</option><option>Lime/cement stucco</option></select>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Corner post type</div>
+                <select class="field-select"><option>Round timber</option><option>Glulam</option><option>Box post</option></select>
+              </div>
+              <div class="field-divider"></div>
+              <div class="field-section-label">Glazing</div>
+              <div class="field-group">
+                <div class="field-label">Window-to-wall ratio</div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:35%;"></div><div class="slider-thumb" style="left:35%;"></div></div><span class="slider-val">22%</span></div>
+              </div>
+              <div class="field-group">
+                <div class="field-label">South glazing fraction</div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:70%;"></div><div class="slider-thumb" style="left:70%;"></div></div><span class="slider-val">60%</span></div>
+              </div>
+              <div class="alert-inline success" style="margin-top:var(--sp-3);">✓ Effective wall R-38 · exceeds Zone 6B requirement (R-20)</div>
+            </div>
+
+            <!-- ROOF -->
+            <div class="sec-panel" data-panel="roof">
+              <div class="field-section-label">Framing</div>
+              <div class="field-group">
+                <div class="field-label">Structural system</div>
+                <select class="field-select"><option>Timber frame trusses</option><option>Conventional rafter</option><option>Hybrid</option></select>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Pitch</div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:50%;"></div><div class="slider-thumb" style="left:50%;"></div></div><span class="slider-val">6:12</span></div>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Overhang depth (south)</div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:48%;"></div><div class="slider-thumb" style="left:48%;"></div></div><span class="slider-val">24 in</span></div>
+              </div>
+              <div class="field-divider"></div>
+              <div class="field-section-label">Insulation</div>
+              <div class="field-group">
+                <div class="field-label">Insulation type</div>
+                <select class="field-select"><option>Dense-pack cellulose</option><option>Mineral wool batts</option><option>Spray foam</option></select>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Target R-value</div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:75%;"></div><div class="slider-thumb" style="left:75%;"></div></div><span class="slider-val">R-60</span></div>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Thermal bridging correction</div>
+                <select class="field-select"><option>Service cavity (25mm)</option><option>None</option></select>
+              </div>
+            </div>
+
+            <!-- FOUNDATION -->
+            <div class="sec-panel" data-panel="foundation">
+              <div class="field-section-label">System</div>
+              <div class="field-group">
+                <div class="field-label">Foundation type</div>
+                <select class="field-select"><option>Rubble trench</option><option>Perimeter stem wall</option><option>Slab-on-grade</option><option>Pier &amp; beam</option></select>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Drain tile</div>
+                <select class="field-select"><option>Perforated 4 in HDPE</option><option>Perforated clay tile</option></select>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Frost depth (county AHJ)</div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:55%;"></div><div class="slider-thumb" style="left:55%;"></div></div><span class="slider-val">36 in</span></div>
+              </div>
+              <div class="field-divider"></div>
+              <div class="field-section-label">Slab / floor</div>
+              <div class="field-group">
+                <div class="field-label">Slab insulation</div>
+                <select class="field-select"><option>EPS 2 in (R-10) continuous</option><option>None</option></select>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Floor finish</div>
+                <select class="field-select"><option>Earthen floor</option><option>Concrete burnished</option><option>Reclaimed wood</option></select>
+              </div>
+            </div>
+
+            <!-- SYSTEMS -->
+            <div class="sec-panel" data-panel="systems">
+              <div class="alert-inline warning" style="margin-bottom:var(--sp-4);"><svg class="nhd-icon-inline" width="11" height="11" style="margin-right:4px;flex-shrink:0;"><use href="#i-warn"/></svg>2 advisories — see details below</div>
+              <div class="field-section-label">Water supply</div>
+              <div class="field-group">
+                <div class="field-label">Source</div>
+                <select class="field-select"><option>Private well</option><option>Municipal connection</option><option>Rainwater harvest (non-potable)</option></select>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Well depth</div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:35%;"></div><div class="slider-thumb" style="left:35%;"></div></div><span class="slider-val">42 ft</span></div>
+              </div>
+              <div class="alert-inline error" style="margin-top:2px;">✕ Below 50 ft minimum — Class B soil (Montana DEQ)</div>
+              <div class="field-divider"></div>
+              <div class="field-section-label">Wastewater</div>
+              <div class="field-group">
+                <div class="field-label">System type</div>
+                <select class="field-select"><option>Conventional absorption field</option><option>Mound system</option><option>Constructed wetland</option></select>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Setback to well</div>
+                <div style="font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--chrome-0);padding:3px 0;">68 ft <span style="font-size:10px;color:var(--chrome-3);">· 100 ft req.</span></div>
+              </div>
+              <div class="alert-inline warning" style="margin-top:2px;"><svg class="nhd-icon-inline" width="11" height="11" style="margin-right:4px;flex-shrink:0;"><use href="#i-warn"/></svg>Setback advisory — relocate field or document variance</div>
+              <div class="field-divider"></div>
+              <div class="field-section-label">Energy</div>
+              <div class="field-group">
+                <div class="field-label">Solar system</div>
+                <select class="field-select"><option>Grid-tied + battery backup</option><option>Off-grid standalone</option><option>Grid-tied only</option></select>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Array size</div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:50%;"></div><div class="slider-thumb" style="left:50%;"></div></div><span class="slider-val">6 kW</span></div>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Space heating</div>
+                <select class="field-select"><option>Masonry heater (primary)</option><option>Mini-split heat pump</option><option>Radiant floor (hydronic)</option></select>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Ventilation</div>
+                <select class="field-select"><option>HRV — Zehnder Comfoair 200</option><option>ERV</option><option>Exhaust-only</option></select>
+              </div>
+            </div>
+
+            <!-- SITE -->
+            <div class="sec-panel" data-panel="site">
+              <div class="field-section-label">Location</div>
+              <div class="field-group">
+                <div class="field-label">County</div>
+                <input class="field-input" type="text" value="Ravalli County, MT">
+              </div>
+              <div class="field-group">
+                <div class="field-label">Climate zone (IECC)</div>
+                <select class="field-select"><option>Zone 6B — Cold/Dry</option><option>Zone 4C — Marine</option><option>Zone 5A — Cool/Humid</option></select>
+              </div>
+              <div class="field-group">
+                <div class="field-label">South orientation offset</div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:50%;"></div><div class="slider-thumb" style="left:50%;"></div></div><span class="slider-val">0°</span></div>
+              </div>
+              <div class="field-divider"></div>
+              <div class="field-section-label">Structural loads</div>
+              <div class="field-group">
+                <div class="field-label">Ground snow load</div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:60%;"></div><div class="slider-thumb" style="left:60%;"></div></div><span class="slider-val">60 psf</span></div>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Design wind speed (ASCE 7)</div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:50%;"></div><div class="slider-thumb" style="left:50%;"></div></div><span class="slider-val">115 mph</span></div>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Seismic design category</div>
+                <select class="field-select"><option>Category B (low)</option><option>Category C</option><option>Category D</option></select>
+              </div>
+              <div class="field-divider"></div>
+              <div class="field-section-label">Setbacks</div>
+              <div class="field-group">
+                <div class="field-label">Front yard</div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:40%;"></div><div class="slider-thumb" style="left:40%;"></div></div><span class="slider-val">25 ft</span></div>
+              </div>
+              <div class="field-group">
+                <div class="field-label">Side yard</div>
+                <div class="slider-row"><div class="slider-track"><div class="slider-fill" style="width:25%;"></div><div class="slider-thumb" style="left:25%;"></div></div><span class="slider-val">10 ft</span></div>
+              </div>
+            </div>
+
+            <!-- OUTBUILDINGS -->
+            <div class="sec-panel" data-panel="outbuildings">
+              <div class="field-section-label">Structures</div>
+              <div style="display:flex;flex-direction:column;gap:var(--sp-3);margin-bottom:var(--sp-5);">
+                <div class="ob-item">
+                  <div><div class="ob-name">Workshop / Shop</div><div class="ob-meta">24 × 30 ft · Timber frame</div></div>
+                  <div class="ob-del">✕</div>
+                </div>
+                <div class="ob-item">
+                  <div><div class="ob-name">Greenhouse</div><div class="ob-meta">12 × 24 ft · Polycarbonate</div></div>
+                  <div class="ob-del">✕</div>
+                </div>
+              </div>
+              <button class="add-btn">+ Add outbuilding</button>
+              <div class="field-divider"></div>
+              <div class="field-section-label">Visibility in 3D view</div>
+              <div style="display:flex;flex-direction:column;gap:var(--sp-3);">
+                <label class="check-row"><div class="check-box on"></div>Show outbuildings in viewport</label>
+                <label class="check-row"><div class="check-box on"></div>Include in BOM / budget</label>
+                <label class="check-row"><div class="check-box"></div>Include in compliance package</label>
+              </div>
+              <div class="field-divider"></div>
+              <div class="alert-inline success">✓ Outbuildings within total lot coverage limit (Ravalli Co. 40%)</div>
+            </div>
+
+          </div><!-- /section-fields -->
+        </div><!-- /edit-panel -->
+
+        <!-- viewport -->
+        <div class="viewport">
+          <div class="viewport-label">Three.js · Live 3D — Edit</div>
+          <div class="viewport-tools">
+            <div class="viewport-tool on">Wireframe</div>
+            <div class="viewport-tool">Solid</div>
+            <div class="viewport-tool">Section</div>
+            <div class="viewport-tool">North ↑</div>
+          </div>
+          <div class="viewport-house">
+            <svg width="220" height="160" viewBox="0 0 260 190" fill="none" style="opacity:.5;">
+              <rect x="40" y="90" width="180" height="100" stroke="rgba(255,210,140,.7)" stroke-width="1.5"/>
+              <polygon points="30,90 130,28 230,90" stroke="rgba(255,220,160,.85)" stroke-width="1.5" fill="none"/>
+              <line x1="130" y1="28" x2="130" y2="90" stroke="rgba(255,210,140,.35)" stroke-width="1" stroke-dasharray="4,3"/>
+              <rect x="108" y="150" width="24" height="40" stroke="rgba(255,210,140,.5)" stroke-width="1"/>
+              <rect x="56" y="108" width="28" height="22" stroke="rgba(255,210,140,.4)" stroke-width="1"/>
+              <rect x="96" y="108" width="28" height="22" stroke="rgba(255,210,140,.4)" stroke-width="1"/>
+              <rect x="136" y="108" width="28" height="22" stroke="rgba(255,210,140,.4)" stroke-width="1"/>
+              <rect x="176" y="108" width="28" height="22" stroke="rgba(255,210,140,.4)" stroke-width="1"/>
+              <rect x="8" y="140" width="28" height="50" stroke="rgba(100,160,80,.4)" stroke-width="1" stroke-dasharray="3,2"/>
+              <polygon points="4,140 22,126 40,140" stroke="rgba(100,160,80,.35)" stroke-width="1" stroke-dasharray="3,2" fill="none"/>
+            </svg>
+          </div>
+          <div class="viewport-axis">
+            <div class="axis-item"><div class="axis-line" style="width:22px;background:#c44;"></div><span class="axis-label" style="color:#c66;">X</span></div>
+            <div class="axis-item"><div class="axis-line" style="width:16px;background:#4a4;"></div><span class="axis-label" style="color:#6a6;">Y</span></div>
+            <div class="axis-item"><div class="axis-line" style="width:12px;background:#44a;"></div><span class="axis-label" style="color:#66a;">Z</span></div>
+          </div>
+          <div class="layers-float">
+            <div class="layers-toggle-btn" id="layersToggleEdit"><svg class="nhd-icon-inline" width="11" height="11" style="margin-right:4px;"><use href="#i-eye-sm"/></svg>Layers ▾</div>
+            <div class="layers-panel" id="layersPanelEdit">
+              <div class="layers-section-label">Structure</div>
+              <div class="layer-row"><div class="layer-dot" style="background:#b8a070;"></div><div class="layer-name">Envelope</div><svg class="nhd-icon" width="11" height="11"><use href="#i-eye-sm"/></svg></div>
+              <div class="layer-row"><div class="layer-dot" style="background:#8a6a48;"></div><div class="layer-name">Interior</div><svg class="nhd-icon" width="11" height="11"><use href="#i-eye-sm"/></svg></div>
+              <div class="layer-row"><div class="layer-dot" style="background:#5c8048;"></div><div class="layer-name">Roof</div><svg class="nhd-icon" width="11" height="11"><use href="#i-eye-sm"/></svg></div>
+              <div class="layer-row"><div class="layer-dot" style="background:#7a6040;"></div><div class="layer-name">Foundation</div><svg class="nhd-icon" width="11" height="11"><use href="#i-eye-sm"/></svg></div>
+              <div class="layers-section-label">Systems</div>
+              <div class="layer-row"><div class="layer-dot" style="background:#3c5e74;"></div><div class="layer-name">Plumbing</div><svg class="nhd-icon" width="11" height="11"><use href="#i-eye-sm"/></svg></div>
+              <div class="layer-row"><div class="layer-dot" style="background:#ae7630;"></div><div class="layer-name">Heating</div><svg class="nhd-icon" width="11" height="11" style="opacity:.25;"><use href="#i-eye-sm"/></svg></div>
+              <div class="layer-row"><div class="layer-dot" style="background:#b8a030;"></div><div class="layer-name">Power / Solar</div><svg class="nhd-icon" width="11" height="11"><use href="#i-eye-sm"/></svg></div>
+              <div class="layers-section-label">Site</div>
+              <div class="layer-row"><div class="layer-dot" style="background:#4e7248;"></div><div class="layer-name">Outbuildings</div><svg class="nhd-icon" width="11" height="11"><use href="#i-eye-sm"/></svg></div>
+            </div>
+          </div>
+        </div>
+      </div><!-- /edit-layout -->
+    </div><!-- /edit mode -->
+
+    <!-- ─── OUTPUT MODE ─── -->
+    <div class="mode-view" data-view="output">
+      <div class="output-layout">
+        <!-- output nav sidebar -->
+        <div class="output-sidebar">
+          <div class="output-sidebar-header">
+            <div class="output-sidebar-title">Output &amp; Export</div>
+            <div class="output-sidebar-sub">Montana Strawbale · Rev 3</div>
+          </div>
+          <div class="output-nav">
+            <div class="output-group-label">2D Drawings</div>
+            <div class="output-item active" data-output="floorplan"><svg class="nhd-icon" width="12" height="12"><use href="#i-grid"/></svg>Floor Plan</div>
+            <div class="output-item" data-output="sections"><svg class="nhd-icon" width="12" height="12"><use href="#i-sections"/></svg>Wall Sections</div>
+            <div class="output-item" data-output="elevations"><svg class="nhd-icon" width="12" height="12"><use href="#i-elevation"/></svg>Elevations</div>
+            <div class="output-item" data-output="details"><svg class="nhd-icon" width="12" height="12"><use href="#i-zoom"/></svg>Construction Details</div>
+            <div class="output-group-label">Compliance</div>
+            <div class="output-item" data-output="pe"><svg class="nhd-icon" width="12" height="12"><use href="#i-triangle"/></svg>PE Structural Package</div>
+            <div class="output-item" data-output="permit"><svg class="nhd-icon" width="12" height="12"><use href="#i-stamp"/></svg>Permit Set</div>
+            <div class="output-item" data-output="lender"><svg class="nhd-icon" width="12" height="12"><use href="#i-columns"/></svg>Lender Package</div>
+            <div class="output-group-label">BIM / BOM</div>
+            <div class="output-item" data-output="bom"><svg class="nhd-icon" width="12" height="12"><use href="#i-list"/></svg>Bill of Materials</div>
+            <div class="output-item" data-output="schedule"><svg class="nhd-icon" width="12" height="12"><use href="#i-calendar"/></svg>Material Schedule</div>
+          </div>
+        </div>
+        <!-- drawing area -->
+        <div class="output-main">
+          <div class="output-toolbar">
+            <div class="output-toolbar-title" id="outputDocTitle">Floor Plan · Scale 1:48</div>
+            <button class="output-action">DXF</button>
+            <button class="output-action">PDF</button>
+            <button class="output-action primary">Export ↓</button>
+          </div>
+          <div class="output-canvas" style="flex-direction:column;align-items:stretch;">
+
+            <!-- ── DRAWING VIEW (default) ── -->
+            <div class="out-view active" id="outViewDrawing" style="align-items:center;justify-content:center;position:relative;">
+              <svg width="340" height="260" viewBox="0 0 340 260" fill="none" xmlns="http://www.w3.org/2000/svg" style="opacity:.7;">
+                <rect x="40" y="30" width="260" height="200" stroke="#2c2018" stroke-width="6" fill="white"/>
+                <line x1="200" y1="30" x2="200" y2="160" stroke="#2c2018" stroke-width="3"/>
+                <line x1="40" y1="160" x2="300" y2="160" stroke="#2c2018" stroke-width="3"/>
+                <line x1="120" y1="160" x2="120" y2="230" stroke="#2c2018" stroke-width="3"/>
+                <path d="M 200 60 A 28 28 0 0 0 228 30" stroke="#888" stroke-width="1" fill="none"/>
+                <line x1="200" y1="60" x2="200" y2="30" stroke="#888" stroke-width="1"/>
+                <path d="M 120 190 A 24 24 0 0 1 144 160" stroke="#888" stroke-width="1" fill="none"/>
+                <line x1="120" y1="190" x2="144" y2="190" stroke="#888" stroke-width="1"/>
+                <line x1="40" y1="80" x2="40" y2="120" stroke="white" stroke-width="8"/>
+                <line x1="40" y1="80" x2="40" y2="120" stroke="#888" stroke-width="1" stroke-dasharray="4,2"/>
+                <line x1="240" y1="30" x2="280" y2="30" stroke="white" stroke-width="8"/>
+                <line x1="240" y1="30" x2="280" y2="30" stroke="#888" stroke-width="1" stroke-dasharray="4,2"/>
+                <text x="105" y="105" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#6a4e34">LIVING / KITCHEN</text>
+                <text x="260" y="100" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#6a4e34">BEDROOM</text>
+                <text x="80" y="200" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#6a4e34">BATH</text>
+                <text x="220" y="200" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#6a4e34">UTILITY</text>
+                <line x1="40" y1="18" x2="300" y2="18" stroke="#9a8068" stroke-width="0.5"/>
+                <line x1="40" y1="14" x2="40" y2="22" stroke="#9a8068" stroke-width="0.5"/>
+                <line x1="300" y1="14" x2="300" y2="22" stroke="#9a8068" stroke-width="0.5"/>
+                <text x="170" y="12" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#9a8068">48'-0"</text>
+                <line x1="14" y1="30" x2="14" y2="230" stroke="#9a8068" stroke-width="0.5"/>
+                <line x1="10" y1="30" x2="18" y2="30" stroke="#9a8068" stroke-width="0.5"/>
+                <line x1="10" y1="230" x2="18" y2="230" stroke="#9a8068" stroke-width="0.5"/>
+                <text x="9" y="135" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="7" fill="#9a8068" transform="rotate(-90,9,135)">36'-0"</text>
+                <line x1="316" y1="50" x2="316" y2="30" stroke="#2c2018" stroke-width="1.5"/>
+                <polygon points="316,24 312,34 320,34" fill="#2c2018"/>
+                <text x="316" y="56" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="8" fill="#6a4e34">N</text>
+              </svg>
+              <div class="output-canvas-label" id="outputDrawingLabel">Floor Plan A1.1 · Natural House · Ravalli Co. MT</div>
+              <div class="output-scale">1 : 48</div>
+              <div class="output-3d-thumb" id="switchToPreview" title="Switch to 3D Preview">
+                <svg width="50" height="36" viewBox="0 0 260 190" fill="none" style="opacity:.45;"><rect x="40" y="90" width="180" height="100" stroke="rgba(255,210,140,.8)" stroke-width="2"/><polygon points="30,90 130,28 230,90" stroke="rgba(255,220,160,.9)" stroke-width="2" fill="none"/></svg>
+                <div class="output-3d-thumb-label">3D Preview ↗</div>
+              </div>
+            </div>
+
+            <!-- ── BOM VIEW ── -->
+            <div class="out-view" id="outViewBOM">
+              <div class="bom-wrap">
+                <div class="bom-title">Bill of Materials</div>
+                <div class="bom-subtitle">Montana Strawbale · 1,728 ft² · Rev. 3 · Ravalli Co. MT · Estimate ±15%</div>
+                <table class="bom-table">
+                  <thead><tr>
+                    <th>Item</th><th>Specification</th>
+                    <th class="num">Qty</th><th class="num">Unit</th>
+                    <th class="num">Unit cost</th><th class="num">Total</th>
+                  </tr></thead>
+                  <tbody>
+                    <tr class="bom-group"><td colspan="6">Structure — Walls</td></tr>
+                    <tr><td><div class="bom-item-name">Straw bales</div><div class="bom-item-spec">2-string, wheat · 18 in nominal</div></td><td class="compliance-code">Supplier TBD</td><td class="num">420</td><td class="num">bale</td><td class="num">$28</td><td class="num">$11,760</td></tr>
+                    <tr><td><div class="bom-item-name">Round timber posts</div><div class="bom-item-spec">8–10 in diameter · peeled, air-dried</div></td><td class="compliance-code">Local mill</td><td class="num">16</td><td class="num">each</td><td class="num">$420</td><td class="num">$6,720</td></tr>
+                    <tr><td><div class="bom-item-name">Earth plaster — base coat</div><div class="bom-item-spec">Clay/sand/straw mix · 1.5 in</div></td><td class="compliance-code">Site-sourced</td><td class="num">240</td><td class="num">bag</td><td class="num">$18</td><td class="num">$4,320</td></tr>
+                    <tr><td><div class="bom-item-name">Earth plaster — finish coat</div><div class="bom-item-spec">Fine clay · pigmented</div></td><td class="compliance-code">American Clay</td><td class="num">120</td><td class="num">bag</td><td class="num">$32</td><td class="num">$3,840</td></tr>
+                    <tr><td><div class="bom-item-name">Bale pins / rebar</div><div class="bom-item-spec">#4 rebar · 24 in · galvanized</div></td><td class="compliance-code">Big R</td><td class="num">840</td><td class="num">pin</td><td class="num">$2.40</td><td class="num">$2,016</td></tr>
+
+                    <tr class="bom-group"><td colspan="6">Structure — Roof</td></tr>
+                    <tr><td><div class="bom-item-name">Timber frame trusses</div><div class="bom-item-spec">Douglas fir · custom fabricated</div></td><td class="compliance-code">Cascade Timber</td><td class="num">8</td><td class="num">truss</td><td class="num">$2,200</td><td class="num">$17,600</td></tr>
+                    <tr><td><div class="bom-item-name">Dense-pack cellulose</div><div class="bom-item-spec">R-60 · 18 in depth</div></td><td class="compliance-code">GreenFiber</td><td class="num">3,200</td><td class="num">sf</td><td class="num">$3.80</td><td class="num">$12,160</td></tr>
+                    <tr><td><div class="bom-item-name">Standing seam metal roofing</div><div class="bom-item-spec">Galvalume · 24 ga · 16 in panels</div></td><td class="compliance-code">Metal Sales</td><td class="num">2,100</td><td class="num">sf</td><td class="num">$4.60</td><td class="num">$9,660</td></tr>
+                    <tr><td><div class="bom-item-name">Roof sheathing — OSB</div><div class="bom-item-spec">7/16 in · rated</div></td><td class="compliance-code">Weyerhaeuser</td><td class="num">3,100</td><td class="num">sf</td><td class="num">$0.95</td><td class="num">$2,945</td></tr>
+
+                    <tr class="bom-group"><td colspan="6">Foundation</td></tr>
+                    <tr><td><div class="bom-item-name">Rubble / drain rock</div><div class="bom-item-spec">1.5–2.5 in washed river rock</div></td><td class="compliance-code">Montana Aggregate</td><td class="num">28</td><td class="num">ton</td><td class="num">$38</td><td class="num">$1,064</td></tr>
+                    <tr><td><div class="bom-item-name">Perforated drain tile</div><div class="bom-item-spec">4 in HDPE · 440 lf</div></td><td class="compliance-code">Home Depot</td><td class="num">440</td><td class="num">lf</td><td class="num">$1.20</td><td class="num">$528</td></tr>
+                    <tr><td><div class="bom-item-name">EPS slab insulation</div><div class="bom-item-spec">2 in · R-10 · Type II</div></td><td class="compliance-code">InsulFoam</td><td class="num">1,800</td><td class="num">sf</td><td class="num">$0.80</td><td class="num">$1,440</td></tr>
+
+                    <tr class="bom-group"><td colspan="6">Windows &amp; Doors</td></tr>
+                    <tr><td><div class="bom-item-name">Triple-pane windows (south)</div><div class="bom-item-spec">U-0.18 · SHGC 0.40 · wood clad</div></td><td class="compliance-code">Intus Windows</td><td class="num">6</td><td class="num">unit</td><td class="num">$2,800</td><td class="num">$16,800</td></tr>
+                    <tr><td><div class="bom-item-name">Triple-pane windows (other)</div><div class="bom-item-spec">U-0.18 · SHGC 0.25 · wood clad</div></td><td class="compliance-code">Intus Windows</td><td class="num">4</td><td class="num">unit</td><td class="num">$2,400</td><td class="num">$9,600</td></tr>
+                    <tr><td><div class="bom-item-name">Exterior doors</div><div class="bom-item-spec">Fiberglass insulated · U-0.20</div></td><td class="compliance-code">Therma-Tru</td><td class="num">2</td><td class="num">unit</td><td class="num">$1,600</td><td class="num">$3,200</td></tr>
+
+                    <tr class="bom-group"><td colspan="6">Systems</td></tr>
+                    <tr><td><div class="bom-item-name">Solar array + racking</div><div class="bom-item-spec">6 kW · 16 × 375W panels</div></td><td class="compliance-code">Sunrun / local</td><td class="num">1</td><td class="num">system</td><td class="num">$18,000</td><td class="num">$18,000</td></tr>
+                    <tr><td><div class="bom-item-name">Battery storage</div><div class="bom-item-spec">LiFePO4 · 10 kWh</div></td><td class="compliance-code">EG4 / Signature</td><td class="num">1</td><td class="num">system</td><td class="num">$8,400</td><td class="num">$8,400</td></tr>
+                    <tr><td><div class="bom-item-name">Well pump + pressure tank</div><div class="bom-item-spec">1 hp submersible · 42 gal tank</div></td><td class="compliance-code">Goulds / local</td><td class="num">1</td><td class="num">system</td><td class="num">$3,200</td><td class="num">$3,200</td></tr>
+                    <tr><td><div class="bom-item-name">Masonry heater kit</div><div class="bom-item-spec">Temp-Cast or custom brick · 8,000 BTU/h</div></td><td class="compliance-code">Masonry Stove Builders</td><td class="num">1</td><td class="num">unit</td><td class="num">$14,000</td><td class="num">$14,000</td></tr>
+                    <tr><td><div class="bom-item-name">HRV unit</div><div class="bom-item-spec">Zehnder Comfoair 200 · 200 cfm</div></td><td class="compliance-code">Zehnder</td><td class="num">1</td><td class="num">unit</td><td class="num">$4,200</td><td class="num">$4,200</td></tr>
+
+                    <tr class="bom-group"><td colspan="6">Labor &amp; Overhead</td></tr>
+                    <tr><td><div class="bom-item-name">General contractor labor</div><div class="bom-item-spec">Framing, roofing, mechanical rough-in</div></td><td></td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">$68,000</td></tr>
+                    <tr><td><div class="bom-item-name">Bale raising crew</div><div class="bom-item-spec">5-day community build event</div></td><td></td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">$4,800</td></tr>
+                    <tr><td><div class="bom-item-name">Permits + engineering</div><div class="bom-item-spec">AHJ fees, PE review, soil test</div></td><td></td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">$8,200</td></tr>
+
+                    <tr class="bom-total"><td colspan="4"><strong>ESTIMATED TOTAL</strong></td><td class="num">1,728 ft²</td><td class="num">$284,600</td></tr>
+                    <tr><td colspan="6" style="font-family:var(--font-mono);font-size:9px;color:var(--chrome-3);padding:var(--sp-4);">$164.7 / ft² blended · ±15% estimate · pricing as of July 2026 · does not include land or site work</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- ── COMPLIANCE VIEW ── -->
+            <div class="out-view" id="outViewCompliance">
+              <div class="compliance-wrap">
+                <div>
+                  <div class="compliance-section-title">IRC 2021 Compliance Review</div>
+                  <div style="font-family:var(--font-mono);font-size:10px;color:var(--chrome-3);margin-bottom:var(--sp-6);">Montana Strawbale · 1,728 ft² · Ravalli Co. AHJ · Generated July 2026</div>
+                  <table class="compliance-table">
+                    <thead><tr><th>Code Section</th><th>Requirement</th><th>Status</th><th>Note</th></tr></thead>
+                    <tbody>
+                      <tr><td class="compliance-code">R301 — Design criteria</td><td>Snow load, wind, seismic</td><td><span class="c-badge pass">✓ Pass</span></td><td class="compliance-note">60 psf · 115 mph · SDC B</td></tr>
+                      <tr><td class="compliance-code">R302 — Fire resistance</td><td>Separation, exterior walls</td><td><span class="c-badge pass">✓ Pass</span></td><td class="compliance-note">Earth plaster qualifies as non-combustible cladding</td></tr>
+                      <tr><td class="compliance-code">R303 — Light &amp; ventilation</td><td>Min 8% glazing per habitable room</td><td><span class="c-badge pass">✓ Pass</span></td><td class="compliance-note">22% W/W ratio · HRV handles mech. ventilation</td></tr>
+                      <tr><td class="compliance-code">R304 — Min. room dimensions</td><td>70 ft² · 7 ft ceiling</td><td><span class="c-badge pass">✓ Pass</span></td><td class="compliance-note">All habitable rooms ≥ 110 ft²</td></tr>
+                      <tr><td class="compliance-code">R313 — Sprinklers</td><td>Required in some jurisdictions</td><td><span class="c-badge na">N/A</span></td><td class="compliance-note">Ravalli Co. does not require residential sprinklers for &lt;5,000 ft²</td></tr>
+                      <tr><td class="compliance-code">R401 — Foundation</td><td>Frost depth 36 in (local)</td><td><span class="c-badge pass">✓ Pass</span></td><td class="compliance-note">Rubble trench below frost line · PE-stamped detail required</td></tr>
+                      <tr><td class="compliance-code">R602 — Straw bale</td><td>AHJ acceptance · IRC Alt. method</td><td><span class="c-badge warn">⚠ Advisory</span></td><td class="compliance-note">Montana allows SB by Appendix S — submit test report ICC-ES ESR-1599</td></tr>
+                      <tr><td class="compliance-code">N1102 — Thermal envelope</td><td>Zone 6B: Wall R-20, Ceil R-60, Window U-0.30</td><td><span class="c-badge pass">✓ Pass</span></td><td class="compliance-note">Wall R-38 · Ceiling R-60 · Windows U-0.18 — all exceed requirements</td></tr>
+                      <tr><td class="compliance-code">N1102.4 — Air barrier</td><td>≤ 5 ACH50 (blower door)</td><td><span class="c-badge warn">⚠ Advisory</span></td><td class="compliance-note">Target 1.5 ACH50 (Passive House) — verify after construction</td></tr>
+                      <tr><td class="compliance-code">P2905 — Water supply</td><td>Private well construction standards</td><td><span class="c-badge fail">✕ Fail</span></td><td class="compliance-note">Well depth 42 ft below 50 ft minimum for Class B soils (Montana DEQ §36-21)</td></tr>
+                      <tr><td class="compliance-code">P2905.4 — Septic setback</td><td>100 ft well-to-absorption field</td><td><span class="c-badge warn">⚠ Advisory</span></td><td class="compliance-note">Current layout 68 ft — relocate field or file variance with Ravalli Co. Sanitarian</td></tr>
+                      <tr><td class="compliance-code">E3601 — Electrical service</td><td>200A min for solar + battery</td><td><span class="c-badge pass">✓ Pass</span></td><td class="compliance-note">200A main panel specified</td></tr>
+                      <tr><td class="compliance-code">M1601 — Mechanical</td><td>HRV balanced ±10% at each terminal</td><td><span class="c-badge pass">✓ Pass</span></td><td class="compliance-note">Zehnder Comfoair 200 spec sheet included</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div style="display:flex;gap:var(--sp-5);">
+                  <div style="flex:1;padding:var(--sp-6);background:var(--sage-2);border:1px solid rgba(60,92,56,.2);border-radius:var(--radius-md);">
+                    <div style="font-family:var(--font-mono);font-size:9px;text-transform:uppercase;letter-spacing:.10em;color:var(--sage-0);margin-bottom:var(--sp-3);">Passed</div>
+                    <div style="font-family:var(--font-display);font-size:28px;font-weight:600;color:var(--sage-0);">9</div>
+                    <div style="font-size:10px;color:var(--sage-1);">sections in full compliance</div>
+                  </div>
+                  <div style="flex:1;padding:var(--sp-6);background:var(--copper-2);border:1px solid rgba(138,90,24,.2);border-radius:var(--radius-md);">
+                    <div style="font-family:var(--font-mono);font-size:9px;text-transform:uppercase;letter-spacing:.10em;color:var(--copper-0);margin-bottom:var(--sp-3);">Advisory</div>
+                    <div style="font-family:var(--font-display);font-size:28px;font-weight:600;color:var(--copper-0);">3</div>
+                    <div style="font-size:10px;color:var(--copper-1);">items need attention before permit</div>
+                  </div>
+                  <div style="flex:1;padding:var(--sp-6);background:var(--brick-2);border:1px solid rgba(120,44,28,.2);border-radius:var(--radius-md);">
+                    <div style="font-family:var(--font-mono);font-size:9px;text-transform:uppercase;letter-spacing:.10em;color:var(--brick-0);margin-bottom:var(--sp-3);">Failed</div>
+                    <div style="font-family:var(--font-display);font-size:28px;font-weight:600;color:var(--brick-0);">1</div>
+                    <div style="font-size:10px;color:var(--brick-1);">blocking issue — well depth</div>
+                  </div>
+                  <div style="flex:1;padding:var(--sp-6);background:var(--canvas-2);border:1px solid var(--border-subtle);border-radius:var(--radius-md);">
+                    <div style="font-family:var(--font-mono);font-size:9px;text-transform:uppercase;letter-spacing:.10em;color:var(--chrome-3);margin-bottom:var(--sp-3);">N/A</div>
+                    <div style="font-family:var(--font-display);font-size:28px;font-weight:600;color:var(--chrome-2);">1</div>
+                    <div style="font-size:10px;color:var(--chrome-3);">not applicable to this jurisdiction</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div><!-- /output mode -->
+
+  </div><!-- /content-area -->
+
+  <!-- ── STATUS BAR ── -->
+  <div class="status-bar">
+    <div class="status-item"><div class="status-dot" style="background:var(--sage-1);"></div>Walls <span class="status-value">R-38 · Strawbale LB 18 in</span></div>
+    <div class="status-item"><div class="status-dot" style="background:#5c8048;"></div>Roof <span class="status-value">6:12 · R-60</span></div>
+    <div class="status-item"><div class="status-dot" style="background:#b8a070;"></div>Area <span class="status-value">1,728 ft²</span></div>
+    <div class="status-item"><div class="status-dot" style="background:#b8a030;"></div>BOM <span class="status-value">$284,600 est.</span></div>
+    <div class="status-item"><div class="status-dot" style="background:var(--copper-1);"></div>IRC <span class="status-value">2 advisories · 0 errors</span></div>
+    <div style="flex:1;"></div>
+    <div class="status-item">Zone 6B · Ravalli Co. MT · ASCE 7-22</div>
+  </div>
+
+</div><!-- /app-shell -->
+
+<!-- ── WIZARD MODAL ── -->
+<div class="wizard-backdrop" id="wizardBackdrop">
+  <div class="wizard-modal">
+    <div class="wizard-header">
+      <div style="flex:1;">
+        <div class="wizard-step-badge" id="wizardStepBadge">Step 1 of 14</div>
+        <div class="wizard-title" id="wizardTitle" style="margin-top:var(--sp-3);">What's your primary structure?</div>
+        <div class="wizard-subtitle" id="wizardSubtitle">This determines how Blender models the load path and which code provisions apply.</div>
+      </div>
+      <div class="wizard-close" id="wizardClose">✕</div>
+    </div>
+    <div class="wizard-progress"><div class="wizard-progress-fill" id="wizardBar" style="width:7.1%;"></div></div>
+    <div class="wizard-body">
+
+      <!-- Step 1 -->
+      <div class="wizard-step active" data-step="1">
+        <div class="radio-cards">
+          <div class="radio-card selected" data-radio="1">
+            <div class="radio-card-icon"><svg class="nhd-icon" width="28" height="28"><use href="#i-walls"/></svg></div>
+            <div class="radio-card-name">Strawbale — Load bearing</div>
+            <div class="radio-card-desc">Bale stack carries gravity loads. Best for single story.</div>
+          </div>
+          <div class="radio-card" data-radio="1">
+            <div class="radio-card-icon"><svg class="nhd-icon" width="28" height="28"><use href="#i-timber"/></svg></div>
+            <div class="radio-card-name">Timber frame + infill</div>
+            <div class="radio-card-desc">Post &amp; beam structure with straw bale infill. Works for 2 stories.</div>
+          </div>
+          <div class="radio-card" data-radio="1">
+            <div class="radio-card-icon"><svg class="nhd-icon" width="28" height="28"><use href="#i-adobe"/></svg></div>
+            <div class="radio-card-name">Adobe / rammed earth</div>
+            <div class="radio-card-desc">Mass wall construction. Best in mild climates.</div>
+          </div>
+          <div class="radio-card" data-radio="1">
+            <div class="radio-card-icon"><svg class="nhd-icon" width="28" height="28"><use href="#i-hybrid"/></svg></div>
+            <div class="radio-card-name">Hybrid</div>
+            <div class="radio-card-desc">Mix of systems — configure individually per elevation.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="wizard-step" data-step="2">
+        <div class="large-slider-wrap">
+          <div style="font-size:13px;color:var(--chrome-2);margin-bottom:var(--sp-4);">Drag to set your target conditioned floor area. You can refine room-by-room later.</div>
+          <div class="large-slider-row">
+            <input class="large-slider" type="range" id="areaSlider" min="400" max="3000" step="40" value="1280">
+            <div class="large-slider-val" id="areaVal">1,280<br><span style="font-size:12px;color:var(--chrome-3);">ft²</span></div>
+          </div>
+          <div class="large-slider-ticks"><span>400 ft²</span><span>1,000</span><span>1,600</span><span>2,200</span><span>3,000 ft²</span></div>
+        </div>
+        <div style="display:flex;gap:var(--sp-5);margin-top:var(--sp-4);">
+          <div style="flex:1;padding:var(--sp-5);background:var(--canvas-1);border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+            <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:.10em;text-transform:uppercase;color:var(--chrome-3);margin-bottom:var(--sp-2);">Bale count (est.)</div>
+            <div style="font-family:var(--font-mono);font-size:18px;color:var(--chrome-0);" id="baleCount">~320</div>
+          </div>
+          <div style="flex:1;padding:var(--sp-5);background:var(--canvas-1);border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+            <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:.10em;text-transform:uppercase;color:var(--chrome-3);margin-bottom:var(--sp-2);">BOM estimate</div>
+            <div style="font-family:var(--font-mono);font-size:18px;color:var(--chrome-0);" id="bomEst">$186k</div>
+          </div>
+          <div style="flex:1;padding:var(--sp-5);background:var(--canvas-1);border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+            <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:.10em;text-transform:uppercase;color:var(--chrome-3);margin-bottom:var(--sp-2);">R-value (walls)</div>
+            <div style="font-family:var(--font-mono);font-size:18px;color:var(--chrome-0);">R-38</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="wizard-step" data-step="3">
+        <div class="field-group">
+          <div class="field-label" style="font-size:12px;margin-bottom:var(--sp-3);">County or address — used for climate zone, snow load, frost depth, and AHJ code lookup.</div>
+          <input class="field-input" type="text" placeholder="Enter county name or address…" style="font-size:14px;padding:10px 12px;">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-4);">
+          <div style="padding:var(--sp-5);background:var(--canvas-1);border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+            <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:.10em;text-transform:uppercase;color:var(--chrome-3);margin-bottom:4px;">Climate zone</div>
+            <div style="font-family:var(--font-mono);font-size:14px;color:var(--chrome-0);">6B — Cold/Dry</div>
+          </div>
+          <div style="padding:var(--sp-5);background:var(--canvas-1);border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+            <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:.10em;text-transform:uppercase;color:var(--chrome-3);margin-bottom:4px;">Snow load</div>
+            <div style="font-family:var(--font-mono);font-size:14px;color:var(--chrome-0);">60 psf</div>
+          </div>
+          <div style="padding:var(--sp-5);background:var(--canvas-1);border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+            <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:.10em;text-transform:uppercase;color:var(--chrome-3);margin-bottom:4px;">Frost depth</div>
+            <div style="font-family:var(--font-mono);font-size:14px;color:var(--chrome-0);">36 in</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4 -->
+      <div class="wizard-step" data-step="4">
+        <div style="font-size:13px;color:var(--chrome-2);margin-bottom:var(--sp-5);">How will you manage water and wastewater on site?</div>
+        <div style="display:flex;flex-direction:column;gap:var(--sp-3);">
+          <div class="radio-card selected" data-radio="4" style="display:flex;align-items:center;gap:var(--sp-5);">
+            <div class="radio-card-icon" style="margin-bottom:0;"><svg class="nhd-icon" width="22" height="22"><use href="#i-well"/></svg></div>
+            <div><div class="radio-card-name">Private well + absorption septic</div><div class="radio-card-desc">Most common for rural sites. Requires perc test and setback compliance.</div></div>
+          </div>
+          <div class="radio-card" data-radio="4" style="display:flex;align-items:center;gap:var(--sp-5);">
+            <div class="radio-card-icon" style="margin-bottom:0;"><svg class="nhd-icon" width="22" height="22"><use href="#i-municipal"/></svg></div>
+            <div><div class="radio-card-name">Municipal water + sewer</div><div class="radio-card-desc">Connect to existing infrastructure.</div></div>
+          </div>
+          <div class="radio-card" data-radio="4" style="display:flex;align-items:center;gap:var(--sp-5);">
+            <div class="radio-card-icon" style="margin-bottom:0;"><svg class="nhd-icon" width="22" height="22"><use href="#i-rainwater"/></svg></div>
+            <div><div class="radio-card-name">Rainwater harvest + constructed wetland</div><div class="radio-card-desc">Off-grid water. Requires state permit. Not potable in most jurisdictions without treatment.</div></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <div class="wizard-footer">
+      <div class="wizard-dots" id="wizardDots"></div>
+      <div class="wizard-nav">
+        <button class="wiz-btn wiz-btn-back" id="wizBack">← Back</button>
+        <button class="wiz-btn wiz-btn-next" id="wizNext">Next →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── AI CHAT ── -->
+<div class="chat-float-btn" id="chatFloatBtn" title="AI Copilot"><svg class="nhd-icon" width="18" height="18"><use href="#i-chat"/></svg></div>
+<div class="chat-panel-wrap" id="chatPanel">
+  <div class="chat-panel-header">
+    <div class="chat-panel-title" style="display:flex;align-items:center;gap:6px;"><svg class="nhd-icon" width="13" height="13"><use href="#i-chat"/></svg>AI Copilot</div>
+    <div class="chat-panel-close" id="chatClose">✕</div>
+  </div>
+  <div class="chat-messages">
+    <div class="chat-msg">
+      <div class="chat-avatar ai">NH</div>
+      <div class="chat-bubble ai">I can help with code compliance, material specs, sizing, or system selection. What would you like to explore?</div>
+    </div>
+    <div class="chat-msg user">
+      <div class="chat-avatar user">You</div>
+      <div class="chat-bubble user">Will my well depth pass for Montana DEQ?</div>
+    </div>
+    <div class="chat-msg">
+      <div class="chat-avatar ai">NH</div>
+      <div class="chat-bubble ai">Montana DEQ requires 50 ft minimum in Class B soils. Your current depth of 42 ft is below that. Deepen to ≥50 ft, or request a soil reclassification via perc test.</div>
+    </div>
+  </div>
+  <div class="chat-input-row">
+    <textarea class="chat-textarea" rows="1" placeholder="Ask about code, materials…"></textarea>
+    <button class="chat-send">↑</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;$preview&quot;: {&quot;width&quot;: 1440, &quot;height&quot;: 900}
+}">
+class Component extends DCLogic {
+  currentMode = 'edit';
+  currentSection = 'envelope';
+  wizardStep = 1;
+  totalWizardSteps = 4; // demo steps; indicates 14 total
+
+  componentDidMount() {
+    const el = this.el;
+
+    // ── Mode switching ────────────────────────────────────
+    const switchMode = (target) => {
+      this.currentMode = target;
+      el.querySelectorAll('.mode-view').forEach(v => {
+        v.classList.toggle('active', v.dataset.view === target);
+      });
+      el.querySelectorAll('.mode-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.mode === target);
+      });
+    };
+
+    el.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => switchMode(btn.dataset.mode));
+    });
+
+    // start-mode path buttons
+    const goEdit = () => switchMode('edit');
+    const goPreview = () => switchMode('preview');
+
+    const wizardBtn = el.querySelector('#startWizard');
+    if (wizardBtn) wizardBtn.addEventListener('click', () => {
+      this.openWizard();
+    });
+    const exampleBtn = el.querySelector('#startExample');
+    if (exampleBtn) exampleBtn.addEventListener('click', goEdit);
+    const jsonBtn = el.querySelector('#startJSON');
+    if (jsonBtn) jsonBtn.addEventListener('click', goEdit);
+    const aiBtn = el.querySelector('#startAI');
+    if (aiBtn) { aiBtn.addEventListener('click', () => { switchMode('edit'); this.openChat(); }); }
+    const jumpBtn = el.querySelector('#startJumpEdit');
+    if (jumpBtn) jumpBtn.addEventListener('click', goEdit);
+
+    // output: 3d thumb → preview
+    const thumbBtn = el.querySelector('#switchToPreview');
+    if (thumbBtn) thumbBtn.addEventListener('click', () => switchMode('preview'));
+
+    // ── Section tabs in Edit mode ─────────────────────────
+    el.querySelectorAll('.sec-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const target = tab.dataset.sec;
+        this.currentSection = target;
+        el.querySelectorAll('.sec-tab').forEach(t => t.classList.toggle('active', t.dataset.sec === target));
+        el.querySelectorAll('.sec-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === target));
+      });
+    });
+
+    // ── Layer panels ──────────────────────────────────────
+    const setupLayers = (toggleId, panelId) => {
+      const btn = el.querySelector(`#${toggleId}`);
+      const panel = el.querySelector(`#${panelId}`);
+      if (btn && panel) {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          panel.classList.toggle('open');
+        });
+      }
+    };
+    setupLayers('layersTogglePreview', 'layersPanelPreview');
+    setupLayers('layersToggleEdit', 'layersPanelEdit');
+
+    el.querySelectorAll('.layer-eye').forEach(eye => {
+      eye.addEventListener('click', e => {
+        e.stopPropagation();
+        const isOff = eye.style.opacity === '0.25';
+        eye.style.opacity = isOff ? '1' : '0.25';
+      });
+    });
+
+    document.addEventListener('click', () => {
+      el.querySelectorAll('.layers-panel.open').forEach(p => p.classList.remove('open'));
+    });
+
+    // ── Viewport tools toggle ─────────────────────────────
+    el.querySelectorAll('.viewport-tool').forEach(tool => {
+      tool.addEventListener('click', () => {
+        const group = tool.closest('.viewport-tools');
+        if (!group) return;
+        group.querySelectorAll('.viewport-tool').forEach(t => t.classList.remove('on'));
+        tool.classList.add('on');
+      });
+    });
+
+    // ── Compact mode toggle ───────────────────────────────
+    const compactToggle = el.querySelector('#compactToggle');
+    const shell = el.querySelector('#appShell');
+    if (compactToggle && shell) {
+      compactToggle.addEventListener('click', () => {
+        compactToggle.classList.toggle('on');
+        shell.classList.toggle('compact');
+      });
+    }
+
+    // ── Output nav ────────────────────────────────────────
+    const outputTitle = el.querySelector('#outputDocTitle');
+    const outputLabel = el.querySelector('#outputDrawingLabel');
+    const titles = {
+      floorplan: 'Floor Plan · Scale 1:48',
+      sections: 'Wall Sections · Scale 1:24',
+      elevations: 'Elevations · Scale 1:48',
+      details: 'Construction Details · Scale 1:12',
+      pe: 'PE Structural Package',
+      permit: 'Permit Set',
+      lender: 'Lender Package',
+      bom: 'Bill of Materials',
+      schedule: 'Material Schedule',
+    };
+    const labels = {
+      floorplan: 'Floor Plan A1.1 · Natural House · Ravalli Co. MT',
+      sections: 'Wall Section A3.1 · Strawbale LB 18 in',
+      elevations: 'South Elevation A2.1',
+      details: 'Foundation Detail D1.2',
+      pe: 'PE Package · Structural Calculations',
+      permit: 'Permit Set · AHJ Submittal',
+      lender: 'Lender Package · Appraisal Support',
+      bom: 'BOM · 1,728 ft² · $284,600 est.',
+      schedule: 'Material Schedule Rev. 3',
+    };
+    el.querySelectorAll('.output-item').forEach(item => {
+      item.addEventListener('click', () => {
+        el.querySelectorAll('.output-item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+        const key = item.dataset.output;
+        if (outputTitle && titles[key]) outputTitle.textContent = titles[key];
+        if (outputLabel && labels[key]) outputLabel.textContent = labels[key];
+      });
+    });
+
+    // ── Radio cards ───────────────────────────────────────
+    el.querySelectorAll('.radio-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const group = card.dataset.radio;
+        el.querySelectorAll(`.radio-card[data-radio="${group}"]`).forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+      });
+    });
+
+    // ── Wizard ────────────────────────────────────────────
+    this.openWizard = () => {
+      const bd = el.querySelector('#wizardBackdrop');
+      if (bd) bd.classList.add('open');
+      this.wizardStep = 1;
+      this.renderWizard();
+    };
+    const closeWizard = () => {
+      const bd = el.querySelector('#wizardBackdrop');
+      if (bd) bd.classList.remove('open');
+    };
+    const closeBtn = el.querySelector('#wizardClose');
+    if (closeBtn) closeBtn.addEventListener('click', closeWizard);
+    const backdrop = el.querySelector('#wizardBackdrop');
+    if (backdrop) backdrop.addEventListener('click', e => { if (e.target === backdrop) closeWizard(); });
+
+    const wizBack = el.querySelector('#wizBack');
+    const wizNext = el.querySelector('#wizNext');
+    if (wizBack) wizBack.addEventListener('click', () => {
+      if (this.wizardStep > 1) { this.wizardStep--; this.renderWizard(); }
+    });
+    if (wizNext) wizNext.addEventListener('click', () => {
+      if (this.wizardStep < this.totalWizardSteps) { this.wizardStep++; this.renderWizard(); }
+      else { closeWizard(); switchMode('edit'); }
+    });
+
+    this.renderWizard = () => {
+      const step = this.wizardStep;
+      const badge = el.querySelector('#wizardStepBadge');
+      const bar = el.querySelector('#wizardBar');
+      if (badge) badge.textContent = `Step ${step} of 14`;
+      if (bar) bar.style.width = `${(step / 14) * 100}%`;
+
+      const titles = {
+        1: ['What\'s your primary structure?', 'This determines the load path and which IRC provisions apply.'],
+        2: ['How large is your house?', 'Set the target conditioned floor area. Refine room-by-room in Edit mode.'],
+        3: ['Where is your site?', 'County is used to look up climate zone, snow load, frost depth, and AHJ code.'],
+        4: ['Water &amp; wastewater systems?', 'This affects setback calculations and compliance requirements.'],
+      };
+      const t = el.querySelector('#wizardTitle');
+      const s = el.querySelector('#wizardSubtitle');
+      if (t && titles[step]) t.innerHTML = titles[step][0];
+      if (s && titles[step]) s.innerHTML = titles[step][1];
+
+      el.querySelectorAll('.wizard-step').forEach(ws => {
+        ws.classList.toggle('active', parseInt(ws.dataset.step) === step);
+      });
+
+      // dots
+      const dotsEl = el.querySelector('#wizardDots');
+      if (dotsEl) {
+        dotsEl.innerHTML = '';
+        for (let i = 1; i <= 14; i++) {
+          const d = document.createElement('div');
+          d.className = 'wizard-dot' + (i === step ? ' active' : '') + (i < step ? ' done' : '');
+          dotsEl.appendChild(d);
+        }
+      }
+
+      const backBtn = el.querySelector('#wizBack');
+      if (backBtn) backBtn.style.visibility = step === 1 ? 'hidden' : 'visible';
+      const nextBtn = el.querySelector('#wizNext');
+      if (nextBtn) nextBtn.textContent = step >= this.totalWizardSteps ? '✓ Apply &amp; Edit' : 'Next →';
+    };
+    this.renderWizard();
+
+    // area slider
+    const areaSlider = el.querySelector('#areaSlider');
+    const areaVal = el.querySelector('#areaVal');
+    const baleCount = el.querySelector('#baleCount');
+    const bomEst = el.querySelector('#bomEst');
+    if (areaSlider) {
+      areaSlider.addEventListener('input', () => {
+        const v = parseInt(areaSlider.value);
+        if (areaVal) areaVal.innerHTML = `${v.toLocaleString()}<br><span style="font-size:12px;color:var(--chrome-3);">ft²</span>`;
+        if (baleCount) baleCount.textContent = `~${Math.round(v * 0.25)}`;
+        if (bomEst) bomEst.textContent = `$${Math.round(v * 145 / 1000)}k`;
+      });
+    }
+
+    // ── AI Chat ───────────────────────────────────────────
+    this.openChat = () => {
+      const panel = el.querySelector('#chatPanel');
+      if (panel) panel.classList.add('open');
+      const floatBtn = el.querySelector('#chatFloatBtn');
+      if (floatBtn) floatBtn.style.display = 'none';
+    };
+    const chatFloatBtn = el.querySelector('#chatFloatBtn');
+    const chatPanel = el.querySelector('#chatPanel');
+    const chatClose = el.querySelector('#chatClose');
+    if (chatFloatBtn) chatFloatBtn.addEventListener('click', this.openChat);
+    if (chatClose) chatClose.addEventListener('click', () => {
+      if (chatPanel) chatPanel.classList.remove('open');
+      if (chatFloatBtn) chatFloatBtn.style.display = 'flex';
+    });
+
+    // Generate btn feedback + viewport pulse
+    const genBtn = el.querySelector('#generateBtn');
+    if (genBtn) {
+      genBtn.addEventListener('click', () => {
+        genBtn.textContent = '⟳ Sending to Blender…';
+        genBtn.style.opacity = '0.7';
+        // pulse viewports
+        el.querySelectorAll('.viewport').forEach(vp => {
+          vp.style.transition = 'opacity .3s';
+          vp.style.opacity = '0.4';
+          setTimeout(() => { vp.style.opacity = '1'; }, 600);
+          setTimeout(() => { vp.style.opacity = '0.6'; }, 900);
+          setTimeout(() => { vp.style.opacity = '1'; }, 1400);
+        });
+        const iconSvg = `<svg class="nhd-icon-inline" width="13" height="13" style="margin-right:4px;"><use href="#i-hex"/></svg>`;
+        setTimeout(() => {
+          genBtn.innerHTML = `${iconSvg}Model updated`;
+          genBtn.style.opacity = '1';
+          genBtn.style.background = 'var(--sage-0)';
+          genBtn.style.borderColor = 'var(--sage-0)';
+        }, 1400);
+        setTimeout(() => {
+          genBtn.innerHTML = `${iconSvg}Generate Model`;
+          genBtn.style.background = '';
+          genBtn.style.borderColor = '';
+        }, 3000);
+      });
+    }
+
+    // ── Universal draggable sliders ────────────────────────
+    // Config map keyed by label text substring
+    const sliderConfigs = {
+      'Width':                  { min:20,  max:80,  unit:' ft',  step:1  },
+      'Length':                 { min:20,  max:100, unit:' ft',  step:1  },
+      'Ceiling height':         { min:8,   max:14,  unit:' ft',  step:.5 },
+      'Nominal bale':           { min:14,  max:24,  unit:' in',  step:1  },
+      'Window-to-wall':         { min:8,   max:55,  unit:'%',    step:1  },
+      'South glazing':          { min:20,  max:85,  unit:'%',    step:1  },
+      'Pitch':                  { min:2,   max:12,  unit:':12',  step:.5 },
+      'Overhang':               { min:12,  max:48,  unit:' in',  step:1  },
+      'Target R-value':         { min:30,  max:90,  unit:'',     step:1, prefix:'R-' },
+      'Frost depth':            { min:12,  max:72,  unit:' in',  step:1  },
+      'Well depth':             { min:20,  max:200, unit:' ft',  step:1  },
+      'Array size':             { min:2,   max:20,  unit:' kW',  step:.5 },
+      'South orientation':      { min:-45, max:45,  unit:'°',    step:1  },
+      'Ground snow':            { min:20,  max:120, unit:' psf', step:5  },
+      'Design wind':            { min:85,  max:160, unit:' mph', step:5  },
+      'Front yard':             { min:5,   max:60,  unit:' ft',  step:1  },
+      'Side yard':              { min:3,   max:30,  unit:' ft',  step:1  },
+      'Setback to well':        { min:20,  max:200, unit:' ft',  step:1  },
+    };
+
+    const getConfig = (row) => {
+      const group = row.closest('.field-group');
+      const labelEl = group ? group.querySelector('.field-label') : null;
+      if (!labelEl) return null;
+      const labelText = labelEl.textContent;
+      for (const [key, cfg] of Object.entries(sliderConfigs)) {
+        if (labelText.includes(key)) return cfg;
+      }
+      return { min:0, max:100, unit:'%', step:1 };
+    };
+
+    const pctToVal = (pct, cfg) => {
+      const raw = cfg.min + pct * (cfg.max - cfg.min);
+      const stepped = Math.round(raw / cfg.step) * cfg.step;
+      return Math.max(cfg.min, Math.min(cfg.max, stepped));
+    };
+
+    const formatVal = (v, cfg) => {
+      const prefix = cfg.prefix || '';
+      const num = (cfg.step < 1) ? v.toFixed(1) : Math.round(v);
+      return `${prefix}${num}${cfg.unit}`;
+    };
+
+    el.querySelectorAll('.slider-row').forEach(row => {
+      const track = row.querySelector('.slider-track');
+      const fill  = row.querySelector('.slider-fill');
+      const thumb = row.querySelector('.slider-thumb');
+      const valEl = row.querySelector('.slider-val');
+      if (!track || !fill || !thumb) return;
+
+      track.style.cursor = 'ew-resize';
+      thumb.style.cursor = 'ew-resize';
+
+      const applyPct = (pct) => {
+        pct = Math.max(0.01, Math.min(0.99, pct));
+        fill.style.width  = (pct * 100) + '%';
+        thumb.style.left  = (pct * 100) + '%';
+        if (valEl) {
+          const cfg = getConfig(row);
+          if (cfg) valEl.textContent = formatVal(pctToVal(pct, cfg), cfg);
+        }
+        // update label inline value if present
+        const group = row.closest('.field-group');
+        const label = group?.querySelector('.field-label');
+        if (label && valEl) {
+          const span = label.querySelector('span');
+          if (span) span.textContent = valEl.textContent;
+        }
+      };
+
+      let dragging = false;
+      const startDrag = (clientX) => {
+        dragging = true;
+        moveDrag(clientX);
+      };
+      const moveDrag = (clientX) => {
+        const rect = track.getBoundingClientRect();
+        applyPct((clientX - rect.left) / rect.width);
+      };
+
+      track.addEventListener('mousedown',  e => { e.preventDefault(); startDrag(e.clientX); });
+      track.addEventListener('touchstart', e => { e.preventDefault(); startDrag(e.touches[0].clientX); }, { passive:false });
+      document.addEventListener('mousemove',  e => { if (dragging) moveDrag(e.clientX); });
+      document.addEventListener('touchmove',  e => { if (dragging) moveDrag(e.touches[0].clientX); }, { passive:false });
+      document.addEventListener('mouseup',  () => { dragging = false; });
+      document.addEventListener('touchend', () => { dragging = false; });
+    });
+
+    // ── Output view switching (BOM / compliance / drawing) ─
+    const outViewDrawing    = el.querySelector('#outViewDrawing');
+    const outViewBOM        = el.querySelector('#outViewBOM');
+    const outViewCompliance = el.querySelector('#outViewCompliance');
+
+    const drawingKeys  = new Set(['floorplan','sections','elevations','details']);
+    const bomKeys      = new Set(['bom','schedule']);
+    const complianceKeys = new Set(['pe','permit','lender']);
+
+    el.querySelectorAll('.output-item').forEach(item => {
+      item.addEventListener('click', () => {
+        el.querySelectorAll('.output-item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+        const key = item.dataset.output;
+
+        if (outViewDrawing)    outViewDrawing.classList.toggle('active',    drawingKeys.has(key));
+        if (outViewBOM)        outViewBOM.classList.toggle('active',        bomKeys.has(key));
+        if (outViewCompliance) outViewCompliance.classList.toggle('active', complianceKeys.has(key));
+
+        const titles = {
+          floorplan:'Floor Plan · Scale 1:48', sections:'Wall Sections · Scale 1:24',
+          elevations:'Elevations · Scale 1:48', details:'Construction Details · Scale 1:12',
+          pe:'PE Structural Package — IRC 2021 Review',
+          permit:'Permit Set · AHJ Submittal Package',
+          lender:'Lender Package · Appraisal Support',
+          bom:'Bill of Materials · $284,600 est.',
+          schedule:'Material Schedule · Rev. 3',
+        };
+        const toolbar = el.querySelector('#outputDocTitle');
+        if (toolbar && titles[key]) toolbar.textContent = titles[key];
+      });
+    });
+
+    // ── Preview sidebar → jump to Edit + section ───────────
+    el.querySelectorAll('.acc-item').forEach(item => {
+      const header = item.querySelector('.acc-header');
+      const name   = header?.querySelector('.acc-name')?.textContent?.toLowerCase();
+      if (!header || !name) return;
+
+      const sectionMap = {
+        envelope:'envelope', walls:'walls', roof:'roof',
+        foundation:'foundation', systems:'systems',
+        site:'site', outbuildings:'outbuildings',
+      };
+      const secKey = Object.keys(sectionMap).find(k => name.includes(k));
+      if (!secKey) return;
+
+      header.style.cursor = 'pointer';
+      header.title = `Edit ${secKey} →`;
+      header.addEventListener('click', () => {
+        // switch to edit mode
+        el.querySelectorAll('.mode-view').forEach(v => v.classList.toggle('active', v.dataset.view === 'edit'));
+        el.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === 'edit'));
+        // activate section
+        el.querySelectorAll('.sec-tab').forEach(t => t.classList.toggle('active', t.dataset.sec === secKey));
+        el.querySelectorAll('.sec-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === secKey));
+      });
+    });
+
+    // check boxes toggle
+    el.querySelectorAll('.check-box').forEach(cb => {
+      cb.addEventListener('click', () => cb.classList.toggle('on'));
+    });
+  }
+}
+</script>
+</body>
+</html>

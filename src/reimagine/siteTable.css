@@ -144,7 +144,6 @@
   width: min(720px, calc(100vw - 470px)); max-height: calc(100vh - 230px);
   border-radius: 16px; z-index: 8; overflow-y: auto; padding: 14px 16px;
 }
-.st-morepanel-greet { font-size: 13px; color: var(--muted2, #565a4f); margin-bottom: 10px; }
 .st-morepanel .rz-found { border: none; background: transparent; padding: 0; box-shadow: none; }
 
 /* ── receipts ledger — money on the table, always ──────────────────────── */
@@ -233,7 +232,6 @@
    and the designs shelf inside it are exactly the ones classic uses. */
 .st-look .rz-status { display: none; }        /* the strip carries the facts */
 .st-look .rz-views { display: none; }         /* the dock carries the views  */
-.st-look .rz-greet-card { display: none; }    /* the model speaks for itself */
 .st-look .rz-flags-card { display: none; }    /* the strip's popover instead */
 .st-look .rz-history { display: none; }       /* undo/redo live top-left row */
 .st-look .rz-floors,

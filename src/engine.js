@@ -4049,14 +4049,14 @@ export function detectIssues(spec) {
     if (!climbs) continue;
     const st = resolveStair(spec, stairEl);
     for (const flag of st.flags) {
-      issues.push({ severity: 'warning', title: `${stairEl.name}: ${flag.split('—')[0].trim()}`, owner: 'Architect', system: 'rooms', fix: flag });
+      issues.push({ severity: 'warning', title: `${stairEl.name}: ${flag.split('—')[0].trim()}`, owner: 'Architect', system: 'stairs', fix: flag });
     }
     if (stairFootprint?.length && !rectInFootprint(stairFootprint, st.bbox)) {
       issues.push({
         severity: 'warning',
         title: `${stairEl.name} runs outside the walls`,
         owner: 'Architect',
-        system: 'rooms',
+        system: 'stairs',
         fix: `Its ${st.label.toLowerCase()} needs ${st.bbox.w.toFixed(1)}′ × ${st.bbox.d.toFixed(1)}′ of floor and part of that lands beyond the footprint. Turn it 90°, switch to a U (the most compact shape), or drag it further in.`
       });
     }
@@ -4083,7 +4083,7 @@ export function detectIssues(spec) {
   if (hasStackedSpace
     && !spec.rooms.some((room) => /stair|ladder/i.test(room.name))
     && !(spec.elements || []).some((element) => /stair|ladder/i.test(element.name))) {
-    issues.push({ severity: 'warning', title: 'Upper space has no stair', owner: 'Architect', system: 'rooms', fixId: 'add-stair', fix: 'Add a stair (about 3 × 10 ft plus a landing) — or a ladder for a loft — so the upper floor, loft, or tower is reachable.' });
+    issues.push({ severity: 'warning', title: 'Upper space has no stair', owner: 'Architect', system: 'stairs', fixId: 'add-stair', fix: 'Add a stair (about 3 × 10 ft plus a landing) — or a ladder for a loft — so the upper floor, loft, or tower is reachable. The ＋ Stairs button is in the Storeys chapter.' });
   }
 
   // Ported from the add-on's aiCritic (Appendix S / 75-A style rules).
@@ -4375,10 +4375,10 @@ export function detectIssues(spec) {
   (spec.elements || []).filter((el) => el.category === 'deck').forEach((el) => {
     const dk = resolveDeck(spec, el);
     if (dk.topFt >= 2.5 && dk.railKey === 'none') {
-      issues.push({ severity: 'critical', title: `${el.name || 'A deck'} stands ${Math.round(dk.topFt * 10) / 10}′ up with no railing`, owner: 'Engineer', system: 'rooms', fix: 'A walking surface more than 30″ above the ground needs a guard (36″+ railing). Tap the deck and pick a railing.' });
+      issues.push({ severity: 'critical', title: `${el.name || 'A deck'} stands ${Math.round(dk.topFt * 10) / 10}′ up with no railing`, owner: 'Engineer', system: 'outdoors', fix: 'A walking surface more than 30″ above the ground needs a guard (36″+ railing). Tap the deck and pick a railing.' });
     }
     if (dk.topFt >= 1.5 && String(el.deckStairs || 'auto') === 'none') {
-      issues.push({ severity: 'warning', title: `${el.name || 'A deck'} has no steps down`, owner: 'Architect', system: 'rooms', fix: 'Tap the deck and give its steps an edge — or plan its only door back into the house knowingly.' });
+      issues.push({ severity: 'warning', title: `${el.name || 'A deck'} has no steps down`, owner: 'Architect', system: 'outdoors', fix: 'Tap the deck and give its steps an edge — or plan its only door back into the house knowingly.' });
     }
   });
   // 8. Per-storey and attached roofs that won't drain (or are extreme).
