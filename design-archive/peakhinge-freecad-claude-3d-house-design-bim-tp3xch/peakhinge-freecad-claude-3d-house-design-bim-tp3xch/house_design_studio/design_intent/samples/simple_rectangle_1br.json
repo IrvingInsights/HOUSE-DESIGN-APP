@@ -1,0 +1,218 @@
+{
+  "schema_version": "1.0",
+  "intent_id": "intent_sample1br",
+  "revision": 1,
+  "created_at": "2026-07-01T07:09:15.855967+00:00",
+  "updated_at": "2026-07-01T07:09:15.855995+00:00",
+  "source": {
+    "input_text": "A small single-story one-bedroom cabin, ~8x6m, gable roof, slab on grade, big south-facing windows.",
+    "input_image_refs": []
+  },
+  "site": {
+    "address_or_description": "Sample rural lot",
+    "orientation_deg_from_north": 0.0,
+    "lot_shape": "rectangular",
+    "lot_width_m": 25.0,
+    "lot_depth_m": 30.0,
+    "setbacks_m": {
+      "front": 0.0,
+      "rear": 0.0,
+      "left": 0.0,
+      "right": 0.0
+    },
+    "climate_notes": "Cold winters, hot summers; passive solar desirable."
+  },
+  "stories": 1,
+  "footprint": {
+    "shape": "rectangle",
+    "width_m": 8.0,
+    "depth_m": 6.0,
+    "wall_height_m": 2.7
+  },
+  "rooms": [
+    {
+      "id": "room_living",
+      "name": "Living / Kitchen",
+      "polygon": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          4.5,
+          0.0
+        ],
+        [
+          4.5,
+          6.0
+        ],
+        [
+          0.0,
+          6.0
+        ]
+      ],
+      "area_m2": 27.0,
+      "room_type": "living",
+      "min_ceiling_height_m": 2.55
+    },
+    {
+      "id": "room_bed",
+      "name": "Bedroom",
+      "polygon": [
+        [
+          4.5,
+          0.0
+        ],
+        [
+          8.0,
+          0.0
+        ],
+        [
+          8.0,
+          6.0
+        ],
+        [
+          4.5,
+          6.0
+        ]
+      ],
+      "area_m2": 21.0,
+      "room_type": "bedroom",
+      "min_ceiling_height_m": 2.55
+    }
+  ],
+  "walls": [
+    {
+      "id": "wall_south",
+      "start": [
+        0.0,
+        0.0
+      ],
+      "end": [
+        8.0,
+        0.0
+      ],
+      "height_m": 2.7,
+      "thickness_m": 0.15,
+      "wall_type": "exterior_bearing",
+      "material": "2x6 wood frame"
+    },
+    {
+      "id": "wall_east",
+      "start": [
+        8.0,
+        0.0
+      ],
+      "end": [
+        8.0,
+        6.0
+      ],
+      "height_m": 2.7,
+      "thickness_m": 0.15,
+      "wall_type": "exterior_bearing",
+      "material": "2x6 wood frame"
+    },
+    {
+      "id": "wall_north",
+      "start": [
+        8.0,
+        6.0
+      ],
+      "end": [
+        0.0,
+        6.0
+      ],
+      "height_m": 2.7,
+      "thickness_m": 0.15,
+      "wall_type": "exterior_bearing",
+      "material": "2x6 wood frame"
+    },
+    {
+      "id": "wall_west",
+      "start": [
+        0.0,
+        6.0
+      ],
+      "end": [
+        0.0,
+        0.0
+      ],
+      "height_m": 2.7,
+      "thickness_m": 0.15,
+      "wall_type": "exterior_bearing",
+      "material": "2x6 wood frame"
+    },
+    {
+      "id": "wall_partition",
+      "start": [
+        4.5,
+        0.0
+      ],
+      "end": [
+        4.5,
+        6.0
+      ],
+      "height_m": 2.7,
+      "thickness_m": 0.1,
+      "wall_type": "interior_partition",
+      "material": "2x4 partition"
+    }
+  ],
+  "openings": [
+    {
+      "id": "op_door",
+      "host_wall_id": "wall_south",
+      "opening_type": "door",
+      "width_m": 0.9,
+      "height_m": 2.1,
+      "sill_height_m": 0.0,
+      "position_along_wall_m": 2.0,
+      "egress_rated": false,
+      "swing_or_operation": "left-hand inswing"
+    },
+    {
+      "id": "op_win_living",
+      "host_wall_id": "wall_south",
+      "opening_type": "window",
+      "width_m": 1.8,
+      "height_m": 1.2,
+      "sill_height_m": 0.9,
+      "position_along_wall_m": 3.5,
+      "egress_rated": false,
+      "swing_or_operation": "fixed"
+    },
+    {
+      "id": "op_win_bed",
+      "host_wall_id": "wall_east",
+      "opening_type": "window",
+      "width_m": 1.0,
+      "height_m": 1.2,
+      "sill_height_m": 0.6,
+      "position_along_wall_m": 3.0,
+      "egress_rated": true,
+      "swing_or_operation": "casement egress"
+    }
+  ],
+  "roof": {
+    "roof_type": "gable",
+    "pitch_ratio": 0.33,
+    "overhang_m": 0.4,
+    "ridge_orientation": "parallel_to_width",
+    "material_notes": "Standing seam metal"
+  },
+  "foundation": {
+    "foundation_type": "slab_on_grade",
+    "slab_thickness_m": 0.1,
+    "notes": ""
+  },
+  "structural_framing_assumptions": {
+    "floor_joist_or_slab": "4in slab on grade, no joists",
+    "roof_rafter_or_truss": "2x8 rafters @ 16in o.c.",
+    "wall_stud_spec": "2x6 @ 16in o.c.",
+    "disclaimer": "Heuristic assumptions only. Not engineered. A licensed Professional Engineer must independently review and size all structural members."
+  },
+  "materials_notes": "Wood frame, metal roof, timber cladding.",
+  "open_questions": [
+    "Confirm bedroom egress window meets local clear-opening minimums."
+  ]
+}

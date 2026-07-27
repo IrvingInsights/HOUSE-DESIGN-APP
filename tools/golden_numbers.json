@@ -1,22 +1,28 @@
 {
   "seed": {
     "cost": {
+      "furnishings": 0,
       "foundation": 8832,
       "frame": 0,
       "flooring": 14716.8,
       "upperFloors": 0,
+      "stairs": 0,
       "outdoors": 0,
       "walls": 28684.08,
       "windows": 3060,
       "roof": 15589.692936,
-      "heat": 3000,
+      "heat": 4400,
       "water": 7500,
       "waste": 8500,
       "power": 18900
     },
     "numbers": {
       "floor": 1008,
+      "heatKit": 2600,
+      "heatInstall": 1800,
       "heatedFloor": 1008,
+      "heatedFloorRaw": 1008,
+      "bufferArea": 0,
       "storeys": 1,
       "basementRoomArea": 0,
       "roofArea": 1343.939046,
@@ -52,14 +58,15 @@
       "panels": 6,
       "panelRoom": 61,
       "batteryKwh": 21,
-      "totalBeforeSweat": 108782.572936,
+      "totalBeforeSweat": 110182.572936,
       "sweat": 0,
-      "total": 108782.572936,
+      "total": 110182.572936,
       "carbonKg": 46709.330269,
       "pitch": 0.32
     },
     "issues": [
-      "warning:Framed wall has no frame to carry it"
+      "warning:Framed wall has no frame to carry it",
+      "warning:Nothing here cools the house in summer"
     ],
     "phases": [
       "site-prep:1.5:0.08",
@@ -75,22 +82,28 @@
   },
   "standard": {
     "cost": {
+      "furnishings": 0,
       "foundation": 15888,
       "frame": 11520,
       "flooring": 12096,
       "upperFloors": 0,
+      "stairs": 0,
       "outdoors": 0,
       "walls": 28684.08,
       "windows": 3060,
       "roof": 16127.268555,
-      "heat": 4500,
+      "heat": 5000,
       "water": 7500,
       "waste": 8500,
       "power": 30000
     },
     "numbers": {
       "floor": 1008,
+      "heatKit": 3200,
+      "heatInstall": 1800,
       "heatedFloor": 1008,
+      "heatedFloorRaw": 1008,
+      "bufferArea": 0,
       "storeys": 1,
       "basementRoomArea": 0,
       "roofArea": 1343.939046,
@@ -126,9 +139,9 @@
       "panels": 10,
       "panelRoom": 61,
       "batteryKwh": 36,
-      "totalBeforeSweat": 137875.348555,
+      "totalBeforeSweat": 138375.348555,
       "sweat": 0,
-      "total": 137875.348555,
+      "total": 138375.348555,
       "carbonKg": 71699.687601,
       "pitch": 0.32
     },
@@ -149,22 +162,28 @@
   },
   "strawBale": {
     "cost": {
+      "furnishings": 0,
       "foundation": 8832,
       "frame": 0,
       "flooring": 14716.8,
       "upperFloors": 0,
+      "stairs": 0,
       "outdoors": 0,
       "walls": 19122.72,
       "windows": 3060,
       "roof": 15589.692936,
-      "heat": 3000,
+      "heat": 4400,
       "water": 7500,
       "waste": 8500,
       "power": 18900
     },
     "numbers": {
       "floor": 1008,
+      "heatKit": 2600,
+      "heatInstall": 1800,
       "heatedFloor": 1008,
+      "heatedFloorRaw": 1008,
+      "bufferArea": 0,
       "storeys": 1,
       "basementRoomArea": 0,
       "roofArea": 1343.939046,
@@ -200,14 +219,15 @@
       "panels": 6,
       "panelRoom": 61,
       "batteryKwh": 21,
-      "totalBeforeSweat": 99221.212936,
+      "totalBeforeSweat": 100621.212936,
       "sweat": 0,
-      "total": 99221.212936,
+      "total": 100621.212936,
       "carbonKg": 43522.210269,
       "pitch": 0.32
     },
     "issues": [
-      "critical:Straw bale walls sit too near the ground"
+      "critical:Straw bale walls sit too near the ground",
+      "warning:Nothing here cools the house in summer"
     ],
     "phases": [
       "site-prep:1.5:0.08",

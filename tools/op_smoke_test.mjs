@@ -10,8 +10,10 @@ import {
   WALL_ASSEMBLIES, FRAME_TYPES, FLOORING_TYPES, SUBFLOOR_TYPES, OPENING_TYPES,
   gradeElevationAt, maxFoundationExposureFt, resolveWallSide, footprintEdges,
   basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, storeyElevationFt, storeyHeightFt, roofProfile,
-  openingVerticalBand
+  openingVerticalBand, openingWallPlane, ROOF_COVERINGS
 } from '../backend/bim-core.mjs';
+// The stair GEOMETRY lives engine-side (bim-core only validates the op values).
+import * as engine from '../src/engine.js';
 
 function near(a, b, eps = 0.01) { return Math.abs(a - b) <= eps; }
 
@@ -140,8 +142,147 @@ r = apply(freshSpec(), [{ type: 'set_flooring', value: 'cork' }, { type: 'set_fl
 ok(r.spec.flooring.type === 'cork' && r.spec.flooring.subfloor === 'insulated', 'set_flooring type + subfloor');
 r = apply(freshSpec(), [{ type: 'set_frame', value: 'timber' }, { type: 'set_frame', value: 'stick', level: 2 }]);
 ok(r.spec.frame.type === 'timber' && r.spec.frame.storeyTypes['2'] === 'stick', 'set_frame base + per-storey');
+// --- add_roof_plane: it must ADD A PLANE ------------------------------------
+// It used to fall through to set_roof_profile: it reshaped the whole house's
+// roof, said "ok", and added nothing. These checks pin the difference.
+{
+  const before = freshSpec();
+  const roofWas = { type: before.shell.roofType, pitch: before.shell.roofPitch, high: before.shell.wallHeightFt };
+  r = apply(freshSpec(), [{ type: 'add_roof_plane', roofType: 'shed', name: 'Woodshed cover', x: 40, y: 3, w: 12, d: 10 }]);
+  const plane = (r.spec.elements || []).find((el) => el.name === 'Woodshed cover');
+  ok(Boolean(plane), 'add_roof_plane adds an element');
+  ok(plane?.roofType === 'shed', 'add_roof_plane: the element carries the roof kind, so the scene draws a panel on posts');
+  ok(plane?.w === 12 && plane?.d === 10, 'add_roof_plane keeps the size it was given');
+  ok(r.spec.shell.roofType === roofWas.type && r.spec.shell.roofPitch === roofWas.pitch && r.spec.shell.wallHeightFt === roofWas.high,
+    'add_roof_plane leaves the HOUSE roof alone — the old bug reshaped it');
+  r = apply(freshSpec(), [{ type: 'add_roof_plane' }]);
+  const bare = (r.spec.elements || []).slice(-1)[0];
+  ok(bare?.category === 'canopy' && bare.w >= 2 && bare.d >= 2 && bare.roofType === 'shed',
+    'add_roof_plane with nothing named still lands a real, sized plane');
+  // over an existing thing
+  const withDeck = freshSpec();
+  withDeck.elements = [{ id: 'dk1', name: 'Deck', category: 'deck', x: 8, y: 30, w: 12, d: 8, h: 0.35, level: 1 }];
+  r = apply(withDeck, [{ type: 'add_roof_plane', targetId: 'Deck', roofType: 'gable' }]);
+  ok(r.spec.elements.length === 1 && r.spec.elements[0].deckRoof === 'gable',
+    'add_roof_plane over a named deck roofs THAT deck instead of adding a second object');
+  r = apply(freshSpec(), [{ type: 'add_roof_plane', targetId: 'the pergola that is not there' }]);
+  ok((r.spec.elements || []).length === 0 && (r.warnings || []).some((w) => /couldn.t find/i.test(w)),
+    'add_roof_plane over something that does not exist says so instead of guessing');
+}
+// --- stairs: a real object, not a box ---------------------------------------
+{
+  const withStair = (extra = {}) => {
+    const s = freshSpec();
+    s.shell.storeys = 2; s.shell.wallHeightFt = 10;
+    s.elements = [{ id: 'st1', name: 'Stairs', category: 'stair', x: 4, y: 4, w: 3.5, d: 10, h: 8, level: 1, ...extra }];
+    return s;
+  };
+  r = apply(withStair(), [{ type: 'set_stair', id: 'st1', field: 'facing', value: 'east' }]);
+  ok(r.spec.elements[0].stair.facing === 'east', 'set_stair turns the stair 90°');
+  r = apply(withStair(), [{ type: 'set_stair', id: 'st1', field: 'shape', value: 'u' }]);
+  ok(r.spec.elements[0].stair.shape === 'u', 'set_stair splits it into a switchback');
+  r = apply(withStair(), [{ type: 'set_stair', id: 'st1', field: 'shape', value: 'zigzag' }]);
+  ok((r.spec.elements[0].stair?.shape || 'straight') === 'straight', 'set_stair rejects an unknown shape');
+  r = apply(withStair(), [{ type: 'set_stair', id: 'st1', field: 'split', value: 9 }]);
+  ok(r.spec.elements[0].stair.split === 0.85, 'set_stair clamps the run split');
+  r = apply(withStair(), [{ type: 'set_stair', id: 'st1', field: 'shape', value: 'l', w: 12, d: 9 }]);
+  ok(r.spec.elements[0].w === 12 && r.spec.elements[0].d === 9, 'set_stair stores the resolved footprint, so the box matches the shape');
+
+  // geometry: the run is derived from the climb, and turning it 90° swaps the
+  // bounding box rather than changing how far you have to walk.
+  const st = engine.resolveStair(withStair(), withStair().elements[0]);
+  ok(st.risers === 16 && Math.abs(st.riserIn - 7.5) < 0.01, `10' climb → 16 risers at 7.5" (got ${st.risers} / ${st.riserIn.toFixed(2)})`);
+  ok(st.treads === 15 && Math.abs(st.totalRunFt - 13.125) < 0.01, `15 treads = 13.125' of run (got ${st.totalRunFt.toFixed(3)})`);
+  const sN = engine.resolveStair(withStair({ stair: { shape: 'straight', facing: 'north' } }), withStair({ stair: { shape: 'straight', facing: 'north' } }).elements[0]);
+  const sE = engine.resolveStair(withStair({ stair: { shape: 'straight', facing: 'east' } }), withStair({ stair: { shape: 'straight', facing: 'east' } }).elements[0]);
+  ok(Math.abs(sN.bbox.w - sE.bbox.d) < 0.01 && Math.abs(sN.bbox.d - sE.bbox.w) < 0.01, 'turning 90° swaps the footprint, same run');
+  const sU = engine.resolveStair(withStair({ stair: { shape: 'u', facing: 'north', split: 0.5 } }), withStair({ stair: { shape: 'u', facing: 'north', split: 0.5 } }).elements[0]);
+  ok(sU.run1Treads + sU.run2Treads === sU.treads, 'a split stair still climbs every tread');
+  ok(sU.bbox.d < sN.bbox.d, `the U is shorter than the straight run (${sU.bbox.d.toFixed(1)}' vs ${sN.bbox.d.toFixed(1)}')`);
+  ok(sU.parts.filter((p) => p.kind === 'run').length === 2 && sU.parts.some((p) => p.kind === 'landing'), 'a U has two runs and a landing');
+  // every part must stay anchored at the element's x/y
+  ok(Math.abs(sU.bbox.x - 4) < 0.001 && Math.abs(sU.bbox.y - 4) < 0.001, 'the resolved stair stays anchored where it was dragged');
+
+  // a stair is no longer free — priced per tread, plus landing and railing
+  const priced = engine.deriveDesign(withStair());
+  const lines = priced.receipts.systems.stairs || [];
+  ok(priced.cost.stairs > 0 && lines.length > 0, `a stair costs money and shows its working (${Math.round(priced.cost.stairs)}, ${lines.length} lines)`);
+  ok(Math.abs(lines.reduce((a, l) => a + l.amount, 0) - priced.cost.stairs) < 0.01, 'stair receipt lines sum to the stair line');
+  const noStair = withStair(); noStair.elements = [];
+  ok(engine.deriveDesign(noStair).cost.stairs === 0, 'no stair, no stair cost');
+  // the U costs MORE than the straight run (a landing and more railing) —
+  // it buys floor space, not money
+  const uSpec = withStair({ stair: { shape: 'u' } });
+  ok(engine.deriveDesign(uSpec).cost.stairs > priced.cost.stairs, 'a switchback costs more than a straight run — it buys space, not money');
+  // milling your own stock is a SHALLOW discount here: a stair is labour
+  const milledSpec = withStair(); milledSpec.sourcing = { stairs: 'milled' };
+  const mCost = engine.deriveDesign(milledSpec).cost.stairs;
+  ok(mCost < priced.cost.stairs && mCost > priced.cost.stairs * 0.5, `milled stair stock saves some, not half (${Math.round(mCost)} vs ${Math.round(priced.cost.stairs)})`);
+
+  // A CORNER DRAG RESIZES A STAIR'S WIDTH, NEVER ITS RUN. The run is derived
+  // from the climb, so widening must leave the tread count and run length alone
+  // — otherwise dragging a corner would silently change how far the stair has
+  // to travel, which the climb does not allow.
+  {
+    const wide = withStair({ stair: { shape: 'straight', facing: 'north', widthFt: 5 } });
+    const narrow = withStair({ stair: { shape: 'straight', facing: 'north', widthFt: 3 } });
+    const a = engine.resolveStair(wide, wide.elements[0]);
+    const b = engine.resolveStair(narrow, narrow.elements[0]);
+    ok(Math.abs(a.bbox.d - b.bbox.d) < 0.001 && a.treads === b.treads,
+      `widening a stair leaves its run alone (${a.bbox.d.toFixed(2)}′, ${a.treads} treads both ways)`);
+    ok(a.bbox.w > b.bbox.w, `width is the axis that actually moves (${b.bbox.w} → ${a.bbox.w})`);
+  }
+
+  // TURNING A STAIR PIVOTS IT IN PLACE. x/y is the north-west CORNER, so a
+  // footprint flipping 3.5×15.75 → 15.75×3.5 would swing the run around that
+  // corner and hurl it across the site ("the compass is broken"). The UI keeps
+  // the CENTRE fixed by pairing set_stair with a move_object; this pins the
+  // arithmetic that pairing depends on.
+  {
+    const el = { id: 'st1', name: 'Stairs', category: 'stair', x: 10, y: 4, w: 3.5, d: 15.75, h: 8, level: 1, stair: { shape: 'straight', facing: 'north' } };
+    const base = { ...freshSpec(), shell: { ...freshSpec().shell, storeys: 2, wallHeightFt: 10 } };
+    const bN = engine.resolveStair(base, el);
+    const bE = engine.resolveStair(base, { ...el, stair: { ...el.stair, facing: 'east' } });
+    const cx = el.x + bN.bbox.w / 2; const cy = el.y + bN.bbox.d / 2;
+    const nx = cx - bE.bbox.w / 2; const ny = cy - bE.bbox.d / 2;
+    ok(Math.abs((nx + bE.bbox.w / 2) - cx) < 0.001 && Math.abs((ny + bE.bbox.d / 2) - cy) < 0.001,
+      'a turned stair keeps its centre — the re-anchor arithmetic holds');
+    ok(Math.abs(nx - el.x) > 1, `turning actually re-anchors the corner (${el.x} → ${nx.toFixed(1)}), it does not sit still and swing`);
+  }
+
+  // A STAIR CLIMBING TO A DECK OPENS ITS RAILING WHERE IT LANDS — otherwise you
+  // walk a full storey up into a guard rail. The gap must appear ONLY where the
+  // treads actually meet the edge, and every other edge must stay railed.
+  const deckSpec = (withStairEl) => {
+    const s = freshSpec();
+    s.shell.storeys = 2; s.shell.wallHeightFt = 10;
+    s.elements = [{ id: 'dk', name: 'Deck', category: 'deck', x: 0, y: 30, w: 20, d: 8, h: 0.35, level: 2, z: 10 }];
+    // a stair on the storey BELOW, landing on the deck's north edge (y=30)
+    if (withStairEl) s.elements.push({ id: 'st', name: 'Stairs', category: 'stair', x: 6, y: 30 - 13.125, w: 3.5, d: 13.125, h: 8, level: 1, stair: { shape: 'straight', facing: 'south' } });
+    return s;
+  };
+  const railOf = (s) => engine.resolveDeck(s, s.elements[0]).railLf;
+  const bare = railOf(deckSpec(false));
+  const landed = railOf(deckSpec(true));
+  ok(landed < bare, `a landing stair opens the rail (${landed.toFixed(1)} lf vs ${bare.toFixed(1)} bare)`);
+  ok(bare - landed >= 2 && bare - landed <= 6, `the opening is stair-width, not the whole edge (${(bare - landed).toFixed(1)} lf removed)`);
+  // a stair on the SAME level as the deck tops out a storey higher — it must NOT
+  // open this deck's rail
+  const wrongLevel = deckSpec(true); wrongLevel.elements[1].level = 2;
+  ok(Math.abs(railOf(wrongLevel) - bare) < 0.01, 'a stair that does not climb to this deck leaves its rail alone');
+}
+
 r = apply(freshSpec(), [{ type: 'set_reclaimed', system: 'windows', value: true }]);
-ok(r.spec.reclaimed.windows === true, 'set_reclaimed');
+ok(r.spec.sourcing.windows === 'salvaged', 'set_reclaimed true still means salvaged');
+r = apply(freshSpec(), [{ type: 'set_sourcing', system: 'flooring', value: 'milled' }]);
+ok(r.spec.sourcing.flooring === 'milled', 'set_sourcing milled');
+r = apply(freshSpec(), [{ type: 'set_sourcing', system: 'windows', value: 'milled' }]);
+ok(r.spec.sourcing.windows === 'new', 'set_sourcing refuses milled windows — you cannot mill a window');
+r = apply(freshSpec(), [{ type: 'set_sourcing', system: 'frame', value: 'nonsense' }]);
+ok(r.spec.sourcing.frame === 'new', 'set_sourcing rejects unknown source');
+// A pre-sourcing spec migrates silently: the old boolean map folds in and goes.
+r = apply({ ...freshSpec(), reclaimed: { roof: true, frame: true } }, [{ type: 'set_sourcing', system: 'flooring', value: 'milled' }]);
+ok(r.spec.sourcing.roof === 'salvaged' && r.spec.sourcing.frame === 'salvaged' && r.spec.reclaimed === undefined, 'legacy reclaimed booleans migrate to sourcing and are dropped');
 r = apply(freshSpec(), [{ type: 'set_assembly', field: 'envelope', value: 'cob walls with earthen plaster' }]);
 ok(/cob/.test(r.spec.systems.envelope), 'set_assembly envelope');
 
@@ -427,7 +568,7 @@ ok(WALL_ASSEMBLIES['ply-insulated'] && WALL_ASSEMBLIES.sips && WALL_ASSEMBLIES.i
 ok(WALL_ASSEMBLIES['straw-bale'].green === true && !WALL_ASSEMBLIES.sips.green, 'green flags mark natural methods');
 ok(WALL_ASSEMBLIES.glazed && WALL_ASSEMBLIES.glazed.rValue === 2, 'glazed glass-wall assembly present');
 ok(Object.keys(FRAME_TYPES).length === 6, 'FRAME_TYPES table');
-ok(Object.keys(FLOORING_TYPES).length === 6 && Object.keys(SUBFLOOR_TYPES).length === 4, 'floor tables');
+ok(Object.keys(FLOORING_TYPES).length === 7 && FLOORING_TYPES.pine.costPsf < FLOORING_TYPES.wood.costPsf && Object.keys(SUBFLOOR_TYPES).length === 4, 'floor tables — pine sits under hardwood');
 ok(Object.keys(OPENING_TYPES).length === 16, 'OPENING_TYPES table');
 
 // --- transaction truth (UX review 2026-07-10) --------------------------------
@@ -619,6 +760,134 @@ async function httpSanity() {
   const cov = r.elements.find((e) => e.name === 'Covered deck');
   ok(patio?.deckSurface === 'stone' && patio?.deckPlacement === 'grade', 'add_element keeps the patio\'s stone-at-grade options');
   ok(cov?.deckRail === 'cable' && cov?.deckRoof === 'gable', 'add_element keeps the covered deck\'s railing and roof choices');
+}
+
+// --- an upper storey's windows live on THAT STOREY'S wall -------------------
+// Daniel's south face, 2026-07-26. His house was 28x32 with a 28x32 second
+// storey — the two south edges coincided, and everything looked right. He then
+// deepened the house to 39 ft to make room for a greenhouse and an entry as
+// their own walled-off spaces, and left the second storey at 32. Its walls
+// moved with it (the scene has always drawn those from the plate); its WINDOWS
+// stayed pinned to the footprint, 7 ft further south, hanging over the
+// greenhouse roof where no second storey exists. One number, two owners.
+// openingWallPlane is now the single answer, and the band law samples the roof
+// at the same place, so a set-back storey keeps its windows instead of
+// dropping them to the floor below.
+{
+  const s = freshSpec();
+  s.shell.storeys = 2;
+  s.shell.widthFt = 28; s.shell.depthFt = 39;
+  s.elements = [{ id: 'storey-2-extent', name: 'Storey 2 extent', category: 'floor', x: 0, y: 0, w: 28, d: 32, h: 0.4, level: 2, z: 12 }];
+  s.openings = [
+    { type: 'window', wall: 'south', x: 10, widthFt: 6, sillFt: 1.5, level: 2, label: 'over the greenhouse roof' },
+    { type: 'window', wall: 'south', x: 10, widthFt: 6, sillFt: 1.5, level: 1, label: 'in the greenhouse wall' },
+    { type: 'window', wall: 'east', y: 10, widthFt: 6, sillFt: 1.5, level: 2, label: 'east upstairs' }
+  ];
+  ok(openingWallPlane(s, 'south', 1) === 39, 'the GROUND floor south wall is the footprint — 39 ft back');
+  ok(openingWallPlane(s, 'south', 2) === 32, "the SECOND floor's south wall is its own outline — 32 ft back, over the single-storey strip");
+  ok(openingWallPlane(s, 'east', 2) === 28, 'a side the storey does reach keeps the footprint plane');
+  const bandOf = (spec, i) => openingVerticalBand(spec, spec.openings[i]);
+  ok(bandOf(s, 0).level === 2, 'a second-floor window on a set-back wall STAYS on the second floor');
+  ok(bandOf(s, 1).level === 1, 'and a ground-floor window on the same side stays on the ground');
+  ok(bandOf(s, 2).level === 2, 'the east upstairs window is untouched');
+  // The two planes must not be confused when the storey is full-footprint.
+  const full = freshSpec();
+  full.shell.storeys = 2;
+  full.openings = [{ type: 'window', wall: 'south', x: 10, widthFt: 6, sillFt: 1.5, level: 2 }];
+  ok(openingWallPlane(full, 'south', 2) === (Number(full.shell.depthFt) || 28),
+    'a storey with no plate is a full-footprint stack: its wall IS the footprint');
+  ok(openingVerticalBand(full, full.openings[0]).level === 2, 'and its upstairs windows stay upstairs');
+  // A window past the plate ALONG the wall is still a real orphan.
+  const past = structuredClone(s);
+  past.elements[0] = { ...past.elements[0], x: 0, y: 0, w: 12, d: 32 };
+  past.openings = [{ type: 'window', wall: 'south', x: 22, widthFt: 4, sillFt: 1.5, level: 2 }];
+  ok(openingVerticalBand(past, past.openings[0]).level === 1,
+    'a window beyond where the storey reaches ALONG the wall still drops — that orphan is real');
+}
+
+// --- shade devices and the whole-house fan ----------------------------------
+{
+  const r = apply(freshSpec(), [
+    { type: 'add_element', name: 'Trellis', category: 'shade', kind: 'trellis', side: 'west', x: -6, y: 8, w: 5, d: 14, h: 8, level: 1 },
+    { type: 'set_utility', field: 'wholeHouseFan', value: 'true' }
+  ]).spec;
+  const tr = r.elements.find((e) => e.category === 'shade');
+  ok(tr?.kind === 'trellis', 'a shade device keeps which KIND it is');
+  ok(tr?.side === 'west', 'a shade device keeps which WALL it stands in front of — that is what decides the sun it blocks');
+  ok(r.utilities.wholeHouseFan === true, 'set_utility turns the whole-house fan on');
+  const r2 = apply(freshSpec(), [{ type: 'add_element', name: 'Awning', category: 'shade', kind: 'awning', side: 'nowhere', x: 2, y: 2, w: 4, d: 3, h: 8 }]).spec;
+  ok(!r2.elements[0].side, 'a nonsense side is dropped rather than stored');
+}
+
+// --- one side of a storey's eave -------------------------------------------
+// The house has always had four separate eaves; a STOREY had one number for
+// all four, so "shorten just the south one" could not be said. Daniel's upper
+// roof carries 6 ft all round and the south one reached 6 ft over a 7 ft
+// greenhouse — correct geometry, plants in the shade.
+{
+  const s = freshSpec();
+  s.shell.storeys = 2;
+  s.elements = [{ id: 'p2', name: 'Storey 2 extent', category: 'floor', x: 0, y: 0, w: 28, d: 32, h: 0.4, level: 2, z: 12, roofOverhangFt: 6 }];
+  let r = apply(s, [{ type: 'update_object', targetId: 'p2', name: 'Storey 2 extent', field: 'roofOverhangSouthFt', value: 4 }]).spec;
+  let p = r.elements.find((e) => e.id === 'p2');
+  ok(p.roofOverhangSouthFt === 4, 'one side of a storey eave can be set on its own');
+  ok(p.roofOverhangFt === 6, 'and the storey keeps its all-round figure for the other three');
+  r = apply(r, [{ type: 'update_object', targetId: 'p2', name: 'Storey 2 extent', field: 'roofOverhangSouthFt', value: '' }]).spec;
+  p = r.elements.find((e) => e.id === 'p2');
+  ok(p.roofOverhangSouthFt === undefined, 'clearing a side hands it back to the all-round figure');
+  r = apply(r, [{ type: 'update_object', targetId: 'p2', name: 'Storey 2 extent', field: 'roofOverhangSouthFt', value: 40 }]).spec;
+  p = r.elements.find((e) => e.id === 'p2');
+  ok(p.roofOverhangSouthFt === 12, 'and an absurd eave clamps instead of building a 40 ft cantilever');
+  r = apply(r, [{ type: 'update_object', targetId: 'p2', name: 'Storey 2 extent', field: 'roofOverhangSouthFt', value: 0 }]).spec;
+  p = r.elements.find((e) => e.id === 'p2');
+  ok(p.roofOverhangSouthFt === 0, 'zero is a real answer — no eave on that side at all');
+}
+
+// --- a small building has walls, and walls can have doorways ---------------
+// An outbuilding used to be a solid box with no render of its own. Daniel
+// wanted three doors out of his workshop — to the greenhouse, to the patio,
+// to the carport — and there was nowhere to put them.
+{
+  const s = freshSpec();
+  s.elements = [{ id: 'ws', name: 'Workshop', category: 'outbuilding', construction: 'shed', x: 40, y: 10, w: 20, d: 8, h: 9, level: 1 }];
+  let r = apply(s, [
+    { type: 'update_object', targetId: 'ws', name: 'Workshop', field: 'doorWestFt', value: 3 },
+    { type: 'update_object', targetId: 'ws', name: 'Workshop', field: 'doorSouthFt', value: 6 }
+  ]).spec;
+  let w = r.elements.find((e) => e.id === 'ws');
+  ok(w.doorWestFt === 3 && w.doorSouthFt === 6, 'each side of a small building carries its own doorway width');
+  ok(w.doorNorthFt === undefined && w.doorEastFt === undefined, 'the sides you did not ask for stay solid wall');
+  r = apply(r, [{ type: 'update_object', targetId: 'ws', name: 'Workshop', field: 'doorWestFt', value: 0 }]).spec;
+  ok(r.elements[0].doorWestFt === undefined, 'zero closes a doorway back up rather than storing a zero-wide door');
+  r = apply(r, [{ type: 'update_object', targetId: 'ws', name: 'Workshop', field: 'doorSouthFt', value: 40 }]).spec;
+  ok(r.elements[0].doorSouthFt === 16, 'an absurd doorway clamps instead of removing the whole wall');
+  // its own roof covering — clear poly over a carport beside glass
+  r = apply(r, [{ type: 'update_object', targetId: 'ws', name: 'Workshop', field: 'roofCovering', value: 'polycarb' }]).spec;
+  ok(r.elements[0].roofCovering === 'polycarb', 'a structure can wear a different roof from the house');
+  ok(ROOF_COVERINGS.polycarb.translucent === true, 'and the clear one is marked translucent, which is the whole point of it');
+  r = apply(r, [{ type: 'update_object', targetId: 'ws', name: 'Workshop', field: 'roofCovering', value: 'unobtanium' }]).spec;
+  ok(r.elements[0].roofCovering === undefined, 'a covering that does not exist clears back to the house roof');
+}
+
+// --- a structure sheds where you tell it, and can be skinned ---------------
+// One building, one roof: Daniel's carport and workshop are a poly-walled bay
+// with an insulated room framed inside its north end. That needs a shed to take
+// a wall covering (only open canopies could), and a roof that drains where the
+// building needs it rather than always copying the house.
+{
+  const s = freshSpec();
+  s.elements = [{ id: 'bay', name: 'Bay', category: 'outbuilding', construction: 'pole', x: 60, y: 60, w: 20, d: 20, h: 10, level: 1 }];
+  let r = apply(s, [
+    { type: 'update_object', targetId: 'bay', field: 'wallCovering', value: 'polycarb' },
+    { type: 'update_object', targetId: 'bay', field: 'roofFall', value: 'east' }
+  ]).spec;
+  let b = r.elements[0];
+  ok(b.wallCovering === 'polycarb', 'any structure can be skinned, not just the open ones');
+  ok(b.roofFall === 'east', 'and it sheds where the building needs it, not always where the house does');
+  r = apply(r, [{ type: 'update_object', targetId: 'bay', field: 'roofFall', value: '' }]).spec;
+  ok(r.elements[0].roofFall === undefined, 'clearing it hands the fall back to the house');
+  r = apply(r, [{ type: 'update_object', targetId: 'bay', field: 'roofFall', value: 'sideways' }]).spec;
+  ok(r.elements[0].roofFall === undefined, 'and a direction that is not a direction is refused');
 }
 
 const wantHttp = process.argv.includes('--http');

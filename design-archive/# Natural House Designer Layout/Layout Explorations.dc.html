@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --canvas-0:#faf5ec; --canvas-1:#f2e8d5; --canvas-2:#e8d9c0; --canvas-3:#dccfb0;
+      --chrome-0:#28180a; --chrome-1:#48321c; --chrome-2:#6a4e34; --chrome-3:#9a8068;
+      --border-subtle:#d8c8a8; --border-default:#b8a070; --border-strong:#8a6c48;
+      --accent-0:#7a5828; --accent-1:#9a7240; --accent-bg:#f0e6d0;
+      --sage-0:#3c5c38; --sage-1:#4e7248; --sage-2:#d8ecd4;
+      --copper-0:#8a5a18; --copper-2:#f5e8cc;
+      --brick-0:#782c1c; --brick-2:#f5dcd8;
+      --slate-1:#3c5e74; --slate-2:#d8e8f0;
+      --title-color:#3a5c2e;
+      --font-display:'Playfair Display',Georgia,serif;
+      --font-body:'DM Sans','Helvetica Neue',sans-serif;
+      --font-mono:'JetBrains Mono','Fira Code',monospace;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+    body{background:#eee8dc;font-family:var(--font-body);-webkit-font-smoothing:antialiased;}
+
+    /* ── shared mockup chrome ── */
+    .mock-card{display:flex;flex-direction:column;width:380px;flex-shrink:0;}
+    .mock-badge{
+      display:inline-flex;align-items:center;gap:6px;
+      font-family:var(--font-mono);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;
+      background:var(--chrome-0);color:var(--canvas-1);border-radius:3px;
+      padding:3px 8px;margin-bottom:10px;align-self:flex-start;
+    }
+    .mock-title{font-family:var(--font-display);font-size:20px;font-weight:600;color:var(--title-color);line-height:1.2;margin-bottom:4px;}
+    .mock-subtitle{font-size:12px;color:var(--chrome-2);margin-bottom:14px;line-height:1.5;}
+
+    .mock-frame{
+      width:380px;height:480px;
+      background:var(--canvas-0);
+      border:1px solid var(--border-default);
+      border-radius:5px;
+      overflow:hidden;
+      display:flex;flex-direction:column;
+      box-shadow:0 3px 16px rgba(40,24,10,.16);
+      position:relative;
+    }
+
+    /* app bar */
+    .mock-appbar{
+      height:32px;min-height:32px;
+      background:var(--chrome-0);
+      display:flex;align-items:center;padding:0 10px;gap:8px;
+      flex-shrink:0;
+    }
+    .mock-logo{font-family:var(--font-display);font-size:11px;color:var(--canvas-1);font-weight:600;letter-spacing:0.02em;flex:1;}
+    .mock-appbtn{
+      font-family:var(--font-mono);font-size:9px;color:var(--chrome-3);
+      background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);
+      border-radius:2px;padding:2px 6px;cursor:pointer;
+    }
+    .mock-appbtn.accent{background:var(--accent-0);color:var(--canvas-1);border-color:var(--accent-0);}
+
+    /* shared viewport */
+    .mock-viewport{
+      background:#1e1710;
+      flex:1;position:relative;overflow:hidden;
+      display:flex;align-items:center;justify-content:center;
+    }
+    .mock-viewport-label{
+      position:absolute;top:7px;left:8px;
+      font-family:var(--font-mono);font-size:8px;letter-spacing:0.10em;
+      color:rgba(255,255,255,.2);text-transform:uppercase;
+    }
+    .mock-house{opacity:0.55;}
+    .mock-layers-btn{
+      position:absolute;bottom:8px;right:8px;
+      background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.18);
+      border-radius:3px;padding:3px 7px;
+      font-family:var(--font-mono);font-size:8px;color:rgba(255,255,255,.6);
+      cursor:pointer;display:flex;gap:4px;align-items:center;
+    }
+    .mock-layers-panel{
+      position:absolute;bottom:30px;right:8px;
+      background:rgba(25,18,10,.92);border:1px solid rgba(255,255,255,.15);
+      border-radius:4px;padding:8px 10px;
+      display:none;flex-direction:column;gap:3px;min-width:130px;
+    }
+    .mock-layers-panel.open{display:flex;}
+    .layer-row-m{display:flex;align-items:center;gap:6px;}
+    .layer-dot-m{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+    .layer-name-m{font-family:var(--font-mono);font-size:8px;color:rgba(255,255,255,.65);flex:1;}
+    .layer-eye{font-size:9px;color:rgba(255,255,255,.5);cursor:pointer;transition:opacity .12s;}
+
+    /* panel fields */
+    .mock-panel{background:var(--canvas-1);border-right:1px solid var(--border-subtle);overflow-y:auto;padding:8px;}
+    .mock-field{margin-bottom:8px;}
+    .mock-field-label{font-family:var(--font-mono);font-size:8px;letter-spacing:0.10em;text-transform:uppercase;color:var(--chrome-3);margin-bottom:3px;}
+    .mock-select{
+      width:100%;background:var(--canvas-0);border:1px solid var(--border-default);
+      border-radius:2px;padding:4px 6px;font-family:var(--font-body);font-size:10px;color:var(--chrome-1);
+    }
+    .mock-slider-row{display:flex;align-items:center;gap:5px;}
+    .mock-slider{flex:1;height:3px;background:var(--canvas-3);border-radius:2px;position:relative;}
+    .mock-slider-fill{height:100%;border-radius:2px;background:var(--accent-0);width:55%;}
+    .mock-slider-thumb{
+      width:11px;height:11px;border-radius:50%;background:var(--accent-0);
+      border:2px solid var(--canvas-0);box-shadow:0 1px 3px rgba(40,24,10,.3);
+      position:absolute;top:50%;left:55%;transform:translate(-50%,-50%);
+    }
+    .mock-slider-val{font-family:var(--font-mono);font-size:8px;color:var(--chrome-2);min-width:28px;text-align:right;}
+    .mock-section-header{
+      display:flex;align-items:center;gap:5px;padding:5px 6px;
+      background:var(--canvas-2);border:1px solid var(--border-subtle);border-radius:2px;
+      margin-bottom:3px;cursor:pointer;
+    }
+    .mock-section-icon{font-size:10px;}
+    .mock-section-name{font-size:10px;font-weight:500;color:var(--chrome-1);flex:1;}
+    .mock-section-meta{font-family:var(--font-mono);font-size:8px;color:var(--chrome-3);}
+    .mock-chevron{font-size:8px;color:var(--chrome-3);}
+    .mock-warning-dot{
+      width:5px;height:5px;border-radius:50%;background:var(--copper-0);flex-shrink:0;
+    }
+
+    /* panel section visibility */
+    .panel-section{display:none;}
+    .panel-section.is-active{display:block;}
+
+    /* start here overlay */
+    .start-overlay{
+      position:absolute;inset:0;
+      background:rgba(40,24,10,.72);
+      backdrop-filter:blur(3px);
+      display:none;
+      align-items:center;justify-content:center;
+      z-index:20;
+    }
+    .start-card{
+      background:var(--canvas-0);border-radius:5px;
+      width:280px;padding:18px;
+      box-shadow:0 8px 32px rgba(40,24,10,.4);
+    }
+    .start-card-title{font-family:var(--font-display);font-size:15px;font-weight:600;color:var(--title-color);margin-bottom:4px;}
+    .start-card-sub{font-size:10px;color:var(--chrome-2);margin-bottom:14px;line-height:1.5;}
+    .start-paths{display:flex;flex-direction:column;gap:5px;}
+    .start-path{
+      display:flex;align-items:center;gap:8px;padding:7px 10px;
+      background:var(--canvas-1);border:1px solid var(--border-subtle);border-radius:3px;cursor:pointer;
+    }
+    .start-path:hover{background:var(--canvas-2);}
+    .start-path-icon{font-size:14px;width:20px;text-align:center;flex-shrink:0;}
+    .start-path-text{flex:1;}
+    .start-path-name{font-size:10px;font-weight:500;color:var(--chrome-0);}
+    .start-path-desc{font-size:9px;color:var(--chrome-3);}
+    .start-path-arrow{font-size:10px;color:var(--chrome-3);}
+    .start-dismiss{
+      margin-top:10px;width:100%;padding:5px;
+      background:transparent;border:1px solid var(--border-subtle);border-radius:2px;
+      font-family:var(--font-mono);font-size:8px;letter-spacing:0.08em;text-transform:uppercase;
+      color:var(--chrome-3);cursor:pointer;
+    }
+
+    /* trade-offs */
+    .tradeoffs{margin-top:12px;display:flex;flex-direction:column;gap:10px;}
+    .tradeoff-group{display:flex;flex-direction:column;gap:3px;}
+    .tradeoff-label{font-family:var(--font-mono);font-size:9px;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:4px;}
+    .tradeoff-label.pro{color:var(--sage-0);}
+    .tradeoff-label.con{color:var(--copper-0);}
+    .tradeoff-item{font-size:11px;color:var(--chrome-2);line-height:1.45;display:flex;gap:6px;}
+    .tradeoff-item::before{content:'✓';color:var(--sage-0);flex-shrink:0;font-size:10px;}
+    .tradeoff-item.con::before{content:'—';color:var(--copper-0);}
+    .tradeoff-best{
+      font-size:10px;color:var(--chrome-3);
+      border-top:1px solid var(--border-subtle);padding-top:8px;margin-top:4px;
+      font-style:italic;
+    }
+    .tradeoff-best strong{color:var(--chrome-1);font-style:normal;}
+
+    /* ── Option A: Belt ── */
+    .belt{
+      height:36px;min-height:36px;
+      background:var(--canvas-2);
+      border-bottom:1px solid var(--border-default);
+      display:flex;align-items:stretch;
+      overflow-x:auto;flex-shrink:0;
+    }
+    .belt::-webkit-scrollbar{height:2px;}
+    .belt::-webkit-scrollbar-thumb{background:var(--border-default);}
+    .belt-tab{
+      display:flex;align-items:center;gap:4px;
+      padding:0 10px;white-space:nowrap;
+      font-size:10px;font-family:var(--font-body);font-weight:500;
+      color:var(--chrome-2);border-bottom:2px solid transparent;
+      cursor:pointer;background:transparent;border-top:none;border-left:none;border-right:none;
+      transition:color .12s,border-color .12s,background .12s;
+    }
+    .belt-tab:hover{background:var(--canvas-3);color:var(--chrome-1);}
+    .belt-tab.is-active{color:var(--accent-0);border-bottom-color:var(--accent-0);background:var(--canvas-1);}
+    .belt-tab-icon{font-size:11px;}
+    .belt-tab-warning{
+      width:14px;height:14px;border-radius:7px;
+      background:var(--copper-0);color:white;
+      font-size:8px;font-weight:600;font-family:var(--font-mono);
+      display:flex;align-items:center;justify-content:center;
+    }
+    .belt-body{display:flex;flex:1;overflow:hidden;}
+    .belt-panel{width:155px;min-width:155px;}
+
+    /* ── Option B: Icon rail ── */
+    .rail{
+      width:40px;min-width:40px;
+      background:var(--chrome-0);
+      display:flex;flex-direction:column;align-items:center;
+      padding:6px 0;gap:2px;
+    }
+    .rail-sep{width:24px;height:1px;background:rgba(255,255,255,.1);margin:4px 0;}
+    .rail-tab{
+      width:32px;height:32px;border-radius:3px;
+      display:flex;align-items:center;justify-content:center;
+      font-size:13px;cursor:pointer;
+      background:transparent;border:none;
+      transition:background .12s;position:relative;
+    }
+    .rail-tab:hover{background:rgba(255,255,255,.08);}
+    .rail-tab.is-active{background:var(--accent-0);}
+    .rail-tab .rail-warn{
+      position:absolute;top:2px;right:2px;
+      width:8px;height:8px;border-radius:4px;
+      background:var(--copper-0);border:1px solid var(--chrome-0);
+    }
+    .rail-tab-bottom{margin-top:auto;}
+    .rail-body{display:flex;flex:1;overflow:hidden;}
+    .rail-panel{width:140px;min-width:140px;}
+    .rail-label-bar{
+      height:24px;
+      background:var(--canvas-2);border-bottom:1px solid var(--border-subtle);
+      display:flex;align-items:center;padding:0 8px;
+      font-size:10px;font-weight:600;color:var(--chrome-1);
+    }
+
+    /* ── Option C: Mode bar ── */
+    .modebar{
+      height:34px;min-height:34px;
+      background:var(--canvas-1);border-bottom:1px solid var(--border-default);
+      display:flex;align-items:center;padding:0 8px;gap:4px;flex-shrink:0;
+    }
+    .mode-btn{
+      display:flex;align-items:center;gap:4px;
+      padding:4px 10px;border-radius:3px;
+      font-size:10px;font-weight:500;font-family:var(--font-body);
+      cursor:pointer;border:1px solid transparent;
+      color:var(--chrome-2);background:transparent;
+      transition:background .12s,color .12s,border-color .12s;
+    }
+    .mode-btn:hover{background:var(--canvas-2);color:var(--chrome-1);}
+    .mode-btn.is-active{background:var(--accent-0);color:var(--canvas-0);border-color:var(--accent-0);}
+    .mode-btn-icon{font-size:11px;}
+    .mode-view{flex:1;display:none;overflow:hidden;}
+    .mode-view.is-active{display:flex;}
+
+    /* C: preview mode — thin accordion sidebar */
+    .c-preview-sidebar{
+      width:100px;min-width:100px;
+      background:var(--canvas-1);border-right:1px solid var(--border-subtle);
+      overflow-y:auto;padding:4px;
+    }
+    .c-acc-item{
+      border-radius:2px;margin-bottom:2px;overflow:hidden;
+      border:1px solid var(--border-subtle);
+    }
+    .c-acc-header{
+      display:flex;align-items:center;gap:4px;padding:4px 6px;
+      background:var(--canvas-2);cursor:pointer;
+    }
+    .c-acc-icon{font-size:10px;}
+    .c-acc-name{font-size:9px;font-weight:500;color:var(--chrome-1);flex:1;}
+    .c-acc-body{
+      padding:5px 6px;background:var(--canvas-0);
+      font-family:var(--font-mono);font-size:8px;color:var(--chrome-3);line-height:1.8;
+      border-top:1px solid var(--border-subtle);
+    }
+
+    /* C: edit mode — wide panel */
+    .c-edit-panel{
+      width:170px;min-width:170px;
+      background:var(--canvas-1);border-right:1px solid var(--border-default);
+      overflow-y:auto;
+    }
+    .c-panel-header{
+      padding:8px 10px;border-bottom:1px solid var(--border-subtle);
+      background:var(--canvas-2);
+    }
+    .c-panel-section-label{font-family:var(--font-mono);font-size:8px;letter-spacing:0.10em;text-transform:uppercase;color:var(--chrome-3);}
+    .c-panel-title{font-family:var(--font-display);font-size:13px;font-weight:600;color:var(--title-color);}
+    .c-panel-tabs{display:flex;border-bottom:1px solid var(--border-subtle);background:var(--canvas-1);}
+    .c-panel-tab{
+      padding:4px 8px;font-size:9px;font-weight:500;color:var(--chrome-3);
+      border-bottom:2px solid transparent;cursor:pointer;
+    }
+    .c-panel-tab.is-active{color:var(--accent-0);border-bottom-color:var(--accent-0);}
+    .c-panel-fields{padding:8px;}
+
+    /* C: output mode */
+    .c-output-view{
+      flex:1;background:var(--canvas-0);
+      display:flex;flex-direction:column;
+    }
+    .c-output-tabs{
+      height:32px;background:var(--canvas-1);border-bottom:1px solid var(--border-subtle);
+      display:flex;align-items:stretch;padding:0 8px;gap:4px;
+    }
+    .c-output-tab{
+      display:flex;align-items:center;padding:0 10px;
+      font-size:10px;font-weight:500;color:var(--chrome-2);
+      border-bottom:2px solid transparent;cursor:pointer;
+    }
+    .c-output-tab.is-active{color:var(--accent-0);border-bottom-color:var(--accent-0);}
+    .c-output-canvas{
+      flex:1;display:flex;align-items:center;justify-content:center;
+      background:white;border:1px solid var(--border-subtle);margin:12px;border-radius:3px;
+      position:relative;
+    }
+    .c-output-label{
+      font-family:var(--font-mono);font-size:9px;letter-spacing:0.10em;color:var(--chrome-3);text-transform:uppercase;
+    }
+    .c-viewport-thumb{
+      position:absolute;bottom:8px;right:8px;
+      width:60px;height:40px;border-radius:2px;border:1px solid var(--border-default);
+      background:#1e1710;display:flex;align-items:center;justify-content:center;
+      font-family:var(--font-mono);font-size:7px;color:rgba(255,255,255,.3);
+    }
+
+    /* toggle btn */
+    .show-start-btn{
+      margin-top:8px;
+      display:inline-flex;align-items:center;gap:5px;
+      font-family:var(--font-mono);font-size:9px;letter-spacing:0.08em;text-transform:uppercase;
+      color:var(--accent-0);background:var(--accent-bg);border:1px solid var(--border-default);
+      border-radius:2px;padding:4px 9px;cursor:pointer;
+    }
+  </style>
+</helmet>
+
+<!-- ═══════════════════════════════════════════════════════
+     LAYOUT & IA EXPLORATIONS — NATURAL HOUSE DESIGNER
+     ═══════════════════════════════════════════════════════ -->
+
+<!-- page header -->
+<div style="padding:48px 48px 0;max-width:1380px;margin:0 auto;">
+  <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:0.16em;text-transform:uppercase;color:var(--chrome-3);margin-bottom:10px;">Natural House Designer · Turn 1</div>
+  <h1 style="font-family:var(--font-display);font-size:32px;font-weight:600;color:var(--title-color);line-height:1.2;margin-bottom:8px;">Layout &amp; IA Explorations</h1>
+  <p style="font-size:14px;color:var(--chrome-2);max-width:620px;line-height:1.65;margin-bottom:8px;">Three distinct structural directions. Each shows where the control panel navigation lives, how the 3D viewport and output views relate, where outbuildings layer toggle fits, and how the Start Here flow enters.</p>
+  <p style="font-family:var(--font-mono);font-size:10px;color:var(--chrome-3);">Click tabs, rail icons, and mode buttons inside each mockup — press ▶ Show Start Here to see onboarding in context. Reference: <a href="#1a" style="color:var(--accent-0);">1a</a> · <a href="#1b" style="color:var(--accent-0);">1b</a> · <a href="#1c" style="color:var(--accent-0);">1c</a></p>
+</div>
+
+<!-- ── ornamental rule ── -->
+<div style="display:flex;align-items:center;gap:12px;margin:24px 48px 36px;max-width:1380px;">
+  <div style="flex:1;height:1px;background:linear-gradient(90deg,var(--border-default),transparent);"></div>
+  <div style="width:5px;height:5px;transform:rotate(45deg);background:var(--accent-0);opacity:.6;"></div>
+  <div style="width:5px;height:5px;transform:rotate(45deg);background:var(--accent-0);opacity:.6;"></div>
+  <div style="flex:1;height:1px;background:linear-gradient(270deg,var(--border-default),transparent);"></div>
+</div>
+
+<!-- ══ OPTIONS ROW ══ -->
+<section style="display:flex;gap:28px;flex-wrap:wrap;padding:0 48px 64px;max-width:1380px;margin:0 auto;">
+
+  <!-- ──────────────────────────────────────────────────── -->
+  <!-- 1a · BELT NAVIGATION                                -->
+  <!-- ──────────────────────────────────────────────────── -->
+  <div id="1a" class="mock-card">
+    <div class="mock-badge">1a · Belt Navigation</div>
+    <div class="mock-title">Horizontal Belt</div>
+    <div class="mock-subtitle">Section tabs run above the control panel. One click switches the entire panel contents. Viewport is always right.</div>
+
+    <div class="mock-frame">
+      <!-- app bar -->
+      <div class="mock-appbar">
+        <span class="mock-logo">Natural House</span>
+        <button class="mock-appbtn">BOM</button>
+        <button class="mock-appbtn">Export ▾</button>
+        <button class="mock-appbtn accent">Generate</button>
+      </div>
+
+      <!-- belt -->
+      <div class="belt">
+        <button class="belt-tab" data-group="a" data-tab="envelope"><span class="belt-tab-icon">🏠</span>Envelope</button>
+        <button class="belt-tab is-active" data-group="a" data-tab="walls"><span class="belt-tab-icon">🧱</span>Walls</button>
+        <button class="belt-tab" data-group="a" data-tab="roof"><span class="belt-tab-icon">🏛</span>Roof</button>
+        <button class="belt-tab" data-group="a" data-tab="foundation"><span class="belt-tab-icon">🏗</span>Foundation</button>
+        <button class="belt-tab" data-group="a" data-tab="systems"><span class="belt-tab-icon">⚙</span>Systems<span class="belt-tab-warning">2</span></button>
+        <button class="belt-tab" data-group="a" data-tab="site"><span class="belt-tab-icon">🌿</span>Site</button>
+        <button class="belt-tab" data-group="a" data-tab="outbuildings"><span class="belt-tab-icon">🌲</span>Outbuildings</button>
+      </div>
+
+      <!-- body -->
+      <div class="belt-body" style="flex:1;overflow:hidden;">
+        <!-- panel -->
+        <div class="mock-panel belt-panel">
+          <!-- Envelope panel -->
+          <div class="panel-section" data-group="a" data-section="envelope">
+            <div class="mock-field"><div class="mock-field-label">Footprint</div><select class="mock-select"><option>Rectangle</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Width (ft)</div><div class="mock-slider-row"><div class="mock-slider"><div class="mock-slider-fill" style="width:60%;"></div><div class="mock-slider-thumb" style="left:60%;"></div></div><span class="mock-slider-val">36 ft</span></div></div>
+            <div class="mock-field"><div class="mock-field-label">Length (ft)</div><div class="mock-slider-row"><div class="mock-slider"><div class="mock-slider-fill" style="width:70%;"></div><div class="mock-slider-thumb" style="left:70%;"></div></div><span class="mock-slider-val">48 ft</span></div></div>
+            <div class="mock-field"><div class="mock-field-label">Floor area</div><div style="font-family:var(--font-mono);font-size:10px;color:var(--chrome-1);padding:3px 0;">1,728 ft² · 1 story</div></div>
+          </div>
+          <!-- Walls panel -->
+          <div class="panel-section is-active" data-group="a" data-section="walls">
+            <div class="mock-field"><div class="mock-field-label">Assembly</div><select class="mock-select"><option>Strawbale — load bearing</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Thickness</div><div class="mock-slider-row"><div class="mock-slider"><div class="mock-slider-fill" style="width:55%;"></div><div class="mock-slider-thumb" style="left:55%;"></div></div><span class="mock-slider-val">18 in</span></div></div>
+            <div class="mock-field"><div class="mock-field-label">Plaster</div><select class="mock-select"><option>Earth plaster</option></select></div>
+            <div class="mock-field" style="background:var(--sage-2);border:1px solid var(--sage-0);border-radius:2px;padding:4px 5px;">
+              <div style="font-family:var(--font-mono);font-size:8px;color:var(--sage-0);">✓ R-38 · meets energy code</div>
+            </div>
+          </div>
+          <!-- Roof panel -->
+          <div class="panel-section" data-group="a" data-section="roof">
+            <div class="mock-field"><div class="mock-field-label">Framing</div><select class="mock-select"><option>Timber frame</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Pitch</div><div class="mock-slider-row"><div class="mock-slider"><div class="mock-slider-fill" style="width:50%;"></div><div class="mock-slider-thumb" style="left:50%;"></div></div><span class="mock-slider-val">6:12</span></div></div>
+            <div class="mock-field"><div class="mock-field-label">Insulation</div><select class="mock-select"><option>Dense-pack cellulose</option></select></div>
+          </div>
+          <!-- Foundation panel -->
+          <div class="panel-section" data-group="a" data-section="foundation">
+            <div class="mock-field"><div class="mock-field-label">Type</div><select class="mock-select"><option>Rubble trench</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Drain tile</div><select class="mock-select"><option>Perforated 4 in</option></select></div>
+          </div>
+          <!-- Systems panel -->
+          <div class="panel-section" data-group="a" data-section="systems">
+            <div style="background:var(--copper-2);border:1px solid var(--copper-0);border-radius:2px;padding:4px 5px;margin-bottom:6px;">
+              <div style="font-family:var(--font-mono);font-size:8px;color:var(--copper-0);">⚠ 2 advisory warnings</div>
+            </div>
+            <div class="mock-field"><div class="mock-field-label">Water</div><select class="mock-select"><option>Private well — 42 ft</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Septic</div><select class="mock-select"><option>Standard absorption</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Solar</div><select class="mock-select"><option>Grid-tied + battery</option></select></div>
+          </div>
+          <!-- Site panel -->
+          <div class="panel-section" data-group="a" data-section="site">
+            <div class="mock-field"><div class="mock-field-label">County</div><select class="mock-select"><option>Ravalli, MT</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Climate zone</div><select class="mock-select"><option>Zone 6B</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">South orientation</div><div class="mock-slider-row"><div class="mock-slider"><div class="mock-slider-fill" style="width:50%;"></div><div class="mock-slider-thumb" style="left:50%;"></div></div><span class="mock-slider-val">0°</span></div></div>
+          </div>
+          <!-- Outbuildings panel -->
+          <div class="panel-section" data-group="a" data-section="outbuildings">
+            <div class="mock-field"><div class="mock-field-label">Structures</div>
+              <div style="font-family:var(--font-mono);font-size:8px;color:var(--chrome-2);padding:3px 0;line-height:1.8;">Shop — 24×30 ft<br>Greenhouse — 12×24 ft</div>
+            </div>
+            <button style="width:100%;padding:4px;background:var(--canvas-0);border:1px dashed var(--border-default);border-radius:2px;font-size:10px;color:var(--chrome-2);cursor:pointer;">+ Add outbuilding</button>
+          </div>
+        </div>
+
+        <!-- viewport -->
+        <div class="mock-viewport" style="flex:1;">
+          <div class="mock-viewport-label">Three.js · Live 3D</div>
+          <!-- house silhouette -->
+          <svg class="mock-house" width="110" height="80" viewBox="0 0 110 80">
+            <rect x="15" y="38" width="80" height="42" fill="none" stroke="rgba(255,220,160,.5)" stroke-width="1.5"/>
+            <polygon points="10,38 55,10 100,38" fill="none" stroke="rgba(255,220,160,.7)" stroke-width="1.5"/>
+            <rect x="42" y="56" width="14" height="24" fill="none" stroke="rgba(255,220,160,.4)" stroke-width="1"/>
+            <rect x="22" y="48" width="16" height="12" fill="none" stroke="rgba(255,220,160,.3)" stroke-width="1"/>
+            <rect x="72" y="48" width="16" height="12" fill="none" stroke="rgba(255,220,160,.3)" stroke-width="1"/>
+          </svg>
+          <!-- layers btn -->
+          <div class="mock-layers-btn" data-layers-toggle="a">👁 Layers</div>
+          <div class="mock-layers-panel" data-layers-panel="a">
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#b8a070;"></div><div class="layer-name-m">Envelope</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#8a6a48;"></div><div class="layer-name-m">Interior</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#5c8048;"></div><div class="layer-name-m">Roof</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#7a6040;"></div><div class="layer-name-m">Foundation</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:var(--slate-1);"></div><div class="layer-name-m">Plumbing</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#ae7630;"></div><div class="layer-name-m">Heating</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#b8a030;"></div><div class="layer-name-m">Power/Solar</div><span class="layer-eye">👁</span></div>
+            <div style="height:1px;background:rgba(255,255,255,.1);margin:3px 0;"></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#4e7248;"></div><div class="layer-name-m">Outbuildings</div><span class="layer-eye" style="opacity:.3;">👁</span></div>
+          </div>
+          <!-- start here overlay -->
+          <div class="start-overlay" data-group="a">
+            <div class="start-card">
+              <div class="start-card-title">Welcome to Natural House</div>
+              <div class="start-card-sub">How do you want to start your design?</div>
+              <div class="start-paths">
+                <div class="start-path"><div class="start-path-icon">🧭</div><div class="start-path-text"><div class="start-path-name">Guided Wizard</div><div class="start-path-desc">14-question flow, 8 min</div></div><div class="start-path-arrow">›</div></div>
+                <div class="start-path"><div class="start-path-icon">🏡</div><div class="start-path-text"><div class="start-path-name">Load a worked example</div><div class="start-path-desc">Montana strawbale, 1,280 ft²</div></div><div class="start-path-arrow">›</div></div>
+                <div class="start-path"><div class="start-path-icon">📄</div><div class="start-path-text"><div class="start-path-name">Import JSON manifest</div><div class="start-path-desc">Resume a previous project</div></div><div class="start-path-arrow">›</div></div>
+                <div class="start-path"><div class="start-path-icon">🤖</div><div class="start-path-text"><div class="start-path-name">Describe in AI chat</div><div class="start-path-desc">Upload a sketch or PDF</div></div><div class="start-path-arrow">›</div></div>
+              </div>
+              <button class="start-dismiss" data-dismiss="a">Skip — go directly to controls</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button class="show-start-btn" data-group="a">▶ Show Start Here</button>
+
+    <!-- trade-offs -->
+    <div class="tradeoffs">
+      <div class="tradeoff-group">
+        <div class="tradeoff-label pro">Advantages</div>
+        <div class="tradeoff-item">All 7 sections reachable in one click — no scrolling ever</div>
+        <div class="tradeoff-item">Belt visually separates navigation from the content below</div>
+        <div class="tradeoff-item">Warning badges on the belt tab surface issues at a glance</div>
+        <div class="tradeoff-item">Outbuildings gets a natural top-level tab with no awkward nesting</div>
+        <div class="tradeoff-item">Layer toggles float on the viewport, uncluttering the panel</div>
+      </div>
+      <div class="tradeoff-group">
+        <div class="tradeoff-label con">Trade-offs</div>
+        <div class="tradeoff-item con">Belt can overflow on narrow screens — needs horizontal scroll or collapse</div>
+        <div class="tradeoff-item con">Loses 36 px of vertical panel height to the belt on small displays</div>
+        <div class="tradeoff-item con">Power users lose visual overview of all sections simultaneously</div>
+      </div>
+      <div class="tradeoff-best"><strong>Best for:</strong> first-time &amp; intermediate users who think in discrete sections. Cleanest implementation path — belt is just a tab strip above existing <code>&lt;details&gt;</code> panels.</div>
+    </div>
+  </div>
+
+
+  <!-- ──────────────────────────────────────────────────── -->
+  <!-- 1b · ICON RAIL (3-COLUMN STUDIO)                   -->
+  <!-- ──────────────────────────────────────────────────── -->
+  <div id="1b" class="mock-card">
+    <div class="mock-badge">1b · Icon Rail</div>
+    <div class="mock-title">Studio Three-Column</div>
+    <div class="mock-subtitle">Narrow icon rail → scrollable section panel → viewport. Familiar to CAD/3D software users. Maximum vertical space for controls.</div>
+
+    <div class="mock-frame">
+      <!-- app bar -->
+      <div class="mock-appbar">
+        <span class="mock-logo">NH</span>
+        <button class="mock-appbtn" style="margin-left:auto;">BOM</button>
+        <button class="mock-appbtn">Export ▾</button>
+        <button class="mock-appbtn accent">Generate</button>
+      </div>
+
+      <!-- body -->
+      <div class="rail-body" style="flex:1;overflow:hidden;">
+        <!-- icon rail -->
+        <div class="rail">
+          <button class="rail-tab" data-group="b" data-tab="envelope" title="Envelope">🏠</button>
+          <button class="rail-tab is-active" data-group="b" data-tab="walls" title="Walls">🧱</button>
+          <button class="rail-tab" data-group="b" data-tab="roof" title="Roof">🏛</button>
+          <button class="rail-tab" data-group="b" data-tab="foundation" title="Foundation">🏗</button>
+          <button class="rail-tab" data-group="b" data-tab="systems" title="Systems">⚙<span class="rail-warn"></span></button>
+          <button class="rail-tab" data-group="b" data-tab="site" title="Site">🌿</button>
+          <button class="rail-tab" data-group="b" data-tab="outbuildings" title="Outbuildings">🌲</button>
+          <div class="rail-sep"></div>
+          <!-- output section -->
+          <button class="rail-tab rail-tab-bottom" data-group="b" data-tab="drawings" title="2D Drawings" style="margin-top:auto;">📐</button>
+          <button class="rail-tab" data-group="b" data-tab="compliance" title="Compliance">📋</button>
+          <div class="rail-sep"></div>
+          <button class="rail-tab" data-group="b" data-tab="chat" title="AI Copilot">🤖</button>
+        </div>
+
+        <!-- middle panel -->
+        <div class="mock-panel rail-panel" style="width:150px;min-width:150px;">
+          <!-- section labels per rail tab -->
+          <div class="rail-label-bar" id="b-panel-title">Walls</div>
+
+          <!-- panels -->
+          <div class="panel-section" data-group="b" data-section="envelope" style="padding:8px;">
+            <div class="mock-field"><div class="mock-field-label">Footprint</div><select class="mock-select"><option>Rectangle</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Width</div><div class="mock-slider-row"><div class="mock-slider"><div class="mock-slider-fill" style="width:60%;"></div><div class="mock-slider-thumb" style="left:60%;"></div></div><span class="mock-slider-val">36 ft</span></div></div>
+            <div class="mock-field"><div class="mock-field-label">Length</div><div class="mock-slider-row"><div class="mock-slider"><div class="mock-slider-fill" style="width:70%;"></div><div class="mock-slider-thumb" style="left:70%;"></div></div><span class="mock-slider-val">48 ft</span></div></div>
+          </div>
+
+          <div class="panel-section is-active" data-group="b" data-section="walls" style="padding:8px;">
+            <div class="mock-field"><div class="mock-field-label">Assembly</div><select class="mock-select"><option>Strawbale LB</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Thickness</div><div class="mock-slider-row"><div class="mock-slider"><div class="mock-slider-fill" style="width:55%;"></div><div class="mock-slider-thumb" style="left:55%;"></div></div><span class="mock-slider-val">18 in</span></div></div>
+            <div class="mock-field"><div class="mock-field-label">Plaster</div><select class="mock-select"><option>Earth plaster</option></select></div>
+            <div class="mock-field" style="background:var(--sage-2);border:1px solid var(--sage-0);border-radius:2px;padding:4px 5px;"><div style="font-family:var(--font-mono);font-size:8px;color:var(--sage-0);">✓ R-38 code pass</div></div>
+          </div>
+
+          <div class="panel-section" data-group="b" data-section="roof" style="padding:8px;">
+            <div class="mock-field"><div class="mock-field-label">Framing</div><select class="mock-select"><option>Timber frame</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Pitch</div><div class="mock-slider-row"><div class="mock-slider"><div class="mock-slider-fill" style="width:50%;"></div><div class="mock-slider-thumb" style="left:50%;"></div></div><span class="mock-slider-val">6:12</span></div></div>
+          </div>
+
+          <div class="panel-section" data-group="b" data-section="foundation" style="padding:8px;">
+            <div class="mock-field"><div class="mock-field-label">Type</div><select class="mock-select"><option>Rubble trench</option></select></div>
+          </div>
+
+          <div class="panel-section" data-group="b" data-section="systems" style="padding:8px;">
+            <div style="background:var(--copper-2);border:1px solid var(--copper-0);border-radius:2px;padding:4px 5px;margin-bottom:6px;"><div style="font-family:var(--font-mono);font-size:8px;color:var(--copper-0);">⚠ 2 advisories</div></div>
+            <div class="mock-field"><div class="mock-field-label">Water</div><select class="mock-select"><option>Private well</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Septic</div><select class="mock-select"><option>Absorption field</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Solar</div><select class="mock-select"><option>Grid-tied + bat.</option></select></div>
+          </div>
+
+          <div class="panel-section" data-group="b" data-section="site" style="padding:8px;">
+            <div class="mock-field"><div class="mock-field-label">County</div><select class="mock-select"><option>Ravalli, MT</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Climate</div><select class="mock-select"><option>Zone 6B</option></select></div>
+          </div>
+
+          <div class="panel-section" data-group="b" data-section="outbuildings" style="padding:8px;">
+            <div class="mock-field"><div class="mock-field-label">Structures</div>
+              <div style="font-family:var(--font-mono);font-size:8px;color:var(--chrome-2);padding:3px 0;line-height:1.8;">Shop — 24×30<br>Greenhouse — 12×24</div>
+            </div>
+            <button style="width:100%;padding:4px;background:var(--canvas-0);border:1px dashed var(--border-default);border-radius:2px;font-size:9px;color:var(--chrome-2);cursor:pointer;">+ Add outbuilding</button>
+          </div>
+
+          <!-- output panels — replace viewport + panel when selected -->
+          <div class="panel-section" data-group="b" data-section="drawings" style="padding:8px;">
+            <div class="mock-field"><div class="mock-field-label">Export</div>
+              <div style="display:flex;flex-direction:column;gap:3px;margin-top:3px;">
+                <button style="padding:4px 6px;background:var(--canvas-0);border:1px solid var(--border-default);border-radius:2px;font-size:9px;color:var(--chrome-1);cursor:pointer;">Floor Plan DXF</button>
+                <button style="padding:4px 6px;background:var(--canvas-0);border:1px solid var(--border-default);border-radius:2px;font-size:9px;color:var(--chrome-1);cursor:pointer;">Sections PDF</button>
+                <button style="padding:4px 6px;background:var(--canvas-0);border:1px solid var(--border-default);border-radius:2px;font-size:9px;color:var(--chrome-1);cursor:pointer;">Elevations PDF</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-section" data-group="b" data-section="compliance" style="padding:8px;">
+            <div class="mock-field"><div class="mock-field-label">Packages</div>
+              <div style="display:flex;flex-direction:column;gap:3px;margin-top:3px;">
+                <button style="padding:4px 6px;background:var(--canvas-0);border:1px solid var(--border-default);border-radius:2px;font-size:9px;color:var(--chrome-1);cursor:pointer;">PE Package</button>
+                <button style="padding:4px 6px;background:var(--canvas-0);border:1px solid var(--border-default);border-radius:2px;font-size:9px;color:var(--chrome-1);cursor:pointer;">Permit Set</button>
+                <button style="padding:4px 6px;background:var(--canvas-0);border:1px solid var(--border-default);border-radius:2px;font-size:9px;color:var(--chrome-1);cursor:pointer;">Lender Package</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-section" data-group="b" data-section="chat" style="padding:8px;display:none;">
+            <div style="font-family:var(--font-mono);font-size:8px;color:var(--chrome-3);margin-bottom:6px;letter-spacing:.08em;text-transform:uppercase;">AI Copilot</div>
+            <div style="background:var(--canvas-0);border:1px solid var(--border-subtle);border-radius:2px;padding:5px;font-size:9px;color:var(--chrome-2);line-height:1.6;margin-bottom:5px;">Ask me about code, materials, sizing…</div>
+            <textarea style="width:100%;border:1px solid var(--border-default);border-radius:2px;padding:4px;font-size:9px;resize:none;background:var(--canvas-0);color:var(--chrome-1);" rows="3" placeholder="Your question…"></textarea>
+          </div>
+        </div>
+
+        <!-- viewport -->
+        <div class="mock-viewport" style="flex:1;">
+          <div class="mock-viewport-label">Three.js · Live 3D</div>
+          <svg class="mock-house" width="110" height="80" viewBox="0 0 110 80">
+            <rect x="15" y="38" width="80" height="42" fill="none" stroke="rgba(255,220,160,.5)" stroke-width="1.5"/>
+            <polygon points="10,38 55,10 100,38" fill="none" stroke="rgba(255,220,160,.7)" stroke-width="1.5"/>
+            <rect x="42" y="56" width="14" height="24" fill="none" stroke="rgba(255,220,160,.4)" stroke-width="1"/>
+            <rect x="22" y="48" width="16" height="12" fill="none" stroke="rgba(255,220,160,.3)" stroke-width="1"/>
+            <rect x="72" y="48" width="16" height="12" fill="none" stroke="rgba(255,220,160,.3)" stroke-width="1"/>
+          </svg>
+          <div class="mock-layers-btn" data-layers-toggle="b">👁 Layers</div>
+          <div class="mock-layers-panel" data-layers-panel="b">
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#b8a070;"></div><div class="layer-name-m">Envelope</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#8a6a48;"></div><div class="layer-name-m">Interior</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#5c8048;"></div><div class="layer-name-m">Roof</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#7a6040;"></div><div class="layer-name-m">Foundation</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:var(--slate-1);"></div><div class="layer-name-m">Plumbing</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#ae7630;"></div><div class="layer-name-m">Heating</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#b8a030;"></div><div class="layer-name-m">Power/Solar</div><span class="layer-eye">👁</span></div>
+            <div style="height:1px;background:rgba(255,255,255,.1);margin:3px 0;"></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#4e7248;"></div><div class="layer-name-m">Outbuildings</div><span class="layer-eye" style="opacity:.3;">👁</span></div>
+          </div>
+          <!-- Start Here overlay (different: replaces panel+viewport) -->
+          <div class="start-overlay" data-group="b" style="background:rgba(25,16,8,.82);">
+            <div class="start-card">
+              <div class="start-card-title">Welcome to Natural House</div>
+              <div class="start-card-sub">Choose how to begin — or jump to the icon rail.</div>
+              <div class="start-paths">
+                <div class="start-path"><div class="start-path-icon">🧭</div><div class="start-path-text"><div class="start-path-name">Guided Wizard</div><div class="start-path-desc">14 questions · 8 min</div></div><div class="start-path-arrow">›</div></div>
+                <div class="start-path"><div class="start-path-icon">🏡</div><div class="start-path-text"><div class="start-path-name">Load example</div><div class="start-path-desc">Montana strawbale</div></div><div class="start-path-arrow">›</div></div>
+                <div class="start-path"><div class="start-path-icon">📄</div><div class="start-path-text"><div class="start-path-name">Import JSON</div><div class="start-path-desc">Resume project</div></div><div class="start-path-arrow">›</div></div>
+                <div class="start-path"><div class="start-path-icon">🤖</div><div class="start-path-text"><div class="start-path-name">AI chat</div><div class="start-path-desc">Upload sketch or PDF</div></div><div class="start-path-arrow">›</div></div>
+              </div>
+              <button class="start-dismiss" data-dismiss="b">Use icon rail directly</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button class="show-start-btn" data-group="b">▶ Show Start Here</button>
+
+    <div class="tradeoffs">
+      <div class="tradeoff-group">
+        <div class="tradeoff-label pro">Advantages</div>
+        <div class="tradeoff-item">Maximum vertical panel height — no belt eating space</div>
+        <div class="tradeoff-item">Output (drawings, compliance) and AI copilot live in the same rail — one consistent navigation model</div>
+        <div class="tradeoff-item">Icon rail stays visible and orientating even on small screens</div>
+        <div class="tradeoff-item">Rail can reorder sections via drag — power user customization</div>
+      </div>
+      <div class="tradeoff-group">
+        <div class="tradeoff-label con">Trade-offs</div>
+        <div class="tradeoff-item con">Icon-only nav requires learned iconography or tooltips — extra work to make icons legible</div>
+        <div class="tradeoff-item con">Three-column layout has the most complex CSS to implement</div>
+        <div class="tradeoff-item con">On tablet/mobile, middle column must either stack or collapse — needs a breakpoint strategy</div>
+      </div>
+      <div class="tradeoff-best"><strong>Best for:</strong> power users familiar with CAD or 3D tools (Blender, Revit). Highest ceiling; highest implementation cost.</div>
+    </div>
+  </div>
+
+
+  <!-- ──────────────────────────────────────────────────── -->
+  <!-- 1c · FOCUS MODES                                   -->
+  <!-- ──────────────────────────────────────────────────── -->
+  <div id="1c" class="mock-card">
+    <div class="mock-badge">1c · Focus Modes</div>
+    <div class="mock-title">Adaptive Modes</div>
+    <div class="mock-subtitle">A mode bar switches the whole layout intent: Start Here → Preview (viewport dominant) → Edit (controls wide) → Output (drawings/compliance).</div>
+
+    <div class="mock-frame">
+      <!-- app bar -->
+      <div class="mock-appbar">
+        <span class="mock-logo">Natural House</span>
+        <button class="mock-appbtn" style="margin-left:auto;">BOM</button>
+        <button class="mock-appbtn accent">Generate</button>
+      </div>
+
+      <!-- mode bar -->
+      <div class="modebar">
+        <button class="mode-btn" data-group="c" data-mode="start"><span class="mode-btn-icon">⬢</span>Start</button>
+        <button class="mode-btn" data-group="c" data-mode="preview"><span class="mode-btn-icon">◎</span>Preview</button>
+        <button class="mode-btn is-active" data-group="c" data-mode="edit"><span class="mode-btn-icon">✏</span>Edit</button>
+        <button class="mode-btn" data-group="c" data-mode="output"><span class="mode-btn-icon">📐</span>Output</button>
+        <div style="flex:1;"></div>
+        <div style="font-family:var(--font-mono);font-size:8px;color:var(--chrome-3);">2 warnings</div>
+      </div>
+
+      <!-- START mode -->
+      <div class="mode-view" data-group="c" data-mode="start" style="flex-direction:column;align-items:center;justify-content:center;background:var(--canvas-0);padding:20px;gap:10px;">
+        <div style="font-family:var(--font-display);font-size:16px;font-weight:600;color:var(--title-color);text-align:center;">Welcome to Natural House</div>
+        <div style="font-size:10px;color:var(--chrome-2);text-align:center;max-width:220px;line-height:1.5;margin-bottom:4px;">A procedural strawbale/timber-frame design tool with live 3D preview, BOM, and PE-ready compliance packages.</div>
+        <div style="display:flex;flex-direction:column;gap:5px;width:100%;max-width:260px;">
+          <div class="start-path"><div class="start-path-icon">🧭</div><div class="start-path-text"><div class="start-path-name">Guided Wizard</div><div class="start-path-desc">14 questions · 8 min</div></div><div class="start-path-arrow">›</div></div>
+          <div class="start-path"><div class="start-path-icon">🏡</div><div class="start-path-text"><div class="start-path-name">Load a worked example</div><div class="start-path-desc">Montana strawbale, 1,280 ft²</div></div><div class="start-path-arrow">›</div></div>
+          <div class="start-path"><div class="start-path-icon">📄</div><div class="start-path-text"><div class="start-path-name">Import JSON manifest</div><div class="start-path-desc">Resume previous project</div></div><div class="start-path-arrow">›</div></div>
+          <div class="start-path"><div class="start-path-icon">🤖</div><div class="start-path-text"><div class="start-path-name">Describe in AI chat</div><div class="start-path-desc">Upload sketch or PDF</div></div><div class="start-path-arrow">›</div></div>
+        </div>
+        <div style="font-family:var(--font-mono);font-size:8px;color:var(--chrome-3);margin-top:6px;">Or switch to Preview / Edit mode above →</div>
+      </div>
+
+      <!-- PREVIEW mode -->
+      <div class="mode-view" data-group="c" data-mode="preview" style="overflow:hidden;">
+        <!-- thin accordion sidebar -->
+        <div class="c-preview-sidebar">
+          <div class="c-acc-item">
+            <div class="c-acc-header"><span class="c-acc-icon">🏠</span><span class="c-acc-name">Envelope</span></div>
+          </div>
+          <div class="c-acc-item">
+            <div class="c-acc-header"><span class="c-acc-icon">🧱</span><span class="c-acc-name">Walls</span></div>
+            <div class="c-acc-body">Strawbale LB<br>18 in · R-38</div>
+          </div>
+          <div class="c-acc-item">
+            <div class="c-acc-header"><span class="c-acc-icon">🏛</span><span class="c-acc-name">Roof</span></div>
+          </div>
+          <div class="c-acc-item">
+            <div class="c-acc-header"><span class="c-acc-icon">🏗</span><span class="c-acc-name">Foundation</span></div>
+          </div>
+          <div class="c-acc-item">
+            <div class="c-acc-header"><span class="c-acc-icon">⚙</span><span class="c-acc-name">Systems</span></div>
+          </div>
+          <div class="c-acc-item">
+            <div class="c-acc-header"><span class="c-acc-icon">🌿</span><span class="c-acc-name">Site</span></div>
+          </div>
+          <div class="c-acc-item">
+            <div class="c-acc-header"><span class="c-acc-icon">🌲</span><span class="c-acc-name">Outbuildings</span></div>
+          </div>
+        </div>
+        <!-- dominant viewport -->
+        <div class="mock-viewport" style="flex:1;">
+          <div class="mock-viewport-label">Three.js · Live 3D · Preview mode</div>
+          <svg class="mock-house" width="130" height="95" viewBox="0 0 110 80">
+            <rect x="15" y="38" width="80" height="42" fill="none" stroke="rgba(255,220,160,.55)" stroke-width="1.5"/>
+            <polygon points="10,38 55,10 100,38" fill="none" stroke="rgba(255,220,160,.75)" stroke-width="1.5"/>
+            <rect x="42" y="56" width="14" height="24" fill="none" stroke="rgba(255,220,160,.4)" stroke-width="1"/>
+            <rect x="22" y="48" width="16" height="12" fill="none" stroke="rgba(255,220,160,.3)" stroke-width="1"/>
+            <rect x="72" y="48" width="16" height="12" fill="none" stroke="rgba(255,220,160,.3)" stroke-width="1"/>
+          </svg>
+          <div class="mock-layers-btn" data-layers-toggle="c">👁 Layers</div>
+          <div class="mock-layers-panel" data-layers-panel="c">
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#b8a070;"></div><div class="layer-name-m">Envelope</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#8a6a48;"></div><div class="layer-name-m">Interior</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#5c8048;"></div><div class="layer-name-m">Roof</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#7a6040;"></div><div class="layer-name-m">Foundation</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:var(--slate-1);"></div><div class="layer-name-m">Plumbing</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#ae7630;"></div><div class="layer-name-m">Heating</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#b8a030;"></div><div class="layer-name-m">Power/Solar</div><span class="layer-eye">👁</span></div>
+            <div style="height:1px;background:rgba(255,255,255,.1);margin:3px 0;"></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#4e7248;"></div><div class="layer-name-m">Outbuildings</div><span class="layer-eye" style="opacity:.3;">👁</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- EDIT mode -->
+      <div class="mode-view is-active" data-group="c" data-mode="edit" style="overflow:hidden;">
+        <!-- wide controls panel -->
+        <div class="c-edit-panel">
+          <div class="c-panel-header">
+            <div class="c-panel-section-label">Edit Mode · Section</div>
+            <div class="c-panel-title">Walls</div>
+          </div>
+          <div class="c-panel-tabs">
+            <div class="c-panel-tab is-active">Walls</div>
+            <div class="c-panel-tab">Roof</div>
+            <div class="c-panel-tab">Found.</div>
+            <div class="c-panel-tab">Systems</div>
+          </div>
+          <div class="c-panel-fields">
+            <div class="mock-field"><div class="mock-field-label">Assembly</div><select class="mock-select" style="width:100%;"><option>Strawbale — load bearing</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Thickness</div><div class="mock-slider-row"><div class="mock-slider"><div class="mock-slider-fill" style="width:55%;"></div><div class="mock-slider-thumb" style="left:55%;"></div></div><span class="mock-slider-val">18 in</span></div></div>
+            <div class="mock-field"><div class="mock-field-label">Plaster finish</div><select class="mock-select" style="width:100%;"><option>Earth plaster</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Corner posts</div><select class="mock-select" style="width:100%;"><option>Round timber</option></select></div>
+            <div class="mock-field"><div class="mock-field-label">Window-to-wall ratio</div><div class="mock-slider-row"><div class="mock-slider"><div class="mock-slider-fill" style="width:40%;"></div><div class="mock-slider-thumb" style="left:40%;"></div></div><span class="mock-slider-val">22%</span></div></div>
+            <div style="height:1px;background:var(--border-subtle);margin:6px 0;"></div>
+            <div style="font-family:var(--font-mono);font-size:8px;color:var(--chrome-3);margin-bottom:4px;letter-spacing:.08em;text-transform:uppercase;">Outbuildings</div>
+            <div style="font-family:var(--font-mono);font-size:8px;color:var(--chrome-2);line-height:1.8;">Shop — 24×30<br>Greenhouse — 12×24</div>
+            <button style="width:100%;margin-top:4px;padding:4px;background:var(--canvas-0);border:1px dashed var(--border-default);border-radius:2px;font-size:9px;color:var(--chrome-2);cursor:pointer;">+ Add outbuilding</button>
+          </div>
+        </div>
+        <!-- smaller viewport -->
+        <div class="mock-viewport" style="flex:1;">
+          <div class="mock-viewport-label">Three.js · Edit mode</div>
+          <svg class="mock-house" width="90" height="65" viewBox="0 0 110 80">
+            <rect x="15" y="38" width="80" height="42" fill="none" stroke="rgba(255,220,160,.5)" stroke-width="1.5"/>
+            <polygon points="10,38 55,10 100,38" fill="none" stroke="rgba(255,220,160,.7)" stroke-width="1.5"/>
+            <rect x="42" y="56" width="14" height="24" fill="none" stroke="rgba(255,220,160,.4)" stroke-width="1"/>
+          </svg>
+          <div class="mock-layers-btn" data-layers-toggle="c2">👁</div>
+          <div class="mock-layers-panel" data-layers-panel="c2" style="bottom:30px;right:6px;">
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#b8a070;"></div><div class="layer-name-m">Envelope</div><span class="layer-eye">👁</span></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#5c8048;"></div><div class="layer-name-m">Roof</div><span class="layer-eye">👁</span></div>
+            <div style="height:1px;background:rgba(255,255,255,.1);margin:2px 0;"></div>
+            <div class="layer-row-m"><div class="layer-dot-m" style="background:#4e7248;"></div><div class="layer-name-m">Outbuildings</div><span class="layer-eye">👁</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- OUTPUT mode -->
+      <div class="mode-view" data-group="c" data-mode="output" style="flex-direction:column;overflow:hidden;">
+        <div class="c-output-view">
+          <div class="c-output-tabs">
+            <div class="c-output-tab is-active">Floor Plan</div>
+            <div class="c-output-tab">Sections</div>
+            <div class="c-output-tab">Elevations</div>
+            <div class="c-output-tab">PE Package</div>
+            <div class="c-output-tab">Permit Set</div>
+          </div>
+          <div style="flex:1;display:flex;position:relative;">
+            <div class="c-output-canvas">
+              <!-- floor plan placeholder -->
+              <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+                <svg width="120" height="90" viewBox="0 0 120 90" style="opacity:.25;">
+                  <rect x="10" y="10" width="100" height="70" fill="none" stroke="var(--chrome-0)" stroke-width="1.5"/>
+                  <line x1="10" y1="40" x2="110" y2="40" stroke="var(--chrome-0)" stroke-width="0.5" stroke-dasharray="3,2"/>
+                  <line x1="55" y1="10" x2="55" y2="80" stroke="var(--chrome-0)" stroke-width="0.5" stroke-dasharray="3,2"/>
+                  <rect x="45" y="65" width="12" height="15" fill="none" stroke="var(--chrome-0)" stroke-width="1"/>
+                </svg>
+                <div class="c-output-label">Floor Plan · 1 : 48</div>
+              </div>
+              <!-- persistent viewport thumbnail -->
+              <div class="c-viewport-thumb">3D ▸</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- end mock-frame -->
+
+    <div style="display:flex;gap:6px;margin-top:8px;">
+      <button class="show-start-btn" style="font-size:8px;" data-mode-switch="c" data-mode-target="start">⬢ Start Here</button>
+      <button class="show-start-btn" style="font-size:8px;" data-mode-switch="c" data-mode-target="preview">◎ Preview</button>
+      <button class="show-start-btn" style="font-size:8px;" data-mode-switch="c" data-mode-target="edit">✏ Edit</button>
+      <button class="show-start-btn" style="font-size:8px;" data-mode-switch="c" data-mode-target="output">📐 Output</button>
+    </div>
+
+    <div class="tradeoffs">
+      <div class="tradeoff-group">
+        <div class="tradeoff-label pro">Advantages</div>
+        <div class="tradeoff-item">Start Here is a genuine full mode — first-timers get a clean, uncluttered welcome screen, not a modal layered over a confusing UI</div>
+        <div class="tradeoff-item">Preview mode maximises 3D viewport — perfect for client review sessions</div>
+        <div class="tradeoff-item">Output mode replaces viewport with the drawing/compliance viewer — output gets as much space as the 3D view</div>
+        <div class="tradeoff-item">Mode bar is one consistent top-level navigation concept — easiest mental model</div>
+      </div>
+      <div class="tradeoff-group">
+        <div class="tradeoff-label con">Trade-offs</div>
+        <div class="tradeoff-item con">Edit → Preview context switch can feel jarring — sidebar width changes on mode toggle</div>
+        <div class="tradeoff-item con">Power users need an extra click (switch to Edit mode) before touching any field</div>
+        <div class="tradeoff-item con">Output mode hides the 3D view (mitigated by persistent thumbnail) — a power user reviewing compliance while tweaking geometry must mode-switch</div>
+      </div>
+      <div class="tradeoff-best"><strong>Best for:</strong> mixed-user audiences — first-timers get Start Here, reviewers get Preview, power users use Edit. Highest design payoff; moderate implementation complexity.</div>
+    </div>
+  </div>
+
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;$preview&quot;: {&quot;width&quot;: 1320, &quot;height&quot;: 1000}
+}">
+class Component extends DCLogic {
+  componentDidMount() {
+    const el = this.el;
+
+    // ── Belt tabs (Option A) ──────────────────────────────
+    el.querySelectorAll('.belt-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const group = tab.dataset.group;
+        const target = tab.dataset.tab;
+        el.querySelectorAll(`.belt-tab[data-group="${group}"]`).forEach(t => t.classList.remove('is-active'));
+        tab.classList.add('is-active');
+        el.querySelectorAll(`.panel-section[data-group="${group}"]`).forEach(s => {
+          s.classList.toggle('is-active', s.dataset.section === target);
+        });
+      });
+    });
+
+    // ── Icon rail (Option B) ─────────────────────────────
+    const panelTitleEl = el.querySelector('#b-panel-title');
+    const railLabels = {
+      envelope:'Envelope', walls:'Walls', roof:'Roof', foundation:'Foundation',
+      systems:'Systems', site:'Site', outbuildings:'Outbuildings',
+      drawings:'2D Drawings', compliance:'Compliance', chat:'AI Copilot'
+    };
+    el.querySelectorAll('.rail-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const group = tab.dataset.group;
+        const target = tab.dataset.tab;
+        el.querySelectorAll(`.rail-tab[data-group="${group}"]`).forEach(t => t.classList.remove('is-active'));
+        tab.classList.add('is-active');
+        el.querySelectorAll(`.panel-section[data-group="${group}"]`).forEach(s => {
+          s.classList.toggle('is-active', s.dataset.section === target);
+          if (s.dataset.section === target) s.style.display = 'block';
+          else s.style.display = 'none';
+        });
+        if (panelTitleEl && railLabels[target]) panelTitleEl.textContent = railLabels[target];
+      });
+    });
+
+    // ── Mode bar (Option C) ──────────────────────────────
+    el.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const group = btn.dataset.group;
+        const target = btn.dataset.mode;
+        el.querySelectorAll(`.mode-btn[data-group="${group}"]`).forEach(b => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+        el.querySelectorAll(`.mode-view[data-group="${group}"]`).forEach(v => {
+          v.classList.toggle('is-active', v.dataset.mode === target);
+          v.style.display = v.dataset.mode === target ? 'flex' : 'none';
+        });
+      });
+    });
+
+    // Mode switch buttons below mockup C
+    el.querySelectorAll('[data-mode-switch]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const group = btn.dataset.modeSwitch;
+        const target = btn.dataset.modeTarget;
+        const modeBtn = el.querySelector(`.mode-btn[data-group="${group}"][data-mode="${target}"]`);
+        if (modeBtn) modeBtn.click();
+      });
+    });
+
+    // ── Start Here overlays ──────────────────────────────
+    el.querySelectorAll('.show-start-btn[data-group]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const group = btn.dataset.group;
+        const overlay = el.querySelector(`.start-overlay[data-group="${group}"]`);
+        if (!overlay) return;
+        const showing = overlay.style.display === 'flex';
+        overlay.style.display = showing ? 'none' : 'flex';
+        btn.textContent = showing ? '▶ Show Start Here' : '✕ Hide';
+      });
+    });
+
+    el.querySelectorAll('.start-dismiss').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const group = btn.dataset.dismiss;
+        const overlay = el.querySelector(`.start-overlay[data-group="${group}"]`);
+        if (overlay) overlay.style.display = 'none';
+        const showBtn = el.querySelector(`.show-start-btn[data-group="${group}"]`);
+        if (showBtn) showBtn.textContent = '▶ Show Start Here';
+      });
+    });
+
+    // ── Layer panel toggles ──────────────────────────────
+    el.querySelectorAll('[data-layers-toggle]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.layersToggle;
+        const panel = el.querySelector(`[data-layers-panel="${id}"]`);
+        if (panel) panel.classList.toggle('open');
+      });
+    });
+
+    // ── Layer eye toggles ────────────────────────────────
+    el.querySelectorAll('.layer-eye').forEach(eye => {
+      eye.addEventListener('click', () => {
+        const off = eye.style.opacity === '0.25';
+        eye.style.opacity = off ? '1' : '0.25';
+      });
+    });
+
+    // ── Output tab switching (C output mode) ─────────────
+    el.querySelectorAll('.c-output-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        tab.closest('.c-output-tabs').querySelectorAll('.c-output-tab').forEach(t => t.classList.remove('is-active'));
+        tab.classList.add('is-active');
+        const label = el.querySelector('.c-output-label');
+        if (label) label.textContent = `${tab.textContent} · 1 : 48`;
+      });
+    });
+
+    // ── Panel sub-tabs (C edit mode) ─────────────────────
+    el.querySelectorAll('.c-panel-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        tab.closest('.c-panel-tabs').querySelectorAll('.c-panel-tab').forEach(t => t.classList.remove('is-active'));
+        tab.classList.add('is-active');
+        const title = el.querySelector('.c-panel-title');
+        if (title) title.textContent = tab.textContent;
+      });
+    });
+  }
+}
+</script>
+</body>
+</html>
