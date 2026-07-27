@@ -130,12 +130,19 @@ function runInvariants(spec, seed, tag) {
     check(a === b, seed, `${tag} I6 heal converges`);
   } catch (e) { check(false, seed, `${tag} I6 benign pass throws`, e && e.message); }
 
-  // I7 — the band law: clamped openings are FLAGGED, never silent
+  // I7 — the band law: clamped openings are FLAGGED, never silent.
+  // The GUARANTEE is that every clamped opening is named by some flag. It may
+  // be named on its own ('fit-opening' + openingIndex) or inside a group that
+  // lists its members ('storey-reach-wall' + openingIndices) — five windows
+  // orphaned by one set-back storey are one problem with one fix, and five
+  // identical warnings telling you to "slide it along the wall" is noise AND
+  // wrong advice. Grouping is allowed; going silent is not.
   try {
     (spec.openings || []).forEach((o, oi) => {
       const band = openingVerticalBand(spec, o);
       if (!band.clamped) return;
-      const flagged = issues.some((f) => f.fixId === 'fit-opening' && f.openingIndex === oi);
+      const flagged = issues.some((f) => (f.fixId === 'fit-opening' && f.openingIndex === oi)
+        || (Array.isArray(f.openingIndices) && f.openingIndices.includes(oi)));
       check(flagged, seed, `${tag} I7 clamped opening ${oi} is flagged`, `${o.type}@${o.wall} reason=${band.reason}`);
     });
   } catch (e) { check(false, seed, `${tag} I7 band law throws`, e && e.message); }

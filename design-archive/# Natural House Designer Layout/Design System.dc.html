@@ -1,0 +1,1217 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&amp;family=DM+Sans:wght@300;400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* ── CANVAS ── */
+      --canvas-0: #faf5ec;
+      --canvas-1: #f2e8d5;
+      --canvas-2: #e8d9c0;
+      --canvas-3: #dccfb0;
+
+      /* ── CHROME ── */
+      --chrome-0: #28180a;
+      --chrome-1: #48321c;
+      --chrome-2: #6a4e34;
+      --chrome-3: #9a8068;
+
+      /* ── TITLE COLOR (tweakable) ── */
+      --title-color: #3a5c2e;
+
+      /* ── BORDERS ── */
+      --border-subtle: #d8c8a8;
+      --border-default: #b8a070;
+      --border-strong: #8a6c48;
+
+      /* ── ACCENT — tobacco/amber ── */
+      --accent-0: #7a5828;
+      --accent-1: #9a7240;
+      --accent-2: #b88e58;
+      --accent-bg: #f0e6d0;
+
+      /* ── SAGE — passive solar / success / eco ── */
+      --sage-0: #3c5c38;
+      --sage-1: #4e7248;
+      --sage-2: #d8ecd4;
+
+      /* ── COPPER — warning / advisory ── */
+      --copper-0: #8a5a18;
+      --copper-1: #ae7630;
+      --copper-2: #f5e8cc;
+
+      /* ── BRICK — error / critical ── */
+      --brick-0: #782c1c;
+      --brick-1: #9e3c28;
+      --brick-2: #f5dcd8;
+
+      /* ── SLATE — info / neutral ── */
+      --slate-0: #2c4858;
+      --slate-1: #3c5e74;
+      --slate-2: #d8e8f0;
+
+      /* ── TYPOGRAPHY ── */
+      --font-display: 'Playfair Display', Georgia, serif;
+      --font-body: 'DM Sans', 'Helvetica Neue', sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+      --text-xs: 10px;
+      --text-sm: 11px;
+      --text-base: 13px;
+      --text-md: 15px;
+      --text-lg: 18px;
+      --text-xl: 22px;
+      --text-2xl: 28px;
+      --text-3xl: 38px;
+
+      --weight-regular: 400;
+      --weight-medium: 500;
+      --weight-semibold: 600;
+      --weight-bold: 700;
+
+      --leading-tight: 1.2;
+      --leading-base: 1.5;
+      --leading-loose: 1.8;
+
+      /* ── SPACING ── */
+      --sp-1: 2px;
+      --sp-2: 4px;
+      --sp-3: 6px;
+      --sp-4: 8px;
+      --sp-5: 12px;
+      --sp-6: 16px;
+      --sp-7: 20px;
+      --sp-8: 24px;
+      --sp-9: 32px;
+      --sp-10: 40px;
+      --sp-11: 48px;
+      --sp-12: 64px;
+
+      /* ── RADII ── */
+      --radius-sm: 2px;
+      --radius-md: 3px;
+      --radius-lg: 5px;
+
+      /* ── SHADOWS ── */
+      --shadow-sm: 0 1px 2px rgba(40,24,10,0.10);
+      --shadow-md: 0 2px 8px rgba(40,24,10,0.14);
+      --shadow-lg: 0 4px 20px rgba(40,24,10,0.18);
+      --shadow-inset: inset 0 1px 3px rgba(40,24,10,0.12);
+
+      /* ── EASING ── */
+      --ease: 0.14s ease;
+      --ease-slow: 0.28s ease;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--canvas-0);
+      color: var(--chrome-0);
+      font-family: var(--font-body);
+      font-size: var(--text-base);
+      line-height: var(--leading-base);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Ornamental rule ── */
+    .rule {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-4);
+      margin: var(--sp-8) 0;
+      color: var(--border-strong);
+    }
+    .rule::before, .rule::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--border-default), transparent);
+    }
+    .rule span {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--chrome-3);
+      white-space: nowrap;
+    }
+
+    /* ── Section label ── */
+    .section-label {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--chrome-3);
+      margin-bottom: var(--sp-5);
+    }
+
+    /* ── Token chip ── */
+    .token-name {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      color: var(--chrome-2);
+      background: var(--canvas-2);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 1px 5px;
+    }
+
+    /* ── Compact mode (demo) ── */
+    body.compact {
+      --text-base: 11px;
+      --text-sm: 10px;
+      --sp-5: 8px;
+      --sp-6: 12px;
+      --sp-7: 16px;
+    }
+
+    /* ── Button base ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--sp-3);
+      font-family: var(--font-body);
+      font-size: var(--text-base);
+      font-weight: var(--weight-medium);
+      line-height: 1;
+      border-radius: var(--radius-md);
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: background var(--ease), border-color var(--ease), color var(--ease), box-shadow var(--ease);
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .btn-lg { padding: 10px 18px; font-size: var(--text-md); }
+    .btn-md { padding: 7px 14px; }
+    .btn-sm { padding: 4px 10px; font-size: var(--text-sm); }
+
+    .btn-primary {
+      background: var(--accent-0);
+      border-color: var(--accent-0);
+      color: var(--canvas-0);
+      box-shadow: var(--shadow-sm);
+    }
+    .btn-primary:hover { background: var(--accent-1); border-color: var(--accent-1); }
+    .btn-primary:active { background: var(--accent-2); }
+
+    .btn-secondary {
+      background: var(--canvas-1);
+      border-color: var(--border-default);
+      color: var(--chrome-1);
+      box-shadow: var(--shadow-sm);
+    }
+    .btn-secondary:hover { background: var(--canvas-2); border-color: var(--border-strong); }
+
+    .btn-ghost {
+      background: transparent;
+      border-color: transparent;
+      color: var(--chrome-2);
+    }
+    .btn-ghost:hover { background: var(--canvas-2); color: var(--chrome-1); }
+
+    .btn-sage {
+      background: var(--sage-0);
+      border-color: var(--sage-0);
+      color: var(--canvas-0);
+    }
+    .btn-sage:hover { background: var(--sage-1); }
+
+    .btn-danger {
+      background: transparent;
+      border-color: var(--brick-1);
+      color: var(--brick-0);
+    }
+    .btn-danger:hover { background: var(--brick-2); }
+
+    .btn:disabled {
+      opacity: 0.42;
+      cursor: not-allowed;
+    }
+
+    /* ── Form controls ── */
+    .form-label {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      color: var(--chrome-2);
+      display: block;
+      margin-bottom: var(--sp-2);
+    }
+    .form-hint {
+      font-size: var(--text-sm);
+      color: var(--chrome-3);
+      margin-top: var(--sp-2);
+      line-height: var(--leading-base);
+    }
+
+    .input-text {
+      width: 100%;
+      background: var(--canvas-1);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-md);
+      padding: 7px 10px;
+      font-family: var(--font-body);
+      font-size: var(--text-base);
+      color: var(--chrome-0);
+      outline: none;
+      box-shadow: var(--shadow-inset);
+      transition: border-color var(--ease), box-shadow var(--ease);
+    }
+    .input-text:focus { border-color: var(--accent-0); box-shadow: var(--shadow-inset), 0 0 0 2px rgba(122,88,40,0.18); }
+    .input-text::placeholder { color: var(--chrome-3); }
+    .input-text.error { border-color: var(--brick-1); box-shadow: var(--shadow-inset), 0 0 0 2px rgba(158,60,40,0.15); }
+
+    .input-select {
+      appearance: none;
+      background: var(--canvas-1) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236a4e34' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center;
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-md);
+      padding: 7px 28px 7px 10px;
+      font-family: var(--font-body);
+      font-size: var(--text-base);
+      color: var(--chrome-0);
+      cursor: pointer;
+      outline: none;
+      box-shadow: var(--shadow-inset);
+      transition: border-color var(--ease);
+    }
+    .input-select:focus { border-color: var(--accent-0); box-shadow: var(--shadow-inset), 0 0 0 2px rgba(122,88,40,0.18); }
+
+    /* Range slider */
+    .slider-wrap { display: flex; align-items: center; gap: var(--sp-4); }
+    .input-range {
+      -webkit-appearance: none;
+      flex: 1;
+      height: 4px;
+      background: var(--canvas-2);
+      border-radius: 2px;
+      outline: none;
+      border: 1px solid var(--border-subtle);
+    }
+    .input-range::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: var(--accent-0);
+      border: 2px solid var(--canvas-0);
+      box-shadow: 0 1px 4px rgba(40,24,10,0.22);
+      cursor: pointer;
+      transition: background var(--ease);
+    }
+    .input-range::-webkit-slider-thumb:hover { background: var(--accent-1); }
+    .slider-value {
+      font-family: var(--font-mono);
+      font-size: var(--text-sm);
+      color: var(--chrome-1);
+      min-width: 36px;
+      text-align: right;
+    }
+
+    /* Checkbox / radio */
+    .check-wrap, .radio-wrap {
+      display: flex; align-items: center; gap: var(--sp-3);
+      cursor: pointer;
+      font-size: var(--text-base);
+      color: var(--chrome-1);
+      user-select: none;
+    }
+    .check-box, .radio-box {
+      width: 15px; height: 15px;
+      border: 1.5px solid var(--border-default);
+      border-radius: var(--radius-sm);
+      background: var(--canvas-1);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: background var(--ease), border-color var(--ease);
+    }
+    .radio-box { border-radius: 50%; }
+    .check-box.checked, .radio-box.checked {
+      background: var(--accent-0);
+      border-color: var(--accent-0);
+    }
+    .check-box.checked::after {
+      content: '';
+      width: 8px; height: 5px;
+      border-left: 1.5px solid var(--canvas-0);
+      border-bottom: 1.5px solid var(--canvas-0);
+      transform: rotate(-45deg) translateY(-1px);
+    }
+    .radio-box.checked::after {
+      content: '';
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--canvas-0);
+    }
+
+    /* Toggle / compact switch */
+    .toggle-wrap { display: flex; align-items: center; gap: var(--sp-4); font-size: var(--text-base); color: var(--chrome-1); }
+    .toggle {
+      width: 32px; height: 18px;
+      border-radius: 9px;
+      background: var(--canvas-3);
+      border: 1px solid var(--border-default);
+      position: relative;
+      cursor: pointer;
+      transition: background var(--ease);
+      flex-shrink: 0;
+    }
+    .toggle.on { background: var(--accent-0); border-color: var(--accent-0); }
+    .toggle::after {
+      content: '';
+      position: absolute;
+      top: 2px; left: 2px;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: white;
+      box-shadow: 0 1px 2px rgba(40,24,10,0.2);
+      transition: left var(--ease);
+    }
+    .toggle.on::after { left: 16px; }
+
+    /* ── Collapsible section header ── */
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-4);
+      padding: var(--sp-4) var(--sp-6);
+      background: var(--canvas-1);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      user-select: none;
+      transition: background var(--ease);
+    }
+    .section-header:hover { background: var(--canvas-2); }
+    .section-header.open { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-color: transparent; }
+    .section-icon {
+      width: 22px; height: 22px;
+      border-radius: var(--radius-sm);
+      background: var(--accent-bg);
+      border: 1px solid var(--border-subtle);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+    .section-title {
+      flex: 1;
+      font-family: var(--font-body);
+      font-weight: var(--weight-semibold);
+      font-size: var(--text-base);
+      color: var(--chrome-0);
+    }
+    .section-meta {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      color: var(--chrome-3);
+    }
+    .section-chevron {
+      width: 14px; height: 14px;
+      color: var(--chrome-3);
+      transition: transform var(--ease);
+    }
+    .section-header.open .section-chevron { transform: rotate(180deg); }
+    .section-body {
+      border: 1px solid var(--border-subtle);
+      border-top: none;
+      border-bottom-left-radius: var(--radius-md);
+      border-bottom-right-radius: var(--radius-md);
+      padding: var(--sp-5) var(--sp-6);
+      background: var(--canvas-0);
+      display: flex; flex-direction: column; gap: var(--sp-5);
+    }
+
+    /* ── Validation / warning banners ── */
+    .alert {
+      display: flex;
+      gap: var(--sp-4);
+      padding: var(--sp-4) var(--sp-5);
+      border-radius: var(--radius-md);
+      border-left: 3px solid transparent;
+      font-size: var(--text-base);
+      line-height: var(--leading-base);
+    }
+    .alert-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+    .alert-body { flex: 1; }
+    .alert-title { font-weight: var(--weight-semibold); margin-bottom: 2px; }
+    .alert-code { font-family: var(--font-mono); font-size: var(--text-xs); opacity: 0.7; margin-top: 3px; }
+
+    .alert-error { background: var(--brick-2); border-color: var(--brick-0); color: var(--brick-0); }
+    .alert-warning { background: var(--copper-2); border-color: var(--copper-0); color: var(--copper-0); }
+    .alert-success { background: var(--sage-2); border-color: var(--sage-0); color: var(--sage-0); }
+    .alert-info { background: var(--slate-2); border-color: var(--slate-0); color: var(--slate-0); }
+
+    /* Inline field error */
+    .field-error { font-size: var(--text-sm); color: var(--brick-1); margin-top: var(--sp-2); display: flex; gap: var(--sp-2); align-items: center; }
+
+    /* ── Modal chrome ── */
+    .modal-backdrop {
+      background: rgba(40,24,10,0.55);
+      backdrop-filter: blur(2px);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-lg);
+    }
+    .modal {
+      background: var(--canvas-0);
+      width: 540px;
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-lg);
+    }
+    .modal-header {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--sp-5);
+      padding: var(--sp-7) var(--sp-8);
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--canvas-1);
+    }
+    .modal-step-badge {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      color: var(--accent-0);
+      background: var(--accent-bg);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-sm);
+      padding: 2px 7px;
+      white-space: nowrap;
+      margin-top: 2px;
+    }
+    .modal-title { font-family: var(--font-display); font-size: var(--text-xl); font-weight: var(--weight-semibold); color: var(--title-color); line-height: var(--leading-tight); }
+    .modal-subtitle { font-size: var(--text-sm); color: var(--chrome-2); margin-top: var(--sp-2); }
+    .modal-close {
+      margin-left: auto;
+      width: 26px; height: 26px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle);
+      background: var(--canvas-2);
+      color: var(--chrome-2);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .modal-progress {
+      height: 3px;
+      background: var(--canvas-2);
+    }
+    .modal-progress-fill {
+      height: 100%;
+      background: var(--accent-0);
+      transition: width var(--ease-slow);
+    }
+    .modal-body { padding: var(--sp-8); display: flex; flex-direction: column; gap: var(--sp-6); }
+    .modal-footer {
+      padding: var(--sp-6) var(--sp-8);
+      border-top: 1px solid var(--border-subtle);
+      background: var(--canvas-1);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .modal-step-dots { display: flex; gap: var(--sp-2); }
+    .modal-dot { width: 6px; height: 6px; border-radius: 3px; background: var(--border-default); transition: all var(--ease); }
+    .modal-dot.active { width: 18px; background: var(--accent-0); }
+
+    /* ── Chat bubbles ── */
+    .chat-thread { display: flex; flex-direction: column; gap: var(--sp-5); }
+    .chat-msg { display: flex; gap: var(--sp-4); max-width: 100%; }
+    .chat-msg.user { flex-direction: row-reverse; }
+    .chat-avatar {
+      width: 26px; height: 26px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      flex-shrink: 0;
+    }
+    .chat-avatar.ai { background: var(--accent-bg); color: var(--accent-0); border-color: var(--border-default); }
+    .chat-avatar.user { background: var(--canvas-2); color: var(--chrome-2); border-color: var(--border-subtle); }
+    .chat-bubble {
+      padding: var(--sp-4) var(--sp-5);
+      border-radius: var(--radius-lg);
+      font-size: var(--text-base);
+      line-height: var(--leading-base);
+      max-width: 86%;
+    }
+    .chat-bubble.ai {
+      background: var(--canvas-1);
+      border: 1px solid var(--border-subtle);
+      color: var(--chrome-0);
+      border-top-left-radius: var(--radius-sm);
+    }
+    .chat-bubble.user {
+      background: var(--accent-0);
+      color: var(--canvas-0);
+      border-top-right-radius: var(--radius-sm);
+    }
+    .chat-bubble .code-ref {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      background: rgba(40,24,10,0.10);
+      border-radius: 2px;
+      padding: 1px 4px;
+    }
+    .chat-input-row {
+      display: flex; gap: var(--sp-3); align-items: flex-end;
+      padding-top: var(--sp-4);
+      border-top: 1px solid var(--border-subtle);
+      margin-top: var(--sp-4);
+    }
+    .chat-textarea {
+      flex: 1;
+      background: var(--canvas-1);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-md);
+      padding: 7px 10px;
+      font-family: var(--font-body);
+      font-size: var(--text-base);
+      color: var(--chrome-0);
+      resize: none;
+      outline: none;
+      min-height: 36px;
+      box-shadow: var(--shadow-inset);
+    }
+    .chat-textarea:focus { border-color: var(--accent-0); }
+
+    /* ── Visibility layer row ── */
+    .layer-row {
+      display: flex; align-items: center; gap: var(--sp-3);
+      padding: var(--sp-2) var(--sp-4);
+      border-radius: var(--radius-sm);
+      transition: background var(--ease);
+    }
+    .layer-row:hover { background: var(--canvas-2); }
+    .layer-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .layer-name { font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.06em; color: var(--chrome-1); flex: 1; }
+    .layer-on { color: var(--chrome-3); font-size: 12px; cursor: pointer; }
+  </style>
+</helmet>
+
+<!-- ════════════════════════════════════════════════════
+     NATURAL HOUSE DESIGNER — DESIGN SYSTEM REFERENCE
+     ════════════════════════════════════════════════════ -->
+<div style="max-width: 900px; margin: 0 auto; padding: var(--sp-11) var(--sp-9);">
+
+  <!-- Masthead -->
+  <div style="margin-bottom: var(--sp-10);">
+    <div style="font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.16em; text-transform: uppercase; color: var(--chrome-3); margin-bottom: var(--sp-4);">Natural House Designer · Design System v1</div>
+    <h1 style="font-family: var(--font-display); font-size: var(--text-3xl); font-weight: 600; color: var(--title-color); line-height: var(--leading-tight); margin-bottom: var(--sp-4);">Token Reference</h1>
+    <p style="font-size: var(--text-md); color: var(--chrome-2); max-width: 560px; line-height: var(--leading-loose);">A warm-neutral, Arts &amp; Crafts–inflected system for a plain HTML/CSS/JS tool — evolved for high information density, technical precision, and natural-building character.</p>
+    <!-- Ornamental rule -->
+    <div style="display: flex; align-items: center; gap: var(--sp-5); margin-top: var(--sp-8);">
+      <div style="flex: 1; height: 1px; background: linear-gradient(90deg, var(--border-default), transparent);"></div>
+      <div style="width: 6px; height: 6px; transform: rotate(45deg); background: var(--accent-0); opacity: 0.6;"></div>
+      <div style="width: 4px; height: 4px; transform: rotate(45deg); background: var(--border-strong); opacity: 0.4;"></div>
+      <div style="width: 6px; height: 6px; transform: rotate(45deg); background: var(--accent-0); opacity: 0.6;"></div>
+      <div style="flex: 1; height: 1px; background: linear-gradient(270deg, var(--border-default), transparent);"></div>
+    </div>
+  </div>
+
+
+  <!-- ══ 1. COLOR PALETTE ══ -->
+  <div class="rule"><span>01 · Color Palette</span></div>
+
+  <!-- Canvas scale -->
+  <div style="margin-bottom: var(--sp-8);">
+    <div class="section-label">Canvas — background surfaces</div>
+    <div style="display: flex; gap: var(--sp-3); flex-wrap: wrap;">
+      <div style="flex: 1; min-width: 120px;">
+        <div style="height: 56px; background: var(--canvas-0); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);"></div>
+        <div style="margin-top: var(--sp-2); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-2);">--canvas-0 · page bg</div>
+        <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3);">#faf5ec</div>
+      </div>
+      <div style="flex: 1; min-width: 120px;">
+        <div style="height: 56px; background: var(--canvas-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);"></div>
+        <div style="margin-top: var(--sp-2); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-2);">--canvas-1 · panel bg</div>
+        <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3);">#f2e8d5</div>
+      </div>
+      <div style="flex: 1; min-width: 120px;">
+        <div style="height: 56px; background: var(--canvas-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);"></div>
+        <div style="margin-top: var(--sp-2); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-2);">--canvas-2 · card/inset</div>
+        <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3);">#e8d9c0</div>
+      </div>
+      <div style="flex: 1; min-width: 120px;">
+        <div style="height: 56px; background: var(--canvas-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);"></div>
+        <div style="margin-top: var(--sp-2); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-2);">--canvas-3 · hover/depressed</div>
+        <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3);">#dccfb0</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chrome scale -->
+  <div style="margin-bottom: var(--sp-8);">
+    <div class="section-label">Chrome — text &amp; foreground</div>
+    <div style="display: flex; gap: var(--sp-3); flex-wrap: wrap;">
+      <div style="flex: 1; min-width: 100px;">
+        <div style="height: 44px; background: var(--chrome-0); border-radius: var(--radius-md);"></div>
+        <div style="margin-top: var(--sp-2); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-2);">--chrome-0 · primary</div>
+        <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3);">#28180a</div>
+      </div>
+      <div style="flex: 1; min-width: 100px;">
+        <div style="height: 44px; background: var(--chrome-1); border-radius: var(--radius-md);"></div>
+        <div style="margin-top: var(--sp-2); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-2);">--chrome-1 · secondary</div>
+        <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3);">#48321c</div>
+      </div>
+      <div style="flex: 1; min-width: 100px;">
+        <div style="height: 44px; background: var(--chrome-2); border-radius: var(--radius-md);"></div>
+        <div style="margin-top: var(--sp-2); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-2);">--chrome-2 · muted</div>
+        <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3);">#6a4e34</div>
+      </div>
+      <div style="flex: 1; min-width: 100px;">
+        <div style="height: 44px; background: var(--chrome-3); border-radius: var(--radius-md);"></div>
+        <div style="margin-top: var(--sp-2); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-2);">--chrome-3 · disabled</div>
+        <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3);">#9a8068</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Accent + semantic -->
+  <div style="margin-bottom: var(--sp-8);">
+    <div class="section-label">Accent &amp; semantic colors</div>
+    <div style="display: flex; gap: var(--sp-3); flex-wrap: wrap;">
+      <!-- Accent -->
+      <div style="flex: 1; min-width: 140px;">
+        <div style="display: flex; border-radius: var(--radius-md); overflow: hidden; height: 44px;">
+          <div style="flex: 2; background: var(--accent-0);"></div>
+          <div style="flex: 1.5; background: var(--accent-1);"></div>
+          <div style="flex: 1; background: var(--accent-2);"></div>
+          <div style="flex: 2; background: var(--accent-bg); border: 1px solid var(--border-subtle);"></div>
+        </div>
+        <div style="margin-top: var(--sp-2); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-2);">Tobacco — accent (interactive)</div>
+        <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3);">0·1·2·bg</div>
+      </div>
+      <!-- Sage -->
+      <div style="flex: 1; min-width: 120px;">
+        <div style="display: flex; border-radius: var(--radius-md); overflow: hidden; height: 44px;">
+          <div style="flex: 2; background: var(--sage-0);"></div>
+          <div style="flex: 1.5; background: var(--sage-1);"></div>
+          <div style="flex: 2; background: var(--sage-2); border: 1px solid var(--border-subtle);"></div>
+        </div>
+        <div style="margin-top: var(--sp-2); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-2);">Sage — success / eco</div>
+      </div>
+      <!-- Copper -->
+      <div style="flex: 1; min-width: 120px;">
+        <div style="display: flex; border-radius: var(--radius-md); overflow: hidden; height: 44px;">
+          <div style="flex: 2; background: var(--copper-0);"></div>
+          <div style="flex: 1.5; background: var(--copper-1);"></div>
+          <div style="flex: 2; background: var(--copper-2); border: 1px solid var(--border-subtle);"></div>
+        </div>
+        <div style="margin-top: var(--sp-2); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-2);">Copper — warning / advisory</div>
+      </div>
+      <!-- Brick -->
+      <div style="flex: 1; min-width: 120px;">
+        <div style="display: flex; border-radius: var(--radius-md); overflow: hidden; height: 44px;">
+          <div style="flex: 2; background: var(--brick-0);"></div>
+          <div style="flex: 1.5; background: var(--brick-1);"></div>
+          <div style="flex: 2; background: var(--brick-2); border: 1px solid var(--border-subtle);"></div>
+        </div>
+        <div style="margin-top: var(--sp-2); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-2);">Brick — error / critical</div>
+      </div>
+      <!-- Slate -->
+      <div style="flex: 1; min-width: 120px;">
+        <div style="display: flex; border-radius: var(--radius-md); overflow: hidden; height: 44px;">
+          <div style="flex: 2; background: var(--slate-0);"></div>
+          <div style="flex: 1.5; background: var(--slate-1);"></div>
+          <div style="flex: 2; background: var(--slate-2); border: 1px solid var(--border-subtle);"></div>
+        </div>
+        <div style="margin-top: var(--sp-2); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-2);">Slate — info / neutral</div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══ 2. TYPOGRAPHY ══ -->
+  <div class="rule"><span>02 · Type Scale</span></div>
+
+  <!-- Font specimens -->
+  <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-6); margin-bottom: var(--sp-8);">
+    <div style="padding: var(--sp-5); background: var(--canvas-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);">
+      <div class="section-label">Display — Playfair Display</div>
+      <div style="font-family: var(--font-display); font-size: 22px; color: var(--title-color); line-height: 1.2; margin-top: var(--sp-3);">Section<br>Headers &amp;<br>Modal Titles</div>
+      <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3); margin-top: var(--sp-4);">--font-display · serif</div>
+    </div>
+    <div style="padding: var(--sp-5); background: var(--canvas-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);">
+      <div class="section-label">Body — DM Sans</div>
+      <div style="font-family: var(--font-body); font-size: 15px; color: var(--chrome-1); line-height: 1.5; margin-top: var(--sp-3);">UI labels, descriptions, wizard copy. Human and readable without being casual.</div>
+      <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3); margin-top: var(--sp-4);">--font-body · humanist sans</div>
+    </div>
+    <div style="padding: var(--sp-5); background: var(--canvas-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);">
+      <div class="section-label">Data — JetBrains Mono</div>
+      <div style="font-family: var(--font-mono); font-size: 13px; color: var(--chrome-1); line-height: 1.6; margin-top: var(--sp-3);">32.5 ft<br>R-38 Straw<br>IRC 2021 §R302.1<br>BOM · BIM · CAD</div>
+      <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3); margin-top: var(--sp-4);">--font-mono · technical</div>
+    </div>
+  </div>
+
+  <!-- Scale ramp -->
+  <div style="display: flex; flex-direction: column; gap: var(--sp-4); margin-bottom: var(--sp-8); padding: var(--sp-6); background: var(--canvas-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);">
+    <div style="display: flex; align-items: baseline; gap: var(--sp-6);">
+      <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3); min-width: 100px;">--text-3xl · 38px</div>
+      <div style="font-family: var(--font-display); font-size: 38px; font-weight: 600; color: var(--title-color); line-height: 1.1;">Natural House</div>
+    </div>
+    <div style="display: flex; align-items: baseline; gap: var(--sp-6);">
+      <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3); min-width: 100px;">--text-2xl · 28px</div>
+      <div style="font-family: var(--font-display); font-size: 28px; font-weight: 600; color: var(--title-color);">Envelope &amp; Walls</div>
+    </div>
+    <div style="display: flex; align-items: baseline; gap: var(--sp-6);">
+      <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3); min-width: 100px;">--text-xl · 22px</div>
+      <div style="font-family: var(--font-display); font-size: 22px; color: var(--title-color);">Roof Configuration</div>
+    </div>
+    <div style="display: flex; align-items: baseline; gap: var(--sp-6);">
+      <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3); min-width: 100px;">--text-lg · 18px</div>
+      <div style="font-family: var(--font-body); font-size: 18px; font-weight: 500; color: var(--chrome-0);">Foundation Type</div>
+    </div>
+    <div style="display: flex; align-items: baseline; gap: var(--sp-6);">
+      <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3); min-width: 100px;">--text-md · 15px</div>
+      <div style="font-family: var(--font-body); font-size: 15px; color: var(--chrome-1);">Select your wall assembly method</div>
+    </div>
+    <div style="display: flex; align-items: baseline; gap: var(--sp-6);">
+      <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3); min-width: 100px;">--text-base · 13px</div>
+      <div style="font-family: var(--font-body); font-size: 13px; color: var(--chrome-1);">Default UI text — control panel labels, descriptions, form hints</div>
+    </div>
+    <div style="display: flex; align-items: baseline; gap: var(--sp-6);">
+      <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3); min-width: 100px;">--text-sm · 11px</div>
+      <div style="font-family: var(--font-mono); font-size: 11px; color: var(--chrome-2);">WALL_TYPE · STRAWBALE · R-38 · 18IN NOMINAL</div>
+    </div>
+    <div style="display: flex; align-items: baseline; gap: var(--sp-6);">
+      <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3); min-width: 100px;">--text-xs · 10px</div>
+      <div style="font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--chrome-3);">SECTION LABEL · TOKEN NAME · STATUS</div>
+    </div>
+  </div>
+
+
+  <!-- ══ 3. SPACING ══ -->
+  <div class="rule"><span>03 · Spacing Scale</span></div>
+
+  <div style="display: flex; align-items: flex-end; gap: var(--sp-4); margin-bottom: var(--sp-8); padding: var(--sp-6); background: var(--canvas-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow-x: auto;">
+    <div style="display: flex; align-items: flex-end; gap: 3px;">
+      <div style="width: 2px; height: 2px; background: var(--accent-0); border-radius: 1px;"></div>
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--chrome-3);">sp-1<br>2</div>
+    </div>
+    <div style="display: flex; align-items: flex-end; gap: 3px;">
+      <div style="width: 4px; height: 4px; background: var(--accent-0); border-radius: 1px;"></div>
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--chrome-3);">sp-2<br>4</div>
+    </div>
+    <div style="display: flex; align-items: flex-end; gap: 3px;">
+      <div style="width: 6px; height: 6px; background: var(--accent-0); border-radius: 1px;"></div>
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--chrome-3);">sp-3<br>6</div>
+    </div>
+    <div style="display: flex; align-items: flex-end; gap: 3px;">
+      <div style="width: 8px; height: 8px; background: var(--accent-0); border-radius: 1px;"></div>
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--chrome-3);">sp-4<br>8</div>
+    </div>
+    <div style="display: flex; align-items: flex-end; gap: 3px;">
+      <div style="width: 12px; height: 12px; background: var(--accent-0); border-radius: 1px;"></div>
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--chrome-3);">sp-5<br>12</div>
+    </div>
+    <div style="display: flex; align-items: flex-end; gap: 3px;">
+      <div style="width: 16px; height: 16px; background: var(--accent-0); border-radius: 1px;"></div>
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--chrome-3);">sp-6<br>16</div>
+    </div>
+    <div style="display: flex; align-items: flex-end; gap: 3px;">
+      <div style="width: 20px; height: 20px; background: var(--accent-0); border-radius: 1px;"></div>
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--chrome-3);">sp-7<br>20</div>
+    </div>
+    <div style="display: flex; align-items: flex-end; gap: 3px;">
+      <div style="width: 24px; height: 24px; background: var(--accent-0); border-radius: 1px;"></div>
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--chrome-3);">sp-8<br>24</div>
+    </div>
+    <div style="display: flex; align-items: flex-end; gap: 3px;">
+      <div style="width: 32px; height: 32px; background: var(--accent-0); border-radius: 1px;"></div>
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--chrome-3);">sp-9<br>32</div>
+    </div>
+    <div style="display: flex; align-items: flex-end; gap: 3px;">
+      <div style="width: 40px; height: 40px; background: var(--accent-0); border-radius: 1px;"></div>
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--chrome-3);">sp-10<br>40</div>
+    </div>
+    <div style="display: flex; align-items: flex-end; gap: 3px;">
+      <div style="width: 48px; height: 48px; background: var(--accent-0); border-radius: 1px;"></div>
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--chrome-3);">sp-11<br>48</div>
+    </div>
+    <div style="display: flex; align-items: flex-end; gap: 3px;">
+      <div style="width: 64px; height: 64px; background: var(--accent-0); border-radius: 1px;"></div>
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--chrome-3);">sp-12<br>64</div>
+    </div>
+  </div>
+
+
+  <!-- ══ 4. BUTTONS ══ -->
+  <div class="rule"><span>04 · Buttons</span></div>
+
+  <div style="display: flex; flex-direction: column; gap: var(--sp-5); margin-bottom: var(--sp-8); padding: var(--sp-6); background: var(--canvas-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);">
+    <div style="display: flex; align-items: center; gap: var(--sp-5); flex-wrap: wrap;">
+      <button class="btn btn-primary btn-lg">Generate Model</button>
+      <button class="btn btn-primary btn-md">Apply Changes</button>
+      <button class="btn btn-primary btn-sm">Confirm</button>
+      <span style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3);">btn-primary — main CTA</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: var(--sp-5); flex-wrap: wrap;">
+      <button class="btn btn-secondary btn-lg">Load Example</button>
+      <button class="btn btn-secondary btn-md">Export CAD</button>
+      <button class="btn btn-secondary btn-sm">Cancel</button>
+      <span style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3);">btn-secondary — secondary action</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: var(--sp-5); flex-wrap: wrap;">
+      <button class="btn btn-ghost btn-md">← Back</button>
+      <button class="btn btn-ghost btn-md">Reset to defaults</button>
+      <button class="btn btn-ghost btn-sm">Details</button>
+      <span style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3);">btn-ghost — low-emphasis</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: var(--sp-5); flex-wrap: wrap;">
+      <button class="btn btn-sage btn-md">✓ Mark compliant</button>
+      <button class="btn btn-danger btn-md">Delete outbuilding</button>
+      <button class="btn btn-primary btn-md" disabled="">Locked (PE review)</button>
+      <span style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--chrome-3);">btn-sage / btn-danger / :disabled</span>
+    </div>
+  </div>
+
+
+  <!-- ══ 5. FORM CONTROLS ══ -->
+  <div class="rule"><span>05 · Form Controls</span></div>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-6); margin-bottom: var(--sp-8);">
+
+    <!-- Text inputs -->
+    <div style="display: flex; flex-direction: column; gap: var(--sp-5); padding: var(--sp-6); background: var(--canvas-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);">
+      <div class="section-label">Text inputs</div>
+      <div>
+        <label class="form-label">Floor area</label>
+        <input class="input-text" type="text" value="1,280" style="font-family: var(--font-mono);">
+        <div class="form-hint">Square feet of conditioned space</div>
+      </div>
+      <div>
+        <label class="form-label">Site address</label>
+        <input class="input-text" type="text" placeholder="Enter address or lat/long…">
+      </div>
+      <div>
+        <label class="form-label">Well depth (ft) — error state</label>
+        
+        <input class="input-text error" type="text" value="42"><div class="field-error">⚠ Below 50 ft minimum for this soil class</div>
+      </div>
+    </div>
+
+    <!-- Selects + checks -->
+    <div style="display: flex; flex-direction: column; gap: var(--sp-5); padding: var(--sp-6); background: var(--canvas-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);">
+      <div class="section-label">Selects &amp; toggles</div>
+      <div>
+        <label class="form-label">Wall assembly</label>
+        <select class="input-select">
+          <option>Strawbale — load bearing</option>
+          <option>Strawbale — infill</option>
+          <option>Timber frame + straw infill</option>
+          <option>Adobe / rammed earth</option>
+        </select>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: var(--sp-3);">
+        <label class="check-wrap">
+          <div class="check-box checked"></div>
+          Passive solar south glazing
+        </label>
+        <label class="check-wrap">
+          <div class="check-box"></div>
+          Greenhouse addition
+        </label>
+        <label class="radio-wrap">
+          <div class="radio-box checked"></div>
+          On-grid + battery backup
+        </label>
+        <label class="radio-wrap">
+          <div class="radio-box"></div>
+          Off-grid standalone
+        </label>
+      </div>
+      <div class="toggle-wrap">
+        <div class="toggle on" id="compactToggle"></div>
+        <span>Compact panel mode</span>
+      </div>
+    </div>
+
+    <!-- Sliders -->
+    <div style="display: flex; flex-direction: column; gap: var(--sp-5); padding: var(--sp-6); background: var(--canvas-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); grid-column: 1 / -1;">
+      <div class="section-label">Range sliders</div>
+      <div>
+        <label class="form-label">Wall thickness — <span style="font-family: var(--font-mono); color: var(--chrome-1);">18 in nominal</span></label>
+        <div class="slider-wrap">
+          <input class="input-range" type="range" min="14" max="24" value="18">
+          <span class="slider-value">18 in</span>
+        </div>
+      </div>
+      <div>
+        <label class="form-label">Roof pitch — <span style="font-family: var(--font-mono); color: var(--chrome-1);">6:12</span></label>
+        <div class="slider-wrap">
+          <input class="input-range" type="range" min="2" max="12" value="6">
+          <span class="slider-value">6:12</span>
+        </div>
+      </div>
+      <div>
+        <label class="form-label">Solar glazing angle — <span style="font-family: var(--font-mono); color: var(--chrome-1);">52°</span></label>
+        <div class="slider-wrap">
+          <input class="input-range" type="range" min="30" max="90" value="52">
+          <span class="slider-value">52°</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══ 6. COLLAPSIBLE SECTIONS ══ -->
+  <div class="rule"><span>06 · Collapsible Panel Sections</span></div>
+
+  <div style="display: flex; flex-direction: column; gap: var(--sp-3); margin-bottom: var(--sp-8);">
+    <!-- Open section -->
+    <div>
+      <div class="section-header open">
+        <div class="section-icon">🧱</div>
+        <div class="section-title">Walls &amp; Envelope</div>
+        <div class="section-meta">Strawbale · 18 in</div>
+        <svg class="section-chevron" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 5l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      </div>
+      <div class="section-body">
+        <div>
+          <label class="form-label">Assembly type</label>
+          <select class="input-select" style="width: 100%;">
+            <option>Strawbale — load bearing</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Nominal thickness</label>
+          <div class="slider-wrap">
+            <input class="input-range" type="range" min="14" max="24" value="18">
+            <span class="slider-value">18 in</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Closed sections -->
+    <div class="section-header">
+      <div class="section-icon">🏠</div>
+      <div class="section-title">Roof</div>
+      <div class="section-meta">Timber · 6:12</div>
+      <svg class="section-chevron" viewBox="0 0 14 14" fill="none"><path d="M3 5l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    </div>
+    <div class="section-header">
+      <div class="section-icon">🏗</div>
+      <div class="section-title">Foundation</div>
+      <div class="section-meta">Rubble trench</div>
+      <svg class="section-chevron" viewBox="0 0 14 14" fill="none"><path d="M3 5l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    </div>
+    <!-- With badge -->
+    <div class="section-header" style="position: relative;">
+      <div class="section-icon">⚙</div>
+      <div class="section-title">Systems</div>
+      <div class="section-meta">Solar · Well · Septic</div>
+      <div style="background: var(--copper-0); color: var(--canvas-0); font-family: var(--font-mono); font-size: 9px; padding: 2px 5px; border-radius: 10px; font-weight: 600;">2 warnings</div>
+      <svg class="section-chevron" viewBox="0 0 14 14" fill="none"><path d="M3 5l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    </div>
+  </div>
+
+
+  <!-- ══ 7. VALIDATION STATES ══ -->
+  <div class="rule"><span>07 · Validation &amp; Warnings</span></div>
+
+  <div style="display: flex; flex-direction: column; gap: var(--sp-4); margin-bottom: var(--sp-8);">
+    <div class="alert alert-error">
+      <div class="alert-icon">✕</div>
+      <div class="alert-body">
+        <div class="alert-title">Well/septic separation violation</div>
+        <div>100 ft minimum separation required. Current layout: 68 ft. Relocate one or both to proceed.</div>
+        <div class="alert-code">IRC 2021 §P2905.4.2 · PE review required before permit</div>
+      </div>
+    </div>
+    <div class="alert alert-warning">
+      <div class="alert-icon">⚠</div>
+      <div class="alert-body">
+        <div class="alert-title">Roof pitch below passive-solar threshold</div>
+        <div>4:12 pitch reduces winter solar gain by ~22% at this latitude. Consider 6:12 minimum.</div>
+        <div class="alert-code">Advisory · ASHRAE 90.2 · no block on export</div>
+      </div>
+    </div>
+    <div class="alert alert-success">
+      <div class="alert-icon">✓</div>
+      <div class="alert-body">
+        <div class="alert-title">Thermal envelope meets Passive House target</div>
+        <div>Calculated UA = 0.12 BTU/h·ft²·°F — 14% below threshold. Wall R-value, window specs, and airtightness are all within tolerance.</div>
+      </div>
+    </div>
+    <div class="alert alert-info">
+      <div class="alert-icon">i</div>
+      <div class="alert-body">
+        <div class="alert-title">SE wind load not yet calculated</div>
+        <div>Enter your county for automatic ASCE 7-22 wind exposure lookup, or enter design wind speed manually.</div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══ 8. MODAL CHROME ══ -->
+  <div class="rule"><span>08 · Wizard Modal Chrome</span></div>
+
+  <div style="margin-bottom: var(--sp-8); display: flex; justify-content: center;">
+    <div class="modal">
+      <div class="modal-header">
+        <div style="flex: 1;">
+          <div class="modal-step-badge">Step 4 of 14</div>
+          <div class="modal-title" style="margin-top: var(--sp-3);">Wall Assembly</div>
+          <div class="modal-subtitle">Choose the primary structural system for your exterior walls.</div>
+        </div>
+        <div class="modal-close">✕</div>
+      </div>
+      <div class="modal-progress"><div class="modal-progress-fill" style="width: 28.5%;"></div></div>
+      <div class="modal-body">
+        <div>
+          <label class="form-label">Wall type</label>
+          <select class="input-select" style="width: 100%;">
+            <option>Strawbale — load bearing</option>
+          </select>
+          <div class="form-hint">Load-bearing bale uses the bale stack itself as the structure. Best for single-story.</div>
+        </div>
+        <div>
+          <label class="form-label">Nominal bale thickness</label>
+          <div class="slider-wrap">
+            <input class="input-range" type="range" min="14" max="24" value="18">
+            <span class="slider-value">18 in</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div class="modal-step-dots">
+          <div class="modal-dot"></div>
+          <div class="modal-dot"></div>
+          <div class="modal-dot"></div>
+          <div class="modal-dot active"></div>
+          <div class="modal-dot"></div>
+          <div class="modal-dot"></div>
+        </div>
+        <div style="display: flex; gap: var(--sp-4);">
+          <button class="btn btn-ghost btn-md">← Back</button>
+          <button class="btn btn-primary btn-md">Next →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══ 9. CHAT BUBBLES ══ -->
+  <div class="rule"><span>09 · AI Copilot Chat</span></div>
+
+  <div style="padding: var(--sp-6); background: var(--canvas-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); margin-bottom: var(--sp-8);">
+    <div class="chat-thread">
+      <div class="chat-msg">
+        <div class="chat-avatar ai">NH</div>
+        <div class="chat-bubble ai">Welcome. I can help you configure your strawbale design, check IRC compliance, or explain any parameter. What would you like to explore?</div>
+      </div>
+      <div class="chat-msg user">
+        <div class="chat-avatar user">You</div>
+        <div class="chat-bubble user">Will my well depth pass for the septic setback rule in Montana?</div>
+      </div>
+      <div class="chat-msg">
+        <div class="chat-avatar ai">NH</div>
+        <div class="chat-bubble ai">Montana DEQ requires a minimum <span class="code-ref">50 ft</span> separation from any private well to an absorption field. Your current layout shows <span class="code-ref">68 ft</span> — that passes. However your well is only <span class="code-ref">42 ft deep</span>, which is below the 50 ft minimum for Class B soils. You'll need to either deepen it or reclassify the soil with a perc test.</div>
+      </div>
+    </div>
+    <div class="chat-input-row">
+      <textarea class="chat-textarea" rows="1" placeholder="Ask about code, materials, sizing…"></textarea>
+      <button class="btn btn-primary btn-sm">Send</button>
+    </div>
+  </div>
+
+
+  <!-- ══ 10. VISIBILITY LAYERS ══ -->
+  <div class="rule"><span>10 · 3D Visibility Layers</span></div>
+
+  <div style="padding: var(--sp-5) var(--sp-5); background: var(--canvas-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); margin-bottom: var(--sp-8); max-width: 240px;">
+    <div class="section-label" style="padding: 0 var(--sp-3);">3D Layers</div>
+    <div class="layer-row"><div class="layer-dot" style="background: var(--chrome-1);"></div><div class="layer-name">Envelope</div><div class="layer-on">👁</div></div>
+    <div class="layer-row"><div class="layer-dot" style="background: #8a6a48;"></div><div class="layer-name">Interior</div><div class="layer-on">👁</div></div>
+    <div class="layer-row"><div class="layer-dot" style="background: #5c8048;"></div><div class="layer-name">Roof</div><div class="layer-on">👁</div></div>
+    <div class="layer-row"><div class="layer-dot" style="background: #6a5a40;"></div><div class="layer-name">Foundation</div><div class="layer-on">👁</div></div>
+    <div class="layer-row"><div class="layer-dot" style="background: var(--slate-1);"></div><div class="layer-name">Plumbing</div><div class="layer-on">👁</div></div>
+    <div class="layer-row"><div class="layer-dot" style="background: var(--copper-1);"></div><div class="layer-name">Heating</div><div class="layer-on">👁</div></div>
+    <div class="layer-row"><div class="layer-dot" style="background: #b8a030;"></div><div class="layer-name">Power / Solar</div><div class="layer-on">👁</div></div>
+    <div class="layer-row" style="border-top: 1px solid var(--border-subtle); margin-top: var(--sp-2); padding-top: var(--sp-3);"><div class="layer-dot" style="background: var(--sage-1);"></div><div class="layer-name">Outbuildings</div><div class="layer-on" style="opacity: 0.35;">👁</div></div>
+  </div>
+
+
+  <!-- ══ FOOTER / TOKENS ══ -->
+  <div class="rule"><span>Full token reference below</span></div>
+  <div style="padding: var(--sp-6); background: var(--chrome-0); border-radius: var(--radius-md); color: var(--canvas-2); font-family: var(--font-mono); font-size: var(--text-xs); line-height: 2; margin-bottom: var(--sp-12);">
+    <div style="color: var(--chrome-3); margin-bottom: var(--sp-4);">/* paste into :root { } in style.css */</div>
+    <div style="color: #c8a96e;">/* canvas */</div>
+    <div>--canvas-0: #faf5ec; &nbsp;--canvas-1: #f2e8d5; &nbsp;--canvas-2: #e8d9c0; &nbsp;--canvas-3: #dccfb0;</div>
+    <div style="color: #c8a96e; margin-top: var(--sp-3);">/* chrome */</div>
+    <div>--chrome-0: #28180a; &nbsp;--chrome-1: #48321c; &nbsp;--chrome-2: #6a4e34; &nbsp;--chrome-3: #9a8068;</div>
+    <div style="color: #c8a96e; margin-top: var(--sp-3);">/* borders */</div>
+    <div>--border-subtle: #d8c8a8; &nbsp;--border-default: #b8a070; &nbsp;--border-strong: #8a6c48;</div>
+    <div style="color: #c8a96e; margin-top: var(--sp-3);">/* accent — tobacco */</div>
+    <div>--accent-0: #7a5828; &nbsp;--accent-1: #9a7240; &nbsp;--accent-2: #b88e58; &nbsp;--accent-bg: #f0e6d0;</div>
+    <div style="color: #c8a96e; margin-top: var(--sp-3);">/* semantic */</div>
+    <div>--sage-0: #3c5c38; &nbsp;--sage-1: #4e7248; &nbsp;--sage-2: #d8ecd4;</div>
+    <div>--copper-0: #8a5a18; &nbsp;--copper-1: #ae7630; &nbsp;--copper-2: #f5e8cc;</div>
+    <div>--brick-0: #782c1c; &nbsp;--brick-1: #9e3c28; &nbsp;--brick-2: #f5dcd8;</div>
+    <div>--slate-0: #2c4858; &nbsp;--slate-1: #3c5e74; &nbsp;--slate-2: #d8e8f0;</div>
+    <div style="color: #c8a96e; margin-top: var(--sp-3);">/* typography */</div>
+    <div>--font-display: 'Playfair Display', Georgia, serif;</div>
+    <div>--font-body: 'DM Sans', 'Helvetica Neue', sans-serif;</div>
+    <div>--font-mono: 'JetBrains Mono', 'Fira Code', monospace;</div>
+    <div style="color: #c8a96e; margin-top: var(--sp-3);">/* text scale */</div>
+    <div>--text-xs:10px; --text-sm:11px; --text-base:13px; --text-md:15px;</div>
+    <div>--text-lg:18px; --text-xl:22px; --text-2xl:28px; --text-3xl:38px;</div>
+    <div style="color: #c8a96e; margin-top: var(--sp-3);">/* spacing */</div>
+    <div>--sp-1:2px; --sp-2:4px; --sp-3:6px; --sp-4:8px; --sp-5:12px;</div>
+    <div>--sp-6:16px; --sp-7:20px; --sp-8:24px; --sp-9:32px; --sp-10:40px;</div>
+    <div>--sp-11:48px; --sp-12:64px;</div>
+    <div style="color: #c8a96e; margin-top: var(--sp-3);">/* radii · shadows · easing */</div>
+    <div>--radius-sm:2px; --radius-md:3px; --radius-lg:5px;</div>
+    <div>--shadow-sm:0 1px 2px rgba(40,24,10,.10);</div>
+    <div>--shadow-md:0 2px 8px rgba(40,24,10,.14);</div>
+    <div>--shadow-lg:0 4px 20px rgba(40,24,10,.18);</div>
+    <div>--shadow-inset:inset 0 1px 3px rgba(40,24,10,.12);</div>
+    <div>--ease:0.14s ease; --ease-slow:0.28s ease;</div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;$preview&quot;: {&quot;width&quot;: 900, &quot;height&quot;: 1200},
+  &quot;titleColor&quot;: {
+    &quot;editor&quot;: &quot;color&quot;,
+    &quot;default&quot;: &quot;#3a5c2e&quot;,
+    &quot;options&quot;: [&quot;#3a5c2e&quot;, &quot;#28180a&quot;, &quot;#7a5828&quot;, &quot;#2c4858&quot;],
+    &quot;section&quot;: &quot;Typography&quot;
+  }
+}">
+class Component extends DCLogic {
+  syncTokens() {
+    const color = this.props.titleColor ?? '#3a5c2e';
+    this.el.style.setProperty('--title-color', color);
+  }
+  componentDidMount() {
+    this.syncTokens();
+    const toggle = this.el.querySelector('#compactToggle');
+    if (toggle) {
+      toggle.addEventListener('click', () => {
+        toggle.classList.toggle('on');
+        document.body.classList.toggle('compact');
+      });
+    }
+  }
+  componentDidUpdate() {
+    this.syncTokens();
+  }
+}
+</script>
+</body>
+</html>

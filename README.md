@@ -1,5 +1,9 @@
 # Natural Building — a house design studio
 
+> **AI tools and agents: read [`AGENTS.md`](./AGENTS.md) before doing anything.**
+> It is the operating contract for this repo — one home for the project, push to
+> GitHub every session, keep the Notion hub current.
+
 Design a real house — straw bale, cob, timber frame, or fully conventional — and watch a live 3D model keep track of the cost, the code checks, and the carbon while you work. Draw the floor plan in 2D, flip to 3D, ask the built-in assistant for changes in plain English, and export permit-style drawings, frame drawings, or a BIM (IFC) model at the end.
 
 **You don't need to know anything about coding to use this.** Follow the three steps below.

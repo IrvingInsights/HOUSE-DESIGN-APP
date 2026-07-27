@@ -30,9 +30,14 @@
    beneath it and couldn't be clicked or dragged. */
 .rz-model { background: var(--canvas, #F4F3EC); }
 .rz-model .planWrap {
+  position: absolute;
   inset: 60px 16px 76px 364px;
   border-radius: 14px;
   border: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 60%, transparent);
+  overflow: hidden;
+}
+.st-look .rz-model .planWrap {
+  inset: 60px 16px 76px 16px;
 }
 /* narrow windows: the trail overlays regardless — let the plan use the width */
 @media (max-width: 860px) {
@@ -128,7 +133,7 @@
 
 /* SURFACE 2 — the Trail spine, left edge. Centered when short; when a chapter's
    controls make it taller than the screen it caps to the viewport and scrolls
-   inside, so the greeting and the build button never slide off the top/bottom. */
+   inside, so the chapter strip and the build button never slide off the ends. */
 .rz-trail {
   top: 50%; left: 16px; transform: translateY(-50%);
   border-radius: 18px; padding: 16px; width: 336px;
@@ -145,10 +150,6 @@
 }
 .rz-trail-toggle:hover { filter: brightness(1.1); }
 .rz-trail.closed .rz-trail-toggle { right: 8px; top: 8px; }
-.rz-greeting {
-  font-size: 14px; line-height: 1.5; color: var(--ink, #22251f);
-  margin: 6px 30px 16px 4px;
-}
 /* two columns: eight chapters in four short rows, so the chapter's actual
    controls start high in the bar instead of a full screen down */
 .rz-chapters { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 6px; }
@@ -320,6 +321,16 @@
 /* roof chapter — overhang controls */
 .rz-field-lead { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss, #868a7c); }
 .rz-field-num .rz-field-lead { flex: 1; }
+/* Chip picker (PickRow): every option visible at a glance, one tap to choose,
+   the chosen option explains itself below. Replaces dropdowns in the detail
+   panels. Matches the toolbar's st-pill look using the same brand tokens. */
+.rz-pick-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rz-pick-chip { font: inherit; font-size: 13px; color: var(--ink, #22251f); background: var(--raise, #fff); border: 1px solid var(--line, #dbd9ce); border-radius: 999px; padding: 6px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: border-color .12s, background .12s, color .12s; }
+.rz-pick-chip:hover { border-color: var(--evergreen, #3c6472); }
+.rz-pick-chip.on { background: var(--evergreen, #3c6472); border-color: var(--evergreen, #3c6472); color: #fff; font-weight: 600; }
+.rz-pick-chip:focus-visible { outline: 2px solid var(--evergreen, #3c6472); outline-offset: 2px; }
+.rz-pick-chip.on .rz-pick-leaf { filter: brightness(1.7); }
+.rz-pick-desc { font-size: 12px; color: var(--moss, #868a7c); line-height: 1.4; }
 .rz-overhang-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 /* stack label over a full-width input; higher specificity so it wins over .rz-field-num's row */
 .rz-overhang-grid .rz-overhang-cell { flex-direction: column; align-items: stretch; gap: 3px; }
@@ -429,6 +440,24 @@
 .rz-bfoot-total { font-size: 15px; color: var(--ink, #22251f); padding-top: 6px; }
 .rz-budget-note { margin-top: 8px; font-size: 11px; line-height: 1.45; color: var(--moss, #868a7c); }
 
+/* The trades you take on yourself — switches, in the budget, where the
+   question actually comes up. Each row says what it is worth before you
+   touch it, so the choice is visible without having to try it. */
+.rz-budget-diy { border-top: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 70%, transparent); padding: 10px 18px 2px; }
+.rz-diy-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; cursor: pointer; }
+.rz-diy-row input { flex: none; width: 16px; height: 16px; accent-color: var(--good, #3e7b53); }
+.rz-diy-label { flex: 1; display: flex; flex-direction: column; font-size: 13px; color: var(--ink, #22251f); }
+.rz-diy-label small { font-size: 11px; color: var(--moss, #868a7c); }
+.rz-diy-worth { font-size: 12px; white-space: nowrap; color: var(--moss, #868a7c); font-weight: 600; }
+.rz-diy-row.on .rz-diy-worth { color: var(--good, #3e7b53); }
+
+/* Summer at a glance: what lands on the house, what holds it, how far it
+   drifts. Three numbers, because the fourth would be one too many. */
+.rz-summer-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 6px 0 2px; }
+.rz-summer-grid > div { display: flex; flex-direction: column; gap: 2px; padding: 7px 8px; border-radius: 8px; background: color-mix(in srgb, var(--line, #dbd9ce) 22%, transparent); }
+.rz-summer-grid b { font-size: 15px; color: var(--ink, #22251f); }
+.rz-summer-grid small { font-size: 10px; line-height: 1.3; color: var(--moss, #868a7c); }
+
 /* SURFACE 4b — the Ask bar, bottom center */
 .rz-ask {
   bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -451,21 +480,6 @@
   border-radius: 12px; padding: 10px 14px; font-size: 13px; color: var(--earth, #565a4f);
   box-shadow: 0 8px 30px rgba(30, 40, 30, 0.12);
 }
-
-/* the foreman greeting — its own card at the top, so the left bar is controls
-   only. Constrained so it never reaches the compass (top-right). */
-.rz-greet-card {
-  position: absolute; z-index: 5;
-  top: 82px; left: 50%; transform: translateX(-50%);
-  max-width: min(460px, calc(100vw - 360px));
-  padding: 10px 16px; border-radius: 14px; text-align: center;
-  font-size: 13.5px; line-height: 1.5; color: var(--ink, #22251f);
-  background: color-mix(in srgb, var(--ivory, #fbfaf6) 90%, transparent);
-  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
-  border: 1px solid color-mix(in srgb, var(--line, #dbd9ce) 70%, transparent);
-  box-shadow: 0 8px 30px rgba(30, 40, 30, 0.12);
-}
-@media (max-width: 900px) { .rz-greet-card { display: none; } }
 
 /* undo / redo — top left */
 .rz-history {
@@ -811,3 +825,8 @@ button.rz-storey-name:hover { color: var(--evergreen, #3c6472); background: colo
 
 /* the Outline section's whole-building size row */
 .rz-shape-size { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+
+/* greenhouse-as-opening list (merged Walls & openings chapter) */
+.rz-ghlist { margin-top: 6px; }
+.rz-ghrow { border-top: 1px dashed #d8d2c2; padding: 6px 0 2px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.rz-ghrow .rz-fresh { align-self: flex-start; }

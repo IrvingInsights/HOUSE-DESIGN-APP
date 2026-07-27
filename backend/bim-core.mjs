@@ -1,4 +1,4 @@
-const DEFAULT_SITE_PAD_EXTENSION_FT = 64;
+const DEFAULT_SITE_PAD_EXTENSION_FT = 16;
 const DEFAULT_OUTDOOR_GRID_SIZE_FT = 240;
 // Spaces that live OUT on the land, not inside the conditioned shell — they can
 // be bigger than the house and sit well outside its footprint. Includes the
@@ -141,13 +141,139 @@ export const CLADDING_TYPES = {
   brick:       { key: 'brick',       label: 'Brick veneer',                          costPsf: 12,  carbonPsf: 9,  color: 0x9c5f4a, texture: 'concrete' }
 };
 
+// What actually COVERS the roof. Until now the roof was priced at a flat $10/sf
+// and drawn generic grey no matter what — so metal, cedar, and a living roof all
+// cost and weighed the same. Standing-seam metal is the default at exactly the
+// old 10 / 12 numbers, so existing designs don't shift when this landed.
+// 'catchment' marks coverings safe to drink rainwater off; 'pitch' is the
+// sensible range (a living roof wants it flat-ish, thatch wants it steep).
+export const ROOF_COVERINGS = {
+  metal:       { key: 'metal',       label: 'Standing seam metal',   costPsf: 10, carbonPsf: 12, color: 0x8a938f, texture: 'metal',    catchment: true,  pitch: [0.08, 1.2], note: 'Long-lived and light — the rain-catchment favorite.' },
+  corrugated:  { key: 'corrugated',  label: 'Corrugated metal',      costPsf: 7,  carbonPsf: 10, color: 0x9aa3a0, texture: 'metal',    catchment: true,  pitch: [0.15, 1.2], note: 'The cheapest metal, and still catchment-safe.' },
+  cedar:       { key: 'cedar',       label: 'Cedar shakes',          costPsf: 12, carbonPsf: 4,  color: 0x8d7355, texture: 'wood',     catchment: false, pitch: [0.33, 1.2], green: true, note: 'Renewable and beautiful; not for drinking-water catchment.' },
+  thatch:      { key: 'thatch',      label: 'Thatch (reed / straw)', costPsf: 16, carbonPsf: 2,  color: 0xb59a63, texture: 'plaster',  catchment: false, pitch: [0.75, 1.5], green: true, note: 'Lowest carbon of all — wants a steep pitch to shed water.' },
+  living:      { key: 'living',      label: 'Living (green) roof',   costPsf: 22, carbonPsf: 6,  color: 0x6d8a52, texture: 'plaster',  catchment: false, pitch: [0.02, 0.25], green: true, note: 'Vegetated: heavy, so it needs structure, membrane and drainage. Low pitch only.' },
+  clay:        { key: 'clay',        label: 'Clay tile',             costPsf: 18, carbonPsf: 16, color: 0xa8624a, texture: 'concrete', catchment: true,  pitch: [0.33, 1.0], note: 'Heavy but lasts a century.' },
+  asphalt:     { key: 'asphalt',     label: 'Asphalt shingles',      costPsf: 5,  carbonPsf: 14, color: 0x4f4a45, texture: 'plaster',  catchment: false, pitch: [0.17, 1.0], note: 'Cheapest and most common; petroleum-based, not catchment-safe.' },
+  membrane:    { key: 'membrane',    label: 'EPDM membrane',         costPsf: 8,  carbonPsf: 13, color: 0x3f4442, texture: 'plaster',  catchment: false, pitch: [0, 0.15], note: 'For flat and near-flat roofs.' },
+  // A ROOF YOU CAN SEE THROUGH. Daniel, on roofing the carport that stands
+  // right beside his greenhouse: "if we roof it with clear poly it won't
+  // obscure the greenhouse." Every other covering here stops light dead, which
+  // is fine over a house and wrong over anything a greenhouse has to see past.
+  // Twin-wall polycarbonate is the standard answer — light, cheap, spans on
+  // purlins. Not catchment-safe for drinking; fine for the garden.
+  polycarb:    { key: 'polycarb',    label: 'Clear polycarbonate',   costPsf: 9,  carbonPsf: 11, color: 0xd8e6ee, texture: 'metal',    catchment: false, pitch: [0.08, 1.2], translucent: true, note: 'Light passes straight through — for a carport or a lean-to beside glass, where a solid roof would put the thing behind it in shade. Garden water only, not drinking.' }
+};
+
+export function resolveRoofCovering(shell = {}) {
+  return ROOF_COVERINGS[shell?.roofCovering] || ROOF_COVERINGS.metal;
+}
+
+// ── WHAT GOES IN (AND AROUND) THE HOUSE ─────────────────────────────────────
+// Fixtures, built-ins, appliances, furniture and outdoor pieces. Every one is a
+// normal element (category 'furnishing', kind = the catalog key), so it drags on
+// the plan, draws in 3D, and edits through the same card as anything else. Each
+// carries real cost and carbon into the receipts.
+//   w/d = plan footprint in feet, h = height. cost = $, carbon = kg CO2e.
+// The heater is the one special case: its size, name and price already come from
+// the chosen heat source, so it carries cost 0 here (cost.heat covers it).
+export const FURNISHING_GROUPS = [
+  { key: 'fixture',   label: 'Fixtures' },
+  { key: 'builtin',   label: 'Built-ins' },
+  { key: 'appliance', label: 'Appliances' },
+  { key: 'furniture', label: 'Furniture' },
+  { key: 'outdoor',   label: 'Outdoor' }
+];
+
+export const FURNISHINGS = {
+  // Fixtures
+  heater:       { key: 'heater',       group: 'fixture',   label: 'Heater',            w: 3,   d: 2.5, h: 4,   cost: 0,    carbon: 0,   color: 0x8a5a3c, note: 'Size, name and price follow your chosen heat source.' },
+  water_tank:   { key: 'water_tank',   group: 'fixture',   label: 'Water tank',        w: 4,   d: 4,   h: 5,   cost: 900,  carbon: 120, color: 0x6f8898 },
+  water_heater: { key: 'water_heater', group: 'fixture',   label: 'Water heater',      w: 2,   d: 2,   h: 5,   cost: 1400, carbon: 180, color: 0x93a0a8 },
+  toilet:       { key: 'toilet',       group: 'fixture',   label: 'Toilet',            w: 2.5, d: 2,   h: 2.5, cost: 450,  carbon: 60,  color: 0xe8e6e0 },
+  shower:       { key: 'shower',       group: 'fixture',   label: 'Shower',            w: 3,   d: 3,   h: 7,   cost: 1600, carbon: 150, color: 0xd8e2e6 },
+  tub:          { key: 'tub',          group: 'fixture',   label: 'Bathtub',           w: 5,   d: 2.5, h: 2,   cost: 1900, carbon: 200, color: 0xe8e6e0 },
+  sink_bath:    { key: 'sink_bath',    group: 'fixture',   label: 'Bathroom sink',     w: 2,   d: 1.8, h: 3,   cost: 550,  carbon: 70,  color: 0xe8e6e0 },
+  // Built-ins
+  counter:      { key: 'counter',      group: 'builtin',   label: 'Kitchen counter',   w: 8,   d: 2,   h: 3,   cost: 1800, carbon: 220, color: 0xa8895f },
+  island:       { key: 'island',       group: 'builtin',   label: 'Kitchen island',    w: 6,   d: 3,   h: 3,   cost: 1600, carbon: 190, color: 0xa8895f },
+  cabinets:     { key: 'cabinets',     group: 'builtin',   label: 'Upper cabinets',    w: 8,   d: 1.2, h: 2.5, cost: 1200, carbon: 150, color: 0x9c7f57 },
+  shelving:     { key: 'shelving',     group: 'builtin',   label: 'Shelving',          w: 6,   d: 1,   h: 6,   cost: 500,  carbon: 70,  color: 0x9c7f57, green: true },
+  wardrobe:     { key: 'wardrobe',     group: 'builtin',   label: 'Built-in wardrobe', w: 6,   d: 2,   h: 7,   cost: 1400, carbon: 170, color: 0x9c7f57 },
+  pantry_shelf: { key: 'pantry_shelf', group: 'builtin',   label: 'Pantry shelving',   w: 5,   d: 1.5, h: 7,   cost: 700,  carbon: 90,  color: 0x9c7f57, green: true },
+  // Appliances
+  range:        { key: 'range',        group: 'appliance', label: 'Range / cooktop',   w: 2.5, d: 2.2, h: 3,   cost: 1500, carbon: 260, color: 0x6d7276 },
+  fridge:       { key: 'fridge',       group: 'appliance', label: 'Refrigerator',      w: 3,   d: 2.5, h: 6,   cost: 1800, carbon: 420, color: 0xc9ced1 },
+  dishwasher:   { key: 'dishwasher',   group: 'appliance', label: 'Dishwasher',        w: 2,   d: 2.2, h: 3,   cost: 900,  carbon: 210, color: 0xc9ced1 },
+  sink_kitchen: { key: 'sink_kitchen', group: 'appliance', label: 'Kitchen sink',      w: 3,   d: 2,   h: 3,   cost: 800,  carbon: 110, color: 0xd5d9db },
+  washer:       { key: 'washer',       group: 'appliance', label: 'Washer',            w: 2.5, d: 2.5, h: 3.5, cost: 1000, carbon: 230, color: 0xc9ced1 },
+  dryer:        { key: 'dryer',        group: 'appliance', label: 'Dryer',             w: 2.5, d: 2.5, h: 3.5, cost: 900,  carbon: 210, color: 0xc9ced1 },
+  // Furniture
+  bed_queen:    { key: 'bed_queen',    group: 'furniture', label: 'Bed — queen',       w: 5,   d: 6.7, h: 2,   cost: 1400, carbon: 160, color: 0x9a7f6a },
+  bed_twin:     { key: 'bed_twin',     group: 'furniture', label: 'Bed — twin',        w: 3.2, d: 6.3, h: 2,   cost: 800,  carbon: 100, color: 0x9a7f6a },
+  table_dining: { key: 'table_dining', group: 'furniture', label: 'Dining table',      w: 6,   d: 3.5, h: 2.5, cost: 900,  carbon: 120, color: 0x8f7050 },
+  sofa:         { key: 'sofa',         group: 'furniture', label: 'Sofa',              w: 7,   d: 3,   h: 2.8, cost: 1600, carbon: 200, color: 0x7d8a7a },
+  armchair:     { key: 'armchair',     group: 'furniture', label: 'Armchair',          w: 3,   d: 3,   h: 2.8, cost: 700,  carbon: 90,  color: 0x7d8a7a },
+  desk:         { key: 'desk',         group: 'furniture', label: 'Desk',              w: 4.5, d: 2.2, h: 2.5, cost: 600,  carbon: 80,  color: 0x8f7050 },
+  dresser:      { key: 'dresser',      group: 'furniture', label: 'Dresser',           w: 4,   d: 1.8, h: 3.5, cost: 700,  carbon: 95,  color: 0x8f7050 },
+  bookcase:     { key: 'bookcase',     group: 'furniture', label: 'Bookcase',          w: 3,   d: 1.2, h: 6,   cost: 450,  carbon: 65,  color: 0x8f7050 },
+  // Outdoor
+  carport:      { key: 'carport',      group: 'outdoor',   label: 'Carport',           w: 20,  d: 20,  h: 9,   cost: 9000, carbon: 2600, color: 0x8b8f88 },
+  porch:        { key: 'porch',        group: 'outdoor',   label: 'Porch',             w: 12,  d: 8,   h: 9,   cost: 7000, carbon: 1900, color: 0x9a8064 },
+  planter:      { key: 'planter',      group: 'outdoor',   label: 'Raised bed',        w: 8,   d: 4,   h: 1.5, cost: 250,  carbon: 40,  color: 0x6d8a52, green: true },
+  shed:         { key: 'shed',         group: 'outdoor',   label: 'Garden shed',       w: 10,  d: 8,   h: 8,   cost: 4500, carbon: 1400, color: 0x8a7a5c },
+  firepit:      { key: 'firepit',      group: 'outdoor',   label: 'Fire pit',          w: 4,   d: 4,   h: 1.2, cost: 600,  carbon: 180, color: 0x77716a },
+  cistern:      { key: 'cistern',      group: 'outdoor',   label: 'Cistern',           w: 8,   d: 8,   h: 7,   cost: 3800, carbon: 700, color: 0x6f8898, green: true },
+  arbor:        { key: 'arbor',        group: 'outdoor',   label: 'Arbor / pergola',   w: 12,  d: 10,  h: 8,   cost: 2600, carbon: 480, color: 0x9a8064, green: true },
+  coop:         { key: 'coop',         group: 'outdoor',   label: 'Chicken coop',      w: 8,   d: 6,   h: 6,   cost: 1800, carbon: 420, color: 0x8a7a5c, green: true }
+};
+
+export function resolveFurnishing(el = {}) {
+  return FURNISHINGS[el?.kind] || null;
+}
+
+// INSIDE THE WARM HOUSE, OR NOT. Every room used to be heated space, which is
+// how a greenhouse ended up counted as 144 sf of living room you pay to keep
+// at 68°F all winter.
+//
+// A BUFFER is a room that is enclosed but not heated: a greenhouse, an entry
+// airlock, a mud porch, an unheated store. It is the oldest trick in cold-
+// climate building — you wrap the warm box in rooms that take the weather
+// first. It does three things at once: the heated floor gets smaller, the wall
+// between warm and buffer becomes the real thermal boundary (and it is a wall,
+// with a door, not an idea), and on the sunny side the buffer pre-warms the
+// air before it ever reaches the house.
+//
+// A greenhouse defaults to buffer, because a heated greenhouse is a thing
+// almost nobody means to build. Everything else defaults to heated. Either can
+// be set per room, and setting it is the only way the app can tell.
+export const ROOM_ENVELOPES = {
+  heated: { key: 'heated', label: 'Inside the warm house', note: 'Heated to living temperature. It counts toward the floor you pay to keep warm.' },
+  buffer: { key: 'buffer', label: 'Unheated buffer', note: 'Enclosed but not heated — a greenhouse, an entry airlock, a mud porch. It shelters the warm rooms behind it and costs nothing to heat.' }
+};
+export function resolveRoomEnvelope(room = {}) {
+  if (ROOM_ENVELOPES[room?.envelope]) return room.envelope;
+  return room?.type === 'plant' ? 'buffer' : 'heated';
+}
+
 // Interior partition walls — thin walls BETWEEN rooms, placed as elements
 // (category 'partition'). Distinct from the envelope: no weather duty, so
 // they price by face area of the chosen construction.
 export const PARTITION_TYPES = {
-  framed: { key: 'framed', label: 'Light framed (stud)', thicknessFt: 0.45, costPsf: 8,  carbonPsf: 3, color: 0xd9d5c8 },
-  cob:    { key: 'cob',    label: 'Cob (thermal mass)',  thicknessFt: 0.8,  costPsf: 14, carbonPsf: 6, color: 0xb9835e, green: true },
-  adobe:  { key: 'adobe',  label: 'Adobe brick',         thicknessFt: 0.7,  costPsf: 12, carbonPsf: 5, color: 0xa87f5e, green: true }
+  framed: { key: 'framed', label: 'Light framed (stud)', thicknessFt: 0.45, costPsf: 8,  carbonPsf: 3, color: 0xd9d5c8, chip: 'Stud',  note: 'Light framed — thin and cheap.' },
+  cob:    { key: 'cob',    label: 'Cob (thermal mass)',  thicknessFt: 0.8,  costPsf: 14, carbonPsf: 6, color: 0xb9835e, green: true, chip: 'Cob',   note: 'Earthen thermal mass — thick.' },
+  adobe:  { key: 'adobe',  label: 'Adobe brick',         thicknessFt: 0.7,  costPsf: 12, carbonPsf: 5, color: 0xa87f5e, green: true, chip: 'Adobe', note: 'Sun-dried earthen brick.' },
+  // Full natural WALL assemblies for interior walls that are really thermal
+  // boundaries (e.g. the wall to a greenhouse/sunspace). Thickness, R, cost, and
+  // carbon match the exterior straw-bale/etc., so an interior "exterior wall" is
+  // priced and drawn like the real thing. Straw bale comes flat (full) or on-edge
+  // (slimmer infill).
+  'straw-bale-flat':  { key: 'straw-bale-flat',  label: 'Straw bale (flat)',    thicknessFt: 1.6,  costPsf: 12, carbonPsf: 6,  color: 0xd8bf79, rValue: 33, green: true, chip: 'Straw bale · flat',    note: '≈19″, R-33 — full insulation, can be load-bearing.' },
+  'straw-bale-edge':  { key: 'straw-bale-edge',  label: 'Straw bale (on-edge)', thicknessFt: 1.15, costPsf: 11, carbonPsf: 5,  color: 0xd8bf79, rValue: 21, green: true, chip: 'Straw bale · on-edge', note: '≈14″, R-21 — slimmer infill, non-load-bearing.' },
+  'hemp-lime':        { key: 'hemp-lime',        label: 'Hemp-lime',            thicknessFt: 1.25, costPsf: 20, carbonPsf: 4,  color: 0xb9c49b, rValue: 22, green: true, chip: 'Hemp-lime',           note: '≈15″, R-22 — vapor-open, low carbon.' },
+  'light-straw-clay': { key: 'light-straw-clay', label: 'Light straw-clay',     thicknessFt: 1.0,  costPsf: 15, carbonPsf: 7,  color: 0xc6b077, rValue: 20, green: true, chip: 'Light straw-clay',     note: '≈12″, R-20 — form-packed, the slim natural option.' },
+  'rammed-earth':     { key: 'rammed-earth',     label: 'Rammed earth',         thicknessFt: 1.35, costPsf: 22, carbonPsf: 20, color: 0x9d7456, rValue: 12, green: true, chip: 'Rammed earth',        note: '≈16″, R-12 — mass, not insulation.' },
+  cordwood:           { key: 'cordwood',         label: 'Cordwood',             thicknessFt: 1.25, costPsf: 16, carbonPsf: 8,  color: 0x9b7652, rValue: 18, green: true, chip: 'Cordwood',            note: '≈15″, R-18 — log-ends in lime mortar.' }
 };
 
 // Basement: a real below-grade storey. shell.basementHeightFt > 0 turns it on;
@@ -186,6 +312,12 @@ export function resolveWallSide(spec, side, level = 1, edgeKey = null) {
     if (!seg) return base;
     const segAssemblyKey = seg.assembly && WALL_ASSEMBLIES[seg.assembly] ? seg.assembly : base.assemblyKey;
     const segAssembly = WALL_ASSEMBLIES[segAssemblyKey] || base.assembly;
+    // A sun-glazed SECTION resolves exactly like a sun-glazed side: its
+    // heightFt IS the kneewall (glass climbs from there to the roof), so
+    // every consumer of the glazed-side convention — wall builders, the
+    // glazing band, cost, solar — works per-section with no special cases.
+    // The side's own height/roof math never sees this (read-time only).
+    const segGlazed = Boolean(seg.sunGlazing);
     return {
       ...base,
       assemblyKey: segAssemblyKey,
@@ -194,6 +326,11 @@ export function resolveWallSide(spec, side, level = 1, edgeKey = null) {
       interiorFinish: seg.interiorFinish || base.interiorFinish,
       exteriorFinish: seg.exteriorFinish || base.exteriorFinish,
       cladding: CLADDING_TYPES[seg.cladding] ? seg.cladding : base.cladding,
+      ...(segGlazed ? {
+        sunGlazing: true,
+        sunGlazingTiltDeg: Number(seg.sunGlazingTiltDeg ?? base.sunGlazingTiltDeg ?? 30),
+        heightFt: Number(seg.kneewallFt ?? 2)
+      } : {}),
       segmentKey: edgeKey
     };
   };
@@ -522,6 +659,53 @@ const FACING_BY_NORMAL = { '0,-1': 'north', '0,1': 'south', '1,0': 'east', '-1,0
 // wall construction stays keyed by facing (all north-facing edges share the
 // 'north' wall settings), so resolveWallSide keeps working unchanged and the
 // cardinal names remain aliases while the footprint is a plain rectangle.
+// Insert split points at x0/x1 along the south-facing edge that carries that
+// stretch, so ONE section of the wall can get its own construction (the
+// greenhouse's slanted sun glass, bale carrying on either side). Works on the
+// plain rectangle AND any custom outline — L, T, U, or an outline already
+// split by an earlier section. Returns { poly, x0, x1 } (clamped to the edge)
+// or null when there is no straight south edge to split (round outline, or
+// the stretch misses every south edge / ends up under 3 ft).
+export function splitSouthEdgeAt(spec, x0raw, x1raw) {
+  const shell = (spec && spec.shell) || {};
+  if (shell.footprint === 'round') return null;
+  const W = Number(shell.widthFt) || 36;
+  const D = Number(shell.depthFt) || 28;
+  const snap = (v) => Math.round(v * 2) / 2;
+  const wantLo = Math.min(Number(x0raw) || 0, Number(x1raw) || 0);
+  const wantHi = Math.max(Number(x0raw) || 0, Number(x1raw) || 0);
+  if (!Array.isArray(shell.footprint)) {
+    const x0 = snap(Math.max(0, wantLo));
+    const x1 = snap(Math.min(W, wantHi));
+    if (x1 - x0 < 3) return null;
+    return {
+      poly: [[0, 0], [W, 0], [W, D], ...(x1 < W - 0.1 ? [[x1, D]] : []), ...(x0 > 0.1 ? [[x0, D]] : []), [0, D]],
+      x0, x1
+    };
+  }
+  const edges = footprintEdges(spec);
+  const verts = edges.map((e) => [e.x0, e.y0]);
+  let edge = null; let bestOv = 0;
+  for (const e of edges) {
+    if (e.facing !== 'south' || !e.horizontal) continue;
+    const lo = Math.min(e.x0, e.x1); const hi = Math.max(e.x0, e.x1);
+    const ov = Math.min(hi, wantHi) - Math.max(lo, wantLo);
+    if (ov > bestOv) { bestOv = ov; edge = e; }
+  }
+  if (!edge || bestOv < 3) return null;
+  const lo = Math.min(edge.x0, edge.x1); const hi = Math.max(edge.x0, edge.x1);
+  const x0 = snap(Math.max(lo, wantLo));
+  const x1 = snap(Math.min(hi, wantHi));
+  if (x1 - x0 < 3) return null;
+  const y = edge.y0;
+  const dir = Math.sign(edge.x1 - edge.x0) || -1;
+  const inserted = (dir < 0 ? [x1, x0] : [x0, x1])
+    .filter((x) => Math.abs(x - edge.x0) > 0.1 && Math.abs(x - edge.x1) > 0.1)
+    .map((x) => [x, y]);
+  const poly = [...verts.slice(0, edge.index + 1), ...inserted, ...verts.slice(edge.index + 1)];
+  return { poly, x0, x1 };
+}
+
 export function footprintEdges(spec) {
   const vertices = footprintPolygon(spec);
   const n = vertices.length;
@@ -955,6 +1139,50 @@ function upsertRoom(spec, room) {
 // Whoever edits a shared check should decide, per change, whether it belongs to
 // both layers. FOLLOW-UP (reimagining spec §6/§10): fully unify these by relocating
 // deriveDesign into a shared lower module so one detectIssues can serve both.
+// A storey-extent edge within SNAP_FT of the shell edge snaps flush to it.
+// 17.5 + 18 = 35.5 on a 36-foot house is a slip of the keypad, not a design —
+// and the sliver it leaves builds real geometry: a full-roofline wall fin and
+// a floating ribbon of wing roof over six inches of "ground floor". Exported
+// so the load-time heal (App.jsx healLoadedSpec) can apply the same law to
+// designs saved before this fix existed.
+// 0.6: catches the keypad-slip class (17.5 + 18 leaving a 6″ sliver) while a
+// deliberate 1 ft step — reachable from the Stack view's half-foot drags —
+// survives (review finding: 1.5 silently rewrote sub-1.5 ft placements).
+const PLATE_SNAP_FT = 0.6;
+export function snapPlatesToShell(spec) {
+  const shellW = Number(spec?.shell?.widthFt) || 0;
+  const shellD = Number(spec?.shell?.depthFt) || 0;
+  if (shellW <= 0 || shellD <= 0) return spec;
+  for (const plate of (spec.elements || []).filter((el) => el?.category === 'floor' && Number(el.level || 1) >= 2)) {
+    const x0 = Number(plate.x) || 0; const y0 = Number(plate.y) || 0;
+    const x1 = x0 + (Number(plate.w) || 0); const y1 = y0 + (Number(plate.d) || 0);
+    if (x0 > 0 && x0 < PLATE_SNAP_FT) { plate.x = 0; plate.w = Math.round(x1 * 10) / 10; }
+    if (x1 < shellW && shellW - x1 < PLATE_SNAP_FT) plate.w = Math.round((shellW - (Number(plate.x) || 0)) * 10) / 10;
+    if (y0 > 0 && y0 < PLATE_SNAP_FT) { plate.y = 0; plate.d = Math.round(y1 * 10) / 10; }
+    if (y1 < shellD && shellD - y1 < PLATE_SNAP_FT) plate.d = Math.round((shellD - (Number(plate.y) || 0)) * 10) / 10;
+  }
+  // A DECK THAT ENDS A HAIR PAST THE HOUSE. Both of Daniel's second-floor
+  // decks ran to 40 ft on a 39 ft house, so each hung a one-foot sliver past
+  // the south wall — the kind of thing that happens when the house is resized
+  // under something that was drawn to a round number, and the kind of thing
+  // nobody draws on purpose. A deck that genuinely reaches out past the
+  // building (his east balcony stands 6 ft off the east wall) is untouched:
+  // only an end sitting within a few inches of a shell edge is a sliver, and
+  // it goes flush. Silent, like every other heal here — there is nothing for
+  // him to press about a foot of decking he never asked for.
+  const DECK_SNAP_FT = 1.25;
+  for (const deck of (spec.elements || []).filter((el) => el?.category === 'deck')) {
+    const x0 = Number(deck.x) || 0; const y0 = Number(deck.y) || 0;
+    const w = Number(deck.w) || 0; const d = Number(deck.d) || 0;
+    const x1 = x0 + w; const y1 = y0 + d;
+    if (Math.abs(x0) < DECK_SNAP_FT && x0 !== 0) { deck.x = 0; deck.w = Math.round(x1 * 10) / 10; }
+    if (Math.abs(x1 - shellW) < DECK_SNAP_FT && x1 !== shellW) deck.w = Math.round((shellW - (Number(deck.x) || 0)) * 10) / 10;
+    if (Math.abs(y0) < DECK_SNAP_FT && y0 !== 0) { deck.y = 0; deck.d = Math.round(y1 * 10) / 10; }
+    if (Math.abs(y1 - shellD) < DECK_SNAP_FT && y1 !== shellD) deck.d = Math.round((shellD - (Number(deck.y) || 0)) * 10) / 10;
+  }
+  return spec;
+}
+
 function normalizeRooms(spec) {
   // Self-healing reconciliations — corrupt or legacy-era stored values that
   // disagree with the engine's own derived truth get pulled back in line:
@@ -970,6 +1198,25 @@ function normalizeRooms(spec) {
       const w = spec.walls[side];
       if (w && !w.sunGlazing && Number.isFinite(Number(w.heightFt)) && Number.isFinite(shellH) && shellH > 0
         && Math.abs(Number(w.heightFt) - shellH) > 0.05) delete w.heightFt;
+    }
+  }
+  // (1b) TWO THINGS WITH THE SAME NAME. Daniel has two decks both called
+  // "2nd floor deck"; he has had two stairs both called "Stairs", and spent a
+  // session turning one while watching the other, certain the controls were
+  // dead. Ids are unique and names never were, so every card, every list and
+  // every message became a coin toss.
+  // Repaired silently and in place, the way a legacy value gets migrated: the
+  // first keeps the name, the rest get numbered. Nothing to notice, nothing to
+  // press, no list of messes for the user to clean up after the app.
+  {
+    const seenNames = new Map();
+    for (const obj of [...(spec.rooms || []), ...(spec.elements || [])]) {
+      const raw = String(obj.name || '').trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      const n = (seenNames.get(key) || 0) + 1;
+      seenNames.set(key, n);
+      if (n > 1) obj.name = `${raw} ${n}`;
     }
   }
   // (2) A storey extent plate always sits at the engine's floor elevation —
@@ -1029,6 +1276,13 @@ function normalizeRooms(spec) {
       plate.w = Math.round(Math.max(1, nw) * 10) / 10; plate.d = Math.round(Math.max(1, nd) * 10) / 10;
     }
   }
+  // A storey plate that stops a HAIR short of the shell edge is a mistyped
+  // number, not a step: "from west 17.5, W 18" on a 36' house leaves a
+  // 6-inch sliver of "ground floor" along the east wall — whose wall then
+  // rises to the full roofline as a two-storey fin wearing a floating
+  // ribbon of roof. No real step is thinner than SNAP_FT (nothing can stand,
+  // walk, or drain on it), so an edge that close to the shell snaps flush.
+  snapPlatesToShell(spec);
 
   const roomMargin = Math.max(16, padExtension(spec.shell));
   spec.rooms = spec.rooms.map((room) => {
@@ -1066,8 +1320,9 @@ function normalizeRooms(spec) {
   }
   if (Array.isArray(spec.elements)) {
     spec.elements = spec.elements.map((element) => {
-      // Partitions are legitimately thin — don't fatten a 0.45' stud wall to 1'.
-      const minDim = element.category === 'partition' ? 0.3 : 1;
+      // Partitions are legitimately thin — don't fatten a 0.45' stud wall to
+      // 1'. Hand-placed posts and beams are timber-thin the same way.
+      const minDim = element.category === 'partition' || element.category === 'post' || element.category === 'beam' ? 0.3 : 1;
       const resized = {
         ...element,
         w: clamp(Number(element.w) || 1, minDim, spec.shell.widthFt + 48),
@@ -1231,12 +1486,17 @@ export function operationDescription(operation, spec) {
   if (op.type === 'add_room') return `Added ${op.name || 'room'} at ${op.w}' x ${op.d}'.`;
   if (op.type === 'add_element' || op.type === 'add_site_element' || op.type === 'add_loft' || op.type === 'add_tower' || op.type === 'add_floor') return `Added ${op.name || 'building element'} as ${op.category || 'custom BIM object'}.`;
   if (op.type === 'add_level' || op.type === 'edit_level') return `Added/edited ${op.name || `Level ${op.level || 2}`} in the BIM model.`;
-  if (op.type === 'set_roof' || op.type === 'set_roof_profile' || op.type === 'add_roof_plane') return `Set roof to ${op.roofType || spec.shell.roofType || 'roof'}${op.southWallHeightFt && op.northWallHeightFt ? ` with S ${op.southWallHeightFt}' / N ${op.northWallHeightFt}' wall heights` : op.eastWallHeightFt && op.westWallHeightFt ? ` with E ${op.eastWallHeightFt}' / W ${op.westWallHeightFt}' wall heights` : ''}.`;
+  if (op.type === 'add_roof_plane') return `Added a ${op.roofType || 'shed'} roof plane on posts${op.targetId ? ` over ${op.targetId}` : ''}.`;
+  if (op.type === 'set_roof' || op.type === 'set_roof_profile') return `Set roof to ${op.roofType || spec.shell.roofType || 'roof'}${op.southWallHeightFt && op.northWallHeightFt ? ` with S ${op.southWallHeightFt}' / N ${op.northWallHeightFt}' wall heights` : op.eastWallHeightFt && op.westWallHeightFt ? ` with E ${op.eastWallHeightFt}' / W ${op.westWallHeightFt}' wall heights` : ''}.`;
   if (op.type === 'set_assembly' || op.type === 'set_wall_assembly' || op.type === 'set_wall_segment_assembly') return `Updated ${op.field || op.wall || 'assembly'} to ${op.value}.`;
   if (op.type === 'set_wall_height') return `Set ${op.wall || 'wall'} height to ${op.h || op.value}'.`;
   if (op.type === 'set_wall_side') return `Set ${op.wall || 'wall'} wall ${op.field || 'property'} to ${op.value}.`;
   if (op.type === 'set_frame') return `Set ${Number(op.level) > 1 ? `storey ${op.level} ` : ''}frame${op.value ? ` to ${op.value}` : ''}.`;
-  if (op.type === 'set_reclaimed') return `Marked ${op.system || 'materials'} as ${op.value ? 'reclaimed / salvaged' : 'new'}.`;
+  if (op.type === 'set_stair') return `Stair ${op.field || 'shape'} → ${op.value}.`;
+  if (op.type === 'set_sourcing' || op.type === 'set_reclaimed') {
+    const source = MATERIAL_SOURCE_KEYS.includes(String(op.value)) ? String(op.value) : (op.value ? 'salvaged' : 'new');
+    return `${op.system || 'Materials'}: ${MATERIAL_SOURCE_LABELS[source]}.`;
+  }
   if (op.type === 'set_flooring') return `Set flooring${op.value ? ` to ${op.value}` : ''}.`;
   if (op.type === 'set_shell' || op.type === 'add_pad_extension') return `Updated shell ${op.field || 'padExtensionFt'} to ${op.value || op.w}.`;
   if (op.type === 'set_footprint') return 'Set the building footprint outline.';
@@ -1270,6 +1530,10 @@ export const OPENING_TYPES = {
   bay: { label: 'Bay window / window seat', h: 4.5, sill: 1.5, glazed: true, defaultW: 6, bay: true },
   raked: { label: 'Raked gable window', h: 4, sill: 3, glazed: true, defaultW: 5, raked: true },
   tilted: { label: 'Tilted glazing pane', h: 4.5, sill: 1.5, glazed: true, defaultW: 4, tilted: true },
+  // The greenhouse is an OPENING (Daniel's directive): a wide slanted glass
+  // pane on a 2 ft kneewall, moved / resized / removed like any window —
+  // rides the tilted-pane render path, glass area feeds the normal cost.
+  greenhouse: { label: 'Greenhouse — slanted glass', h: 6, sill: 2, glazed: true, defaultW: 10, tilted: true, greenhouse: true },
   skylight: { label: 'Skylight / roof window', h: 0, sill: 0, glazed: true, defaultW: 2.5, roof: true }
 };
 
@@ -1292,7 +1556,8 @@ export const UTILITY_DEFAULTS = {
   diyRoof: false,
   diyHeat: false,
   diyFoundation: false,
-  diyFrame: false
+  diyFrame: false,
+  wholeHouseFan: false
 };
 
 // Topography: the site is not flat. slopeFt = total fall of grade across the
@@ -1352,7 +1617,8 @@ export const FRAME_DEFAULTS = { type: 'load-bearing', storeyTypes: {} };
 export const FLOORING_TYPES = {
   earthen: { label: 'Earthen / lime slab', costPsf: 4, carbonPsf: 2, note: 'Poured earth or lime; high thermal mass, very low carbon, DIY-friendly.', green: true },
   concrete: { label: 'Polished concrete', costPsf: 9, carbonPsf: 14, note: 'Durable mass floor, but the most embodied carbon of the floors.' },
-  wood: { label: 'Wood boards', costPsf: 10, carbonPsf: 4, note: 'Warm underfoot; reclaimed boards cut cost and carbon sharply.' },
+  pine: { label: 'Pine / softwood plank', costPsf: 6, carbonPsf: 3, green: true, note: 'Wide softwood planks — the cheap warm floor, and the one worth milling locally. It dents and it patinas; that is the deal.' },
+  wood: { label: 'Hardwood boards', costPsf: 10, carbonPsf: 4, note: 'Oak, maple, ash — harder-wearing than pine and about twice the price. Salvaged or milled boards cut that sharply.' },
   cork: { label: 'Cork', costPsf: 8, carbonPsf: 2, note: 'Soft, warm, renewable; good over radiant.', green: true },
   tile: { label: 'Tile / stone', costPsf: 12, carbonPsf: 6, note: 'Hard-wearing mass floor, good in wet cores and sun-tempered rooms.' },
   bamboo: { label: 'Bamboo', costPsf: 7, carbonPsf: 3, note: 'Fast-renewable and hard; a warm low-carbon choice.', green: true }
@@ -1398,8 +1664,54 @@ export function resolveInsulation(key, fallback = 'cellulose') {
   return INSULATION_TYPES[key] ? key : fallback;
 }
 
-export const RECLAIMED_SYSTEMS = ['frame', 'walls', 'flooring', 'windows', 'roof'];
-export const RECLAIMED_DEFAULTS = { frame: false, walls: false, flooring: false, windows: false, roof: false };
+// Stair vocabulary the op layer validates against. Mirrors STAIR_SHAPES /
+// STAIR_FACINGS / STAIR_DEFAULTS in src/engine.js, which owns the geometry —
+// this side only decides what is a legal value.
+export const STAIR_SHAPE_KEYS = ['straight', 'l', 'u'];
+export const STAIR_FACING_KEYS = ['north', 'south', 'east', 'west'];
+export const STAIR_FIELDS = ['shape', 'facing', 'turn', 'split', 'widthFt', 'treadIn'];
+export const STAIR_FIELD_DEFAULTS = { shape: 'straight', facing: 'north', turn: 'right', split: 0.5, widthFt: 3.5, treadIn: 10.5 };
+export function isStairElement(el) {
+  return el?.category === 'stair' || (/stair/i.test(el?.name || '') && !/ladder/i.test(el?.name || ''));
+}
+function clampStair(value, min, max, fallback) {
+  return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+}
+
+// Where each material system's stock comes from. Mirrors MATERIAL_SOURCES /
+// SOURCE_FACTORS in src/engine.js (the same backend-vs-client duplication as
+// roofProfile and WALL_ASSEMBLIES) — engine.js prices it, this validates it.
+export const SOURCING_SYSTEMS = ['frame', 'walls', 'flooring', 'windows', 'roof', 'stairs',
+  // Bought-used / shop-built categories for the furnishings catalog — salvaged
+  // appliances, slab-wood counters and shelving, second-hand furniture.
+  'fixture', 'builtin', 'appliance', 'furniture', 'outdoor'];
+export const MATERIAL_SOURCE_KEYS = ['new', 'salvaged', 'milled'];
+export const MATERIAL_SOURCE_LABELS = { new: 'bought new', salvaged: 'salvaged / reclaimed', milled: 'locally milled / your own wood' };
+// Milling only applies where the line is actually wood — you can salvage a
+// window or a fridge, you can't mill one.
+export const MILLABLE_SYSTEMS = ['frame', 'walls', 'flooring', 'roof', 'stairs', 'builtin', 'furniture', 'outdoor'];
+export const SOURCING_DEFAULTS = Object.fromEntries(SOURCING_SYSTEMS.map((system) => [system, 'new']));
+
+// The sources actually offered for a system — drives every picker, so no
+// screen can offer "milled windows".
+export function sourcesFor(system) {
+  return MATERIAL_SOURCE_KEYS.filter((source) => sourceAllowed(system, source));
+}
+export function sourceAllowed(system, source) {
+  if (!SOURCING_SYSTEMS.includes(system) || !MATERIAL_SOURCE_KEYS.includes(source)) return false;
+  return source !== 'milled' || MILLABLE_SYSTEMS.includes(system);
+}
+
+// Pre-sourcing specs stored booleans in spec.reclaimed (true = salvaged). Fold
+// them into spec.sourcing silently — nothing for anyone to press or clean up.
+export function migrateSourcing(spec) {
+  const out = { ...SOURCING_DEFAULTS };
+  const legacy = spec?.reclaimed || {};
+  for (const system of SOURCING_SYSTEMS) if (legacy[system] === true) out[system] = 'salvaged';
+  const current = spec?.sourcing || {};
+  for (const system of SOURCING_SYSTEMS) if (sourceAllowed(system, current[system])) out[system] = current[system];
+  return out;
+}
 
 // The frame in effect on a given storey — a per-storey override falls back to
 // the base frame type. level 1 (or unset) is the ground/base.
@@ -1417,8 +1729,8 @@ export function resolveFrameType(spec, level = 1) {
 // grew a set_shell op the engine then threw away.
 const SHELL_FIELD_NAMES = new Set(['widthFt', 'depthFt', 'wallHeightFt', 'padExtensionFt', 'storeys',
   'basementHeightFt', 'basementHeated', 'upperStoreyHeightFt', 'overhangFt', 'roofType',
-  'designApproach', 'projectName', 'sitePad', 'gutters', 'discharge',
-  'wallColorHex', 'roofColorHex', 'floorColorHex']);
+  'designApproach', 'projectName', 'sitePad', 'gutters', 'discharge', 'roofCovering',
+  'wallColorHex', 'roofColorHex', 'floorColorHex', 'eaveStyle']);
 
 export const parseWxD = (value) => {
   const m = /^\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*$/i.exec(String(value || ''));
@@ -1477,6 +1789,39 @@ export function storeyElevationFt(shell, lvl) {
 // know the real roof pass `roofUnderAt(px,pz)`; spec-level callers get a
 // deliberately GENEROUS roof bound so checks never false-flag a design the
 // renderer covers with roof.
+// WHERE A WALL ACTUALLY STANDS, for a given side and storey.
+//
+// The ground walls are the footprint. An upper storey's walls are its OWN
+// outline, which is not the same thing the moment that storey is set back —
+// and setting one back is how you get a single-storey stretch with a roof deck
+// over it, which is exactly what Daniel's greenhouse and entry are.
+//
+// This was the whole "what happened to the S face" bug. His house was 28x32
+// and the second storey was 28x32, so the two edges coincided and everything
+// looked right. He then deepened the house to 39 ft to make room for the
+// greenhouse and the entry; the upper storey stayed at 32. Its walls moved
+// with it — the scene has always drawn those from the plate — but the windows
+// on them were still pinned to the footprint, 7 ft further south, floating
+// where no second storey exists. One number, two owners.
+export function openingWallPlane(spec, side, level) {
+  const shell = spec?.shell || {};
+  const width = Number(shell.widthFt) || 36;
+  const depth = Number(shell.depthFt) || 28;
+  const outer = { south: depth, north: 0, east: width, west: 0 };
+  const lv = Number(level) || 1;
+  if (lv <= 1 || !WALL_SIDES.includes(side)) return outer[side] ?? 0;
+  const plate = (spec?.elements || []).find((el) => el.category === 'floor' && Number(el.level || 1) === lv);
+  if (!plate) return outer[side] ?? 0; // full-footprint storey: the outer wall IS its wall
+  const px0 = Number(plate.x) || 0;
+  const pz0 = Number(plate.y) || 0;
+  const px1 = px0 + Math.max(1, Number(plate.w) || width);
+  const pz1 = pz0 + Math.max(1, Number(plate.d) || depth);
+  if (side === 'south') return Math.min(pz1, depth);
+  if (side === 'north') return Math.max(pz0, 0);
+  if (side === 'east') return Math.min(px1, width);
+  return Math.max(px0, 0); // west
+}
+
 export function openingVerticalBand(spec, opening, { roofUnderAt = null } = {}) {
   const shell = spec?.shell || {};
   const profile = OPENING_TYPES[opening?.type] || OPENING_TYPES.window;
@@ -1497,14 +1842,30 @@ export function openingVerticalBand(spec, opening, { roofUnderAt = null } = {}) 
     + Math.max(width, depth) * Math.max(0.02, Number(shell.roofPitch) || 0.32) + 4;
   const roofAbs = (() => {
     if (typeof roofUnderAt !== 'function') return conservativeRoof;
-    const pz = side === 'south' ? depth : side === 'north' ? 0 : (a0 + w / 2);
-    const px = side === 'east' ? width : side === 'west' ? 0 : (a0 + w / 2);
+    // Sample the roof over the wall this opening is REALLY on. Sampling the
+    // footprint edge for a set-back storey asked "what is above the greenhouse
+    // roof?" — open sky — and dropped a perfectly good second-floor window to
+    // the ground floor for it.
+    const lvHere = Math.min(Math.max(1, Math.round(Number(opening.level || 1))), storeys);
+    const plane = openingWallPlane(spec, side, lvHere);
+    const pz = side === 'south' || side === 'north' ? plane : (a0 + w / 2);
+    const px = side === 'east' || side === 'west' ? plane : (a0 + w / 2);
     const e0 = horiz ? roofUnderAt(a0, pz) : roofUnderAt(px, a0);
     const e1 = horiz ? roofUnderAt(a0 + w, pz) : roofUnderAt(px, a0 + w);
     const r = Math.min(Number(e0), Number(e1));
     return Number.isFinite(r) ? r : conservativeRoof;
   })();
   // which storey's wall actually spans this stretch? (centre-point test)
+  //
+  // TWO questions, and for a long time this asked only the first. ALONG the
+  // wall: does the storey's plate cover the stretch where this opening sits?
+  // And — the one that was missing — does that plate REACH THIS WALL AT ALL?
+  // A second storey set back from the south wall covers the whole width and
+  // still has no south wall to put a window in; testing only the along-axis
+  // said "yes, it spans" and hung five windows on a wall that is not there.
+  // The 3D caught it by accident (its roof test found open sky above them) and
+  // the elevation view, which passes no roof, drew them two storeys up. Same
+  // spec, two answers — exactly what the shared band law exists to prevent.
   const spansHere = (lv) => {
     if (lv <= 1) return true;
     const el = (spec.elements || []).find((e) => e.category === 'floor' && Number(e.level || 1) === lv);
@@ -1569,7 +1930,7 @@ export function shellShorthandDims(operation) {
 
 // Element kinds that live ON/IN the house — an unset position means "at the
 // origin", never "park it in the yard beside the shell".
-const INTERIOR_ELEMENT_CATS = new Set(['floor', 'partition', 'foundation']);
+const INTERIOR_ELEMENT_CATS = new Set(['floor', 'partition', 'foundation', 'furnishing']);
 
 export function applyBimOperations(currentSpec, plan) {
   const next = structuredClone(currentSpec);
@@ -1689,6 +2050,7 @@ export function applyBimOperations(currentSpec, plan) {
         delete next.shell.overhangs;
       }
       else if (field === 'roofType') next.shell.roofType = String(operation.value || next.shell.roofType || 'gable');
+      else if (field === 'eaveStyle') next.shell.eaveStyle = operation.value === 'soffit' ? 'soffit' : 'open';
       else if (field === 'designApproach') next.shell.designApproach = operation.value === 'standard' ? 'standard' : 'natural';
       else if (field === 'projectName') next.projectName = String(operation.value || next.projectName || 'Untitled Natural Building Study');
       else if (field === 'sitePad') {
@@ -1716,7 +2078,60 @@ export function applyBimOperations(currentSpec, plan) {
       continue;
     }
 
-    if (operation.type === 'set_roof' || operation.type === 'set_roof_profile' || operation.type === 'add_roof_plane') {
+    // A ROOF PLANE IS A ROOF PLANE. This op used to fall straight through to
+    // the handler below — it reshaped the WHOLE HOUSE's roof, reported success,
+    // and added no plane anywhere. An op that lies about what it did is worse
+    // than one that refuses.
+    // What it means now is the thing the scene already knows how to draw: a
+    // sloped panel on four posts over a patch of the plan — a lean-to, a porch
+    // roof, a cover over the woodpile. Name something that already exists and
+    // the plane goes over THAT; name nothing and it drops as its own covered
+    // area you can drag and size like any other object.
+    if (operation.type === 'add_roof_plane') {
+      const kind = String(operation.roofType || '').toLowerCase() === 'gable' ? 'gable' : 'shed';
+      const wanted = String(operation.targetId || operation.target || operation.over || '').trim().toLowerCase();
+      const host = wanted
+        ? next.elements.find((el) => String(el.id || '').toLowerCase() === wanted || String(el.name || '').toLowerCase() === wanted)
+        : null;
+      if (wanted && !host) {
+        rejectedOperations.push(operation);
+        warnings.push(`I couldn't find "${operation.targetId || operation.target || operation.over}" to roof over — nothing was added.`);
+        continue;
+      }
+      if (host) {
+        // A deck says it in the deck's own language, so its card and its price
+        // agree with the roof it just grew.
+        if (host.category === 'deck') host.deckRoof = kind;
+        else host.roofType = kind;
+        actions.push(`Roofed ${host.name} with a ${kind} plane on posts.`);
+        continue;
+      }
+      const planeName = String(operation.name || '').replace(/[^a-zA-Z0-9]/g, '').length >= 2 ? operation.name : 'Roof plane';
+      const id = uniqueObjectId(next, operation.id || planeName);
+      const plane = {
+        id,
+        name: planeName,
+        category: 'canopy',
+        sourceCategory: 'AI Planner',
+        note: 'A roof plane on posts — open on every side.',
+        roofType: kind,
+        x: Number(operation.x || 0) || Number(next.shell.widthFt || 24) + 3,
+        y: Number(operation.y || 0) || 3,
+        z: Number(operation.z || 0),
+        w: Math.max(2, Number(operation.w || 0) || 12),
+        d: Math.max(2, Number(operation.d || 0) || 10),
+        h: Math.max(0.2, Number(operation.h || 0) || 0.3),
+        level: Number(operation.level || 1),
+        construction: '',
+        kind: '',
+        type: 'canopy'
+      };
+      next.elements.push({ ...plane, ...clampObjectPosition(next, plane, plane.x, plane.y) });
+      actions.push(`Added ${planeName} — a ${kind} roof plane, ${Math.round(plane.w)}′ × ${Math.round(plane.d)}′ on posts.`);
+      continue;
+    }
+
+    if (operation.type === 'set_roof' || operation.type === 'set_roof_profile') {
       if (operation.roofType) next.shell.roofType = operation.roofType;
       // A shed falls along ONE axis: naming a pair picks that axis and resets
       // the other pair to the base height, so the profile is never ambiguous.
@@ -1789,9 +2204,13 @@ export function applyBimOperations(currentSpec, plan) {
       if (segMatch) {
         const segKey = segMatch[1];
         const field = operation.field;
-        const constructionFields = ['assembly', 'thicknessFt', 'cladding', 'interiorFinish', 'exteriorFinish'];
+        // Construction fields PLUS sun glazing — a SECTION of a wall can be
+        // the slanted-glass sun face (kneewall below, tilted glass to the
+        // roof) while the rest of the side stays bale (Daniel: "make part of
+        // this S face slanted glass"). Height/omit stay side-level.
+        const constructionFields = ['assembly', 'thicknessFt', 'cladding', 'interiorFinish', 'exteriorFinish', 'sunGlazing', 'sunGlazingTiltDeg', 'kneewallFt'];
         if (!constructionFields.includes(field)) {
-          warnings.push(`Wall sections take construction fields only (assembly, thickness, finishes) — ${field} applies to the whole side. Target the side (north/south/east/west) instead.`);
+          warnings.push(`Wall sections take construction and glazing fields only — ${field} applies to the whole side. Target the side (north/south/east/west) instead.`);
           rejectedOperations.push(operation);
           continue;
         }
@@ -1802,11 +2221,33 @@ export function applyBimOperations(currentSpec, plan) {
           actions.push(`Wall section ${segKey} matches its side again.`);
           continue;
         }
+        if (field === 'sunGlazing') {
+          const on = operation.value === true || String(operation.value) === 'true' || operation.value === 1 || operation.value === '1';
+          if (!on) {
+            // Un-glazing a section removes its glazing fields — it stands
+            // back up as plain wall in its own (or its side's) construction.
+            const seg = (next.wallSegments || {})[segKey];
+            if (seg) {
+              delete seg.sunGlazing; delete seg.sunGlazingTiltDeg; delete seg.kneewallFt;
+              if (Object.keys(seg).length === 0) delete next.wallSegments[segKey];
+              if (next.wallSegments && Object.keys(next.wallSegments).length === 0) delete next.wallSegments;
+            }
+            actions.push(`Wall section ${segKey} is plain wall again.`);
+            continue;
+          }
+          next.wallSegments ||= {};
+          next.wallSegments[segKey] ||= {};
+          next.wallSegments[segKey].sunGlazing = true;
+          actions.push(`Wall section ${segKey} is now a slanted-glass sun face.`);
+          continue;
+        }
         next.wallSegments ||= {};
         next.wallSegments[segKey] ||= {};
         if (field === 'assembly') next.wallSegments[segKey].assembly = WALL_ASSEMBLIES[operation.value] ? operation.value : 'framed';
         else if (field === 'thicknessFt') next.wallSegments[segKey].thicknessFt = clamp(Number(operation.value), 0.2, 3.5);
         else if (field === 'cladding') next.wallSegments[segKey].cladding = CLADDING_TYPES[operation.value] ? operation.value : 'render';
+        else if (field === 'sunGlazingTiltDeg') next.wallSegments[segKey].sunGlazingTiltDeg = clamp(Number(operation.value) || 0, 0, 45);
+        else if (field === 'kneewallFt') next.wallSegments[segKey].kneewallFt = clamp(Number(operation.value) || 2, 0.5, 8);
         else next.wallSegments[segKey][field] = String(operation.value || '');
         actions.push(`Set wall section ${segKey} ${field} to ${operation.value}.`);
         continue;
@@ -1855,6 +2296,13 @@ export function applyBimOperations(currentSpec, plan) {
         const on = operation.value === true || String(operation.value) === 'true' || operation.value === 1 || operation.value === '1';
         const hadGlazing = Boolean(next.walls[side].sunGlazing);
         next.walls[side].sunGlazing = on;
+        // Turning glazing ON brings its kneewall: a glazed side's heightFt IS
+        // the kneewall, so a full-height wall (or none set) would leave only a
+        // sliver of glass at the top — the glass must start low.
+        if (on && !hadGlazing) {
+          const cur = Number(next.walls[side].heightFt);
+          if (!Number.isFinite(cur) || cur > 4) next.walls[side].heightFt = 2;
+        }
         // Turning glazing OFF removes the kneewall with it — the low wall
         // only existed to carry the glass. The side stands back up to the
         // shell's roofline; the shell itself never moved (kneewalls don't
@@ -2174,7 +2622,11 @@ export function applyBimOperations(currentSpec, plan) {
       else if (field === 'roofRValue') next.utilities.roofRValue = clamp(Number(operation.value) || 38, 10, 100);
       else if (field === 'panelCount') next.utilities.panelCount = clamp(Math.round(Number(operation.value) || 0), 0, 200);
       else if (field === 'batteryOverrideKwh') next.utilities.batteryOverrideKwh = clamp(Number(operation.value) || 0, 0, 500);
-      else if (field === 'diyWalls' || field === 'diyRoof' || field === 'diyHeat' || field === 'diyFoundation' || field === 'diyFrame') {
+      else if (field === 'diyWalls' || field === 'diyRoof' || field === 'diyHeat' || field === 'diyFoundation' || field === 'diyFrame'
+        // A whole-house fan: the one piece of cooling KIT this house might
+        // own. Everything else about staying cool is shape, shade and when
+        // you open the windows.
+        || field === 'wholeHouseFan') {
         next.utilities[field] = value === 'true' || operation.value === true || value === '1';
       } else if (allowed[field]) {
         next.utilities[field] = allowed[field].includes(value) ? value : next.utilities[field];
@@ -2194,6 +2646,24 @@ export function applyBimOperations(currentSpec, plan) {
         actions.push(`Set frame bay spacing to ${next.frame.baySpacingFt}'.`);
         continue;
       }
+      // Hand-removal of a DERIVED member: the value is the member's stable
+      // geometry key (the scene stamps one on every skeleton piece). Undo
+      // works through the normal snapshot stack; "restoreMembers" clears the
+      // whole list — the one-tap "bring back everything I removed".
+      if (operation.field === 'removeMember') {
+        const key = String(operation.value || '');
+        if (key.startsWith('fm:')) {
+          next.frame.removedMembers = [...new Set([...(next.frame.removedMembers || []), key])];
+          actions.push('Removed a frame member.');
+        }
+        continue;
+      }
+      if (operation.field === 'restoreMembers') {
+        const n = (next.frame.removedMembers || []).length;
+        next.frame.removedMembers = [];
+        actions.push(`Brought back ${n} removed frame member${n === 1 ? '' : 's'}.`);
+        continue;
+      }
       const value = FRAME_TYPES[operation.value] ? operation.value : 'load-bearing';
       const level = Number(operation.level || 0);
       if (level > 1) next.frame.storeyTypes[String(level)] = value;
@@ -2202,12 +2672,45 @@ export function applyBimOperations(currentSpec, plan) {
       continue;
     }
 
-    if (operation.type === 'set_reclaimed') {
-      next.reclaimed ||= { ...RECLAIMED_DEFAULTS };
-      const system = RECLAIMED_SYSTEMS.includes(operation.system) ? operation.system : null;
+    // A stair's SHAPE, not its box. The client hands back the resolved bounding
+    // box with the op, so the stored w/d always matches the footprint the plan
+    // draws — you can never have a 3 ft box holding an L-shaped stair.
+    if (operation.type === 'set_stair') {
+      const target = (next.elements || []).find((element) => element.id === operation.id)
+        || (next.elements || []).find((element) => isStairElement(element));
+      const field = STAIR_FIELDS.includes(operation.field) ? operation.field : null;
+      if (target && field) {
+        const stair = { ...STAIR_FIELD_DEFAULTS, ...(target.stair || {}) };
+        const value = operation.value;
+        if (field === 'shape' && STAIR_SHAPE_KEYS.includes(value)) stair.shape = value;
+        else if (field === 'facing' && STAIR_FACING_KEYS.includes(value)) stair.facing = value;
+        else if (field === 'turn') stair.turn = value === 'left' ? 'left' : 'right';
+        else if (field === 'split') stair.split = clampStair(Number(value), 0.15, 0.85, stair.split);
+        else if (field === 'widthFt') stair.widthFt = clampStair(Number(value), 2.5, 8, stair.widthFt);
+        else if (field === 'treadIn') stair.treadIn = clampStair(Number(value), 9, 14, stair.treadIn);
+        target.stair = stair;
+        target.category = 'stair';
+        if (Number(operation.w) > 0) target.w = Number(operation.w);
+        if (Number(operation.d) > 0) target.d = Number(operation.d);
+        actions.push(`${target.name || 'Stair'}: ${field} set to ${stair[field]}.`);
+      }
+      continue;
+    }
+
+    // Where a system's material comes from. set_reclaimed is the older boolean
+    // spelling of the same thing (true = salvaged) and still works; both write
+    // spec.sourcing, and the legacy spec.reclaimed map is folded in and dropped.
+    if (operation.type === 'set_sourcing' || operation.type === 'set_reclaimed') {
+      next.sourcing = migrateSourcing(next);
+      delete next.reclaimed;
+      const system = SOURCING_SYSTEMS.includes(operation.system) ? operation.system : null;
       if (system) {
-        next.reclaimed[system] = operation.value === true || operation.value === 'true' || operation.value === 1 || operation.value === '1';
-        actions.push(`Marked ${system} materials as ${next.reclaimed[system] ? 'reclaimed / salvaged' : 'new'}.`);
+        const asked = String(operation.value ?? '');
+        const source = MATERIAL_SOURCE_KEYS.includes(asked) ? asked
+          : ((operation.value === true || asked === 'true' || operation.value === 1 || asked === '1') ? 'salvaged' : 'new');
+        // Only offer what the system can actually be: no milled windows.
+        next.sourcing[system] = sourceAllowed(system, source) ? source : 'new';
+        actions.push(`${system} materials: ${MATERIAL_SOURCE_LABELS[next.sourcing[system]]}.`);
       }
       continue;
     }
@@ -2239,46 +2742,44 @@ export function applyBimOperations(currentSpec, plan) {
         const level = clamp(Math.round(Number(operation.level || 1)), 1, Math.max(1, Math.ceil(Number(next.shell.storeys || 1))));
         const maxAlong = wall === 'north' || wall === 'south' ? next.shell.widthFt : next.shell.depthFt;
         const explicitPos = Number(operation.positionFt) > 0;
-        let along = clamp(Number(operation.positionFt || 0), 0, Math.max(0, maxAlong - widthFt));
-        const overlapsAt = (start) => next.openings.some((existing) => {
-          if (existing.wall !== wall || Number(existing.level || 1) !== level) return false;
-          const e0 = Number(existing.x ?? existing.y ?? 0);
-          const e1 = e0 + (Number(existing.widthFt) || 3);
-          return start < e1 - 0.05 && start + widthFt > e0 + 0.05;
-        });
-        // No stated position (planners get lazy — everything lands at 0):
-        // slide along the wall to the first free stretch so distinct openings
-        // stay distinct instead of piling onto the corner.
-        if (!explicitPos && overlapsAt(along)) {
-          for (let candidate = 1; candidate <= maxAlong - widthFt; candidate += 1) {
-            if (!overlapsAt(candidate)) { along = candidate; break; }
-          }
-        }
+        const posKey = wall === 'north' || wall === 'south' ? 'x' : 'y';
         // Optional extras: a tilt angle (tilted glazing), a shade eyebrow depth
         // (window overhang), and an explicit dormer style (gable / shed). Only
-        // stored when meaningfully set, so plain windows stay clean.
+        // stored when meaningfully set, so plain openings stay clean.
         const extras = {};
         if (OPENING_TYPES[openingType].tilted || Number(operation.tiltDeg) > 0) extras.tiltDeg = clamp(Number(operation.tiltDeg || 25), 5, 60);
         if (Number(operation.shadeFt) > 0) extras.shadeFt = clamp(Number(operation.shadeFt), 0, 6);
         if (operation.dormerStyle === 'gable' || operation.dormerStyle === 'shed') extras.dormerStyle = operation.dormerStyle;
-        const incoming = wall === 'north' || wall === 'south'
-          ? { type: openingType, wall, x: along, widthFt, label, level, ...extras }
-          : { type: openingType, wall, y: along, widthFt, label, level, ...extras };
-        // Openings have no ids, so a re-trace lands the same window again a
-        // foot to the left — forever. An EXPLICITLY placed opening that
-        // overlaps an existing one REPLACES it instead of stacking (two doors
-        // can't share the same stretch of wall in the real world either).
-        const a0 = along, a1 = along + widthFt;
-        const clashIndex = next.openings.findIndex((existing) => {
-          if (existing.wall !== wall || Number(existing.level || 1) !== level) return false;
-          const e0 = Number(existing.x ?? existing.y ?? 0);
-          const e1 = e0 + (Number(existing.widthFt) || 3);
-          return a0 < e1 - 0.05 && a1 > e0 + 0.05;
-        });
-        if (clashIndex >= 0) {
-          next.openings[clashIndex] = { ...incoming, label: operation.name || next.openings[clashIndex].label };
+        const mkOpening = (start, w) => ({ type: openingType, wall, [posKey]: Math.max(0, Math.round(start * 2) / 2), widthFt: Math.max(0.5, Math.round(w * 2) / 2), label, level, ...extras });
+        if (explicitPos) {
+          // A DELIBERATE drop at a spot (a drag, or a traced position): place it
+          // there. If it lands on an existing opening, replace it — two openings
+          // can't share the same stretch of wall.
+          const along = clamp(Number(operation.positionFt), 0, Math.max(0, maxAlong - widthFt));
+          const clashIndex = next.openings.findIndex((existing) => {
+            if (existing.wall !== wall || Number(existing.level || 1) !== level) return false;
+            const e0 = Number(existing.x ?? existing.y ?? 0); const e1 = e0 + (Number(existing.widthFt) || 3);
+            return along < e1 - 0.05 && along + widthFt > e0 + 0.05;
+          });
+          const incoming = mkOpening(along, widthFt);
+          if (clashIndex >= 0) next.openings[clashIndex] = { ...incoming, label: operation.name || next.openings[clashIndex].label };
+          else next.openings.push(incoming);
         } else {
-          next.openings.push(incoming);
+          // Auto-add (the "+ window / + door" buttons): just ADD it, always, at
+          // full width. Drop it into the largest free gap when one fits; otherwise
+          // fan it across the wall so it doesn't land exactly on top of another.
+          // Overlaps are ALLOWED — arrange freely, tidy up in the model. Never
+          // refuse, never re-space existing openings, never replace one.
+          const onWall = next.openings.filter((o) => o.wall === wall && Number(o.level || 1) === level);
+          const spans = onWall.map((o) => { const s = Number(o.x ?? o.y ?? 0); return [s, s + (Number(o.widthFt) || 3)]; }).sort((a, b) => a[0] - b[0]);
+          const gaps = []; let cursor = 0;
+          for (const [s, e] of spans) { if (s - cursor > 0.01) gaps.push([cursor, s - cursor]); cursor = Math.max(cursor, e); }
+          if (maxAlong - cursor > 0.01) gaps.push([cursor, maxAlong - cursor]);
+          const best = gaps.reduce((m, g) => (g[1] > m[1] ? g : m), [0, 0]);
+          const start = best[1] >= widthFt + 0.25
+            ? best[0] + 0.25
+            : (onWall.length * (widthFt * 0.6)) % Math.max(1, maxAlong - widthFt + 0.5);
+          next.openings.push(mkOpening(start, widthFt));
         }
       }
       actions.push(operationDescription(operation, next));
@@ -2440,6 +2941,9 @@ export function applyBimOperations(currentSpec, plan) {
         // width (0 = solid wall), positionFt = distance along the wall run.
         doorWFt: operation.category === 'partition' ? Number(operation.widthFt || 0) : 0,
         doorAtFt: operation.category === 'partition' ? Number(operation.positionFt || 0) : 0,
+        // Which catalog piece a 'furnishing' is (range, sofa, cistern…) — it
+        // drives its price, carbon and color.
+        kind: operation.kind || '',
         type: operation.category || 'custom'
       };
       // A partition defaults to a full-height thin wall, not the 10x10x1.2
@@ -2453,6 +2957,11 @@ export function applyBimOperations(currentSpec, plan) {
         if (longAxis === 'w') { element.d = Number(operation.d) > 0 && Number(operation.d) <= 2 ? Number(operation.d) : thick; }
         else { element.w = Number(operation.w) > 0 && Number(operation.w) <= 2 ? Number(operation.w) : thick; }
         if (!Number(operation.h)) element.h = Math.max(7, Number(next.shell.wallHeightFt || 10) - 0.5);
+      }
+      // A shade device is defined by WHICH WALL it stands in front of — that,
+      // not its position, is what decides the sun it blocks.
+      if (element.category === 'shade' && ['north', 'south', 'east', 'west'].includes(operation.side)) {
+        element.side = operation.side;
       }
       if (element.category === 'deck') {
         // deck options ride the add op (the Patio button, planner asks like
@@ -2556,6 +3065,27 @@ export function applyBimOperations(currentSpec, plan) {
       target.w = Math.max(minDim, Number(operation.w || target.w));
       target.d = Math.max(minDim, Number(operation.d || target.d));
       if (operation.h) target.h = Math.max(0.2, Number(operation.h));
+      // Shrinking a STOREY EXTENT pulls that floor's rooms inside the new
+      // outline RIGHT HERE, in the op — so every door (plan corner drag,
+      // Stack view, number boxes) keeps the size the person set. Before,
+      // only the number-box path pulled rooms; the plan drag left them
+      // outside and the covers-its-rooms heal grew the plate straight back
+      // ("it is forcing the 1st floor shape to match the 2nd" — stale
+      // rooms from an older, deeper house pinned the plate at full size).
+      if (target.category === 'floor' && Number(target.level || 1) >= 2) {
+        const px = Number(target.x) || 0; const py = Number(target.y) || 0;
+        const pw = Number(target.w) || 1; const pd = Number(target.d) || 1;
+        (next.rooms || []).filter((r) => Number(r.level || 1) === Number(target.level)).forEach((r) => {
+          const nw = Math.min(Number(r.w) || 1, pw);
+          const nd = Math.min(Number(r.d) || 1, pd);
+          const nx = clamp(Number(r.x) || 0, px, px + pw - nw);
+          const ny = clamp(Number(r.y) || 0, py, py + pd - nd);
+          if (nw !== Number(r.w)) r.w = nw;
+          if (nd !== Number(r.d)) r.d = nd;
+          if (nx !== Number(r.x)) r.x = nx;
+          if (ny !== Number(r.y)) r.y = ny;
+        });
+      }
       changedIds.push(target.id);
       actions.push(operationDescription({ ...operation, name: target.name }, next));
     } else if (operation.type === 'update_object') {
@@ -2602,6 +3132,37 @@ export function applyBimOperations(currentSpec, plan) {
         // Which way a per-storey SHED piece falls (its LOW side).
         if (['north', 'south', 'east', 'west'].includes(operation.value)) target.roofFall = operation.value;
         else delete target.roofFall;
+      } else if (['doorNorthFt', 'doorSouthFt', 'doorEastFt', 'doorWestFt'].includes(operation.field)) {
+        // A DOORWAY IN ONE SIDE OF A SMALL BUILDING. Width in feet; 0 or blank
+        // is a solid wall. The same idea a partition's doorWFt has always had,
+        // now on the four sides of a shed, workshop or woodshed — which is what
+        // Daniel needed to get from his workshop into the greenhouse, out to
+        // the patio, and through to the carport.
+        const dv = Number(operation.value);
+        if (Number.isFinite(dv) && dv > 0.5) target[operation.field] = clamp(dv, 2, 16);
+        else delete target[operation.field];
+      } else if (operation.field === 'wallCovering') {
+        // Skinning an open structure: a carport with poly walls is a garage
+        // that still passes light to whatever stands behind it.
+        if (ROOF_COVERINGS[operation.value]) target.wallCovering = operation.value;
+        else delete target.wallCovering;
+      } else if (operation.field === 'roofCovering') {
+        // A structure can wear a different roof from the house — clear
+        // polycarbonate over a carport so the greenhouse behind it still sees
+        // the sun, where a solid roof would put it in shade.
+        if (ROOF_COVERINGS[operation.value]) target.roofCovering = operation.value;
+        else delete target.roofCovering;
+      } else if (operation.field === 'envelope') {
+        // Inside the warm house, or a buffer outside it (a greenhouse, an
+        // entry airlock, a porch). See ROOM_ENVELOPES.
+        if (['heated', 'buffer'].includes(operation.value)) target.envelope = operation.value;
+        else delete target.envelope;
+      } else if (['roofOverhangNorthFt', 'roofOverhangSouthFt', 'roofOverhangEastFt', 'roofOverhangWestFt'].includes(operation.field)) {
+        // One side of THIS storey's eave, overriding its all-round figure.
+        // Blank or negative clears back to the storey's own overhang.
+        const ov1 = Number(operation.value);
+        if (Number.isFinite(ov1) && ov1 >= 0 && String(operation.value) !== '') target[operation.field] = clamp(ov1, 0, 12);
+        else delete target[operation.field];
       } else if (operation.field === 'roofOverhangFt') {
         // This storey's own eave reach past its walls; blank/zero = the
         // whole-roof overhangs.

@@ -42,6 +42,12 @@ revision snapshots. Public repo: github.com/IrvingInsights/HOUSE-DESIGN-APP.
   patch the one design; seeds that caught real bugs are permanent (the
   battery's fixed-seed fuzz set replays them every run).**
 - `node tools/op_smoke_test.mjs` — 113 checks; run after ANY bim-core edit.
+- `node tools/thermal_test.mjs` — the SUMMER half of the year: shading by face
+  and by storey, solar gain, thermal mass, the swing, ventilation, and heat
+  source against design load. It pins RELATIONSHIPS, not numbers (a deep
+  overhang must shade south glass and must NOT shade east glass; more mass must
+  mean less swing), so coefficients can be tuned without the model's meaning
+  quietly inverting. Run after any change to the thermal block in deriveDesign.
 - `node tools/persistence_test.mjs` — the engine-side design store: atomic
   saves, revision per save, corruption set-aside, project isolation.
 - `node tools/trace_repair_test.mjs` — 111 checks; run after planner edits.

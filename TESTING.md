@@ -18,6 +18,10 @@ permit-sheet export. No other software needed.
 
 Developers running from a terminal: `npm install` once, then
 `node server.mjs` from the app folder (that's all the launchers do).
+The regression batteries live in `tools/` (`node tools/prove_it.mjs` runs the
+unit suites) — including `capability_test.mjs`, which checks every user-facing
+capability in `tools/capabilities.json` is still reachable in the default look,
+so a UI reorganization can't silently drop a control.
 
 Regression check if 3D ever misbehaves: open the app with `?no3d` on the URL
 — the whole app must still load in the Plan view with an explanation in the

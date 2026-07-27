@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>House Design Studio</title>
+  <link rel="icon" href="/static/house.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="masthead">
+      <div class="masthead-inner">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" width="28" height="28" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linejoin="round"
+                 stroke-linecap="round">
+              <path d="M4 15 L16 5 L28 15" />
+              <path d="M7 13 V27 H25 V13" />
+              <path d="M13 27 V19 H19 V27" />
+            </svg>
+          </span>
+          <div>
+            <h1>House Design Studio</h1>
+            <p class="tagline">From a plain description to a PE-review-ready design,
+              reviewed by a council of experts.</p>
+          </div>
+        </div>
+        <span class="mode-badge" id="mode-badge" hidden></span>
+      </div>
+    </header>
+
+    <main class="content">
+      <!-- INPUT -->
+      <section class="panel" id="input-panel">
+        <div class="panel-head">
+          <span class="step-dot">1</span>
+          <h2>Describe your house</h2>
+        </div>
+        <textarea id="brief" rows="5"
+          placeholder="e.g. A cozy single-story one-bedroom cabin, about 8 by 6 metres, gable roof, slab on grade, with big south-facing windows for winter sun and a covered porch."></textarea>
+
+        <div class="input-row">
+          <label class="upload" id="upload-label">
+            <input type="file" id="images" accept="image/*" multiple hidden />
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                 stroke-linejoin="round"><path d="M4 16l4-4 4 4 4-6 4 6"/>
+              <rect x="3" y="4" width="18" height="16" rx="2"/></svg>
+            <span id="upload-text">Attach sketches, photos, or notes</span>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button id="run-btn" class="btn btn-primary">
+            <span class="btn-label">Run design</span>
+          </button>
+          <button id="sample-btn" class="btn btn-ghost">Try the sample house</button>
+        </div>
+      </section>
+
+      <!-- PROGRESS -->
+      <section class="panel" id="progress-panel" hidden>
+        <div class="panel-head">
+          <span class="step-dot">2</span>
+          <h2>Designing</h2>
+          <span class="spinner" id="spinner"></span>
+        </div>
+        <p class="status-line" id="status-line">Starting…</p>
+        <ol class="timeline" id="timeline"></ol>
+      </section>
+
+      <!-- RESULTS -->
+      <section class="panel" id="results-panel" hidden>
+        <div class="panel-head">
+          <span class="step-dot ok">✓</span>
+          <h2>Your design</h2>
+        </div>
+        <p class="result-summary" id="result-summary"></p>
+
+        <div class="tabs" role="tablist">
+          <button class="tab is-active" data-tab="report">Report</button>
+          <button class="tab" data-tab="drawings">Drawings</button>
+          <button class="tab" data-tab="files">Files</button>
+        </div>
+
+        <div class="tab-panel is-active" id="tab-report">
+          <article class="report" id="report">Loading…</article>
+        </div>
+
+        <div class="tab-panel" id="tab-drawings">
+          <div id="drawings-body"></div>
+        </div>
+
+        <div class="tab-panel" id="tab-files">
+          <ul class="files" id="files-list"></ul>
+        </div>
+      </section>
+
+      <footer class="disclaimer">
+        This tool produces <strong>PE-review-ready documentation only</strong>. It
+        cannot and does not issue a Professional Engineer stamp. A licensed PE
+        (and, where required, a licensed Architect) must independently review and
+        seal any design before it is built.
+      </footer>
+    </main>
+  </div>
+
+  <script src="/static/markdown.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -3,7 +3,8 @@ import {
   OPENING_TYPES, FRAME_TYPES, resolveFrameType, FLOORING_TYPES, resolveFlooring, SUBFLOOR_TYPES, resolveSubfloor, INSULATION_TYPES,
   resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint, pointInFootprint,
   isRoundFootprint, ellipseArea, ellipsePerimeter, rectRoundOverlapArea,
-  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt, storeyHeightFt,
+  basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, ROOF_COVERINGS, resolveRoofCovering, FURNISHINGS, FURNISHING_GROUPS, resolveFurnishing, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt, storeyHeightFt,
+  ROOM_ENVELOPES, resolveRoomEnvelope,
   scoreTraceSpecChecks, openingVerticalBand,
   // Single source of truth for the per-wall assembly model — no longer duplicated here.
   WALL_SIDES, WALL_ASSEMBLIES, wallAssemblyKeyFromText, resolveWallSide,
@@ -20,7 +21,7 @@ export const DEFAULT_PROMPT = '';
 export const DEFAULT_EXPERT_QUESTION = 'What should I worry about before taking this design further?';
 export const DEFAULT_CHAT_MESSAGES = [];
 export const WELCOME_CHAT_TEXT = 'Tell me what to change, attach sketches, or choose an expert/team target and ask for plain-language advice.';
-export const DEFAULT_SITE_PAD_EXTENSION_FT = 64;
+export const DEFAULT_SITE_PAD_EXTENSION_FT = 16;
 export const DEFAULT_OUTDOOR_GRID_SIZE_FT = 240;
 export const OUTDOOR_SPACE_TYPES = new Set(['outdoor', 'site', 'garden', 'animal', 'paddock', 'run', 'landscape', 'homestead']);
 
@@ -138,7 +139,7 @@ export function loadSavedDashboardState() {
     if (!stored) return null;
     const parsed = JSON.parse(stored);
     if (!parsed?.spec?.shell || !Array.isArray(parsed.spec.rooms)) return null;
-    if (!Number.isFinite(Number(parsed.spec.shell.padExtensionFt)) || Number(parsed.spec.shell.padExtensionFt) < 32) {
+    if (!Number.isFinite(Number(parsed.spec.shell.padExtensionFt)) || Number(parsed.spec.shell.padExtensionFt) < 4 || Number(parsed.spec.shell.padExtensionFt) === 64) {
       parsed.spec.shell.padExtensionFt = DEFAULT_SITE_PAD_EXTENSION_FT;
     }
     return parsed;
@@ -375,7 +376,16 @@ export function sitePadRect(spec) {
 export function objectBounds(spec, object) {
   const pad = padExtension(spec.shell);
   const gridSize = Number(spec.shell?.outdoorGridSizeFt || DEFAULT_OUTDOOR_GRID_SIZE_FT);
-  const isPlacedElement = Boolean((spec.elements || []).some((element) => element.id === object?.id));
+  // AN ELEMENT IS AN ELEMENT BEFORE IT IS IN THE LIST. This asked "is this id
+  // already in spec.elements?", which is false for the one being added right
+  // now — so a NEW element got the tight indoor margin and an EXISTING one got
+  // the generous outdoor margin. Daniel's carport, placed 20 ft east of the
+  // house exactly over its own pad, was dragged 4 ft west onto the house; drag
+  // it by hand afterwards and it is allowed straight back out. Same object,
+  // two different rules, depending only on whether it had been saved yet.
+  // Elements carry a category; rooms carry a type. That is the real test.
+  const isPlacedElement = Boolean(object?.category)
+    || (spec.elements || []).some((element) => element.id === object?.id);
   const isOutdoorSpace = OUTDOOR_SPACE_TYPES.has(object?.type) || OUTDOOR_SPACE_TYPES.has(object?.category);
   const margin = isPlacedElement || isOutdoorSpace ? Math.max(gridSize / 2, pad + 24) : Math.max(16, pad * 0.25);
   return {
@@ -655,7 +665,8 @@ export const UTILITY_DEFAULTS = {
   diyWalls: false,
   diyRoof: false,
   diyHeat: false,
-  diyFoundation: false
+  diyFoundation: false,
+  wholeHouseFan: false
 };
 
 // Per-side roof overhang: shell.overhangFt is the global value, optional
@@ -790,7 +801,23 @@ export function deckOpenSides(spec, el) {
     const ow = Math.max(1, Number(o.w) || 10); const od = Math.max(1, Number(o.d) || 8);
     return px > ox - 0.15 && px < ox + ow + 0.15 && pz > oy - 0.15 && pz < oy + od + 0.15;
   });
-  const blockedAt = (px, pz) => insideHouse(px, pz) || insideNeighbor(px, pz);
+  // A STAIR THAT CLIMBS TO THIS DECK OPENS ITS RAILING WHERE IT LANDS.
+  // Without this you walk twelve feet up a stair and meet a guard rail: the
+  // deck's own steps (deckStairs) open a gap, but a stair placed as its own
+  // object was invisible here. A stair standing on the storey BELOW tops out at
+  // this deck's walking height, so where its resolved footprint meets this
+  // edge, that stretch is a doorway, not a rail. Resolved once (not per probe)
+  // and read from the same resolveStair the plan and the 3D draw from, so the
+  // gap lands exactly where the treads do — for any shape, facing, or level.
+  const landingParts = [];
+  for (const o of (spec.elements || [])) {
+    if (!isStair(o)) continue;
+    if (Math.max(1, Number(o.level || 1)) + 1 !== level) continue;
+    resolveStair(spec, o).parts.forEach((p) => landingParts.push(p));
+  }
+  const stairLandsAt = (px, pz) => landingParts.some((p) => px > p.x - 0.15 && px < p.x + p.w + 0.15
+    && pz > p.y - 0.15 && pz < p.y + p.d + 0.15);
+  const blockedAt = (px, pz) => insideHouse(px, pz) || insideNeighbor(px, pz) || stairLandsAt(px, pz);
   // walk each edge, probing 0.85 ft OUTSIDE it (the add button drops decks
   // half a foot from the wall — a sub-foot gap still reads as "against"),
   // and merge the open runs into segments
@@ -899,9 +926,238 @@ export function resolveDeckStairs(spec, el, dkIn = null) {
   return { side, mid, gapA0: mid - gapW / 2, gapA1: mid + gapW / 2, gapW, rise, targetTop, target, targetName, up: targetTop > dk.topFt, treads };
 }
 
+// ---- STAIRS ---------------------------------------------------------------
+// A stair used to be a plain 3.5 × 10 box you could only drag. It is now a real
+// object: it knows which way you climb, whether it turns, and where it turns.
+// Everything below is DERIVED from the storey height — you never type a riser
+// count, you pick a shape and a direction and the arithmetic follows, the same
+// way the roof follows the wall heights.
+export const STAIR_SHAPES = {
+  straight: { label: 'Straight run', runs: 1, note: 'One flight, floor to floor. Simplest to build and the cheapest — but it needs the most uninterrupted length.' },
+  l: { label: 'L — quarter turn on a landing', runs: 2, note: 'Two flights at right angles with a landing in the corner. Tucks into a corner and breaks the fall.' },
+  u: { label: 'U — half turn, switchback', runs: 2, note: 'Two flights doubled back over a landing. The most compact footprint there is — the classic way upstairs in a small house.' }
+};
+// Which way you are walking as you climb. This is the 90° turn: pick a new
+// facing and the whole stair swings with it.
+export const STAIR_FACINGS = { north: 'Climbing north', south: 'Climbing south', east: 'Climbing east', west: 'Climbing west' };
+export const STAIR_TURNS = { right: 'Turn right at the landing', left: 'Turn left at the landing' };
+// Residential code, near enough for planning: 7¾″ max riser, 10″ min tread,
+// 36″ min width, 6′8″ headroom, and a landing at least as deep as the stair.
+export const STAIR_LIMITS = { maxRiserIn: 7.75, minTreadIn: 10, minWidthFt: 3, minHeadroomFt: 6.67 };
+export const STAIR_DEFAULTS = { shape: 'straight', facing: 'north', turn: 'right', split: 0.5, widthFt: 3.5, treadIn: 10.5 };
+// What a stair costs to build. Priced the way a carpenter quotes one: by the
+// TREAD (stringers, tread, riser — so a wider stair costs more per step), plus
+// the landing as a small framed platform, plus railing along every open side.
+// A stair is mostly LABOUR, which is why its salvaged/milled discounts (in
+// SOURCE_FACTORS.stairs) are shallower than the frame's — milling your own
+// stock cuts the boards, not the cutting of them.
+export const STAIR_COSTS = { treadPerFtWidth: 28, landingPsf: 28, railingPerLf: 45 };
+export const STAIR_CARBON = { treadPerFtWidth: 2.2, landingPsf: 2.2, railingPerLf: 1.6 };
+export const STAIR_FACING_ORDER = ['north', 'east', 'south', 'west'];
+
+export function isStair(el) {
+  return el?.category === 'stair' || (/stair/i.test(el?.name || '') && !/ladder/i.test(el?.name || ''));
+}
+// Rotate a local-frame point into the chosen facing. Local frame climbs toward
+// -y (north); the other three are 90° multiples of it, so every rotated rect
+// stays axis-aligned and the plan never has to draw a skewed box.
+function rotStair(x, y, facing) {
+  if (facing === 'east') return [-y, x];
+  if (facing === 'south') return [-x, -y];
+  if (facing === 'west') return [y, -x];
+  return [x, y];
+}
+function rotRect(r, facing) {
+  const [ax, ay] = rotStair(r.x, r.y, facing);
+  const [bx, by] = rotStair(r.x + r.w, r.y + r.d, facing);
+  return { ...r, x: Math.min(ax, bx), y: Math.min(ay, by), w: Math.abs(bx - ax), d: Math.abs(by - ay) };
+}
+
+// The whole stair, resolved once for the plan, the 3D, the inspector and the
+// checks — so none of them can disagree about where a tread is.
+export function resolveStair(spec, el) {
+  const raw = { ...STAIR_DEFAULTS, ...(el?.stair || {}) };
+  const shape = STAIR_SHAPES[raw.shape] ? raw.shape : 'straight';
+  // Before stairs knew which way they climbed, the only way to "turn" one was
+  // to drag its box wide instead of tall. Read that intent: a legacy stair
+  // wider than it is deep was an east–west stair, so start it facing east.
+  // Nothing to press, and picking a facing afterwards overrides it forever.
+  const legacyFacing = (!el?.stair?.facing && Number(el?.w) > Number(el?.d)) ? 'east' : null;
+  const facing = STAIR_FACINGS[raw.facing] && el?.stair?.facing ? raw.facing : (legacyFacing || 'north');
+  const turn = raw.turn === 'left' ? 'left' : 'right';
+  const level = Number(el?.level || 1);
+  // What this stair actually has to climb: floor to floor of the storey it
+  // starts on. Change the wall height and the stair re-treads itself.
+  const rise = Math.max(3, storeyHeightFt(spec?.shell, level) || Number(spec?.shell?.wallHeightFt) || 10);
+  const widthFt = clamp(Number(raw.widthFt) || 3.5, 2.5, 8);
+  const treadIn = clamp(Number(raw.treadIn) || 10.5, 9, 14);
+  const risers = Math.max(2, Math.ceil((rise * 12) / STAIR_LIMITS.maxRiserIn));
+  const riserIn = (rise * 12) / risers;
+  const treads = risers - 1;               // the top riser lands you on the floor
+  const twoRun = STAIR_SHAPES[shape].runs === 2;
+  const split = twoRun ? clamp(Number(raw.split ?? 0.5), 0.15, 0.85) : 1;
+  const run1Treads = twoRun ? clamp(Math.round(treads * split), 1, treads - 1) : treads;
+  const run2Treads = treads - run1Treads;
+  const run1Ft = (run1Treads * treadIn) / 12;
+  const run2Ft = (run2Treads * treadIn) / 12;
+  const W = widthFt;
+
+  // Local frame: run 1 climbs toward -y, arriving on a square landing.
+  const local = [{ kind: 'run', run: 1, treads: run1Treads, x: 0, y: -run1Ft, w: W, d: run1Ft, climb: 'north' }];
+  if (twoRun) {
+    const ly = -run1Ft - W;
+    local.push({ kind: 'landing', x: 0, y: ly, w: W, d: W });
+    if (shape === 'l') {
+      local.push(turn === 'right'
+        ? { kind: 'run', run: 2, treads: run2Treads, x: W, y: ly, w: run2Ft, d: W, climb: 'east' }
+        : { kind: 'run', run: 2, treads: run2Treads, x: -run2Ft, y: ly, w: run2Ft, d: W, climb: 'west' });
+    } else {
+      local.push(turn === 'right'
+        ? { kind: 'run', run: 2, treads: run2Treads, x: W, y: ly, w: W, d: run2Ft, climb: 'south' }
+        : { kind: 'run', run: 2, treads: run2Treads, x: -W, y: ly, w: W, d: run2Ft, climb: 'south' });
+    }
+  }
+  const turned = local.map((r) => rotRect(r, facing));
+  // Anchor the whole assembly at the element's x/y so dragging still works and
+  // el.w/el.d can stay the true bounding box.
+  const minX = Math.min(...turned.map((r) => r.x));
+  const minY = Math.min(...turned.map((r) => r.y));
+  const ox = (Number(el?.x) || 0) - minX;
+  const oy = (Number(el?.y) || 0) - minY;
+  const parts = turned.map((r) => ({ ...r, x: r.x + ox, y: r.y + oy }));
+  const maxX = Math.max(...parts.map((r) => r.x + r.w));
+  const maxY = Math.max(...parts.map((r) => r.y + r.d));
+  const bbox = { x: Number(el?.x) || 0, y: Number(el?.y) || 0, w: maxX - (Number(el?.x) || 0), d: maxY - (Number(el?.y) || 0) };
+
+  const flags = [];
+  if (treadIn < STAIR_LIMITS.minTreadIn) flags.push(`${treadIn.toFixed(1)}″ treads are under the 10″ minimum — steep underfoot.`);
+  if (widthFt < STAIR_LIMITS.minWidthFt) flags.push(`${widthFt.toFixed(1)}′ wide is under the 3′ minimum, and the landing with it.`);
+  if (twoRun && (run1Treads < 2 || run2Treads < 2)) flags.push('One of the two flights is barely a step — slide the split back toward the middle.');
+  return {
+    shape, facing, turn, level, rise, risers, riserIn, treadIn, treads, widthFt,
+    twoRun, split, run1Treads, run2Treads, run1Ft, run2Ft, landingFt: twoRun ? W : 0,
+    totalRunFt: run1Ft + run2Ft + (twoRun ? W : 0), parts, bbox, flags,
+    label: STAIR_SHAPES[shape].label,
+    // Quantities the receipts price. Railing runs the open side of every
+    // flight plus the landing edge — the code-required guard on an open stair.
+    railingLf: run1Ft + run2Ft + (twoRun ? W : 0),
+    landingSf: twoRun ? W * W : 0
+  };
+}
+
 // Interior fixtures & equipment that live inside the house as placed objects —
 // draggable in the 2D plan and rendered in 3D. The heater name follows the
 // chosen heat source so "the heater" is a real object you can position.
+// WHAT A HEAT SOURCE COSTS, SPLIT THE WAY YOU ACTUALLY BUY IT.
+//
+// `kit` is the appliance itself — the thing that arrives on a pallet with a
+// price on it. `install` is everything else it needs to work: facing, chimney,
+// hearth pad, and the trades. The split matters because **sweat equity can only
+// touch `install`** — no amount of your own labour makes refractory modules
+// cheaper, and the old flat-figure model let you discount them by 45%.
+//
+// `quoted: true` means the number is a real supplier price, not a placeholder.
+export const HEAT_SOURCES = {
+  masonry: {
+    label: 'Masonry heater', kit: 8980, install: 8000, quoted: true, faced: true, facingDefault: 'cob',
+    kitLabel: 'Temp-Cast standard kit with bake oven',
+    kitNote: 'the real kit price — refractory modules, mortar, firebox glass door, grate, cleanouts, bake-oven door and trim; shipping included, installation NOT',
+    installNote: 'insulated chimney ≈ $2,400 · concrete pad ≈ $600 · mason ≈ $5,000'
+  },
+  rocket_mass: {
+    label: 'Rocket mass heater', kit: 900, install: 1600, faced: true, facingDefault: 'cob',
+    kitLabel: 'Barrel, firebrick and clay',
+    kitNote: 'materials, not a kit — the cheapest real heat in the book if you build it yourself',
+    installNote: 'bench mass, flue and the labour to build it'
+  },
+  wood_stove: {
+    label: 'Wood stove', kit: 2600, install: 1800,
+    kitLabel: 'Stove',
+    installNote: 'hearth pad, insulated chimney and the fitter'
+  },
+  minisplit: {
+    label: 'Mini-split heat pump', kit: 3200, install: 1800,
+    kitLabel: 'Outdoor unit and head',
+    installNote: 'line set, mounts, electrician'
+  }
+};
+export function resolveHeatSource(key) {
+  return HEAT_SOURCES[key] ? key : 'wood_stove';
+}
+
+// WHAT A HEAT SOURCE CAN ACTUALLY PUT OUT, against the load the house asks for.
+// The app knew the house needed 17 kBTU/hr and knew you had chosen a Temp-Cast,
+// and never once compared the two numbers.
+//
+// `outputKbtu` is SUSTAINED average output over a whole day, not the peak on
+// the label — which is the only figure that means anything against a design
+// load. A batch heater is the honest case: it burns hot for two hours and
+// releases for twenty, so what matters is the total heat per firing spread
+// across the cycle, and how many times a day you are willing to light it.
+// These are planning figures, deliberately conservative.
+export const HEAT_OUTPUT = {
+  masonry: { outputKbtu: 20, batch: true, firings: 2, note: 'two firings a day, heat released slowly over the whole cycle. One firing a day carries about half this.' },
+  rocket_mass: { outputKbtu: 14, batch: true, firings: 2, note: 'smaller core than a masonry heater, same batch rhythm — most of the heat comes back out of the bench.' },
+  wood_stove: { outputKbtu: 25, batch: false, note: 'sustained with regular reloading through the day; the number on the label is a peak you cannot hold.' },
+  minisplit: { outputKbtu: 12, batch: false, derateCold: true, note: 'one head, and heat pumps lose output as it gets colder — near 0°F expect appreciably less than this.' }
+};
+
+// SHADE YOU BUILD OR PLANT. The overhang shades the top storey and nothing
+// else, and no overhang on earth shades an east or west window — the sun comes
+// in almost horizontally at breakfast and dinner. These are the things that
+// actually do the job, as real objects you place on a side of the house.
+//
+// `summer` / `winter` are the fraction of that window band each one shades in
+// each season. The whole point of the leafy ones is the SPREAD between those
+// two numbers: shade in July, bare branches in January. A fixed awning has no
+// spread — it shades both, which is why a retractable one is worth the money on
+// a south wall and an irrelevance on the east.
+export const SHADE_DEVICES = {
+  awning: { key: 'awning', label: 'Awning — fixed', summer: 0.75, winter: 0.6, cost: 420, carbon: 60, projectionFt: 3, note: 'Cloth or metal over the window. Shades July and January alike, so it is a straight win on east and west and a trade-off on the south.' },
+  awning_retract: { key: 'awning_retract', label: 'Awning — retractable', summer: 0.75, winter: 0.05, cost: 1100, carbon: 90, projectionFt: 4, note: 'Out in summer, rolled up in winter. You get the shade and keep the winter sun — the price is the mechanism and remembering to work it.' },
+  trellis: { key: 'trellis', label: 'Trellis with vines', summer: 0.7, winter: 0.25, cost: 380, carbon: 40, projectionFt: 5, green: true, note: 'Grapes, hops, kiwi. Leafs out as the heat arrives and drops in autumn — the cheapest seasonal shade there is, and it feeds you.' },
+  deciduous: { key: 'deciduous', label: 'Deciduous tree', summer: 0.65, winter: 0.2, cost: 250, carbon: -600, projectionFt: 12, green: true, note: 'Bare branches still cut maybe a fifth of the winter sun, which is the honest cost of the July shade. Plant it far enough out that it shades the glass, not the roof.' },
+  shutter: { key: 'shutter', label: 'Exterior shutters', summer: 0.9, winter: 0, cost: 600, carbon: 70, projectionFt: 0, note: 'Closed on a hot afternoon, open the rest of the time. The most effective and the most manual — shading glass from OUTSIDE beats any blind indoors.' }
+};
+export function resolveShadeDevice(el = {}) {
+  return SHADE_DEVICES[el?.kind] || null;
+}
+
+// HOW MUCH SUN LANDS ON A WALL, per square foot of glass, on a clear day, by
+// the season and the way it faces. Planning figures for a temperate northern
+// latitude (~43°N) in BTU/sf/day on a VERTICAL surface — the classic
+// passive-solar tables, rounded honestly.
+//
+// The whole summer story is in this table: in January the south wall collects
+// three times what an east or west wall does, and in July that reverses. South
+// glass in summer is nearly self-protecting because the sun is overhead. East
+// and west glass is not, and cannot be made so with an overhang.
+export const SOLAR_ON_GLASS = {
+  winter: { south: 1000, east: 300, west: 300, north: 90, roof: 500 },
+  summer: { south: 380, east: 780, west: 780, north: 240, roof: 2000 }
+};
+// What gets through the glass itself (solar heat gain coefficient).
+export const GLASS_SHGC = { double: 0.55, triple: 0.45 };
+
+// WHAT THE HEATER WEARS. A masonry heater's core is a kit; its SKIN is a design
+// decision with a real spread — an earthen plaster you trowel on yourself and a
+// soapstone surround differ by thousands. Only masonry-class heaters are faced
+// (a mini-split wears nothing). carbon is kg CO2e for the whole facing.
+export const HEATER_FACINGS = {
+  cob: { label: 'Cob / earthen plaster', cost: 260, carbon: 30, green: true, note: 'Clay, sand and straw off your own site, troweled on. Nearly free in materials, generous with your time, and it re-radiates beautifully.' },
+  lime: { label: 'Lime plaster', cost: 420, carbon: 90, green: true, note: 'Harder and more washable than earth, still breathable and still a DIY job.' },
+  tile: { label: 'Handmade decorative tile', cost: 3200, carbon: 300, note: 'Artisan tile over the core — the traditional kachelofen face. The price is the tile and the setting; budget generously and buy extra.' },
+  brick: { label: 'Brick', cost: 2200, carbon: 420, note: 'Conventional and forgiving, but it wants a mason.' },
+  stucco: { label: 'Cement stucco', cost: 700, carbon: 140 },
+  soapstone: { label: 'Soapstone', cost: 4800, carbon: 260, note: 'The luxury face — dense, slow, and lovely to lean on. It is the most expensive skin here by a distance.' }
+};
+export function resolveHeaterFacing(spec, heatKey) {
+  const src = HEAT_SOURCES[heatKey] || {};
+  if (!src.faced) return null;
+  const key = (spec?.utilities || {}).heaterFacing;
+  return HEATER_FACINGS[key] ? key : (src.facingDefault || 'cob');
+}
+
 export const HEATER_NAMES = { rocket_mass: 'Rocket Mass Heater', masonry: 'Masonry Heater', wood_stove: 'Wood Stove', minisplit: 'Mini-Split Unit' };
 export const HEATER_SIZES = { rocket_mass: [6, 3], masonry: [4, 4], wood_stove: [3, 2.5], minisplit: [3, 1] };
 export function interiorFixtures(spec) {
@@ -910,7 +1166,7 @@ export function interiorFixtures(spec) {
   return [
     { key: 'heater', name: HEATER_NAMES[heat] || 'Heater', category: 'thermal', w: hw, d: hd, h: heat === 'masonry' ? 7 : 4 },
     { key: 'tank', name: 'Water Tank', category: 'water', w: 4, d: 4, h: 5 },
-    { key: 'stairs', name: 'Stairs', category: 'structure', w: 3.5, d: 10, h: 8 },
+    { key: 'stairs', name: 'Stairs', category: 'stair', w: 3.5, d: 10, h: 8 },
     { key: 'counter', name: 'Kitchen Counter', category: 'structure', w: 8, d: 2, h: 3 },
     { key: 'bath', name: 'Bath Fixtures', category: 'water', w: 5, d: 3, h: 2.5 },
     { key: 'closet', name: 'Built-in Storage', category: 'storage', w: 6, d: 2, h: 7 }
@@ -1101,34 +1357,56 @@ export function planNewRoomPlacements(spec, newRooms, level = 1) {
   // Only rooms on the SAME floor collide — each storey packs independently.
   const virtualRooms = (spec.rooms || []).filter((r) => Number(r.level || 1) === level).map((r) => ({ x: Number(r.x), y: Number(r.y), w: Number(r.w), d: Number(r.d) }));
   const taken = new Set((spec.rooms || []).map((r) => r.name));
-  let shellW = Number(spec.shell.widthFt);
-  let shellD = Number(spec.shell.depthFt);
+  const shellW = Number(spec.shell.widthFt);
+  const shellD = Number(spec.shell.depthFt);
   const startW = shellW;
   const startD = shellD;
   const addOps = [];
   const names = [];
+  const unplaced = [];
   for (const nr of newRooms) {
     let name = nr.name;
     let n = 2;
     while (taken.has(name)) { name = `${nr.name} ${n}`; n += 1; }
     taken.add(name);
     names.push(name);
-    const fpForSpots = hasCustomFootprint(spec) && shellW === Number(spec.shell.widthFt) && shellD === Number(spec.shell.depthFt) ? footprintPolygon(spec) : null;
-    let spot = findFreeSpot(shellW, shellD, virtualRooms, nr.w, nr.d, fpForSpots);
+    const fpForSpots = hasCustomFootprint(spec) ? footprintPolygon(spec) : null;
+    let spot = null;
+    let fit = true;
+    // A GREENHOUSE lands ON THE SOLAR WALL, poking OUT — the glazed annex
+    // builds itself the moment the room exists. An interior plant room is
+    // only a floor zone, and adding one read as "it fails to add the
+    // greenhouse over and over": the room appeared, the GREENHOUSE didn't.
+    // 1.5 ft stays inside (the doorway); the rest stands past the south
+    // wall in the sun. Slides along the wall to a clear stretch; overlaps
+    // the wall band as a last resort (still glazed either way).
+    if (nr.type === 'plant' && level === 1 && !fpForSpots) {
+      const yGh = Math.max(0.5, shellD - 1.5);
+      let xGh = null;
+      for (let cx = 0.5; cx <= shellW - nr.w - 0.5; cx += 0.5) {
+        const clash = virtualRooms.some((r) => r.y + r.d > yGh - 0.01 && r.x < cx + nr.w && r.x + r.w > cx);
+        if (!clash) { xGh = cx; break; }
+      }
+      spot = { x: xGh == null ? Math.max(0.5, Math.round(((shellW - nr.w) / 2) * 2) / 2) : xGh, y: yGh };
+    }
+    if (!spot) spot = findFreeSpot(shellW, shellD, virtualRooms, nr.w, nr.d, fpForSpots);
     if (!spot) {
-      if (nr.w > shellW - 2) shellW = clamp(Math.ceil(nr.w + 2), 18, 120);
-      const bottom = virtualRooms.length ? Math.max(...virtualRooms.map((r) => r.y + r.d)) : 1;
-      const y = Math.round((bottom + 0.5) * 2) / 2;
-      shellD = clamp(Math.max(shellD, Math.ceil(y + nr.d + 1)), 18, 80);
-      spot = { x: 1, y };
+      // NEVER grow the shell — or the foundation under it — because a room
+      // was added; the walls are the person's decision (Daniel: "Stop
+      // bumping out the foundation when i add a room"). No free floor =
+      // the room lands mid-plan, overlapping, clearly the person's to
+      // resolve: drag rooms apart, shrink something, or grow the Shape.
+      fit = false;
+      spot = {
+        x: Math.max(0.5, Math.round(((shellW - nr.w) / 2) * 2) / 2),
+        y: Math.max(0.5, Math.round(((shellD - nr.d) / 2) * 2) / 2)
+      };
     }
     virtualRooms.push({ x: spot.x, y: spot.y, w: nr.w, d: nr.d });
+    if (!fit) unplaced.push(name);
     addOps.push({ type: 'add_room', name, category: nr.type, w: nr.w, d: nr.d, x: spot.x, y: spot.y, level });
   }
-  const growOps = [];
-  if (shellW !== startW) growOps.push({ type: 'set_shell', field: 'widthFt', value: String(shellW) });
-  if (shellD !== startD) growOps.push({ type: 'set_shell', field: 'depthFt', value: String(shellD) });
-  return { ops: [...growOps, ...addOps], names, grew: growOps.length > 0, newW: shellW, newD: shellD };
+  return { ops: addOps, names, grew: false, unplaced, newW: startW, newD: startD };
 }
 
 // Interior partitions implied by the room layout: where two rooms on one floor
@@ -1516,7 +1794,7 @@ export function materialsTakeoff(spec, derived) {
   const subfloor = SUBFLOOR_TYPES[derived.subfloor];
   if (subfloor && derived.subfloor !== 'slab') add('flooring', `Subfloor (${subfloor.label.split(' —')[0]})`, `${Math.round(derived.floor)} sf`, 'ground-floor deck');
   const finish = FLOORING_TYPES[derived.flooring];
-  if (finish) add('flooring', `Finish floor (${finish.label.toLowerCase()})`, `${Math.round(derived.heatedFloor)} sf`, 'all heated floors');
+  if (finish) add('flooring', `Finish floor (${finish.label.toLowerCase()})`, `${Math.round(derived.heatedFloorRaw ?? derived.heatedFloor)} sf`, 'every enclosed floor, heated or not');
   const floorInsul = INSULATION_TYPES[derived.floorInsulation];
   if (floorInsul && derived.floorInsulation !== 'none') add('flooring', `Floor insulation (${floorInsul.label.toLowerCase()})`, `${Math.round(derived.floor)} sf`, 'under the ground floor');
 
@@ -1526,10 +1804,21 @@ export function materialsTakeoff(spec, derived) {
   }
 
   // Roof
-  add('roof', 'Roof cladding + sheathing', `${Math.round(derived.roofArea)} sf`, 'includes overhangs and pitch');
+  add('roof', `Roof covering — ${resolveRoofCovering(spec.shell).label.toLowerCase()}`, `${Math.round(derived.roofArea)} sf`, 'includes overhangs and pitch');
   const roofInsul = INSULATION_TYPES[derived.roofInsulation];
   if (roofInsul && derived.roofInsulation !== 'none') add('roof', `Roof insulation (${roofInsul.label.toLowerCase()})`, `${Math.round(derived.roofArea)} sf`, `R≈${derived.roofR}`);
   add('roof', 'Roof framing (rafters)', '—', 'not calculated yet — rafters draw in Export → Frame drawings');
+
+  // Everything placed inside and around the house, one line per kind.
+  const furnCounts = new Map();
+  (spec.elements || []).filter((el) => el.category === 'furnishing').forEach((el) => {
+    const f = resolveFurnishing(el);
+    if (f) furnCounts.set(f.key, { f, n: (furnCounts.get(f.key)?.n || 0) + 1 });
+  });
+  [...furnCounts.values()].forEach(({ f, n }) => {
+    const groupLabel = (FURNISHING_GROUPS.find((g) => g.key === f.group) || {}).label || f.group;
+    add('furnishings', `${f.label}${n > 1 ? ` × ${n}` : ''}`, `${n}`, f.cost === 0 ? `${groupLabel.toLowerCase()} — priced with your heat system` : groupLabel.toLowerCase());
+  });
 
   // Windows & doors
   const openings = spec.openings || [];
@@ -1598,19 +1887,105 @@ export function frameOf(spec) {
   return { type: 'load-bearing', storeyTypes: {}, ...(spec.frame || {}) };
 }
 
-// Which material systems are marked reclaimed / salvaged. Reclaimed materials
-// cut cost and (especially) embodied carbon — reused stock carries no new
-// manufacturing burden.
-export function reclaimedOf(spec) {
-  return { frame: false, walls: false, flooring: false, windows: false, roof: false, ...(spec.reclaimed || {}) };
-}
-export const RECLAIMED_FACTORS = {
-  frame: { cost: 0.4, carbon: 0.15 },
-  walls: { cost: 0.65, carbon: 0.3 },
-  flooring: { cost: 0.45, carbon: 0.25 },
-  windows: { cost: 0.4, carbon: 0.35 },
-  roof: { cost: 0.6, carbon: 0.3 }
+// WHERE EACH MATERIAL SYSTEM'S STOCK COMES FROM. Buying new at a lumberyard is
+// the baseline. Salvaged stock skips manufacturing entirely — which is why its
+// carbon factor drops further than its price does. Locally milled (your own
+// logs, a neighbour with a bandsaw mill, a small local mill) skips the retail
+// markup, the kiln and the freight: you pay for sawing, and you pay in drying
+// time and your own labour instead.
+export const MATERIAL_SOURCES = {
+  new: { label: 'Bought new', short: 'new' },
+  salvaged: { label: 'Salvaged / reclaimed', short: 'salvaged', green: true },
+  milled: { label: 'Locally milled / your own wood', short: 'locally milled', green: true }
 };
+
+// factor 1 = full retail price / full new-material carbon. A source key absent
+// from a system means that source isn't offered there — you can salvage a
+// window or a fridge, you can't mill one. Milling factors bite hardest where
+// the line is nearly all wood (flooring, frame, built-ins) and barely at all
+// where wood is a minority of the assembly (bale walls, a metal roof's battens).
+// The `note` is what the discount actually BUYS you, in the language of the
+// thing itself — because a cost factor is only honest if you know which product
+// it describes. Milling the frame means rough stock and your own joinery; a
+// precut kit from a timber framer is a different (dearer) product entirely, and
+// that is 'bought new'. Getting those two confused is a five-figure mistake.
+export const SOURCE_FACTORS = {
+  frame: {
+    salvaged: { cost: 0.4, carbon: 0.15, note: 'Beams pulled from a barn or a teardown. Cheap and beautiful, but you take the sizes you find.' },
+    milled: { cost: 0.45, carbon: 0.35, note: 'Rough-sawn stock — and YOU cut the joinery, several hundred joints of it. A precut kit from a timber framer, every mortise cut and labelled, is “bought new”: it costs more than this, not less.' }
+  },
+  walls: {
+    salvaged: { cost: 0.65, carbon: 0.3 },
+    milled: { cost: 0.85, carbon: 0.8, note: 'Only the wood moves — battens, cladding, framing. Bales, cob and plaster cost the same either way.' }
+  },
+  flooring: {
+    salvaged: { cost: 0.45, carbon: 0.25, note: 'Reclaimed boards or tile. Budget for waste — salvage never arrives square.' },
+    milled: { cost: 0.35, carbon: 0.5, note: 'Sawing instead of buying. The boards still have to dry to about 8% before they go down, and someone has to plane and tongue-and-groove them. Lay them green and they cup and gap.' }
+  },
+  windows: {
+    salvaged: { cost: 0.4, carbon: 0.35, note: 'The cheapest carbon win there is — but you design the openings around what you find, not the other way round.' }
+  },
+  roof: {
+    salvaged: { cost: 0.6, carbon: 0.3 },
+    milled: { cost: 0.85, carbon: 0.85, note: 'Only the wood moves — battens, sheathing, rafters. Metal, tile and membrane cost the same either way.' }
+  },
+  // A stair is mostly the cutting, not the boards, so its discounts are the
+  // shallowest here — cheap timber does not make the stringers cut themselves.
+  stairs: {
+    salvaged: { cost: 0.75, carbon: 0.5, note: 'Reclaimed treads on new stringers. Worth doing for the look; it saves less than salvage usually does, because the work is the expensive part.' },
+    milled: { cost: 0.7, carbon: 0.6, note: 'Your own stock for treads, risers and stringers. Cuts the timber, not the cutting — a stair is mostly labour.' }
+  },
+  // Bought-used / shop-built categories for the furnishings catalog. Slab-wood
+  // counters and shelving are the 'builtin' line — the classic mill-it-yourself
+  // win alongside the floor.
+  fixture: { salvaged: { cost: 0.45, carbon: 0.3 } },
+  builtin: {
+    salvaged: { cost: 0.5, carbon: 0.2 },
+    milled: { cost: 0.4, carbon: 0.45, note: 'Slab-wood counters and shelving off your own logs — the classic mill-it-yourself win alongside the floor.' }
+  },
+  appliance: { salvaged: { cost: 0.35, carbon: 0.2 } },
+  furniture: { salvaged: { cost: 0.3, carbon: 0.15 }, milled: { cost: 0.45, carbon: 0.4 } },
+  outdoor: { salvaged: { cost: 0.5, carbon: 0.25 }, milled: { cost: 0.55, carbon: 0.5 } }
+};
+
+// What the chosen source means for this system, in plain words — '' when the
+// choice speaks for itself.
+export function sourceNote(sourcing, system) {
+  return SOURCE_FACTORS[system]?.[sourcing[system]]?.note || '';
+}
+export const SOURCING_SYSTEMS = Object.keys(SOURCE_FACTORS);
+
+// The sources actually offered for a system — drives every picker in the UI, so
+// no screen can offer "milled windows".
+export function sourcesFor(system) {
+  return ['new', ...Object.keys(SOURCE_FACTORS[system] || {})];
+}
+
+// Reads spec.sourcing, silently migrating pre-sourcing specs (spec.reclaimed
+// booleans) as it goes: true meant salvaged. Nothing to clean up, nothing for
+// Daniel to press.
+export function sourcingOf(spec) {
+  const explicit = spec.sourcing || {};
+  const legacy = spec.reclaimed || {};
+  const out = {};
+  for (const system of SOURCING_SYSTEMS) {
+    const key = explicit[system];
+    out[system] = (key === 'new' || SOURCE_FACTORS[system][key]) ? key
+      : (legacy[system] === true ? 'salvaged' : 'new');
+  }
+  return out;
+}
+export function sourceFactor(sourcing, system, kind) {
+  return SOURCE_FACTORS[system]?.[sourcing[system]]?.[kind] ?? 1;
+}
+// Boolean "is this system salvaged" view — what the schedule and the older
+// screens ask for.
+export function reclaimedOf(spec) {
+  const sourcing = sourcingOf(spec);
+  const out = {};
+  for (const system of SOURCING_SYSTEMS) out[system] = sourcing[system] === 'salvaged';
+  return out;
+}
 
 // Offline ZIP -> region estimate (the assistant/geocoder refines this later).
 export function zipRegionInfo(zip) {
@@ -1856,6 +2231,8 @@ export function getWallSections(spec) {
         rValue: r.assembly.rValue,
         interiorFinish: r.interiorFinish,
         exteriorFinish: r.exteriorFinish,
+        sunGlazing: !upper && Boolean(r.sunGlazing),
+        sunGlazingTiltDeg: Number(r.sunGlazingTiltDeg ?? 30),
         note: `${r.assembly.label} (R≈${r.assembly.rValue}, ${r.thicknessFt.toFixed(2)}' thick); ${edge.lengthFt}' long, ${heightFt}' ${upper ? `on level ${level}` : 'high'}. One segment of the ${edge.facing}-facing walls — construction is shared across that facing. Move it in the Plan view.`
       };
     };
@@ -2227,6 +2604,7 @@ export function wallAssemblyProfile(envelopeText = '') {
 // copies. Re-exported here so existing importers of './engine.js' are unaffected.
 export { WALL_SIDES, WALL_ASSEMBLIES, wallAssemblyKeyFromText, resolveWallSide };
 export { isRoundFootprint, ellipseArea, ellipsePerimeter };
+export { ROOM_ENVELOPES, resolveRoomEnvelope };
 export const WALL_SIDE_LABELS = { north: 'North', south: 'South', east: 'East', west: 'West' };
 
 
@@ -2635,7 +3013,8 @@ export function operationDescription(operation, spec) {
   if (op.type === 'add_room') return `Added ${op.name || 'room'} at ${op.w}' x ${op.d}'.`;
   if (op.type === 'add_element' || op.type === 'add_site_element' || op.type === 'add_loft' || op.type === 'add_tower' || op.type === 'add_floor') return `Added ${op.name || 'building element'} as ${op.category || 'custom BIM object'}.`;
   if (op.type === 'add_level' || op.type === 'edit_level') return `Added/edited ${op.name || `Level ${op.level || 2}`} in the BIM model.`;
-  if (op.type === 'set_roof' || op.type === 'set_roof_profile' || op.type === 'add_roof_plane') return `Set roof to ${op.roofType || spec.shell.roofType || 'roof'}${op.southWallHeightFt && op.northWallHeightFt ? ` with S ${op.southWallHeightFt}' / N ${op.northWallHeightFt}' wall heights` : op.eastWallHeightFt && op.westWallHeightFt ? ` with E ${op.eastWallHeightFt}' / W ${op.westWallHeightFt}' wall heights` : ''}.`;
+  if (op.type === 'add_roof_plane') return `Added a ${op.roofType || 'shed'} roof plane on posts${op.targetId ? ` over ${op.targetId}` : ''}.`;
+  if (op.type === 'set_roof' || op.type === 'set_roof_profile') return `Set roof to ${op.roofType || spec.shell.roofType || 'roof'}${op.southWallHeightFt && op.northWallHeightFt ? ` with S ${op.southWallHeightFt}' / N ${op.northWallHeightFt}' wall heights` : op.eastWallHeightFt && op.westWallHeightFt ? ` with E ${op.eastWallHeightFt}' / W ${op.westWallHeightFt}' wall heights` : ''}.`;
   if (op.type === 'set_assembly' || op.type === 'set_wall_assembly' || op.type === 'set_wall_segment_assembly') return `Updated ${op.field || op.wall || 'assembly'} to ${op.value}.`;
   if (op.type === 'set_wall_height') return `Set ${op.wall || 'wall'} height to ${op.h || op.value}'.`;
   if (op.type === 'set_shell' || op.type === 'add_pad_extension') return `Updated shell ${op.field || 'padExtensionFt'} to ${op.value || op.w}.`;
@@ -2757,7 +3136,48 @@ export function applyStructuredDesignPlan(currentSpec, plan) {
       continue;
     }
 
-    if (operation.type === 'set_roof' || operation.type === 'set_roof_profile' || operation.type === 'add_roof_plane') {
+    // Mirror of bim-core's add_roof_plane: a real plane on posts over a patch
+    // of the plan, not a rename of the whole house's roof. See the note there.
+    if (operation.type === 'add_roof_plane') {
+      const kind = String(operation.roofType || '').toLowerCase() === 'gable' ? 'gable' : 'shed';
+      const wanted = String(operation.targetId || operation.target || operation.over || '').trim().toLowerCase();
+      const host = wanted
+        ? next.elements.find((el) => String(el.id || '').toLowerCase() === wanted || String(el.name || '').toLowerCase() === wanted)
+        : null;
+      if (wanted && !host) {
+        actions.push(`Couldn't find "${operation.targetId || operation.target || operation.over}" to roof over.`);
+        continue;
+      }
+      if (host) {
+        if (host.category === 'deck') host.deckRoof = kind;
+        else host.roofType = kind;
+        actions.push(`Roofed ${host.name} with a ${kind} plane on posts.`);
+        continue;
+      }
+      const planeName = String(operation.name || '').replace(/[^a-zA-Z0-9]/g, '').length >= 2 ? operation.name : 'Roof plane';
+      const plane = {
+        id: uniqueObjectId(next, operation.id || planeName),
+        name: planeName,
+        category: 'canopy',
+        note: 'A roof plane on posts — open on every side.',
+        roofType: kind,
+        x: Number(operation.x || 0) || Number(next.shell.widthFt || 24) + 3,
+        y: Number(operation.y || 0) || 3,
+        z: Number(operation.z || 0),
+        w: Math.max(2, Number(operation.w || 0) || 12),
+        d: Math.max(2, Number(operation.d || 0) || 10),
+        h: Math.max(0.2, Number(operation.h || 0) || 0.3),
+        level: Number(operation.level || 1),
+        construction: '',
+        kind: '',
+        type: 'canopy'
+      };
+      next.elements.push({ ...plane, ...clampObjectPosition(next, plane, plane.x, plane.y) });
+      actions.push(`Added ${planeName} — a ${kind} roof plane, ${Math.round(plane.w)}′ × ${Math.round(plane.d)}′ on posts.`);
+      continue;
+    }
+
+    if (operation.type === 'set_roof' || operation.type === 'set_roof_profile') {
       if (operation.roofType) next.shell.roofType = operation.roofType;
       // Mirror of bim-core: naming a pair picks the shed's fall axis and
       // resets the other pair, so the profile is never ambiguous.
@@ -2930,6 +3350,11 @@ export function applyStructuredDesignPlan(currentSpec, plan) {
         else { element.w = Number(operation.w) > 0 && Number(operation.w) <= 2 ? Number(operation.w) : thick; }
         if (!Number(operation.h)) element.h = Math.max(7, Number(next.shell.wallHeightFt || 10) - 0.5);
       }
+      // Mirror of bim-core: a shade device is defined by which wall it stands
+      // in front of, not by where it happens to sit.
+      if (element.category === 'shade' && ['north', 'south', 'east', 'west'].includes(operation.side)) {
+        element.side = operation.side;
+      }
       if (element.category === 'deck') {
         // deck options ride the add op (the Patio button, planner asks like
         // "a covered composite deck") — resolveDeck validates the values
@@ -2989,6 +3414,13 @@ export function applyStructuredDesignPlan(currentSpec, plan) {
       } else if (operation.field === 'roofFall') {
         if (['north', 'south', 'east', 'west'].includes(operation.value)) target.roofFall = operation.value;
         else delete target.roofFall;
+      } else if (['roofOverhangNorthFt', 'roofOverhangSouthFt', 'roofOverhangEastFt', 'roofOverhangWestFt'].includes(operation.field)) {
+        // Mirror of bim-core: ONE side of this storey's eave. The four eaves of
+        // a storey do different jobs — a deep one shades the glass below it,
+        // and the same depth over a greenhouse shades the plants out.
+        const ov1 = Number(operation.value);
+        if (Number.isFinite(ov1) && ov1 >= 0 && String(operation.value) !== '') target[operation.field] = clamp(ov1, 0, 12);
+        else delete target[operation.field];
       } else if (operation.field === 'roofOverhangFt') {
         const ov = Number(operation.value);
         if (Number.isFinite(ov) && ov > 0) target.roofOverhangFt = clamp(ov, 0, 12);
@@ -3243,6 +3675,22 @@ export function normalizeRooms(spec) {
         && Math.abs(Number(w.heightFt) - shellH) > 0.05) delete w.heightFt;
     }
   }
+  // TWO THINGS WITH THE SAME NAME (kept in step with the bim-core copy).
+  // Ids are unique; names never were. Two decks called "2nd floor deck", two
+  // stairs called "Stairs" — every card and every message becomes a coin toss,
+  // and it has already cost a whole session of "the controls do nothing".
+  // Repaired silently in place: first keeps the name, the rest get numbered.
+  {
+    const seenNames = new Map();
+    for (const obj of [...(spec.rooms || []), ...(spec.elements || [])]) {
+      const raw = String(obj.name || '').trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      const n = (seenNames.get(key) || 0) + 1;
+      seenNames.set(key, n);
+      if (n > 1) obj.name = `${raw} ${n}`;
+    }
+  }
   for (const el of (spec.elements || [])) {
     if (el.category === 'floor' && Number(el.level || 1) >= 2) {
       const zNow = storeyElevationFt(spec.shell, Number(el.level));
@@ -3360,6 +3808,70 @@ export function repairNorthBandRooms(spec) {
   return bandRooms;
 }
 
+// ── THE SUNSPACE WALL LAW ───────────────────────────────────────────────────
+// A greenhouse is separated from the living space by a wall — standard
+// practice the app UNDERSTANDS by itself (Daniel: "it does not understand
+// that there is an interior wall behind a greenhouse"). DERIVED, not placed:
+// every interior-facing edge of a level-1 plant room (more than 2 ft from
+// its matching exterior wall) grows a cob thermal-mass wall with a doorway.
+// Both the plan and the 3D consume THIS list, so the wall exists everywhere
+// or nowhere. A real partition the person placed along that edge wins — the
+// derived wall stands down. Tapping a derived wall selects its room.
+export function sunspacePartitions(spec) {
+  const shell = spec.shell || {};
+  const W = Number(shell.widthFt) || 36;
+  const D = Number(shell.depthFt) || 28;
+  const out = [];
+  (spec.rooms || []).filter((r) => r.type === 'plant' && Number(r.level || 1) === 1).forEach((room) => {
+    const rx = Number(room.x) || 0; const ry = Number(room.y) || 0;
+    const rw = Number(room.w) || 0; const rd = Number(room.d) || 0;
+    if (rw < 3 || rd < 3) return;
+    // a room poking outside grows the glazed annex instead — out there the
+    // exterior wall IS the separation
+    if (Math.max(ry + rd - D, -ry, rx + rw - W, -rx) > 1.5) return;
+    const t = 0.7;
+    const edges = [
+      { side: 'north', gap: ry, rect: { x: rx, y: ry, w: rw, d: t } },
+      { side: 'south', gap: D - (ry + rd), rect: { x: rx, y: ry + rd - t, w: rw, d: t } },
+      { side: 'west', gap: rx, rect: { x: rx, y: ry, w: t, d: rd } },
+      { side: 'east', gap: W - (rx + rw), rect: { x: rx + rw - t, y: ry, w: t, d: rd } }
+    ];
+    edges.forEach(({ side, gap, rect }) => {
+      if (gap <= 2) return; // against (or near) the shell — the shell is the wall
+      // A WALL ONLY COVERS AN EDGE IT RUNS ALONG. This asked for a bounding-box
+      // overlap and nothing else, so the east-west wall across the greenhouse's
+      // NORTH edge also counted as covering its EAST edge — they share a corner,
+      // and a corner overlaps. The result: the app believed there was a wall
+      // between Daniel's greenhouse and his entry, drew none, and the two ran
+      // together as one space. An edge that runs north-south needs a wall that
+      // runs north-south.
+      const edgeIsHoriz = side === 'north' || side === 'south';
+      const covered = (spec.elements || []).some((e) => {
+        if (e.category !== 'partition') return false;
+        const ew = Number(e.w) || 0; const ed = Number(e.d) || 0;
+        if (edgeIsHoriz ? ew < ed : ed < ew) return false; // runs the wrong way
+        return Number(e.x) < rect.x + rect.w + 0.75 && Number(e.x) + ew > rect.x - 0.75
+          && Number(e.y) < rect.y + rect.d + 0.75 && Number(e.y) + ed > rect.y - 0.75;
+      });
+      if (covered) return;
+      const along = (side === 'north' || side === 'south') ? rect.w : rect.d;
+      out.push({
+        id: room.id, // tapping the wall selects its room
+        // a room can grow one of these per free edge — the render key must be
+        // unique per WALL or React sees duplicate 'greenhouse' keys and may
+        // drop/duplicate children (planView keys on synKey || id)
+        synKey: `${room.id}::swall-${side}`,
+        synthetic: true,
+        name: `${room.name || 'Greenhouse'} wall`,
+        category: 'partition', construction: 'cob', level: 1,
+        ...rect, h: 0,
+        doorWFt: 3, doorAtFt: Math.max(0.5, along / 2 - 1.5)
+      });
+    });
+  });
+  return out;
+}
+
 export function detectIssues(spec) {
   const issues = [];
 
@@ -3418,7 +3930,34 @@ export function detectIssues(spec) {
     // A rectangle shell that only covers PART of the ground floor: indoor
     // rooms left standing outside the walls (a chat/trace often sets the
     // shell to the two-storey core and strands the single-storey spaces).
+    // AN ATTACHED GREENHOUSE IS NOT A STRAY ROOM. Daniel: "the S wall of the
+    // house should be the N wall of the greenhouse." A sunspace hung on the
+    // outside of a wall is the whole point of a sunspace — it stands out
+    // there deliberately, the house's own wall closes it, and the app builds
+    // its glazed annex precisely because it pokes past. Telling him to "grow
+    // the walls to take it in" would destroy the thing he is building.
+    // It counts as attached when one of its edges sits ON a shell wall.
+    // A BUMPOUT IS DELIBERATE; A STRAY IS AN ACCIDENT. The difference is
+    // whether the room sits cleanly OUTSIDE with one edge flush on a shell
+    // wall — a greenhouse hung on the south, an entry foyer beside it — or
+    // straddles the wall / floats in the yard, which is how a room gets left
+    // behind when the shell is resized. Daniel: "there should be no 1st floor
+    // bumpout other than the greenhouse and the little entry foyer next to
+    // it." Those two are the shape of the house, not a mistake in it.
+    const attachedAnnex = (room) => {
+      const W = Number(spec.shell.widthFt) || 0; const D = Number(spec.shell.depthFt) || 0;
+      const x0 = Number(room.x) || 0; const y0 = Number(room.y) || 0;
+      const x1 = x0 + (Number(room.w) || 0); const y1 = y0 + (Number(room.d) || 0);
+      const t = 1.0;
+      const flush = Math.abs(y0 - D) < t || Math.abs(y1) < t || Math.abs(x0 - W) < t || Math.abs(x1) < t;
+      if (!flush) return false;
+      // …and clear of the house: no meaningful overlap with the footprint.
+      const ox = Math.max(0, Math.min(x1, W) - Math.max(x0, 0));
+      const oz = Math.max(0, Math.min(y1, D) - Math.max(y0, 0));
+      return ox * oz < 0.1 * Math.max(0.01, (x1 - x0) * (y1 - y0));
+    };
     const strays = spec.rooms.filter((room) => Number(room.level || 1) === 1 && !OUTDOOR_SPACE_TYPES.has(room.type)
+      && !attachedAnnex(room)
       && (room.x < -0.5 || room.y < -0.5 || room.x + room.w > spec.shell.widthFt + 0.5 || room.y + room.d > spec.shell.depthFt + 0.5));
     if (strays.length) {
       issues.push({ severity: 'critical', title: strays.length === 1 ? `${strays[0].name} sits outside the walls` : `${strays.length} ground-floor rooms sit outside the walls`, owner: 'Architect', system: 'shell', fixId: 'enclose-rooms', fix: 'The shell only covers part of the ground floor. Grow the walls to take these rooms in — an upper storey can still cover just the core: resize its Storey extent (2nd-floor group in the selector, or drag it on the 2nd-floor Plan), and the roof steps down over the rest.' });
@@ -3498,17 +4037,28 @@ export function detectIssues(spec) {
   if (basementBedroom) {
     issues.push({ severity: 'critical', title: `${basementBedroom.name} is a basement bedroom — egress required`, owner: 'Engineer', system: 'rooms', fix: 'A below-grade sleeping room needs an egress window or a walkout door (minimum clear opening per code). Plan the well or walkout on the downhill side.' });
   }
-  // A stair has real geometry now: enough run for its rise (7.75" risers,
-  // 10" treads). Only judged when it actually climbs somewhere.
-  for (const stairEl of (spec.elements || []).filter((el) => /stair/i.test(el.name || '') && !/ladder/i.test(el.name || ''))) {
+  // The stair's run is DERIVED from its rise now, so "too short for the climb"
+  // can no longer happen — you can't draw a stair that doesn't reach. What can
+  // still go wrong is that the resolved footprint walks out through a wall, or
+  // that the shape you picked is uncomfortable. Both are judged from the same
+  // resolveStair() the plan and the 3D draw from.
+  const stairFootprint = footprintPolygon(spec);
+  for (const stairEl of (spec.elements || []).filter(isStair)) {
     const stairLevel = Number(stairEl.level || 1);
     const climbs = stairLevel === BASEMENT_LEVEL ? basementCheck.present : Number(spec.shell.storeys || 1) > 1;
     if (!climbs) continue;
-    const rise = stairLevel === BASEMENT_LEVEL ? basementCheck.heightFt : Number(spec.shell.wallHeightFt || 10);
-    const run = Math.max(Number(stairEl.w) || 0, Number(stairEl.d) || 0);
-    const neededRun = Math.round(rise / 0.646) * 0.833;
-    if (run < neededRun * 0.85) {
-      issues.push({ severity: 'warning', title: `${stairEl.name} is too short for its ${Math.round(rise)}′ climb`, owner: 'Architect', system: 'rooms', fix: `About ${Math.ceil(neededRun)}′ of run is needed at code-friendly 7¾" risers / 10" treads — stretch the stair in the Plan, or accept a steeper ship-ladder knowingly.` });
+    const st = resolveStair(spec, stairEl);
+    for (const flag of st.flags) {
+      issues.push({ severity: 'warning', title: `${stairEl.name}: ${flag.split('—')[0].trim()}`, owner: 'Architect', system: 'stairs', fix: flag });
+    }
+    if (stairFootprint?.length && !rectInFootprint(stairFootprint, st.bbox)) {
+      issues.push({
+        severity: 'warning',
+        title: `${stairEl.name} runs outside the walls`,
+        owner: 'Architect',
+        system: 'stairs',
+        fix: `Its ${st.label.toLowerCase()} needs ${st.bbox.w.toFixed(1)}′ × ${st.bbox.d.toFixed(1)}′ of floor and part of that lands beyond the footprint. Turn it 90°, switch to a U (the most compact shape), or drag it further in.`
+      });
     }
   }
   if (String(spec.systems?.envelope || '').toLowerCase().includes('natural') && !String(spec.systems?.envelope || '').toLowerCase().includes('rainscreen')) {
@@ -3533,7 +4083,7 @@ export function detectIssues(spec) {
   if (hasStackedSpace
     && !spec.rooms.some((room) => /stair|ladder/i.test(room.name))
     && !(spec.elements || []).some((element) => /stair|ladder/i.test(element.name))) {
-    issues.push({ severity: 'warning', title: 'Upper space has no stair', owner: 'Architect', system: 'rooms', fixId: 'add-stair', fix: 'Add a stair (about 3 × 10 ft plus a landing) — or a ladder for a loft — so the upper floor, loft, or tower is reachable.' });
+    issues.push({ severity: 'warning', title: 'Upper space has no stair', owner: 'Architect', system: 'stairs', fixId: 'add-stair', fix: 'Add a stair (about 3 × 10 ft plus a landing) — or a ladder for a loft — so the upper floor, loft, or tower is reachable. The ＋ Stairs button is in the Storeys chapter.' });
   }
 
   // Ported from the add-on's aiCritic (Appendix S / 75-A style rules).
@@ -3592,6 +4142,321 @@ export function detectIssues(spec) {
   if (naturalApproach && hasSouthGlass && derivedForChecks.winterShadeFrac > 0.33) {
     issues.push({ severity: 'warning', title: `South overhang shades ${Math.round(derivedForChecks.winterShadeFrac * 100)}% of the winter sun`, owner: 'Designer', system: 'roof', fixId: 'reduce-south-overhang', fix: `At your latitude the winter noon sun sits at ${Math.round(derivedForChecks.sunWinterDeg)}° — the ${overhangCheck.south.toFixed(1)} ft south overhang casts that much shadow on your solar glass. Trim it, or raise the south wall.` });
   }
+  // ── STANDARD BUILDING PRACTICES — the encyclopedic sweep over everything
+  // the newer controls can shape: hand-edited frames, custom members, storey
+  // stacks, decks, and per-storey roofs. Every freedom the app grants gets a
+  // practice that judges it — plain-language, rule-of-thumb numbers, always
+  // "confirm with your engineer/inspector" territory, never a hard stop.
+  const floorsPr = floorCount(spec);
+  const shellPr = spec.shell || {};
+  // 1. Hand-removed skeleton pieces: something must still carry their load.
+  const removedPr = (spec.frame?.removedMembers || []).length;
+  if (removedPr > 0) {
+    issues.push({ severity: removedPr > 3 ? 'critical' : 'warning', title: `${removedPr} piece${removedPr === 1 ? '' : 's'} removed from the frame skeleton`, owner: 'Engineer', system: 'frame', fix: 'Every removed post or beam carried something. Make sure a wall, your own post, or a beam takes over its load — or bring the pieces back (Frame chapter → “Bring back all removed pieces”).' });
+  }
+  // 1b. THE HEAVIEST THING IN THE HOUSE STANDS ON SOMETHING. A masonry heater
+  // with its bench is measured in TONS, not pounds — a Temp-Cast core, its
+  // facing and a mass bench land somewhere between 2 and 5 of them, all of it
+  // on a footprint the size of a small table. That load has to reach the
+  // ground through something that was designed to carry it: a thickened,
+  // reinforced patch of slab, or its own footing under a raised floor. A
+  // normal floor deck will not do it, and neither will 4 inches of unthickened
+  // slab. This is the one thing every masonry-heater build gets asked about
+  // and the app had no way to say it or to draw it.
+  const massHeat = ['masonry', 'rocket_mass'].includes(utilitiesOf(spec).heatSource);
+  const heaterEls = (spec.elements || []).filter((el) => el.kind === 'heater'
+    || (/(masonry|rocket|mass)\s*(heater|stove|bench)?|heater core|bake oven/i.test(String(el.name || '')) && el.category !== 'foundation'));
+  if (massHeat && heaterEls.length) {
+    const pads = (spec.elements || []).filter((el) => el.category === 'foundation');
+    for (const heat of heaterEls) {
+      const hx = Number(heat.x) || 0; const hy = Number(heat.y) || 0;
+      const hw = Number(heat.w) || 0; const hd = Number(heat.d) || 0;
+      const lvl = Number(heat.level || 1);
+      if (lvl > 1) {
+        issues.push({
+          severity: 'critical',
+          title: `${heat.name || 'The masonry heater'} stands on an upper floor`,
+          owner: 'Engineer', system: 'foundation',
+          fix: 'Several tons on a floor deck is an engineered detail, not a choice you can make on a plan — it needs posts or a bearing wall carrying the load straight down to a footing. Move it to the ground floor, or have an engineer design what holds it up.'
+        });
+        continue;
+      }
+      // Covered = a foundation pad that reaches past the heater on every side.
+      const covered = pads.some((p) => {
+        const px = Number(p.x) || 0; const py = Number(p.y) || 0;
+        return px <= hx + 0.1 && py <= hy + 0.1
+          && px + (Number(p.w) || 0) >= hx + hw - 0.1
+          && py + (Number(p.d) || 0) >= hy + hd - 0.1;
+      });
+      if (!covered) {
+        issues.push({
+          severity: 'warning',
+          title: `${heat.name || 'The heater'} has no footing under it`,
+          owner: 'Engineer', system: 'foundation',
+          fixId: 'heater-footing', elementId: heat.id,
+          fix: 'A masonry heater and its bench weigh a few tons on a small patch of floor. Give it its own reinforced pad, sized a foot past the heater on every side and carried down to undisturbed ground — the Foundation chapter can drop one, or use the button below.'
+        });
+      }
+    }
+  }
+  // 1b-ii. A BUFFER WITH NOTHING BETWEEN IT AND THE HOUSE IS NOT A BUFFER.
+  // The whole point of an unheated greenhouse or entry airlock is that a real
+  // wall — with a door you close — stands between it and the warm rooms. Open
+  // to the house, it is simply a cold corner of the living space dragging the
+  // whole house down, and it earns you nothing.
+  for (const room of (spec.rooms || []).filter((r) => resolveRoomEnvelope(r) === 'buffer' && Number(r.level || 1) === 1)) {
+    const rx = Number(room.x) || 0; const ry = Number(room.y) || 0;
+    const rw = Math.max(0, Number(room.w) || 0); const rd = Math.max(0, Number(room.d) || 0);
+    const walled = (spec.elements || []).some((el) => el.category === 'partition'
+      && Number(el.x) < rx + rw + 1 && Number(el.x) + Number(el.w) > rx - 1
+      && Number(el.y) < ry + rd + 1 && Number(el.y) + Number(el.d) > ry - 1);
+    if (walled) continue;
+    // A buffer hung on the OUTSIDE of the house needs no partition: the wall
+    // between it and the warm rooms is the house's own exterior wall. That is
+    // the whole shape of an attached greenhouse — its north wall IS the
+    // house's south wall — and demanding an interior wall as well would be
+    // asking for a wall that has no business existing.
+    {
+      const W = Number(spec.shell.widthFt) || 0; const D = Number(spec.shell.depthFt) || 0;
+      const t = 1.0;
+      const onAShellWall = Math.abs(ry - D) < t || Math.abs(ry + rd) < t
+        || Math.abs(rx - W) < t || Math.abs(rx + rw) < t;
+      const outside = ry + rd > D + 0.5 || ry < -0.5 || rx + rw > W + 0.5 || rx < -0.5;
+      if (outside && onAShellWall) continue;
+    }
+    issues.push({
+      severity: 'warning',
+      title: `${room.name || 'This buffer room'} has no wall between it and the house`,
+      owner: 'Natural Builder', system: 'rooms',
+      fix: 'It is set as an unheated buffer, but nothing separates it from the warm rooms — so it is really just a cold end of the living space, and the house pays to heat it. Put a wall with a door on the side facing the house (Rooms → "＋ Interior wall"), or set it back to "Inside the warm house" on its card.'
+    });
+  }
+  // 1c. THE SUMMER, WHICH NOTHING USED TO ASK ABOUT. Every check above this
+  // point is about a cold night. A house this well insulated is just as good
+  // at holding heat IN in July, and the same south glass that pays for itself
+  // in January is a liability in a heat wave if nothing was designed for it.
+  const th = derivedForChecks.thermal;
+  if (th) {
+    // East and west glass is the one that cannot be fixed with a roof. The
+    // sun is twenty degrees up when it lands on those walls; it walks straight
+    // in under any overhang. This is the single most useful thing the app can
+    // say about summer, and it could not say it at all.
+    const ewShaded = (th.shadeSummer.east + th.shadeSummer.west) / 2;
+    if (th.eastWestGlass > 80 && ewShaded < 0.3) {
+      issues.push({
+        severity: th.eastWestGlass > 250 ? 'critical' : 'warning',
+        title: `${Math.round(th.eastWestGlass)} sf of east and west glass with nothing shading it`,
+        owner: 'Natural Builder', system: 'windows', fixId: 'shade-east-west',
+        fix: 'Morning and evening sun comes in almost level — no roof overhang can stop it, which is why east and west glass overheats a house and south glass does not. Plant a deciduous tree, grow a trellis, or hang a retractable awning on those walls (Systems → Summer & cooling), or move some of that glass round to the south.'
+      });
+    }
+    // Glass against mass. Bale walls insulate wonderfully and store nothing;
+    // if the mass is not there, the heat the glass gathers has nowhere to go
+    // but into the air, and straight back out at 3am.
+    if (Number.isFinite(th.winterSwingF) && th.winterSwingF > 8) {
+      issues.push({
+        severity: th.winterSwingF > 16 ? 'critical' : 'warning',
+        title: `A sunny winter day swings this house about ${Math.round(th.winterSwingF)}°F`,
+        owner: 'Natural Builder', system: 'walls',
+        fix: `The glass gathers roughly ${Math.round(th.winterGainBtu / 1000)}k BTU on a clear day and there is only ${Math.round(th.thermalMassBtuF).toLocaleString()} BTU/°F of mass to hold it, so it goes into the air and leaves overnight. More mass inside the insulation is the fix — an earthen floor or slab, a cob wall in the sun's path, a bigger heater bench. Insulation is not mass; bale walls do nothing for this.`
+      });
+    } else if (!Number.isFinite(th.winterSwingF) && th.winterGainBtu > 20000) {
+      issues.push({
+        severity: 'warning', title: 'Sun coming in, and no mass at all to hold it',
+        owner: 'Natural Builder', system: 'walls',
+        fix: 'There is nothing in this design that stores heat — no slab, no earthen wall, no masonry heater. Every bit of sun that comes through the glass heats the air and is gone by morning.'
+      });
+    }
+    // Overheating in summer: gain plus the household, against the mass, with
+    // whatever venting the house can actually do.
+    if (Number.isFinite(th.summerSwingF) && th.summerSwingF > 12 && !th.nightFlushOk) {
+      issues.push({
+        severity: 'warning',
+        title: 'Nothing here cools the house in summer',
+        owner: 'Natural Builder', system: 'windows', fixId: 'summer-cooling',
+        fix: `A hot clear day puts about ${Math.round(th.summerLoadBtu / 1000)}k BTU into this house and there is no way to get it back out: the windows that open are too few or all on one side, and there is no fan. Cross-ventilation (openable windows on opposite walls) plus a cool night is the whole cooling strategy in this climate.`
+      });
+    }
+    if (!th.crossVents && th.operableGlass > 0) {
+      issues.push({
+        severity: 'warning', title: 'No cross-ventilation — the windows are all on one side',
+        owner: 'Architect', system: 'windows',
+        fix: 'Air needs a way in and a way out. Openable windows on opposite walls let a breeze cross the house and flush the day\'s heat on a cool night; windows on one side only stir the same air around.'
+      });
+    }
+    // The comparison nobody was making: heater against load.
+    if (th.heatCoverage !== null && th.heatCoverage < 1) {
+      issues.push({
+        severity: th.heatCoverage < 0.7 ? 'critical' : 'warning',
+        title: `The ${HEAT_SOURCES[resolveHeatSource(derivedForChecks.utilities.heatSource)].label.toLowerCase()} is smaller than this house's coldest night`,
+        owner: 'Engineer', system: 'heat',
+        fix: `This house needs about ${derivedForChecks.heatLoadKbtu.toFixed(0)} thousand BTU an hour when it is 0°F out, and that heat source sustains roughly ${th.heatOutputKbtu}. Tighten the envelope, add a second heat source for the coldest weeks, or accept that a cold snap means a cooler house.`
+      });
+    }
+    // An attached greenhouse is a buffer in January and an oven in July —
+    // which one depends entirely on whether it can vent its heat and be shut
+    // off from the house. Neither is a detail you can leave to later.
+    const plantRooms = (spec.rooms || []).filter((room) => room.type === 'plant');
+    for (const gh of plantRooms) {
+      // Which wall the greenhouse leans on, and the stretch of it the
+      // greenhouse occupies — an opening only counts as THIS room's vent if it
+      // sits in that stretch, not merely somewhere on the house.
+      const ghX = Number(gh.x) || 0; const ghY = Number(gh.y) || 0;
+      const ghW = Number(gh.w) || 0; const ghD = Number(gh.d) || 0;
+      const shellW = Number(spec.shell.widthFt) || 0; const shellD = Number(spec.shell.depthFt) || 0;
+      const nearest = [
+        { side: 'south', gap: Math.abs(shellD - (ghY + ghD)), from: ghX, to: ghX + ghW },
+        { side: 'north', gap: Math.abs(ghY), from: ghX, to: ghX + ghW },
+        { side: 'east', gap: Math.abs(shellW - (ghX + ghW)), from: ghY, to: ghY + ghD },
+        { side: 'west', gap: Math.abs(ghX), from: ghY, to: ghY + ghD }
+      ].sort((a, b) => a.gap - b.gap)[0];
+      // Openings store their run along the wall as x (north/south) or y
+      // (east/west) — positionFt is the OP's field name, not the stored one,
+      // and reading it here quietly put every opening at position 0.
+      const inSpan = (o) => {
+        if (o.wall !== nearest.side) return false;
+        const horizWall = nearest.side === 'north' || nearest.side === 'south';
+        const at = Number(horizWall ? o.x : o.y);
+        if (!Number.isFinite(at)) return false;
+        return at >= nearest.from - 2 && at <= nearest.to + 2;
+      };
+      const ghGlass = (spec.openings || []).some((o) => inSpan(o));
+      // High vent: hot air leaves at the top or it does not leave.
+      const highVent = (spec.openings || []).some((o) => (o.wall === 'roof')
+        || (['clerestory', 'awning'].includes(o.type) && inSpan(o)));
+      const shutOff = (spec.elements || []).some((el) => el.category === 'partition'
+        && Number(el.x) < ghX + ghW + 1 && Number(el.x) + Number(el.w) > ghX - 1
+        && Number(el.y) < ghY + ghD + 1 && Number(el.y) + Number(el.d) > ghY - 1);
+      if (ghGlass && (!highVent || !shutOff)) {
+        issues.push({
+          severity: 'warning',
+          title: `${gh.name || 'The greenhouse'}: ${!highVent && !shutOff ? 'no way to vent it, no way to shut it off' : !highVent ? 'no high vent to let the heat out' : 'no wall between it and the house'}`,
+          owner: 'Natural Builder', system: 'rooms',
+          fix: 'An attached greenhouse only works both ways if it can dump its heat and be closed off. It wants an opening high up (a clerestory, an awning window, or a roof vent) to let hot air out in July, and a real wall with a door so you can shut it away on a January night instead of letting it drain the house.'
+        });
+      }
+    }
+  }
+  // 2. Bent/bay spacing beyond timber norms.
+  const frameKeyPr = resolveFrameType(spec, 1);
+  const bayPr = Number(spec.frame?.baySpacingFt) || 8;
+  if (frameKeyPr !== 'load-bearing' && bayPr > 12) {
+    issues.push({ severity: 'warning', title: `Post bays are ${bayPr}′ apart — beyond common timber practice`, owner: 'Engineer', system: 'frame', fix: 'Timber bents usually stand 8–12 ft apart; wider bays need engineered beams. Tighten the bay spacing on the Frame page, or plan for heavier timbers with an engineer.' });
+  }
+  // 3. Two storeys of load-bearing natural wall: beyond the usual envelope.
+  const naturalGroundPr = WALL_SIDES.some((side) => { const r = resolveWallSide(spec, side); return !r.omitted && ['straw-bale', 'cob', 'cordwood', 'light-straw-clay'].includes(r.assemblyKey); });
+  if (frameKeyPr === 'load-bearing' && naturalGroundPr && floorsPr >= 3) {
+    issues.push({ severity: 'warning', title: 'Three storeys on load-bearing natural walls', owner: 'Engineer', system: 'frame', fix: 'Load-bearing bale/cob practice is one to two storeys. Three wants a structural frame carrying the floors, with the natural wall as enclosure — pick a frame on the Frame page.' });
+  }
+  // 4. Hand-placed members: spans and slenderness.
+  (spec.elements || []).forEach((el) => {
+    if (el.category === 'beam') {
+      const span = Math.max(Number(el.w) || 0, Number(el.d) || 0);
+      if (span > 16) issues.push({ severity: 'warning', title: `${el.name || 'A beam'} spans ${Math.round(span)}′ — beyond common timber spans`, owner: 'Engineer', system: 'frame', fix: 'Solid timber beams commonly span 12–16 ft. Add a post under the middle (Frame page → ＋ Post), or plan an engineered beam.' });
+    }
+    if (el.category === 'post') {
+      const hP = Number(el.h) || 0; const wP = Math.min(Number(el.w) || 0.7, Number(el.d) || 0.7);
+      if (wP > 0 && hP / wP > 30) issues.push({ severity: 'warning', title: `${el.name || 'A post'} is very slender (${Math.round(hP)}′ tall on ${(wP * 12).toFixed(0)}″)`, owner: 'Engineer', system: 'frame', fix: 'A free-standing post beyond ~30:1 height-to-width wants bracing or a fatter section. Shorten it, thicken it, or brace it into the frame.' });
+    }
+  });
+  // 5. Habitable storey heights.
+  for (let lv = 1; lv <= floorsPr; lv += 1) {
+    const hLv = storeyHeightFt(shellPr, lv);
+    if (hLv < 7) issues.push({ severity: 'warning', title: `${lv === 1 ? 'The ground floor' : `Storey ${lv}`} is only ${Math.round(hLv * 10) / 10}′ floor-to-floor`, owner: 'Architect', system: 'shell', fix: 'Habitable rooms want about 7 ft of clear ceiling after the floor build-up. Raise this storey in the Storeys view (drag its top edge).' });
+  }
+  // 6. An upper storey overhanging its support.
+  for (let lv = 3; lv <= floorsPr; lv += 1) {
+    const pU = upperPlateRect(spec, lv); const pB = upperPlateRect(spec, lv - 1);
+    if (!pU || !pB) continue;
+    const over = Math.max(pB.x - pU.x, pB.y - pU.y, (pU.x + pU.w) - (pB.x + pB.w), (pU.y + pU.d) - (pB.y + pB.d), 0);
+    if (over > 2) issues.push({ severity: 'warning', title: `Storey ${lv} overhangs the floor below by ${Math.round(over * 10) / 10}′`, owner: 'Engineer', system: 'shell', fix: 'A floor cantilevering more than ~2 ft past its support needs engineered framing. Slide the storey back over the one below (Storeys view), or put posts under the overhang (Frame page → ＋ Post).' });
+  }
+  // 7. Decks: railings above 30″, and a way down.
+  (spec.elements || []).filter((el) => el.category === 'deck').forEach((el) => {
+    const dk = resolveDeck(spec, el);
+    if (dk.topFt >= 2.5 && dk.railKey === 'none') {
+      issues.push({ severity: 'critical', title: `${el.name || 'A deck'} stands ${Math.round(dk.topFt * 10) / 10}′ up with no railing`, owner: 'Engineer', system: 'outdoors', fix: 'A walking surface more than 30″ above the ground needs a guard (36″+ railing). Tap the deck and pick a railing.' });
+    }
+    if (dk.topFt >= 1.5 && String(el.deckStairs || 'auto') === 'none') {
+      issues.push({ severity: 'warning', title: `${el.name || 'A deck'} has no steps down`, owner: 'Architect', system: 'outdoors', fix: 'Tap the deck and give its steps an edge — or plan its only door back into the house knowingly.' });
+    }
+  });
+  // 8. Per-storey and attached roofs that won't drain (or are extreme).
+  (spec.elements || []).filter((el) => el.category === 'floor' && Number(el.level || 1) >= 2).forEach((el) => {
+    const tp = Number(el.roofPitch);
+    if (Number.isFinite(tp) && tp > 0 && tp < 0.02) {
+      issues.push({ severity: 'warning', title: `${floorLabel(spec, Number(el.level))}’s own roof is nearly flat`, owner: 'Engineer', system: 'roof', fix: 'Give it at least ¼″ per foot of fall (≈ 0.02) so water leaves — set the pitch on that floor’s roof card.' });
+    }
+    if (el.stepBelow === 'roof-top') {
+      // the steepest attached plane = the NARROWEST real step around the
+      // plate (west inset alone false-flagged every east/south step)
+      const p = upperPlateRect(spec, Number(el.level));
+      const wPr = Number(shellPr.widthFt) || 36; const dPr = Number(shellPr.depthFt) || 28;
+      const insets = p ? [p.x, wPr - (p.x + p.w), p.y, dPr - (p.y + p.d)].filter((g) => g > 0.75) : [];
+      if (insets.length) {
+        const runW = Math.min(...insets);
+        const prof2 = roofProfile(shellPr);
+        const rise = (storeyElevationFt(shellPr, Number(el.level)) + storeyHeightFt(shellPr, Number(el.level))) - (prof2.roofType === 'shed' ? Math.min(prof2.westWallHeightFt, prof2.eastWallHeightFt, prof2.southWallHeightFt, prof2.northWallHeightFt) : prof2.highWallHeightFt);
+        const pitchA = runW > 0 ? rise / runW : 0;
+        if (pitchA > 1.05) issues.push({ severity: 'warning', title: 'The attached roof below this storey is steeper than 12:12', owner: 'Engineer', system: 'roof', fix: 'A lean-to steeper than 45° sheds weather well but is hard to build and walk. Widen the step it covers, or lower the storey it attaches to.' });
+      }
+    }
+  });
+  // 9. A greenhouse that is only a floor zone — no glass anywhere. The glass
+  // used to depend on a geometric ACCIDENT (the room poking >1.5 ft past a
+  // wall grew the annex); when the house deepened, the greenhouse silently
+  // un-built — Daniel "kept losing the greenhouse". It can still un-build
+  // (geometry is geometry), but never silently: this flags it, with a
+  // one-tap remedy (glaze the face it sits against) wired in the flags card.
+  {
+    const widthPr = Number(shellPr.widthFt) || 36;
+    const depthPr = Number(shellPr.depthFt) || 28;
+    (spec.rooms || []).filter((room) => room.type === 'plant' && Number(room.level || 1) === 1).forEach((room) => {
+      const rx = Number(room.x) || 0; const ry = Number(room.y) || 0;
+      const rw = Number(room.w) || 0; const rd = Number(room.d) || 0;
+      const pokes = Math.max(ry + rd - depthPr, -ry, rx + rw - widthPr, -rx) > 1.5;
+      const covered = (spec.elements || []).some((e) => e.category === 'greenhouse'
+        && e.x < rx + rw && e.x + e.w > rx && e.y < ry + rd && e.y + e.d > ry);
+      const glazedNear = WALL_SIDES.some((side) => {
+        const r = resolveWallSide(spec, side);
+        if (!r.sunGlazing || r.omitted) return false;
+        const gap = side === 'south' ? depthPr - (ry + rd) : side === 'north' ? ry : side === 'east' ? widthPr - (rx + rw) : rx;
+        return gap < 4;
+      });
+      // …and the glass this app's OWN remedy builds: a greenhouse opening in
+      // the wall the room sits against, over the room's own stretch of it.
+      // The check never looked for one, so pressing "glaze the greenhouse"
+      // added the glass and left the warning standing — the remedy could not
+      // clear its own flag, which is exactly how an app teaches you not to
+      // trust it.
+      const nearSide = [
+        { side: 'south', gap: depthPr - (ry + rd), from: rx, to: rx + rw, horiz: true },
+        { side: 'north', gap: ry, from: rx, to: rx + rw, horiz: true },
+        { side: 'east', gap: widthPr - (rx + rw), from: ry, to: ry + rd, horiz: false },
+        { side: 'west', gap: rx, from: ry, to: ry + rd, horiz: false }
+      ].sort((a, b) => a.gap - b.gap)[0];
+      const glazedOpening = (spec.openings || []).some((o) => {
+        if (o.type !== 'greenhouse' || o.wall !== nearSide.side) return false;
+        const at = Number(nearSide.horiz ? o.x : o.y);
+        if (!Number.isFinite(at)) return false;
+        const end = at + (Number(o.widthFt) || 0);
+        return end > nearSide.from - 2 && at < nearSide.to + 2;
+      });
+      if (!pokes && !covered && !glazedNear && !glazedOpening) {
+        issues.push({ severity: 'warning', title: `${room.name || 'The greenhouse'} has no glass — it’s only a floor zone right now`, owner: 'Natural Builder', system: 'walls', fixId: 'greenhouse-glass', roomId: room.id, fix: 'A greenhouse needs a glazed face. One tap below slides the room past the south wall so its own kneewall + slanted glass build over just its stretch — the house wall behind it keeps its own system and weather face.' });
+      }
+    });
+  }
+  // 10. Wide openings in load-bearing natural walls need real lintels.
+  (spec.openings || []).forEach((opening) => {
+    if (opening.wall === 'roof') return;
+    const r = resolveWallSide(spec, opening.wall, Number(opening.level || 1));
+    const wide = Number(opening.widthFt) || 0;
+    if (!r.omitted && ['straw-bale', 'cob', 'cordwood', 'light-straw-clay'].includes(r.assemblyKey) && frameKeyPr === 'load-bearing' && wide > 6) {
+      issues.push({ severity: 'warning', title: `A ${Math.round(wide)}′ opening in the load-bearing ${opening.wall} wall`, owner: 'Engineer', system: 'windows', fix: 'Openings over ~6 ft in a load-bearing natural wall need an engineered lintel or a post each side. Narrow it, split it in two, or add posts (Frame page → ＋ Post).' });
+    }
+  });
+
   if (issues.length === 0) {
     issues.push({ severity: 'pass', title: 'Schematic passes current council checks', owner: 'Project Manager', fix: 'Ready for PE/architect review, structural sizing, jurisdictional code check, and stamped drawing development.' });
   }
@@ -3658,7 +4523,8 @@ export function convertSpecApproach(spec, target) {
   return next;
 }
 
-export function deriveDesign(spec, wallSections) {
+export function deriveDesign(spec, wallSectionsParam) {
+  const wallSections = wallSectionsParam || getWallSections(spec);
   const site = siteOf(spec);
   const utilities = utilitiesOf(spec);
   const w = Number(spec.shell.widthFt) || 0;
@@ -3693,7 +4559,14 @@ export function deriveDesign(spec, wallSections) {
   const basementRoomArea = basement.present
     ? spec.rooms.filter((room) => Number(room.level || 1) === BASEMENT_LEVEL).reduce((sum, room) => sum + room.w * room.d, 0)
     : 0;
-  const heatedFloor = floor + upperFloorArea + loftTowerArea + (basementHeated ? basementRoomArea : 0);
+  // BUFFER ROOMS COME OUT OF THE WARM FLOOR. A greenhouse and an entry airlock
+  // are enclosed, but nobody heats them — counting them as living space made
+  // the heated floor (and everything that leans on it) too big by their whole
+  // area. See ROOM_ENVELOPES in bim-core.
+  const bufferRooms = (spec.rooms || []).filter((room) => resolveRoomEnvelope(room) === 'buffer');
+  const bufferArea = bufferRooms.reduce((sum, room) => sum + Math.max(0, Number(room.w) || 0) * Math.max(0, Number(room.d) || 0), 0);
+  const heatedFloorRaw = floor + upperFloorArea + loftTowerArea + (basementHeated ? basementRoomArea : 0);
+  const heatedFloor = Math.max(1, heatedFloorRaw - bufferArea);
   const pitch = Number(spec.shell.roofPitch || 0.32);
   const overhangs = resolveOverhangs(spec.shell);
   const roofFootprint = roundFp
@@ -3788,6 +4661,25 @@ export function deriveDesign(spec, wallSections) {
     const area = ((side === 'north' || side === 'south' ? w : d) - 1) * (gapH / Math.cos(tilt * Math.PI / 180));
     return { side, tilt, area, glass: area * 0.9 };
   }).filter(Boolean);
+  // Sun-glazed SECTIONS: on a side that is NOT glazed whole, a split wall's
+  // glazed segment contributes its own band — its run, its kneewall (the
+  // section's resolved heightFt), its tilt. The side-level path above stays
+  // byte-identical for existing designs.
+  if (hasSegmentedFootprint(spec)) {
+    footprintEdges(spec).forEach((edge) => {
+      const rSide = resolveWallSide(spec, edge.facing);
+      if (rSide.sunGlazing) return; // whole side already counted above
+      const rSeg = resolveWallSide(spec, edge.facing, 1, edge.key);
+      if (!rSeg.sunGlazing || rSeg.omitted) return;
+      const gapH = Math.max(0, eaveForBand - rSeg.heightFt);
+      if (gapH < 1.5) return;
+      const tilt = clamp(Number(rSeg.sunGlazingTiltDeg ?? 30), 0, 45);
+      const run = Math.max(0, edge.lengthFt - 1);
+      if (run < 2) return;
+      const area = run * (gapH / Math.cos(tilt * Math.PI / 180));
+      sunBands.push({ side: edge.facing, tilt, area, glass: area * 0.9 });
+    });
+  }
   const southBandGlass = sunBands.filter((b) => b.side === 'south').reduce((sum, b) => sum + b.glass * (1 + Math.min(0.3, b.tilt / 100)), 0);
   const nonSouthBandGlass = sunBands.filter((b) => b.side !== 'south').reduce((sum, b) => sum + b.glass, 0);
   const bandFrameArea = sunBands.reduce((sum, b) => sum + b.area, 0);
@@ -3830,14 +4722,263 @@ export function deriveDesign(spec, wallSections) {
   const floorR = INSULATION_TYPES[floorInsulKey].r;
   // Ground-coupled floors lose less than their full area — a 0.5 factor.
   const floorLoss = (floor / Math.max(floorR, 3)) * 0.5;
-  const heatUA = Math.max(0, opaqueWallArea - southOpeningGlass) / Math.max(wallR, 1)
+  // A BUFFER MOVES THE THERMAL BOUNDARY INWARD. The heated box no longer
+  // reaches the outside wall where a greenhouse or an entry stands in front of
+  // it: that stretch of shell now encloses the buffer, and what the warm rooms
+  // actually lose through is the WALL BETWEEN them and it. That wall sees only
+  // part of the outdoor temperature difference, because the buffer sits
+  // somewhere between inside and out — the standard half-factor.
+  // A buffer with no wall between it and the house is not a buffer at all; the
+  // flag says so, and until it exists nothing is subtracted here.
+  const groundBuffers = bufferRooms.filter((room) => Number(room.level || 1) === 1);
+  const bufferBoundary = groundBuffers.reduce((acc, room) => {
+    const rx = Number(room.x) || 0; const ry = Number(room.y) || 0;
+    const rw = Math.max(0, Number(room.w) || 0); const rd = Math.max(0, Number(room.d) || 0);
+    const tol = 1.0;
+    const shellW = Number(spec.shell.widthFt) || 0;
+    const shellD = Number(spec.shell.depthFt) || 0;
+    // Which of this room's four edges lie on the shell (facing weather), and
+    // which face the rest of the house.
+    const edges = [
+      { len: rw, outside: ry <= tol },                 // its north edge
+      { len: rw, outside: ry + rd >= shellD - tol },   // its south edge
+      { len: rd, outside: rx <= tol },                 // its west edge
+      { len: rd, outside: rx + rw >= shellW - tol }    // its east edge
+    ];
+    const wallH = Math.max(1, Number(spec.shell.wallHeightFt) || 10);
+    // Does a real partition stand between this room and the house? Without one
+    // the "buffer" is just part of the same air, and nothing is gained.
+    const walled = (spec.elements || []).some((el) => el.category === 'partition'
+      && Number(el.x) < rx + rw + 1 && Number(el.x) + Number(el.w) > rx - 1
+      && Number(el.y) < ry + rd + 1 && Number(el.y) + Number(el.d) > ry - 1);
+    if (!walled) return acc;
+    acc.shellFace += edges.filter((e) => e.outside).reduce((s, e) => s + e.len, 0) * wallH;
+    acc.innerFace += edges.filter((e) => !e.outside).reduce((s, e) => s + e.len, 0) * wallH;
+    return acc;
+  }, { shellFace: 0, innerFace: 0 });
+  const partitionR = 6; // a framed interior wall, insulated or not — modest either way
+  const bufferUAdelta = bufferBoundary.shellFace > 0
+    ? -(bufferBoundary.shellFace / Math.max(wallR, 1)) + (bufferBoundary.innerFace / partitionR) * 0.5
+    : 0;
+  const heatUA = Math.max(0, Math.max(0, opaqueWallArea - southOpeningGlass) / Math.max(wallR, 1)
     + Math.max(0, roofArea - skylightArea) / roofR
     + floorLoss
-    + (southGlass + skylightArea + nonSouthBandGlass + (glazedWallArea - glazedSouthWallArea) * GLAZED_WALL_GLASS_FRAC) * glazingU;
+    + (southGlass + skylightArea + nonSouthBandGlass + (glazedWallArea - glazedSouthWallArea) * GLAZED_WALL_GLASS_FRAC) * glazingU
+    + bufferUAdelta);
   const heatLoadKbtu = (heatUA * 70) / 1000;
 
   const bedrooms = Math.max(1, spec.rooms.filter((room) => room.type === 'sleeping').length);
   const people = bedrooms + 1;
+
+  // ---- THE OTHER HALF OF THE YEAR ------------------------------------------
+  // Everything above this line is about keeping heat IN. This block is about
+  // the summer, the swing, and whether the heat source can actually meet the
+  // load — three questions the app had no answer to. It thought about heating
+  // and never once about cooling.
+  //
+  // Every number here is a planning figure. They are for comparing choices —
+  // "does a trellis on the west beat triple glazing" — not for sizing
+  // equipment. The point is that the questions stop being invisible.
+
+  // 1. GLASS, BY THE WAY IT FACES. One total was hiding the whole story: south
+  // glass and west glass do opposite things in July.
+  const glassByFace = { south: 0, east: 0, west: 0, north: 0, roof: 0 };
+  const operableByFace = { south: 0, east: 0, west: 0, north: 0, roof: 0 };
+  for (const opening of (spec.openings || [])) {
+    const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
+    if (!profile.glazed) continue;
+    const face = profile.roof || opening.wall === 'roof' ? 'roof' : opening.wall;
+    if (!(face in glassByFace)) continue;
+    const area = face === 'roof'
+      ? (Number(opening.widthFt) || 2.5) ** 2
+      : (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1) * (profile.liteFrac ?? 1);
+    glassByFace[face] += area;
+    // A picture window is a hole you cannot open — it gains heat in July and
+    // gives you no way to let it back out at night.
+    if (!['picture', 'clerestory', 'bay'].includes(opening.type) && face !== 'roof') operableByFace[face] += area * 0.45;
+  }
+  for (const band of sunBands) if (band.side in glassByFace) glassByFace[band.side] += band.glass;
+  for (const side of WALL_SIDES) {
+    const r = resolveWallSide(spec, side);
+    if (r.assemblyKey === 'glazed' && !r.omitted) {
+      const sect = wallSections.filter((w) => w.side === side && w.assemblyKey === 'glazed');
+      glassByFace[side] += sect.reduce((sum, w) => sum + wallFaceArea(w), 0) * GLAZED_WALL_GLASS_FRAC;
+    }
+  }
+
+  // 2. SHADE, STOREY BY STOREY. The old model asked one question — "what does
+  // the roof overhang do to a window 3 to 7 feet off the ground" — and applied
+  // the answer to the whole house. On a two-storey house that is wrong twice:
+  // the eave is twenty feet up and shades the GROUND floor not at all, while
+  // the upstairs windows it does shade get no credit for it.
+  const shadeDevices = (spec.elements || []).filter((el) => el.category === 'shade' && resolveShadeDevice(el));
+  const overhangBySide = resolveOverhangs(spec.shell);
+  const topStorey = Math.max(1, Number(storeys) || 1);
+  // WHICH SUN TO MEASURE THE OVERHANG AGAINST. The old model used the noon
+  // altitude for every wall, which quietly credited the roof with shading the
+  // east and west windows. It does not. Sun only lands on an east wall in the
+  // morning and a west wall in the evening, and at those hours it is barely
+  // twenty degrees above the horizon — it comes in under any overhang ever
+  // built. That is the whole reason east and west glass overheats a house and
+  // south glass does not, and using one number for all four walls hid it.
+  const altOnFace = (side, season) => {
+    if (side === 'south') return season === 'summer' ? sunSummerDeg : sunWinterDeg;
+    if (side === 'north') return season === 'summer' ? 14 : 0;
+    return season === 'summer' ? 25 : 12; // east and west, when the sun is on them
+  };
+  const shadeFor = (side, level, season) => {
+    const alt = altOnFace(side, season);
+    // The roof eave only hangs over the TOP storey's windows. Below that there
+    // is nothing up there but more wall.
+    let frac = 0;
+    if (Number(level) === topStorey) {
+      const elev = topStorey > 1 ? storeyElevationFt(spec.shell, topStorey) : 0;
+      const eaveTop = elev + Math.max(2, resolveWallSide(spec, side, topStorey).heightFt);
+      const drop = (Number(overhangBySide[side]) || 0) * Math.tan(alt * Math.PI / 180);
+      const head = elev + 7; const sill = elev + 3;
+      frac = clamp((head - (eaveTop - drop)) / (head - sill), 0, 1);
+    }
+    // Anything you built or planted in front of that wall, on that floor.
+    for (const dev of shadeDevices) {
+      const spec2 = resolveShadeDevice(dev);
+      if ((dev.side || 'south') !== side) continue;
+      if (Number(dev.level || 1) !== Number(level)) continue;
+      frac = 1 - (1 - frac) * (1 - (season === 'summer' ? spec2.summer : spec2.winter));
+    }
+    return clamp(frac, 0, 1);
+  };
+  // Glass split by storey so the shading lands on the right windows.
+  const glassByFaceStorey = {};
+  for (const opening of (spec.openings || [])) {
+    const profile = OPENING_TYPES[opening.type] || OPENING_TYPES.window;
+    if (!profile.glazed) continue;
+    const face = profile.roof || opening.wall === 'roof' ? 'roof' : opening.wall;
+    if (!(face in glassByFace)) continue;
+    const lvl = Math.max(1, Number(opening.level || 1));
+    const area = face === 'roof'
+      ? (Number(opening.widthFt) || 2.5) ** 2
+      : (Number(opening.widthFt) || 3) * profile.h * (profile.bay ? 1.25 : 1) * (profile.liteFrac ?? 1);
+    glassByFaceStorey[`${face}:${lvl}`] = (glassByFaceStorey[`${face}:${lvl}`] || 0) + area;
+  }
+  // Whatever wasn't an opening (sun bands, glazed walls) rides on the top storey.
+  for (const face of Object.keys(glassByFace)) {
+    const counted = Object.entries(glassByFaceStorey)
+      .filter(([k]) => k.startsWith(`${face}:`)).reduce((s, [, v]) => s + v, 0);
+    const rest = glassByFace[face] - counted;
+    if (rest > 0.01) glassByFaceStorey[`${face}:${topStorey}`] = (glassByFaceStorey[`${face}:${topStorey}`] || 0) + rest;
+  }
+
+  // 3. WHAT COMES THROUGH, on a clear day, in each season.
+  const shgc = GLASS_SHGC[utilities.windowQuality === 'triple' ? 'triple' : 'double'];
+  const gainOn = (season) => {
+    let total = 0;
+    for (const [key, area] of Object.entries(glassByFaceStorey)) {
+      const [face, lvlStr] = key.split(':');
+      const lvl = Number(lvlStr);
+      const incident = SOLAR_ON_GLASS[season][face] || 0;
+      // A roof window has no wall to shade it and no season that spares it.
+      const shaded = face === 'roof' ? 0 : shadeFor(face, lvl, season);
+      // Only the south face cares which way the house is turned.
+      const aim = face === 'south' ? Math.max(0, solarFactor) : 1;
+      total += area * incident * shgc * (1 - shaded) * aim;
+    }
+    return total;
+  };
+  const winterGainBtu = gainOn('winter');
+  const summerGainBtu = gainOn('summer');
+
+  // 4. MASS: what holds the heat once it is in. Bale walls insulate superbly
+  // and store almost nothing — the two jobs are not the same, and a house with
+  // great glass and no mass is the classic swing: too warm by three, cold by
+  // dawn. Counted in BTU per °F, and ONLY what sits inside the insulation
+  // where the room's air can actually reach it.
+  const massParts = [];
+  // Resolved here rather than borrowed from the cost block below — this block
+  // runs first, and both resolvers are pure functions of the spec.
+  const thermHeatKey = resolveHeatSource(utilities.heatSource);
+  const thermFacingKey = resolveHeaterFacing(spec, thermHeatKey);
+  const heatMass = { masonry: 1400, rocket_mass: 2200, wood_stove: 80, minisplit: 0 }[thermHeatKey] || 0;
+  if (heatMass) massParts.push({ label: `${HEAT_SOURCES[thermHeatKey].label} core`, btuF: heatMass });
+  const facingMass = { soapstone: 900, brick: 700, tile: 400, stucco: 200, lime: 120, cob: 260 }[thermFacingKey] || 0;
+  if (facingMass) massParts.push({ label: `${HEATER_FACINGS[thermFacingKey].label} facing`, btuF: facingMass });
+  // Earthen and masonry partitions: volume × about 25 BTU/°F per cubic foot.
+  const massPartitionBtuF = (spec.elements || []).filter((el) => el.category === 'partition'
+    && ['cob', 'adobe'].includes(el.construction))
+    .reduce((sum, el) => {
+      const runFt = Math.max(Number(el.w) || 0, Number(el.d) || 0);
+      const thick = PARTITION_TYPES[el.construction]?.thicknessFt || 0.7;
+      const hgt = Number(el.h) || Math.max(7, Number(spec.shell.wallHeightFt || 10) - 0.5);
+      return sum + runFt * thick * hgt * 25;
+    }, 0);
+  if (massPartitionBtuF > 0) massParts.push({ label: 'Earthen interior walls', btuF: massPartitionBtuF });
+  // A slab you can feel: only when the floor IS concrete and not carpeted over
+  // by a raised deck. About 10 BTU/°F per square foot for 4 inches.
+  const slabFloor = utilities.foundationType === 'slab';
+  if (slabFloor) massParts.push({ label: 'Concrete floor slab', btuF: floor * 10 });
+  // Earthen plaster on the inside faces of natural walls — thin, but there is
+  // a lot of it. Three quarters of an inch, both faces of the natural walls.
+  const plasterMassBtuF = wallSections
+    .filter((w) => !['framed', 'sips', 'ply-insulated', 'icf', 'glazed'].includes(w.assemblyKey))
+    .reduce((sum, w) => sum + wallFaceArea(w) * (0.75 / 12) * 25, 0);
+  if (plasterMassBtuF > 0) massParts.push({ label: 'Earthen plaster, inside faces', btuF: plasterMassBtuF });
+  const thermalMassBtuF = massParts.reduce((sum, p) => sum + p.btuF, 0);
+
+  // 5. THE SWING. Heat that arrives and cannot be stored has to go somewhere,
+  // and where it goes is into the air — fast. Surplus over the day's own heat
+  // loss, divided by the mass, is roughly how far the room temperature moves.
+  // Under about 8°F is comfortable; past 15°F you are opening windows in
+  // January, which means you paid for the glass and threw the heat away.
+  const winterDayLossBtu = heatUA * 40 * 10; // ~40°F difference across 10 daylight hours
+  const winterSurplusBtu = Math.max(0, winterGainBtu - winterDayLossBtu);
+  const winterSwingF = thermalMassBtuF > 0 ? winterSurplusBtu / thermalMassBtuF : Infinity;
+  // Summer: gain plus the household's own heat, with no heat loss to speak of.
+  const internalGainBtu = people * 350 * 16 + 8000;
+  const summerLoadBtu = summerGainBtu + internalGainBtu;
+  const summerSwingF = thermalMassBtuF > 0 ? summerLoadBtu / thermalMassBtuF : Infinity;
+
+  // 6. LETTING IT BACK OUT. A house that cannot cross-ventilate cannot use a
+  // cool night, and a cool night is the whole cooling strategy in this climate.
+  const opposedNS = Math.min(operableByFace.north, operableByFace.south);
+  const opposedEW = Math.min(operableByFace.east, operableByFace.west);
+  const crossVents = opposedNS > 3 || opposedEW > 3;
+  const operableGlass = Object.values(operableByFace).reduce((sum, v) => sum + v, 0);
+  // Rule of thumb: openable area worth about 4% of the floor lets a house
+  // flush itself overnight. A whole-house fan does the job on a still night.
+  const ventRatio = floor > 0 ? operableGlass / heatedFloor : 0;
+  const wholeHouseFan = Boolean(utilities.wholeHouseFan);
+  const nightFlushOk = (crossVents && ventRatio >= 0.04) || wholeHouseFan;
+
+  // 7. CAN THE HEATER ACTUALLY DO IT. The comparison the app never made.
+  const heatOut = HEAT_OUTPUT[thermHeatKey] || null;
+  const heatCoverage = heatOut && heatLoadKbtu > 0 ? heatOut.outputKbtu / heatLoadKbtu : null;
+
+  const thermal = {
+    glassByFace,
+    glassByFaceStorey,
+    operableByFace,
+    operableGlass,
+    ventRatio,
+    crossVents,
+    wholeHouseFan,
+    nightFlushOk,
+    eastWestGlass: glassByFace.east + glassByFace.west,
+    shadeSummer: { south: shadeFor('south', topStorey, 'summer'), east: shadeFor('east', topStorey, 'summer'), west: shadeFor('west', topStorey, 'summer') },
+    shadeGround: topStorey > 1
+      ? { south: shadeFor('south', 1, 'summer'), east: shadeFor('east', 1, 'summer'), west: shadeFor('west', 1, 'summer') }
+      : null,
+    devices: shadeDevices.map((el) => ({ id: el.id, name: el.name, side: el.side || 'south', level: Number(el.level || 1), kind: el.kind })),
+    winterGainBtu,
+    summerGainBtu,
+    summerLoadBtu,
+    internalGainBtu,
+    thermalMassBtuF,
+    massParts,
+    winterSwingF,
+    summerSwingF,
+    heatOutputKbtu: heatOut ? heatOut.outputKbtu : null,
+    heatCoverage,
+    topStorey
+  };
 
   // Water: what you use vs what the source can give (gal/day).
   const waterGpd = people * 50;
@@ -3860,7 +5001,6 @@ export function deriveDesign(spec, wallSections) {
   const batteryKwh = Number(utilities.batteryOverrideKwh) > 0 ? Number(utilities.batteryOverrideKwh) : autoBattery;
 
   // Costs (add-on constants, keyed to the structured utility choices).
-  const heatCostBySource = { rocket_mass: 2500, masonry: 6000, wood_stove: 3000, minisplit: 4500 };
   const waterCostBySource = { well: 7500, spring: 2500, catchment: 3500, town: 1500 };
   const wasteCostByMethod = { septic: 8500, composting: 1500, reedbed: 1200 };
   const foundationCostPsf = { rubble: 8, stemwall: 12, slab: 15 };
@@ -3968,6 +5108,12 @@ export function deriveDesign(spec, wallSections) {
     + [...deckBuckets.rail.values()].reduce((s, b) => s + b.lf * b.rate, 0)
     + [...deckBuckets.roof.values()].reduce((s, b) => s + b.area * b.rate, 0)
     + deckStepsCost;
+  // Shade you build or plant — awnings, a trellis, a tree. They are outdoor
+  // pieces and they price like outdoor pieces, but they earn their line here
+  // by changing the summer numbers, which nothing else in this budget does.
+  const shadeEls = (spec.elements || []).filter((el) => el.category === 'shade' && resolveShadeDevice(el));
+  const shadeCost = shadeEls.reduce((sum, el) => sum + (resolveShadeDevice(el)?.cost || 0), 0);
+  const shadeCarbon = shadeEls.reduce((sum, el) => sum + (resolveShadeDevice(el)?.carbon || 0), 0);
   const outdoorCost = OUTDOOR_ITEMS.reduce((sum, item) => {
     if (!outdoorItemPresent(spec, item)) return sum;
     if (item.key === 'greenhouse') {
@@ -3976,7 +5122,7 @@ export function deriveDesign(spec, wallSections) {
         .reduce((s, element) => s + Math.max(24, (Number(element.w) || item.w) * (Number(element.d) || item.d)) * greenhouseCostSf, 0);
     }
     return sum + item.cost;
-  }, 0) + outbuildingCost + canopyCost + deckCost;
+  }, 0) + outbuildingCost + canopyCost + deckCost + shadeCost;
 
   // Floor assembly = finished floor over the whole heated area + the structural
   // subfloor deck under the ground floor (a slab foundation is its own deck, so
@@ -3985,13 +5131,18 @@ export function deriveDesign(spec, wallSections) {
   const subfloorKey = resolveSubfloor(spec);
   const subfloorCost = floor * (SUBFLOOR_TYPES[subfloorKey]?.costPsf ?? 0);
   const subfloorCarbon = floor * (SUBFLOOR_TYPES[subfloorKey]?.carbonPsf ?? 0);
-  const flooringCostRaw = heatedFloor * (FLOORING_TYPES[flooringKey]?.costPsf ?? 4);
-  const flooringCarbonRaw = heatedFloor * (FLOORING_TYPES[flooringKey]?.carbonPsf ?? 2);
+  // Floor is priced over EVERY enclosed floor, buffer rooms included — a
+  // greenhouse has a floor whether or not you heat it. heatedFloor is the
+  // thermal number and must not be used to buy materials.
+  const flooringCostRaw = heatedFloorRaw * (FLOORING_TYPES[flooringKey]?.costPsf ?? 4);
+  const flooringCarbonRaw = heatedFloorRaw * (FLOORING_TYPES[flooringKey]?.carbonPsf ?? 2);
 
   // Frame (structure): framing quantity ≈ perimeter × wall height, split ground
   // vs. upper storeys so each can run a different frame. A load-bearing wall has
   // no separate frame (cost 0). Reclaimed timber cuts cost + carbon sharply.
   const reclaimed = reclaimedOf(spec);
+  const sourcing = sourcingOf(spec);
+  const srcFac = (system, kind) => sourceFactor(sourcing, system, kind);
   const groundFrameKey = resolveFrameType(spec, 1);
   const upperFrameKey = resolveFrameType(spec, 2);
   // The sun-glazing bands are CARRIED BY THE FRAME — their slant area joins
@@ -4002,7 +5153,7 @@ export function deriveDesign(spec, wallSections) {
   const upperFrameArea = upperPerimeterFt * storeyExtraFt;
   const frameCostRaw = groundFrameArea * (FRAME_TYPES[groundFrameKey]?.costPsf ?? 0) + upperFrameArea * (FRAME_TYPES[upperFrameKey]?.costPsf ?? 0);
   const frameCarbonRaw = groundFrameArea * (FRAME_TYPES[groundFrameKey]?.carbonPsf ?? 0) + upperFrameArea * (FRAME_TYPES[upperFrameKey]?.carbonPsf ?? 0);
-  const frameCost = frameCostRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.cost : 1);
+  const frameCost = frameCostRaw * srcFac('frame', 'cost');
 
   const wallsCostRaw = wallsCost;
   const windowsCostRaw = totalGlass * (utilities.windowQuality === 'triple' ? 70 : 45);
@@ -4014,17 +5165,66 @@ export function deriveDesign(spec, wallSections) {
   const downspoutCost = drainage.downspouts * DOWNSPOUT_COST;
   const dischargeCost = drainage.gutters !== 'none' ? (drainage.dischargeSpec?.cost || 0) : 0;
   const drainageCost = gutterCost + downspoutCost + dischargeCost;
-  const roofCostRaw = roofArea * 10 + roofInsulCost + drainageCost;
+  // What covers the roof drives its price and its carbon — metal, cedar, thatch
+  // and a living roof are wildly different. (Was a flat $10/sf for everything.)
+  const roofCover = resolveRoofCovering(spec.shell);
+  const roofCostRaw = roofArea * roofCover.costPsf + roofInsulCost + drainageCost;
+  // Everything you place inside and around the house — fixtures, built-ins,
+  // appliances, furniture, outdoor pieces — priced from the catalog. (The heater
+  // carries 0 here: cost.heat already prices the chosen heat source.)
+  const furnishingEls = (spec.elements || []).filter((el) => el.category === 'furnishing');
+  // Bought used? Each catalog group has its own salvage toggle (Finishes →
+  // "New or salvaged"), and a piece marked used on its own card wins over it.
+  const furnFactor = (f, el, kindOf) => {
+    const own = MATERIAL_SOURCES[el.source] ? el.source
+      : (el.reclaimed === true ? 'salvaged' : (el.reclaimed === false ? 'new' : null));
+    const src = own || sourcing[f.group];
+    return SOURCE_FACTORS[f.group]?.[src]?.[kindOf] ?? 1;
+  };
+  const furnishingsCostRaw = furnishingEls.reduce((sum, el) => sum + (resolveFurnishing(el)?.cost || 0), 0);
+  const furnishingsCost = furnishingEls.reduce((sum, el) => {
+    const f = resolveFurnishing(el); if (!f) return sum;
+    return sum + f.cost * furnFactor(f, el, 'cost');
+  }, 0);
+  const furnishingsCarbon = furnishingEls.reduce((sum, el) => {
+    const f = resolveFurnishing(el); if (!f) return sum;
+    return sum + f.carbon * furnFactor(f, el, 'carbon');
+  }, 0);
+  // The finish floor alone, after sourcing — the deck and its insulation are
+  // bought either way, so they ride outside the factor (and outside the
+  // savings math below, which used to subtract them by mistake).
+  const flooringFinishCost = flooringCostRaw * srcFac('flooring', 'cost');
+  // STAIRS — priced per tread, plus the landing and the railing. Every stair
+  // resolves through the SAME resolveStair the plan and the 3D draw from, so
+  // the receipt counts the steps you can actually see.
+  const heatKey = resolveHeatSource(utilities.heatSource);
+  const heatFacingKey = resolveHeaterFacing(spec, heatKey);
+  const heatFacing = heatFacingKey ? HEATER_FACINGS[heatFacingKey] : null;
+  const heatInstall = HEAT_SOURCES[heatKey].install + (heatFacing?.cost || 0);
+  const stairEls = (spec.elements || []).filter(isStair);
+  const stairBuilds = stairEls.map((el) => {
+    const st = resolveStair(spec, el);
+    const treads = st.treads * st.widthFt * STAIR_COSTS.treadPerFtWidth;
+    const landing = st.landingSf * STAIR_COSTS.landingPsf;
+    const railing = st.railingLf * STAIR_COSTS.railingPerLf;
+    const carbon = st.treads * st.widthFt * STAIR_CARBON.treadPerFtWidth
+      + st.landingSf * STAIR_CARBON.landingPsf + st.railingLf * STAIR_CARBON.railingPerLf;
+    return { el, st, treads, landing, railing, raw: treads + landing + railing, carbon };
+  });
+  const stairsCostRaw = stairBuilds.reduce((sum, b) => sum + b.raw, 0);
+  const stairsCarbonRaw = stairBuilds.reduce((sum, b) => sum + b.carbon, 0);
   const cost = {
+    furnishings: furnishingsCost,
     foundation: foundationCostBase + foundationRunCost,
     frame: frameCost,
-    flooring: flooringCostRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.cost : 1) + subfloorCost + floorInsulCost,
+    flooring: flooringFinishCost + subfloorCost + floorInsulCost,
     upperFloors: (upperFloorArea + loftTowerArea) * 12,
+    stairs: stairsCostRaw * srcFac('stairs', 'cost'),
     outdoors: outdoorCost,
-    walls: wallsCostRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.cost : 1),
-    windows: windowsCostRaw * (reclaimed.windows ? RECLAIMED_FACTORS.windows.cost : 1),
-    roof: roofCostRaw * (reclaimed.roof ? RECLAIMED_FACTORS.roof.cost : 1),
-    heat: heatCostBySource[utilities.heatSource] ?? 3000,
+    walls: wallsCostRaw * srcFac('walls', 'cost'),
+    windows: windowsCostRaw * srcFac('windows', 'cost'),
+    roof: roofCostRaw * srcFac('roof', 'cost'),
+    heat: HEAT_SOURCES[heatKey].kit + heatInstall,
     water: (waterCostBySource[utilities.waterSource] ?? 5000) + (Number(utilities.tankGal) || 0) * 1.5,
     waste: wasteCostByMethod[utilities.wasteMethod] ?? 5000,
     power: utilities.powerMode === 'gridtie' ? 4200 : panels * 900 + batteryKwh * 500 + 3000
@@ -4041,7 +5241,9 @@ export function deriveDesign(spec, wallSections) {
 
   const sweat = (utilities.diyWalls ? cost.walls * sweatWallsFrac : 0)
     + (utilities.diyRoof ? cost.roof * sweatRoofFrac : 0)
-    + (utilities.diyHeat ? cost.heat * sweatHeatFrac : 0)
+    // Sweat only touches the INSTALL half — the kit is a purchase order, not a
+    // weekend. (This used to discount the appliance itself by 45%.)
+    + (utilities.diyHeat ? heatInstall * sweatHeatFrac : 0)
     + (utilities.diyFoundation ? cost.foundation * sweatFoundationFrac : 0)
     + (utilities.diyFrame ? cost.frame * sweatFrameFrac : 0);
   const total = totalBeforeSweat - sweat;
@@ -4050,32 +5252,42 @@ export function deriveDesign(spec, wallSections) {
   const foundationCarbonPsf = { rubble: 10, stemwall: 18, slab: 25 };
   const wallCarbonPsf = { 'straw-bale': 6, 'rammed-earth': 20, cob: 8, 'hemp-lime': 4, cordwood: 8, 'light-straw-clay': 7, framed: 8, sips: 14, 'ply-insulated': 9, icf: 26, glazed: 15 };
   const wallCarbonRaw = wallSections.reduce((sum, wall) => sum + wallFaceArea(wall) * (wallCarbonPsf[wall.assemblyKey] ?? 8), 0) + partitionCarbon + claddingCarbon;
-  const wallCarbon = wallCarbonRaw * (reclaimed.walls ? RECLAIMED_FACTORS.walls.carbon : 1);
-  const frameCarbon = frameCarbonRaw * (reclaimed.frame ? RECLAIMED_FACTORS.frame.carbon : 1);
+  const wallCarbon = wallCarbonRaw * srcFac('walls', 'carbon');
+  const frameCarbon = frameCarbonRaw * srcFac('frame', 'carbon');
   const drainageCarbon = drainage.gutterLf * GUTTER_CARBON_LF + (drainage.gutters !== 'none' ? (drainage.dischargeSpec?.carbon || 0) : 0);
-  const roofCarbonRaw = roofArea * (12 + INSULATION_TYPES[roofInsulKey].carbonPsf) + drainageCarbon;
-  const roofCarbon = roofCarbonRaw * (reclaimed.roof ? RECLAIMED_FACTORS.roof.carbon : 1);
-  const flooringCarbon = flooringCarbonRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.carbon : 1) + subfloorCarbon + floor * INSULATION_TYPES[floorInsulKey].carbonPsf;
+  const roofCarbonRaw = roofArea * (roofCover.carbonPsf + INSULATION_TYPES[roofInsulKey].carbonPsf) + drainageCarbon;
+  const roofCarbon = roofCarbonRaw * srcFac('roof', 'carbon');
+  const flooringFinishCarbon = flooringCarbonRaw * srcFac('flooring', 'carbon');
+  const flooringCarbon = flooringFinishCarbon + subfloorCarbon + floor * INSULATION_TYPES[floorInsulKey].carbonPsf;
   const stemCarbonExtra = utilities.foundationType === 'stemwall' ? perimeterFt * Math.max(0, stemwallHeightFt - 1.5) * 40 : 0;
   // Basement concrete is carbon-heavy: wall face area + slab replace the
   // regular foundation's coefficient while present.
   const foundationCarbon = basement.present
     ? perimeterFt * basement.heightFt * 16 + floor * 12
     : (utilities.foundationType === 'slab' ? mainSlabArea : floor) * (foundationCarbonPsf[utilities.foundationType] ?? 10) + stemCarbonExtra;
-  const carbonKg = foundationCarbon + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + deckCarbon + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
+  const stairsCarbon = stairsCarbonRaw * srcFac('stairs', 'carbon');
+  // shadeCarbon can be NEGATIVE — a planted tree is the one line in this whole
+  // model that takes carbon back out of the air instead of putting it in.
+  const carbonKg = foundationCarbon + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + deckCarbon + furnishingsCarbon + stairsCarbon + shadeCarbon + (heatFacing?.carbon || 0) + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
-  // What the reclaimed choices saved vs. buying everything new.
-  const reclaimedSavings = {
-    cost: (reclaimed.frame ? frameCostRaw - frameCost : 0)
-      + (reclaimed.walls ? wallsCostRaw - cost.walls : 0)
-      + (reclaimed.flooring ? flooringCostRaw - cost.flooring : 0)
-      + (reclaimed.windows ? windowsCostRaw - cost.windows : 0)
-      + (reclaimed.roof ? roofCostRaw - cost.roof : 0),
-    carbon: (reclaimed.frame ? frameCarbonRaw - frameCarbon : 0)
-      + (reclaimed.walls ? wallCarbonRaw - wallCarbon : 0)
-      + (reclaimed.flooring ? flooringCarbonRaw - flooringCarbon : 0)
-      + (reclaimed.roof ? roofCarbonRaw - roofCarbon : 0),
-    count: Object.values(reclaimed).filter(Boolean).length
+  // What the sourcing choices saved vs. buying every system new — salvage and
+  // local milling both land here.
+  const furnishingsCarbonRaw = furnishingEls.reduce((sum, el) => sum + (resolveFurnishing(el)?.carbon || 0), 0);
+  const sourcingSavings = {
+    cost: (frameCostRaw - frameCost)
+      + (wallsCostRaw - cost.walls)
+      + (flooringCostRaw - flooringFinishCost)
+      + (windowsCostRaw - cost.windows)
+      + (roofCostRaw - cost.roof)
+      + (furnishingsCostRaw - furnishingsCost),
+    carbon: (frameCarbonRaw - frameCarbon)
+      + (wallCarbonRaw - wallCarbon)
+      + (flooringCarbonRaw - flooringFinishCarbon)
+      + (roofCarbonRaw - roofCarbon)
+      + (furnishingsCarbonRaw - furnishingsCarbon),
+    count: SOURCING_SYSTEMS.filter((system) => sourcing[system] !== 'new').length,
+    milled: SOURCING_SYSTEMS.filter((system) => sourcing[system] === 'milled').length,
+    salvaged: SOURCING_SYSTEMS.filter((system) => sourcing[system] === 'salvaged').length
   };
 
   // ---- Receipts: the itemized math behind every cost line -------------------
@@ -4119,15 +5331,29 @@ export function deriveDesign(spec, wallSections) {
     const uRate = FRAME_TYPES[upperFrameKey]?.costPsf ?? 0;
     if (groundFrameArea > 0) lines.push(rline(`Ground frame — ${FRAME_TYPES[groundFrameKey]?.label || groundFrameKey}`, groundFrameArea * gRate, groundFrameArea, 'sf of frame plane', gRate, gRate === 0 ? 'load-bearing walls carry the roof themselves — no separate frame to buy' : 'perimeter × wall height' + (bandFrameArea > 0 ? ' + sun-glazing bands' : '')));
     if (upperFrameArea > 0) lines.push(rline(`Upper frame — ${FRAME_TYPES[upperFrameKey]?.label || upperFrameKey}`, upperFrameArea * uRate, upperFrameArea, 'sf of frame plane', uRate));
-    if (reclaimed.frame && frameCostRaw > 0) lines.push(rline('Reclaimed timber', -(frameCostRaw - frameCost), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.frame.cost * 100)}% of the new-material price`));
+    if (sourcing.frame !== 'new' && frameCostRaw > 0) lines.push(rline(`${MATERIAL_SOURCES[sourcing.frame].label} timber`, -(frameCostRaw - frameCost), null, '', null, `you pay ${Math.round(srcFac('frame', 'cost') * 100)}% of the new-material price`));
     costReceipts.frame = lines;
+  }
+  { // stairs — one block of lines per stair, counted in real treads
+    const lines = [];
+    for (const b of stairBuilds) {
+      const name = b.el.name || 'Stairs';
+      lines.push(rline(`${name} — ${b.st.treads} treads at ${b.st.widthFt.toFixed(1)}′ wide`, b.treads, b.st.treads, 'treads', b.st.widthFt * STAIR_COSTS.treadPerFtWidth, `${b.st.risers} risers at ${b.st.riserIn.toFixed(1)}″ for a ${b.st.rise.toFixed(1)}′ climb`));
+      if (b.landing > 0) lines.push(rline(`${name} — landing`, b.landing, b.st.landingSf, 'sf', STAIR_COSTS.landingPsf, `the turn in a ${b.st.label.toLowerCase()}`));
+      if (b.railing > 0) lines.push(rline(`${name} — railing`, b.railing, b.st.railingLf, 'lf', STAIR_COSTS.railingPerLf, 'guard along the open side'));
+    }
+    if (sourcing.stairs !== 'new' && stairsCostRaw > 0) {
+      lines.push(rline(`${MATERIAL_SOURCES[sourcing.stairs].label} stair timber`, -(stairsCostRaw - cost.stairs), null, '', null, `you pay ${Math.round(srcFac('stairs', 'cost') * 100)}% of new — a stair is mostly the cutting, so this discount is shallow on purpose`));
+    }
+    costReceipts.stairs = lines;
   }
   { // flooring
     const lines = [];
     const fRate = FLOORING_TYPES[flooringKey]?.costPsf ?? 4;
-    const finishFinal = flooringCostRaw * (reclaimed.flooring ? RECLAIMED_FACTORS.flooring.cost : 1);
-    lines.push(rline(`Finish floor — ${FLOORING_TYPES[flooringKey]?.label || flooringKey}`, flooringCostRaw, heatedFloor, 'sf of heated floor', fRate));
-    if (reclaimed.flooring) lines.push(rline('Reclaimed boards', -(flooringCostRaw - finishFinal), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.flooring.cost * 100)}% of new`));
+    lines.push(rline(`Finish floor — ${FLOORING_TYPES[flooringKey]?.label || flooringKey}`, flooringCostRaw, heatedFloorRaw, 'sf of finished floor', fRate));
+    if (sourcing.flooring !== 'new') lines.push(rline(`${MATERIAL_SOURCES[sourcing.flooring].label} boards`, -(flooringCostRaw - flooringFinishCost), null, '', null, sourcing.flooring === 'milled'
+      ? `sawing instead of buying — you pay ${Math.round(srcFac('flooring', 'cost') * 100)}% of the lumberyard price, and supply the drying time`
+      : `you pay ${Math.round(srcFac('flooring', 'cost') * 100)}% of new`));
     if (subfloorCost > 0) lines.push(rline(`Subfloor — ${SUBFLOOR_TYPES[subfloorKey]?.label || subfloorKey}`, subfloorCost, floor, 'sf of deck', SUBFLOOR_TYPES[subfloorKey]?.costPsf ?? 0));
     if (floorInsulCost > 0) lines.push(rline(`Floor insulation — ${INSULATION_TYPES[floorInsulKey]?.label || floorInsulKey}`, floorInsulCost, floor, 'sf of floor', INSULATION_TYPES[floorInsulKey].costPsf));
     costReceipts.flooring = lines;
@@ -4135,6 +5361,51 @@ export function deriveDesign(spec, wallSections) {
   { // upper floors
     const area = upperFloorArea + loftTowerArea;
     costReceipts.upperFloors = area > 0 ? [rline('Upper floor decks', area * 12, area, 'sf of deck', 12, 'joists + deck between storeys')] : [];
+  }
+  { // furnishings — one line per kind of thing placed in the design
+    // Everything here is a piece you put in the plan: fixtures, built-ins,
+    // appliances, furniture, outdoor pieces. Lines carry the NEW price and the
+    // discount lands once at the bottom, so the saving is a number you can see
+    // rather than a quiet rebate buried in each item.
+    const groupLabelOf = (f) => ((FURNISHING_GROUPS.find((g) => g.key === f.group) || {}).label || f.group).toLowerCase();
+    const byKind = new Map();
+    for (const el of furnishingEls) {
+      const f = resolveFurnishing(el);
+      if (!f) continue;
+      byKind.set(f.key, { f, n: (byKind.get(f.key)?.n || 0) + 1 });
+    }
+    const lines = [];
+    for (const { f, n } of byKind.values()) {
+      if (!(f.cost > 0)) {
+        // Priced somewhere else (the heater rides with the heat system). Say so
+        // rather than dropping the row — a piece that is in the plan and costs
+        // nothing here needs to explain itself.
+        lines.push(rline(f.label, 0, null, '', null, f.note || `${groupLabelOf(f)} — priced with another system, not here`));
+      } else if (n > 1) {
+        lines.push(rline(f.label, n * f.cost, n, 'in the design', f.cost, groupLabelOf(f), true));
+      } else {
+        lines.push(rline(f.label, f.cost, null, '', null, groupLabelOf(f)));
+      }
+    }
+    const furnSaved = furnishingsCostRaw - furnishingsCost;
+    if (Math.abs(furnSaved) > 0.005) {
+      // Name which categories are actually discounted — a single piece marked
+      // used on its own card counts here exactly like a whole category set to
+      // salvaged, because that is how the price was worked out.
+      const kinds = new Map();
+      for (const el of furnishingEls) {
+        const f = resolveFurnishing(el);
+        if (!f || !(f.cost > 0)) continue;
+        const own = MATERIAL_SOURCES[el.source] ? el.source
+          : (el.reclaimed === true ? 'salvaged' : (el.reclaimed === false ? 'new' : null));
+        const src = own || sourcing[f.group];
+        if (!src || src === 'new' || !SOURCE_FACTORS[f.group]?.[src]) continue;
+        kinds.set(`${f.group}:${src}`, `${MATERIAL_SOURCES[src].short} ${groupLabelOf(f)}`);
+      }
+      lines.push(rline('Bought used or built yourself', -furnSaved, null, '', null,
+        kinds.size ? `${[...kinds.values()].join(', ')} — off the new price` : 'off the new price'));
+    }
+    costReceipts.furnishings = lines;
   }
   { // outdoors
     const lines = [];
@@ -4161,6 +5432,18 @@ export function deriveDesign(spec, wallSections) {
       lines.push(rline(`Deck roof — ${b.label.split(' —')[0].toLowerCase()}`, b.area * b.rate, b.area, 'sf covered', b.rate, 'posts and a light metal roof over the deck'));
     }
     if (deckStepsCount > 0) lines.push(rline('Deck steps', deckStepsCost, deckStepsCount, deckStepsCount === 1 ? 'stair' : 'stairs', null, 'each run priced by its climb — deck to ground, or deck to deck between levels', true));
+    // Shade, by kind — the cheapest thing in this budget that changes how the
+    // house feels in August.
+    const shadeKinds = new Map();
+    for (const el of shadeEls) {
+      const s = resolveShadeDevice(el);
+      shadeKinds.set(s.key, { s, n: (shadeKinds.get(s.key)?.n || 0) + 1 });
+    }
+    for (const { s, n } of shadeKinds.values()) {
+      lines.push(n > 1
+        ? rline(s.label, n * s.cost, n, 'on the house', s.cost, `shades about ${Math.round(s.summer * 100)}% of that glass in summer`, true)
+        : rline(s.label, s.cost, null, '', null, `shades about ${Math.round(s.summer * 100)}% of that glass in summer, ${Math.round(s.winter * 100)}% in winter`));
+    }
     costReceipts.outdoors = lines;
   }
   { // walls
@@ -4174,13 +5457,13 @@ export function deriveDesign(spec, wallSections) {
     }
     if (partitionCost > 0) lines.push(rline('Interior partitions', partitionCost, null, '', null, 'length × height × the partition rate'));
     if (claddingCost > 0) lines.push(rline('Exterior cladding', claddingCost, null, '', null, 'face area × the cladding rate (render is already in the wall price)'));
-    if (reclaimed.walls) lines.push(rline('Reclaimed wall materials', -(wallsCostRaw - cost.walls), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.walls.cost * 100)}% of new`));
+    if (sourcing.walls !== 'new') lines.push(rline(`${MATERIAL_SOURCES[sourcing.walls].label} wall materials`, -(wallsCostRaw - cost.walls), null, '', null, `you pay ${Math.round(srcFac('walls', 'cost') * 100)}% of new`));
     costReceipts.walls = lines;
   }
   { // windows
     const rate = utilities.windowQuality === 'triple' ? 70 : 45;
     const lines = [rline(`Glazing — ${utilities.windowQuality === 'triple' ? 'triple' : 'double'} pane`, windowsCostRaw, totalGlass, 'sf of glass', rate, 'every window, glazed door, skylight, and sun band')];
-    if (reclaimed.windows) lines.push(rline('Reclaimed windows', -(windowsCostRaw - cost.windows), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.windows.cost * 100)}% of new`));
+    if (sourcing.windows !== 'new') lines.push(rline(`${MATERIAL_SOURCES[sourcing.windows].label} windows`, -(windowsCostRaw - cost.windows), null, '', null, `you pay ${Math.round(srcFac('windows', 'cost') * 100)}% of new`));
     costReceipts.windows = lines;
   }
   { // roof
@@ -4191,12 +5474,17 @@ export function deriveDesign(spec, wallSections) {
     if (gutterCost > 0) lines.push(rline('Gutters', gutterCost, drainage.gutterLf, 'ft of eave', GUTTER_COST_LF));
     if (downspoutCost > 0) lines.push(rline('Downspouts', downspoutCost, drainage.downspouts, 'downspouts', DOWNSPOUT_COST, '', true));
     if (dischargeCost > 0) lines.push(rline(`Runoff — ${drainage.dischargeSpec.label}`, dischargeCost, null, '', null, drainage.dischargeSpec.note));
-    if (reclaimed.roof) lines.push(rline('Reclaimed roofing', -(roofCostRaw - cost.roof), null, '', null, `you pay ${Math.round(RECLAIMED_FACTORS.roof.cost * 100)}% of new`));
+    if (sourcing.roof !== 'new') lines.push(rline(`${MATERIAL_SOURCES[sourcing.roof].label} roofing`, -(roofCostRaw - cost.roof), null, '', null, `you pay ${Math.round(srcFac('roof', 'cost') * 100)}% of new`));
     costReceipts.roof = lines;
   }
   { // heat / water / waste / power
-    const heatNames = { rocket_mass: 'Rocket mass heater', masonry: 'Masonry heater', wood_stove: 'Wood stove', minisplit: 'Mini-split heat pump' };
-    costReceipts.heat = [rline(heatNames[utilities.heatSource] || 'Heat source', heatCostBySource[utilities.heatSource] ?? 3000, null, '', null, 'installed, flat planning figure')];
+    const heatSrc = HEAT_SOURCES[heatKey];
+    costReceipts.heat = [
+      rline(`${heatSrc.label} — ${heatSrc.kitLabel}`, heatSrc.kit, null, '', null,
+        heatSrc.kitNote || (heatSrc.quoted ? 'supplier price' : 'planning figure')),
+      rline('Getting it working', heatSrc.install, null, '', null, heatSrc.installNote)
+    ];
+    if (heatFacing) costReceipts.heat.push(rline(`Facing — ${heatFacing.label}`, heatFacing.cost, null, '', null, heatFacing.note || 'the skin over the core'));
     const waterNames = { well: 'Drilled well', spring: 'Spring development', catchment: 'Roof catchment system', town: 'Town water hookup' };
     const waterLines = [rline(waterNames[utilities.waterSource] || 'Water source', waterCostBySource[utilities.waterSource] ?? 5000)];
     if ((Number(utilities.tankGal) || 0) > 0) waterLines.push(rline('Storage tank', Number(utilities.tankGal) * 1.5, Number(utilities.tankGal), 'gal of storage', 1.5));
@@ -4216,11 +5504,18 @@ export function deriveDesign(spec, wallSections) {
   if (utilities.diyFrame && cost.frame) sweatLines.push(rline('Frame — your own labor', -cost.frame * sweatFrameFrac, null, '', null, `${Math.round(sweatFrameFrac * 100)}% of that line is labor`));
   if (utilities.diyWalls && cost.walls) sweatLines.push(rline('Walls — your own labor', -cost.walls * sweatWallsFrac, null, '', null, `${Math.round(sweatWallsFrac * 100)}% of that line is labor`));
   if (utilities.diyRoof && cost.roof) sweatLines.push(rline('Roof — your own labor', -cost.roof * sweatRoofFrac, null, '', null, `${Math.round(sweatRoofFrac * 100)}% of that line is labor`));
-  if (utilities.diyHeat && cost.heat) sweatLines.push(rline('Heat — your own labor', -cost.heat * sweatHeatFrac, null, '', null, `${Math.round(sweatHeatFrac * 100)}% of that line is labor`));
+  if (utilities.diyHeat && heatInstall) sweatLines.push(rline('Heat — your own labor', -heatInstall * sweatHeatFrac, null, '', null, `${Math.round(sweatHeatFrac * 100)}% of the INSTALL half is labor — the kit itself is a purchase, not a weekend`));
 
   return {
     receipts: { systems: costReceipts, sweat: sweatLines },
-    site, utilities, reclaimed, reclaimedSavings, floor, heatedFloor, storeys, basement, basementRoomArea, basementHeated, roofArea, roofFootprint, overhangs, wallArea, glazedWallArea, wallR, southGlass, glassPct,
+    site, utilities, reclaimed, sourcing, sourcingSavings, floor,
+    // The labour share of each trade you can take on yourself — the Budget
+    // sheet's own switches read these, so what a trade is "worth" on screen is
+    // the same fraction the total is actually computed from.
+    sweatFractions: { sweatWallsFrac, sweatRoofFrac, sweatHeatFrac, sweatFoundationFrac, sweatFrameFrac },
+    // Summer, the swing, and whether the heater covers the load.
+    thermal,
+    heatKey, heatFacingKey, heatKit: HEAT_SOURCES[heatKey].kit, heatInstall, heatedFloor, heatedFloorRaw, bufferArea, bufferRooms: bufferRooms.map((r) => ({ id: r.id, name: r.name, area: Math.round((Number(r.w)||0)*(Number(r.d)||0)) })), storeys, basement, basementRoomArea, basementHeated, roofArea, roofFootprint, overhangs, wallArea, glazedWallArea, wallR, southGlass, glassPct,
     skylightArea, totalGlass, glazingU, stemwallHeightFt, azimuthDeg, solarFactor,
     sunWinterDeg, sunSummerDeg, winterShadeFrac, summerShadeFrac,
     frameGround: groundFrameKey, frameUpper: upperFrameKey, frameArea: groundFrameArea + upperFrameArea,
@@ -4251,6 +5546,12 @@ export const COST_ROWS = [
   { key: 'roof', label: 'Roof', system: 'roof' },
   { key: 'windows', label: 'Windows & doors', system: 'windows' },
   { key: 'upperFloors', label: 'Upper floors', system: 'shell' },
+  { key: 'stairs', label: 'Stairs', system: 'rooms' },
+  // Everything placed inside and around the house. It was missing from this
+  // list for a long while, which meant its money reached the total without
+  // ever showing up as a row — the budget's lines did not add up to its own
+  // bottom line. Every key in `cost` belongs here; receipts_test pins that.
+  { key: 'furnishings', label: 'Fixtures & furniture', system: 'rooms' },
   { key: 'heat', label: 'Heat', system: 'heat' },
   { key: 'water', label: 'Water', system: 'water' },
   { key: 'waste', label: 'Waste', system: 'waste' },
@@ -4306,7 +5607,7 @@ export const SYSTEM_META = {
     reads: (dd) => [
       ['Ground frame', FRAME_TYPES[dd.frameGround]?.label.split(' (')[0] || dd.frameGround, '', ''],
       ...(dd.storeys > 1 ? [['Upper frame', FRAME_TYPES[dd.frameUpper]?.label.split(' (')[0] || dd.frameUpper, '', `${dd.storeys} storeys`]] : []),
-      ['This system', fmtMoney(dd.cost.frame), '', dd.reclaimed.frame ? 'reclaimed timber' : ''],
+      ['This system', fmtMoney(dd.cost.frame), '', dd.sourcing.frame !== 'new' ? `${MATERIAL_SOURCES[dd.sourcing.frame].short} timber` : ''],
       ...(dd.utilities.diyFrame ? [['You save', fmtMoney(dd.cost.frame * 0.6), '', 'raising it yourself']] : [])
     ]
   },
@@ -4316,7 +5617,7 @@ export const SYSTEM_META = {
     feeds: ['Cost'],
     reads: (dd) => [
       ['Subfloor', (SUBFLOOR_TYPES[dd.subfloor]?.label || dd.subfloor).split(' —')[0], '', ''],
-      ['Finish', FLOORING_TYPES[dd.flooring]?.label || dd.flooring, '', dd.reclaimed.flooring ? 'reclaimed' : ''],
+      ['Finish', FLOORING_TYPES[dd.flooring]?.label || dd.flooring, '', dd.sourcing.flooring !== 'new' ? MATERIAL_SOURCES[dd.sourcing.flooring].short : ''],
       ['This system', fmtMoney(dd.cost.flooring), '', `${fmtNum(dd.heatedFloor)} sf`]
     ]
   },
@@ -4482,7 +5783,7 @@ export const PLAN_ELEMENT_HEX = {
   homestead: '#8e7049', landscape: '#6d8c55', storage: '#8a7768', site: '#9a8f70',
   garden: '#5f8d49', animal: '#b0895b', floor: '#8d8473', loft: '#6f7f6a',
   tower: '#7a5f49', outbuilding: '#a08a5f', foundation: '#8f8b80', partition: '#6b6257',
-  chimney: '#9a5944', deck: '#8e7049', custom: '#8b786d'
+  chimney: '#9a5944', deck: '#8e7049', custom: '#8b786d', stair: '#7d6a52'
 };
 
 // 🌿 marks green/natural methods and materials in every options list, with a
@@ -4514,3 +5815,69 @@ export const PLAN_ZONE_HEX = {
 // spec, so editing a thickness / stem height / overhang in the fields beside
 // the drawing redraws the joint. Feet are the SVG unit.
 export const hexOf = (color) => `#${Number(color || 0x8a8a8a).toString(16).padStart(6, '0')}`;
+
+// --- Legacy glass cleanup (update 148) --------------------------------------
+// Five generations of greenhouse design used to coexist: whole-wall glass
+// FACE (sunGlazing), whole-wall glass SYSTEM (glazed assembly), outline-fixed
+// glazed SECTIONS, the room annex, and the greenhouse OPENING. Only the last
+// two remain. This runs on every design as it LOADS: legacy artifacts are
+// removed silently, walls stand back up in the house's solid system, and the
+// glass survives as at most ONE moveable greenhouse opening on the south
+// wall (placed where the south glass actually was). No buttons, no lists.
+export function normalizeLegacyGlass(spec) {
+  if (!spec?.shell) return 0;
+  let cleaned = 0;
+  const counts = {};
+  WALL_SIDES.forEach((s) => {
+    const k = resolveWallSide(spec, s).assemblyKey;
+    if (k !== 'glazed') counts[k] = (counts[k] || 0) + 1;
+  });
+  const solid = (Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || ['straw-bale'])[0];
+  let keep = null; // the one south greenhouse opening the cleanup may leave
+  const W = Number(spec.shell.widthFt) || 36;
+  if (hasSegmentedFootprint(spec) && spec.wallSegments) {
+    footprintEdges(spec).forEach((edge) => {
+      const seg = spec.wallSegments[edge.key];
+      if (!seg || !seg.sunGlazing) return;
+      cleaned += 1;
+      if (edge.facing === 'south' && !keep) {
+        const lo = edge.horizontal ? Math.min(edge.x0, edge.x1) : Math.min(edge.y0, edge.y1);
+        keep = { at: Math.max(0.5, Math.round(lo * 2) / 2), w: Math.min(24, Math.max(3, Math.round(edge.lengthFt * 2) / 2)), tilt: Number(seg.sunGlazingTiltDeg ?? 30) };
+      }
+      delete seg.sunGlazing; delete seg.sunGlazingTiltDeg; delete seg.kneewallFt;
+      if (!Object.keys(seg).length) delete spec.wallSegments[edge.key];
+    });
+    if (spec.wallSegments && !Object.keys(spec.wallSegments).length) delete spec.wallSegments;
+  }
+  WALL_SIDES.forEach((side) => {
+    const w = (spec.walls || {})[side];
+    if (!w) return;
+    if (w.sunGlazing) {
+      cleaned += 1;
+      delete w.sunGlazing; delete w.sunGlazingTiltDeg;
+      // the low wall existed only to carry the glass
+      if (Number(w.heightFt) > 0 && Number(w.heightFt) <= 4) delete w.heightFt;
+      if (side === 'south' && !keep) keep = { at: Math.max(0.5, W / 2 - 9), w: Math.min(24, Math.max(3, W - 2)), tilt: 30 };
+    }
+    if (w.assembly === 'glazed') {
+      cleaned += 1;
+      w.assembly = solid;
+      if (side === 'south' && !keep) keep = { at: Math.max(0.5, W / 2 - 9), w: Math.min(24, Math.max(3, W - 2)), tilt: 30 };
+    }
+    if (!Object.keys(w).length) delete spec.walls[side];
+  });
+  if (keep) {
+    spec.openings = spec.openings || [];
+    const at = Math.min(keep.at, Math.max(0.5, W - keep.w));
+    const clash = spec.openings.some((o) => {
+      if (o.wall !== 'south' || Number(o.level || 1) !== 1) return false;
+      const e0 = Number(o.x ?? 0); const e1 = e0 + (Number(o.widthFt) || 3);
+      return at < e1 - 0.05 && at + keep.w > e0 + 0.05;
+    });
+    const hasGh = spec.openings.some((o) => o.type === 'greenhouse');
+    if (!clash && !hasGh) {
+      spec.openings.push({ type: 'greenhouse', wall: 'south', x: at, widthFt: keep.w, label: 'South Greenhouse — slanted glass', level: 1, tiltDeg: keep.tilt });
+    }
+  }
+  return cleaned;
+}

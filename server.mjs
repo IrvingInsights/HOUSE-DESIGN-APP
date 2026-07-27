@@ -61,6 +61,8 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
   vite.middlewares(req, res);
 });
 

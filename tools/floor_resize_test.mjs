@@ -26,10 +26,13 @@ spec = apply(spec, [{ type: 'add_room', name: 'Loft', category: 'sleeping', w: 1
 const plate0 = plateOf(spec, 2);
 ok(plate0 && plate0.w >= 30, `starting plate is full-ish (${plate0?.w}x${plate0?.d})`);
 
-// --- WITHOUT the room-clamp: resize plate to 14x12 → normalizeRooms snaps it back to cover the 18x16 room.
+// --- A BARE resize_object now pulls the floor's rooms in AT THE OP LAYER
+// (update 137): every door — plan corner drag, Stack view, number boxes —
+// keeps the size the person set. (This case used to assert the OPPOSITE:
+// the snap-back was the proof-of-bug. The bug is dead; pin the cure.)
 const naive = apply(spec, [{ type: 'resize_object', targetId: plateOf(spec, 2).id, name: 'Storey 2 extent', w: 14, d: 12, h: 0.4 }]);
 const naivePlate = plateOf(naive, 2);
-ok(naivePlate.w > 14.5 || naivePlate.d > 12.5, `naive resize snaps back to cover the room (got ${naivePlate.w}x${naivePlate.d}) — proves the bug is real`);
+ok(naivePlate.w <= 14.05 && naivePlate.d <= 12.05, `a bare resize STICKS — the op pulls the rooms in (got ${naivePlate.w}x${naivePlate.d})`);
 
 // --- WITH the room-clamp (what resizeFloor emits): resize plate AND pull the room in to fit → sticks at 14x12.
 const W = 14, D = 12, px = 0, py = 0;

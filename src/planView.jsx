@@ -7,7 +7,11 @@ import {
 import { Grid3X3, Plus } from 'lucide-react';
 import {
   clamp, floorCount, floorLabel, resolveOverhangs, utilitiesOf, resolveWallSide, PLAN_ELEMENT_HEX, planLabelInk,
-  PLAN_ZONE_HEX, hexOf
+  isStair, resolveStair,
+} from './engine.js';
+import { ScaleGrid } from './scaleGrid.jsx';
+import {
+  PLAN_ZONE_HEX, hexOf, sunspacePartitions
 } from './engine.js';
 
 export function JointDetail({ spec, derived, kind, side = 'south', opening = null }) {
@@ -238,8 +242,13 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
       event.preventDefault();
       const point = svg.createSVGPoint();
       point.x = event.clientX; point.y = event.clientY;
-      const user = point.matrixTransform(svg.getScreenCTM().inverse());
-      const factor = event.deltaY > 0 ? 1.18 : 1 / 1.18;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      const user = point.matrixTransform(ctm.inverse());
+      const delta = event.deltaY;
+      const factor = Math.abs(delta) < 40
+        ? Math.pow(1.005, delta)
+        : (delta > 0 ? 1.18 : 1 / 1.18);
       setViewOverride((current) => {
         const cur = current || fitBoxRef.current;
         const w = clamp(cur.w * factor, 8, Math.max(240, fitBoxRef.current.w * 2.5));
@@ -249,7 +258,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
     };
     svg.addEventListener('wheel', onWheel, { passive: false });
     return () => svg.removeEventListener('wheel', onWheel);
-  }, []);
+  });
   function startPan(event) {
     if (event.button !== 0) return;
     try { svgRef.current?.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
@@ -345,9 +354,11 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
       let { x, y, w, d } = o;
       const right = o.x + o.w;
       const bottom = o.y + o.d;
-      // 2-ft floor: a reach-in closet is a real 2-ft-deep room.
-      if (drag.mode.includes('w')) { x = clamp(snap(o.x + dx), right - 60, right - 2); w = right - x; } else if (drag.mode.includes('e')) { w = clamp(snap(o.w + dx), 2, 60); }
-      if (drag.mode.includes('n')) { y = clamp(snap(o.y + dy), bottom - 60, bottom - 2); d = bottom - y; } else if (drag.mode.includes('s')) { d = clamp(snap(o.d + dy), 2, 60); }
+      // 2-ft floor for rooms (a reach-in closet is a real 2-ft-deep room);
+      // interior walls are legitimately thin, so they size down to 6 inches.
+      const minDim = o.category === 'partition' ? 0.5 : 2;
+      if (drag.mode.includes('w')) { x = clamp(snap(o.x + dx), right - 60, right - minDim); w = right - x; } else if (drag.mode.includes('e')) { w = clamp(snap(o.w + dx), minDim, 60); }
+      if (drag.mode.includes('n')) { y = clamp(snap(o.y + dy), bottom - 60, bottom - minDim); d = bottom - y; } else if (drag.mode.includes('s')) { d = clamp(snap(o.d + dy), minDim, 60); }
       ghost = { x, y, w, d };
     }
     setDrag((current) => current && { ...current, ghost });
@@ -509,10 +520,17 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
       >{text}</text>
     );
   };
-  const gridStep = W > 60 ? 10 : 5;
-  const gridLines = [];
-  for (let gx = 0; gx <= W + 0.01; gx += gridStep) gridLines.push(<line key={`gx${gx}`} x1={gx} y1={0} x2={gx} y2={D} stroke="var(--line)" strokeWidth={0.06} opacity={0.5} />);
-  for (let gy = 0; gy <= D + 0.01; gy += gridStep) gridLines.push(<line key={`gy${gy}`} x1={0} y1={gy} x2={W} y2={gy} stroke="var(--line)" strokeWidth={0.06} opacity={0.5} />);
+  // The plan's grid used to stop at the walls, so anything you dragged outside
+  // the house — a deck, an outbuilding, a footing run — sat on blank paper with
+  // nothing to measure it against. It now covers the whole drawn extent, and
+  // it's the same ScaleGrid the wall, storeys and interior views use.
+  const gridLines = (
+    <ScaleGrid
+      xFt={[Math.floor(vb.x), Math.ceil(vb.x + vb.w)]}
+      yFt={[Math.floor(vb.y), Math.ceil(vb.y + vb.h)]}
+      labelSize={Math.max(0.7, vb.w / 90)}
+    />
+  );
 
   // Openings show on their own floor's plan — a 2nd-floor window draws on the
   // 2nd-floor layout, not the ground. (Roof openings are drawn in 3D only.)
@@ -584,7 +602,8 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
         )}
         {buildingContext && onResizeShell && (
           <>
-            <circle cx={shellW} cy={shellD} r={1.1} fill="var(--active-line)" stroke="#fff" strokeWidth={0.18} style={{ cursor: 'se-resize' }} onPointerDown={startShellDrag} />
+            <circle cx={shellW} cy={shellD} r={1.1} fill="transparent" style={{ cursor: 'se-resize' }} onPointerDown={startShellDrag} />
+            <circle cx={shellW} cy={shellD} r={0.42} fill="var(--active-line)" stroke="#fff" strokeWidth={0.12} pointerEvents="none" />
             {shellGhost && <text x={shellW / 2} y={shellD / 2} textAnchor="middle" fontSize={2.4} fill="var(--active-line)" fontWeight="700" pointerEvents="none">{shellW}′ × {shellD}′</text>}
           </>
         )}
@@ -694,14 +713,23 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
               {isSel && ['nw', 'ne', 'sw', 'se'].map((corner) => {
                 const cx = room.x + (corner.includes('e') ? room.w : 0);
                 const cy = room.y + (corner.includes('s') ? room.d : 0);
-                return <circle key={corner} cx={cx} cy={cy} r={0.9} fill="var(--active-line)" stroke="#fff" strokeWidth={0.15} style={{ cursor: `${corner}-resize` }} onPointerDown={(event) => startDrag(event, raw, corner)} />;
+                return (
+                  <g key={corner}>
+                    {/* large invisible grab area — stays easy to grab */}
+                    <circle cx={cx} cy={cy} r={0.9} fill="transparent" style={{ cursor: `${corner}-resize` }} onPointerDown={(event) => startDrag(event, raw, corner)} />
+                    {/* small visible dot — a precise center to line up */}
+                    <circle cx={cx} cy={cy} r={0.35} fill="var(--active-line)" stroke="#fff" strokeWidth={0.1} pointerEvents="none" />
+                  </g>
+                );
               })}
             </g>
           );
         })}
         {/* placed elements (heater, tank, garden, coop, stairs…) — dashed to
             read as objects/fixtures rather than rooms; drag + resize like rooms */}
-        {(spec.elements || []).filter(planLevelFilter).map((raw) => {
+        {/* placed elements PLUS the derived sunspace walls — the same list
+            the 3D consumes, so a greenhouse's wall exists in both or neither */}
+        {[...(spec.elements || []), ...sunspacePartitions(spec)].filter(planLevelFilter).map((raw) => {
           const el = roomAt(raw);
           const isSel = raw.id === selectedRoom;
           const w = Number(el.w) || 4;
@@ -746,12 +774,80 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
               </g>
             );
           }
+          // A stair draws as what it IS — one or two runs with a landing
+          // between, treads ruled across each run, and an arrow showing which
+          // way you climb. Same resolveStair() the checks and the 3D use, so
+          // the drawing can never disagree with the model.
+          if (isStair(raw) && !raw.synthetic) {
+            const st = resolveStair(spec, el);
+            const dim = buildingContext ? 0.3 : 1;
+            return (
+              <g key={raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }} opacity={dim}
+                onPointerDown={(event) => startDrag(event, raw, 'move')}
+                onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}>
+                {st.parts.map((part, index) => (
+                  <rect key={index} x={part.x} y={part.y} width={part.w} height={part.d}
+                    fill={PLAN_ELEMENT_HEX.stair}
+                    fillOpacity={part.kind === 'landing' ? (isSel ? 0.98 : 0.85) : (isSel ? 0.9 : 0.72)}
+                    stroke={isSel ? 'var(--active-line)' : '#5a5348'} strokeWidth={isSel ? 0.4 : 0.22} />
+                ))}
+                {/* tread lines, ruled across the run at the real tread depth */}
+                {st.parts.filter((p) => p.kind === 'run').map((part) => {
+                  const along = part.climb === 'east' || part.climb === 'west';
+                  const n = Math.max(1, part.treads);
+                  return Array.from({ length: n - 1 }, (_, i) => {
+                    const t = (i + 1) / n;
+                    return along
+                      ? <line key={`${part.run}-${i}`} x1={part.x + part.w * t} y1={part.y} x2={part.x + part.w * t} y2={part.y + part.d}
+                        stroke="#f6f4ec" strokeWidth={0.09} opacity={0.75} pointerEvents="none" />
+                      : <line key={`${part.run}-${i}`} x1={part.x} y1={part.y + part.d * t} x2={part.x + part.w} y2={part.y + part.d * t}
+                        stroke="#f6f4ec" strokeWidth={0.09} opacity={0.75} pointerEvents="none" />;
+                  });
+                })}
+                {/* which way is up */}
+                {(() => {
+                  const r1 = st.parts.find((p) => p.kind === 'run');
+                  if (!r1) return null;
+                  const cx = r1.x + r1.w / 2; const cy = r1.y + r1.d / 2;
+                  const deg = { north: 0, east: 90, south: 180, west: 270 }[st.facing] || 0;
+                  return (
+                    <g transform={`translate(${cx} ${cy}) rotate(${deg})`} pointerEvents="none">
+                      <line x1={0} y1={1.1} x2={0} y2={-1.1} stroke="#f6f4ec" strokeWidth={0.16} opacity={0.95} />
+                      <path d="M -0.42 -0.6 L 0 -1.25 L 0.42 -0.6 Z" fill="#f6f4ec" opacity={0.95} />
+                    </g>
+                  );
+                })()}
+                {isSel && (
+                  <text x={st.bbox.x + st.bbox.w / 2} y={st.bbox.y + st.bbox.d + 1.2} textAnchor="middle"
+                    fontSize={0.95} fill="var(--ink)" fontWeight="600" pointerEvents="none">
+                    {st.risers} risers · {st.riserIn.toFixed(1)}″
+                  </text>
+                )}
+                {/* Corner handles, same as every other object. Drawing the stair
+                    as real treads replaced the generic element body — and took
+                    its grab handles with it, so a stair became the one thing on
+                    the plan you could not resize. They pull the stair's WIDTH
+                    (its run length is derived from the climb). */}
+                {isSel && onResize && ['nw', 'ne', 'sw', 'se'].map((corner) => {
+                  const hx = st.bbox.x + (corner.includes('e') ? st.bbox.w : 0);
+                  const hy = st.bbox.y + (corner.includes('s') ? st.bbox.d : 0);
+                  return (
+                    <g key={corner}>
+                      <circle cx={hx} cy={hy} r={0.9} fill="transparent" style={{ cursor: `${corner}-resize` }}
+                        onPointerDown={(event) => startDrag(event, raw, corner)} />
+                      <circle cx={hx} cy={hy} r={0.35} fill="var(--active-line)" stroke="#fff" strokeWidth={0.1} pointerEvents="none" />
+                    </g>
+                  );
+                })}
+              </g>
+            );
+          }
           // In a building context most elements are backdrop — EXCEPT the ones
           // the context is FOR: foundation runs are the subject of the
           // Foundation view (drag them under whatever they carry).
           const isContextSubject = context === 'foundation' && raw.category === 'foundation';
           return (
-            <g key={raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
+            <g key={raw.synKey || raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
               <rect
                 x={el.x} y={el.y} width={w} height={d}
                 fill={PLAN_ELEMENT_HEX[raw.category] || '#8a7768'}
@@ -759,7 +855,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                 stroke={isSel ? 'var(--active-line)' : '#5a5348'}
                 strokeWidth={isSel ? 0.4 : 0.22}
                 strokeDasharray={raw.category === 'partition' ? undefined : '0.8 0.5'}
-                pointerEvents={buildingContext && !isContextSubject ? 'none' : undefined}
+                pointerEvents={raw.synthetic || (buildingContext && !isContextSubject) ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
                 onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}
               />

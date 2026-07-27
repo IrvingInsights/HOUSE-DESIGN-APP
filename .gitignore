@@ -6,3 +6,9 @@ dist/
 PROOF-REPORT.md
 proof-run.log
 sweep2.log
+
+# transfer scratch (Cowork/device bridge)
+_transfer.bundle
+_design-archive.tgz
+_design-archive.zip
+_to_delete/

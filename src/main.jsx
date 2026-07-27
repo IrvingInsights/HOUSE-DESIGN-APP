@@ -20,7 +20,10 @@ import {
   clampObjectPosition, downloadFile, titleCase, targetLocationForPhrase, roofProfile, storeyInfo, upperPlateRect, floorCount,
   floorLabel, resolveOverhangs, OUTDOOR_ITEMS, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS, OUTBUILDING_CONSTRUCTION, OUTBUILDING_PRESETS, outdoorItemPresent,
   interiorFixtures, ROOM_PRESETS, FIX_LABELS, parseLocalRoomAdds, findFreeSpot, planNewRoomPlacements, derivePartitionOps, arrangeRoomsPlan,
-  DEFAULT_MODEL_LAYERS, MAINTENANCE_TASKS, buildTimeline, materialsTakeoff, LAYER_PRESETS, siteOf, utilitiesOf, reclaimedOf,
+  DEFAULT_MODEL_LAYERS, MAINTENANCE_TASKS, buildTimeline, materialsTakeoff, LAYER_PRESETS, siteOf, utilitiesOf,
+  MATERIAL_SOURCES, sourcesFor, sourceFactor, sourceNote,
+  isStair, resolveStair, STAIR_SHAPES, STAIR_FACINGS, STAIR_TURNS, STAIR_DEFAULTS, STAIR_FACING_ORDER,
+  HEATER_FACINGS,
   zipRegionInfo, getWallSections, getSpecialBimObjects, systemFieldForLibraryItem, appliedSystemText, wallAssemblyProfile, WALL_SIDES, WALL_SIDE_LABELS,
   WALL_ASSEMBLIES, wallAssemblyKeyFromText, resolveWallSide, wallsAreMixed, applyNaturalLanguageDesign, interpreterSummary, isConsultativePrompt, buildStudioConversationResponse,
   operationDescription, structuredPlanSummary, buildDashboardStatePayload, normalizeRooms, detectIssues, runCouncil, convertSpecApproach, deriveDesign,
@@ -1203,11 +1206,11 @@ function App() {
     });
   }
 
-  function updateReclaimed(system, value) {
+  function updateSourcing(system, source) {
     void applyBackendOperations({
-      operations: [{ type: 'set_reclaimed', system, value: Boolean(value) }],
-      promptText: `Mark ${system} as ${value ? 'reclaimed' : 'new'}`,
-      logPrefix: 'Reclaimed'
+      operations: [{ type: 'set_sourcing', system, value: source }],
+      promptText: `Source ${system} materials: ${MATERIAL_SOURCES[source]?.label || source}`,
+      logPrefix: 'Sourcing'
     });
   }
 
@@ -1339,6 +1342,39 @@ function App() {
     // something is picked from the model, the plan, or the selector chip.
     setConsoleView('systems');
     setSelMenuOpen(false);
+  }
+
+  // A stair edit changes its SHAPE; its footprint follows. We resolve the new
+  // stair here and send the resulting bounding box along with the op, so the
+  // stored w/d never drifts from what the plan draws.
+  function updateStair(field, value) {
+    const el = (spec.elements || []).find((element) => element.id === selectedRoom);
+    if (!el) return;
+    const numeric = ['split', 'widthFt', 'treadIn'].includes(field);
+    const v = numeric ? Number(value) : value;
+    const before = resolveStair(spec, el);
+    const preview = { ...el, stair: { ...STAIR_DEFAULTS, ...(el.stair || {}), [field]: v } };
+    const st = resolveStair(spec, preview);
+    const operations = [{ type: 'set_stair', id: el.id, field, value: v, w: st.bbox.w, d: st.bbox.d }];
+    // Turn IN PLACE — x/y is the north-west corner, so a footprint that flips
+    // would pivot the run around that corner and fling it across the site.
+    if (field === 'facing' || field === 'shape' || field === 'turn') {
+      const cx = (Number(el.x) || 0) + before.bbox.w / 2;
+      const cy = (Number(el.y) || 0) + before.bbox.d / 2;
+      operations.push({
+        type: 'move_object',
+        targetId: el.id,
+        name: el.name,
+        x: Math.round((cx - st.bbox.w / 2) * 10) / 10,
+        y: Math.round((cy - st.bbox.d / 2) * 10) / 10
+      });
+    }
+    void applyBackendOperations({
+      operations,
+      promptText: `Stair ${field} → ${value}`,
+      logPrefix: 'Stair',
+      nextSelectedId: el.id
+    });
   }
 
   function updateSelectedRoom(field, value) {
@@ -2873,10 +2909,10 @@ function App() {
           )}
 
           {systemView === 'frame' && (() => {
-            const reclaimed = reclaimedOf(spec);
+            const sourcing = derived.sourcing;
             const storeyN = Math.ceil(storeyInfo(spec.shell).storeys);
             const levels = Array.from({ length: storeyN }, (_, i) => i + 1);
-            const savings = derived.reclaimedSavings;
+            const savings = derived.sourcingSavings;
             return (
               <div className="systemPage">
                 <div className="sectionHead">Structural frame</div>
@@ -2907,28 +2943,36 @@ function App() {
                 )}
                 <p className="systemNote">{FRAME_TYPES[resolveFrameType(spec, 1)]?.note} The frame carries the roof and floors; the <b>Walls</b> page sets what fills between it (straw bale, cob, framed insulation…).</p>
 
-                <label className="diyToggle">
-                  <input type="checkbox" checked={reclaimed.frame} onChange={(event) => updateReclaimed('frame', event.target.checked)} />
-                  <span>The frame timber is reclaimed / salvaged — cuts its cost and most of its embodied carbon</span>
-                </label>
+                <div className="controlGrid">
+                  <label>Where the frame timber comes from
+                    <select value={sourcing.frame} onChange={(event) => updateSourcing('frame', event.target.value)}>
+                      {sourcesFor('frame').map((key) => <option key={key} value={key} style={greenOptStyle(MATERIAL_SOURCES[key])}>{greenLeaf(MATERIAL_SOURCES[key])}{MATERIAL_SOURCES[key].label}</option>)}
+                    </select>
+                  </label>
+                </div>
+                {sourceNote(sourcing, 'frame') && (
+                  <p className="systemNote"><b>{MATERIAL_SOURCES[sourcing.frame].label}</b> — priced at {Math.round(sourceFactor(sourcing, 'frame', 'cost') * 100)}% of new. {sourceNote(sourcing, 'frame')}</p>
+                )}
                 <label className="diyToggle">
                   <input type="checkbox" checked={utilitiesOf(spec).diyFrame} onChange={(event) => updateUtility('diyFrame', event.target.checked)} />
                   <span>I'll raise the frame myself (sweat equity)</span>
                 </label>
 
-                <FineTune label="Fine-tune — where materials are reclaimed" hint="salvage cuts cost and embodied carbon">
-                <p className="systemNote">Mark each material system you're building from salvaged stock — it flows straight into cost and embodied carbon.</p>
+                <FineTune label="Fine-tune — where every material comes from" hint="salvage and local milling both cut cost and carbon">
+                <p className="systemNote">Set each material system to what you're actually building from. Bought new is the lumberyard price. Salvaged is reused stock — the cheapest carbon win there is. <b>Locally milled</b> means your own logs or a small mill sawing to your list: you skip the retail markup, the kiln and the freight, and you pay instead in drying time and your own labour. It all flows straight into cost and embodied carbon.</p>
                 <div className="reclaimedGrid">
-                  {[['frame', 'Frame timber'], ['walls', 'Wall materials'], ['flooring', 'Flooring'], ['windows', 'Windows & doors'], ['roof', 'Roofing']].map(([key, label]) => (
-                    <label key={key} className={reclaimed[key] ? 'reclaimedItem on' : 'reclaimedItem'}>
-                      <input type="checkbox" checked={reclaimed[key]} onChange={(event) => updateReclaimed(key, event.target.checked)} />
+                  {[['frame', 'Frame timber'], ['walls', 'Wall materials'], ['flooring', 'Flooring'], ['windows', 'Windows & doors'], ['roof', 'Roofing'], ['builtin', 'Counters & shelving']].map(([key, label]) => (
+                    <label key={key} className={sourcing[key] !== 'new' ? 'reclaimedItem on' : 'reclaimedItem'}>
                       <span>{label}</span>
+                      <select value={sourcing[key]} onChange={(event) => updateSourcing(key, event.target.value)}>
+                        {sourcesFor(key).map((src) => <option key={src} value={src}>{MATERIAL_SOURCES[src].label}</option>)}
+                      </select>
                     </label>
                   ))}
                 </div>
                 {savings.count > 0
-                  ? <p className="systemNote"><b>♺ Reclaimed materials are saving</b> about {fmtMoney(savings.cost)} and {(savings.carbon / 1000).toFixed(1)} t CO₂e versus buying everything new.</p>
-                  : <p className="systemNote">Nothing marked reclaimed yet. Salvaged windows, timber, and roofing are the biggest, cheapest carbon wins on a natural build.</p>}
+                  ? <p className="systemNote"><b>♺ Your sourcing is saving</b> about {fmtMoney(savings.cost)} and {(savings.carbon / 1000).toFixed(1)} t CO₂e versus buying every system new{savings.milled > 0 ? ` — ${savings.milled} of those ${savings.milled === 1 ? 'system is' : 'systems are'} locally milled, so that saving costs you sawing and drying time instead` : ''}.</p>
+                  : <p className="systemNote">Everything is priced as bought-new. Salvaged windows and timber, and milling your own softwood for floors and shelving, are the biggest cheap wins on a natural build.</p>}
                 </FineTune>
 
                 <div className="sectionHead">Frame drawings</div>
@@ -2941,7 +2985,7 @@ function App() {
           {systemView === 'flooring' && (() => {
             const flooringKey = resolveFlooring(spec);
             const subfloorKey = resolveSubfloor(spec);
-            const reclaimed = reclaimedOf(spec);
+            const sourcing = derived.sourcing;
             const isSlab = utilitiesOf(spec).foundationType === 'slab';
             return (
               <div className="systemPage">
@@ -2967,12 +3011,16 @@ function App() {
                       {Object.entries(FLOORING_TYPES).map(([key, f]) => <option key={key} value={key} style={greenOptStyle(f)}>{greenLeaf(f)}{f.label}</option>)}
                     </select>
                   </label>
+                  <label>Where the boards come from
+                    <select value={sourcing.flooring} onChange={(event) => updateSourcing('flooring', event.target.value)}>
+                      {sourcesFor('flooring').map((key) => <option key={key} value={key} style={greenOptStyle(MATERIAL_SOURCES[key])}>{greenLeaf(MATERIAL_SOURCES[key])}{MATERIAL_SOURCES[key].label}</option>)}
+                    </select>
+                  </label>
                 </div>
                 <p className="systemNote">{FLOORING_TYPES[flooringKey]?.note} Covers the whole {fmtNum(derived.heatedFloor)} sf heated floor. Floor assembly (deck + finish): {fmtMoney(derived.cost.flooring)}. A single room can differ — set its floor by tapping it (its floor shows in the schedule).</p>
-                <label className="diyToggle">
-                  <input type="checkbox" checked={reclaimed.flooring} onChange={(event) => updateReclaimed('flooring', event.target.checked)} />
-                  <span>The flooring is reclaimed / salvaged (reclaimed boards or tile — cuts cost and carbon)</span>
-                </label>
+                {sourceNote(sourcing, 'flooring') && (
+                  <p className="systemNote"><b>{MATERIAL_SOURCES[sourcing.flooring].label}</b> — priced at {Math.round(sourceFactor(sourcing, 'flooring', 'cost') * 100)}% of new. {sourceNote(sourcing, 'flooring')}</p>
+                )}
               </div>
             );
           })()}
@@ -3117,7 +3165,17 @@ function App() {
                     <option value="minisplit">Electric mini-split — no wood, draws power</option>
                   </select>
                 </label>
+                {derived.heatFacingKey && (
+                  <label>What it wears — the facing
+                    <select value={derived.heatFacingKey} onChange={(event) => updateUtility('heaterFacing', event.target.value)}>
+                      {Object.entries(HEATER_FACINGS).map(([key, f]) => <option key={key} value={key} style={greenOptStyle(f)}>{greenLeaf(f)}{f.label} — {fmtMoney(f.cost)}</option>)}
+                    </select>
+                  </label>
+                )}
               </div>
+              {derived.heatFacingKey && (
+                <p className="systemNote">{HEATER_FACINGS[derived.heatFacingKey].note} The core is a kit either way — the facing is the part you choose, and it swings the price by thousands: {fmtMoney(HEATER_FACINGS.cob.cost)} for earthen plaster against {fmtMoney(HEATER_FACINGS.soapstone.cost)} for soapstone.</p>
+              )}
               <label className="diyToggle">
                 <input type="checkbox" checked={utilitiesOf(spec).diyHeat} onChange={(event) => updateUtility('diyHeat', event.target.checked)} />
                 <span>I'll build the heater myself (sweat equity)</span>
@@ -3306,7 +3364,9 @@ function App() {
           const diyTrades = [
             { field: 'diyWalls', label: 'Walls', costKey: 'walls', frac: Number(spec.shell.sweatWallsFrac ?? 0.8) },
             { field: 'diyRoof', label: 'Roof', costKey: 'roof', frac: Number(spec.shell.sweatRoofFrac ?? 0.55) },
-            { field: 'diyHeat', label: 'Heat', costKey: 'heat', frac: Number(spec.shell.sweatHeatFrac ?? 0.45) },
+            // Heat sweats against the INSTALL half only — you can fit a heater
+            // yourself, you cannot labour your way out of buying the kit.
+            { field: 'diyHeat', label: 'Heat', costKey: 'heat', frac: Number(spec.shell.sweatHeatFrac ?? 0.45), base: derived.heatInstall },
             { field: 'diyFoundation', label: 'Foundation', costKey: 'foundation', frac: Number(spec.shell.sweatFoundationFrac ?? 0.5) },
             { field: 'diyFrame', label: 'Frame', costKey: 'frame', frac: Number(spec.shell.sweatFrameFrac ?? 0.6) }
           ];
@@ -3415,7 +3475,7 @@ function App() {
               <div className="diyGrid">
                 {diyTrades.map((trade) => {
                   const on = Boolean(derived.utilities[trade.field]);
-                  const saves = (derived.cost[trade.costKey] || 0) * trade.frac;
+                  const saves = (trade.base ?? derived.cost[trade.costKey] ?? 0) * trade.frac;
                   return (
                     <label key={trade.field} className={on ? 'diyToggle on' : 'diyToggle'}>
                       <input type="checkbox" checked={on} onChange={() => toggleDiy(trade.field)} />
@@ -3425,8 +3485,8 @@ function App() {
                   );
                 })}
               </div>
-              {derived.reclaimedSavings.count > 0 && (
-                <p className="systemNote">♺ Reclaimed materials are already saving about {fmtMoney(derived.reclaimedSavings.cost)} and {(derived.reclaimedSavings.carbon / 1000).toFixed(1)} t CO₂e — mark more on the Frame page.</p>
+              {derived.sourcingSavings.count > 0 && (
+                <p className="systemNote">♺ Salvaged and locally milled materials are already saving about {fmtMoney(derived.sourcingSavings.cost)} and {(derived.sourcingSavings.carbon / 1000).toFixed(1)} t CO₂e — set more on the Frame page.</p>
               )}
               <div className={overBy > 0 ? 'costCeiling over' : 'costCeiling under'}>
                 {overBy > 0
@@ -3978,6 +4038,39 @@ function App() {
                     </label>
                     <label>Bay spacing (ft, post to post)<NumField step="0.5" min="4" max="16" value={Number(spec.frame?.baySpacingFt) || 8} onChange={(event) => updateSelectedRoom('baySpacingFt', event.target.value)} /></label>
                   </>}
+                  {selectedIsElement && isStair(selected) && (() => {
+                    const st = resolveStair(spec, selected);
+                    return (
+                      <>
+                        <label>Shape
+                          <select value={st.shape} onChange={(event) => updateStair('shape', event.target.value)}>
+                            {Object.entries(STAIR_SHAPES).map(([key, s]) => <option key={key} value={key}>{s.label}</option>)}
+                          </select>
+                        </label>
+                        <label>Which way you climb
+                          <select value={st.facing} onChange={(event) => updateStair('facing', event.target.value)}>
+                            {Object.entries(STAIR_FACINGS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                          </select>
+                        </label>
+                        <button type="button" className="secondary" onClick={() => updateStair('facing', STAIR_FACING_ORDER[(STAIR_FACING_ORDER.indexOf(st.facing) + 1) % 4])}>↻ Turn 90°</button>
+                        {st.twoRun && <>
+                          <label>Turn at the landing
+                            <select value={st.turn} onChange={(event) => updateStair('turn', event.target.value)}>
+                              {Object.entries(STAIR_TURNS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                            </select>
+                          </label>
+                          <label>Where it breaks — {st.run1Treads} steps up, then {st.run2Treads}
+                            <input type="range" min="0.15" max="0.85" step="0.01" value={st.split}
+                              onChange={(event) => updateStair('split', event.target.value)} />
+                          </label>
+                        </>}
+                        <label>Width (ft)<NumField step="0.5" min="2.5" max="8" value={st.widthFt} onChange={(event) => updateStair('widthFt', event.target.value)} /></label>
+                        <label>Tread depth (in)<NumField step="0.5" min="9" max="14" value={st.treadIn} onChange={(event) => updateStair('treadIn', event.target.value)} /></label>
+                        <p className="systemNote">{STAIR_SHAPES[st.shape].note} Climbing {fmtNum(st.rise)}′ takes <b>{st.risers} risers at {st.riserIn.toFixed(1)}″</b> — {st.treads} treads{st.twoRun ? ` split ${st.run1Treads} / ${st.run2Treads} across a ${st.widthFt.toFixed(1)}′ landing` : ''}. It occupies {st.bbox.w.toFixed(1)}′ × {st.bbox.d.toFixed(1)}′ of floor. Drag it in the plan to move it; the run length is worked out from the climb, so you never set it by hand.</p>
+                        {st.flags.map((flag, index) => <p key={index} className="systemNote"><b>⚠</b> {flag}</p>)}
+                      </>
+                    );
+                  })()}
                   {selectedIsElement && selected?.category === 'partition' && <>
                     <label>Construction
                       <select value={PARTITION_TYPES[selected?.construction] ? selected.construction : 'framed'} onChange={(event) => updateSelectedRoom('construction', event.target.value)}>
