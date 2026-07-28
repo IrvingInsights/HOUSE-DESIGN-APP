@@ -1049,7 +1049,16 @@ export function resolveDeckStairs(spec, el, dkIn = null) {
     if (legalTurns.includes(turn)) {
       const outward = side === 'north' || side === 'west' ? -1 : 1;
       const edgeAt = side === 'north' ? ey : side === 'south' ? ey + ed : side === 'west' ? ex : ex + ew;
-      const n1 = Math.max(1, Math.round(treads / 2));      // out, then turn
+      // HOW FAR OUT BEFORE IT TURNS. Half and half is a balanced L and a fine
+      // default, but it is only a default — the interior stairs have carried a
+      // `split` since they were built and the deck's fold hardcoded one. Turn
+      // almost immediately and the long leg runs ALONG the building instead of
+      // away from it, which is how you get a flight down a wall rather than a
+      // flight standing in the yard. Daniel: "run the stairs down the N wall
+      // off the E deck."
+      const splitRaw = Number(el.deckStairSplit);
+      const split = Number.isFinite(splitRaw) && splitRaw > 0 && splitRaw < 1 ? splitRaw : 0.5;
+      const n1 = Math.min(treads - 1, Math.max(1, Math.round(treads * split)));
       const n2 = Math.max(1, treads - n1);
       const landW = Math.max(gapW, 3.5);
       const legOut = n1 * 0.9;
