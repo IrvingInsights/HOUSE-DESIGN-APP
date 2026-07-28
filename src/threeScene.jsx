@@ -2797,6 +2797,70 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           x: best.rect.x, y: best.rect.y, w: best.rect.w, d: best.rect.d, h: 0
         });
       });
+      // TWO STRUCTURES CAN BE ONE BUILDING. Daniel's workshop and the bay
+      // beside it are not two sheds standing shoulder to shoulder — they are
+      // one building: a poly-walled bay with an insulated room framed into its
+      // end, which is how such a building actually goes up. The app had no way
+      // to say so, so it drew a wall down the middle and a roof over each half
+      // ("they should share a roof. Still looks split").
+      //
+      // THE LAW IS ADJACENCY, NOT A LIST OF NAMES. Structures whose footprints
+      // share an edge are one building — that is true of any building anywhere,
+      // and it needs nothing typed in. One roof over the combined footprint,
+      // one fall, and NO wall on the edge they share; each keeps its own wall
+      // covering, so a poly-walled bay and an insulated room read as different
+      // rooms of the same building. It chains: A against B against C is one
+      // building. `standsAlone` is the exception, and it is a fact about the
+      // one structure — never a pointer at another object.
+      const JOINABLE_CATS = new Set(['outbuilding', 'carport', 'porch']);
+      const STRUCT_TOUCH = 0.35;   // hand-dragged structures never land flush
+      // update_object writes strings, so a switch arrives as 'yes' / '' / '1'.
+      const isYes = (v) => v === true || ['yes', 'true', '1', 'on'].includes(String(v ?? '').toLowerCase());
+      const structuresTouch = (a, b) => {
+        const ax0 = Number(a.x) || 0; const az0 = Number(a.y) || 0;
+        const ax1 = ax0 + (Number(a.w) || 0); const az1 = az0 + (Number(a.d) || 0);
+        const bx0 = Number(b.x) || 0; const bz0 = Number(b.y) || 0;
+        const bx1 = bx0 + (Number(b.w) || 0); const bz1 = bz0 + (Number(b.d) || 0);
+        const overX = Math.min(ax1, bx1) - Math.max(ax0, bx0);
+        const overZ = Math.min(az1, bz1) - Math.max(az0, bz0);
+        return (overX > 1 && overZ > -STRUCT_TOUCH) || (overZ > 1 && overX > -STRUCT_TOUCH);
+      };
+      const joinInfo = (() => {
+        const structures = (spec.elements || []).filter((e) => JOINABLE_CATS.has(e.category) && e.id
+          && !isYes(e.standsAlone) && Number(e.level || 1) === 1);
+        const parent = new Map(structures.map((e) => [e.id, e.id]));
+        const find = (id) => { let r = id; while (parent.get(r) !== r) r = parent.get(r); while (parent.get(id) !== r) { const nx = parent.get(id); parent.set(id, r); id = nx; } return r; };
+        for (let i = 0; i < structures.length; i += 1) {
+          for (let j = i + 1; j < structures.length; j += 1) {
+            if (!structuresTouch(structures[i], structures[j])) continue;
+            const ra = find(structures[i].id); const rb = find(structures[j].id);
+            if (ra !== rb) parent.set(ra, rb);
+          }
+        }
+        const bucket = new Map();
+        for (const e of structures) {
+          const root = find(e.id);
+          if (!bucket.has(root)) bucket.set(root, []);
+          bucket.get(root).push(e);
+        }
+        const info = new Map();
+        for (const members of bucket.values()) {
+          if (members.length < 2) continue;          // one structure is not a join
+          const g = {
+            members,
+            leader: members[0].id,
+            x0: Math.min(...members.map((m) => Number(m.x) || 0)),
+            z0: Math.min(...members.map((m) => Number(m.y) || 0)),
+            x1: Math.max(...members.map((m) => (Number(m.x) || 0) + (Number(m.w) || 0))),
+            z1: Math.max(...members.map((m) => (Number(m.y) || 0) + (Number(m.d) || 0))),
+            h: Math.max(...members.map((m) => Math.max(6, Number(m.h) || 9)))
+          };
+          for (const m of members) info.set(m.id, g);
+        }
+        return info;
+      })();
+      const joinOf = (el) => (el && el.id ? joinInfo.get(el.id) || null : null);
+
       [...(spec.elements || []), ...plantAnnexes, ...sunspacePartitions(spec)].forEach((element) => {
         if (!layers.elements || (layers.hiddenCats || []).includes(element.category || 'custom')) return;
         let elementHeight = element.h || 1.2;
@@ -3103,7 +3167,31 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             : new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.8, map: grainTexture('wood'), bumpMap: bumpTexture('wood'), bumpScale: 0.08 });
           const dp = (m, mat) => { m.userData.roomId = element.id; m.userData.generated = true; group.add(m); return m; };
           // the walking surface: a slab-thin patio at grade, a framed platform raised
-          dp(box(ew0, dk.placement === 'grade' ? 0.25 : 0.35, ed0, ex0 + ew0 / 2, deckTopY, ey0 + ed0 / 2, deckMatD));
+          // — with a STAIRWELL CUT OUT of it when a flight runs underneath. A
+          // stair under a deck is only usable as far as the deck lets you stand
+          // up, so the deck opens from the top of the flight until there is
+          // headroom below: that hole IS the way onto the stair. Drawn as the
+          // pieces left around it (up to four), because a deck with a stair
+          // under it and no hole is a deck you cannot get off.
+          const stDeck = resolveDeckStairs(spec, element, dk);
+          const thickD = dk.placement === 'grade' ? 0.25 : 0.35;
+          const well = stDeck && !stDeck.blocked && stDeck.shape === 'along' && stDeck.wellLen > 0.5
+            ? (stDeck.marchAxis === 'x'
+              ? { x0: Math.max(ex0, stDeck.wellFrom), x1: Math.min(ex0 + ew0, stDeck.wellTo), z0: Math.max(ey0, stDeck.wellA0), z1: Math.min(ey0 + ed0, stDeck.wellA1) }
+              : { x0: Math.max(ex0, stDeck.wellA0), x1: Math.min(ex0 + ew0, stDeck.wellA1), z0: Math.max(ey0, stDeck.wellFrom), z1: Math.min(ey0 + ed0, stDeck.wellTo) })
+            : null;
+          const slab = (x0, x1, z0, z1) => {
+            if (x1 - x0 < 0.05 || z1 - z0 < 0.05) return;
+            dp(box(x1 - x0, thickD, z1 - z0, (x0 + x1) / 2, deckTopY, (z0 + z1) / 2, deckMatD));
+          };
+          if (!well || well.x1 - well.x0 < 0.05 || well.z1 - well.z0 < 0.05) {
+            slab(ex0, ex0 + ew0, ey0, ey0 + ed0);
+          } else {
+            slab(ex0, ex0 + ew0, ey0, well.z0);                      // north of the hole
+            slab(ex0, ex0 + ew0, well.z1, ey0 + ed0);                // south of it
+            slab(ex0, well.x0, well.z0, well.z1);                    // west, alongside
+            slab(well.x1, ex0 + ew0, well.z0, well.z1);              // east, alongside
+          }
           // NO POSTS UNDER A RAISED DECK. I added some; Daniel took them
           // straight back off: "if the beams/floor joists extend out for the
           // decks, just as they do for the roof, we should be fine." That is
@@ -3118,8 +3206,42 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // deck on another level, or the ground. The railing leaves a gap.
           let stepGap = null;
           {
-            const st = resolveDeckStairs(spec, element, dk);
-            if (st && !st.blocked) {
+            const st = stDeck;
+            if (st && !st.blocked && st.shape === 'along') {
+              // THE FLIGHT THAT RUNS UNDER THE DECK. Same treads and the same
+              // handrails, but it marches ALONG the edge instead of away from
+              // it, in a strip tucked beneath the deck — so it costs no ground
+              // and the deck is its roof. The railing opens over its top end,
+              // which is where you step onto it.
+              const alongX = st.marchAxis === 'x';
+              const dirSign = st.botAt > st.topAt ? 1 : -1;
+              const stepH = st.rise / st.treads;
+              for (let s = 1; s <= st.treads; s += 1) {
+                const topY = deckTopY - s * stepH + stepH / 2;
+                const at = st.topAt + dirSign * (s * 0.9 - 0.45);
+                dp(alongX
+                  ? box(0.9, stepH, st.gapW - 0.3, at, topY, st.crossMid, deckMatD)
+                  : box(st.gapW - 0.3, stepH, 0.9, st.crossMid, topY, at, deckMatD));
+              }
+              const railLen = Math.hypot(st.runLen, st.rise);
+              const angle = Math.atan2(st.rise, st.runLen);
+              const ctrAlong = (st.topAt + st.botAt) / 2;
+              const ctrY = deckTopY - st.rise / 2 + 3;
+              [st.gapA0 + 0.12, st.gapA1 - 0.12].forEach((across) => {
+                let rm;
+                if (alongX) {
+                  rm = box(railLen, 0.15, 0.15, ctrAlong, ctrY, across, railMatD);
+                  rm.rotation.z = dirSign > 0 ? -angle : angle;
+                } else {
+                  rm = box(0.15, 0.15, railLen, across, ctrY, ctrAlong, railMatD);
+                  rm.rotation.x = dirSign > 0 ? angle : -angle;
+                }
+                dp(rm);
+              });
+              // the perimeter rail stays UNBROKEN: you step down through the
+              // stairwell, not over the deck's outer edge.
+              stepGap = null;
+            } else if (st && !st.blocked) {
               stepGap = { side: st.side, a0: st.gapA0, a1: st.gapA1 };
               const hiTop = Math.max(deckTopY, st.targetTop);
               const stepsN = st.treads;
@@ -3160,10 +3282,10 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             }
           }
           // railing along each OPEN segment, in the chosen style
-          const railOnSeg = (side, a0, a1) => {
+          // one rail run, on any line — the deck's own edge or the lip of a
+          // stairwell cut into the middle of it.
+          const railLine = (horiz, at, a0, a1) => {
             if (dk.railKey === 'none' || a1 - a0 < 0.6) return;
-            const horiz = side === 'north' || side === 'south';
-            const at = side === 'north' ? ey0 + 0.1 : side === 'south' ? ey0 + ed0 - 0.1 : side === 'west' ? ex0 + 0.1 : ex0 + ew0 - 0.1;
             dp(horiz
               ? box(a1 - a0, 0.18, 0.18, (a0 + a1) / 2, railTop, at, railMatD)
               : box(0.18, 0.18, a1 - a0, at, railTop, (a0 + a1) / 2, railMatD));
@@ -3192,6 +3314,36 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               }
             }
           };
+          const railOnSeg = (side, a0, a1) => {
+            const horiz = side === 'north' || side === 'south';
+            const at = side === 'north' ? ey0 + 0.1 : side === 'south' ? ey0 + ed0 - 0.1
+              : side === 'west' ? ex0 + 0.1 : ex0 + ew0 - 0.1;
+            railLine(horiz, at, a0, a1);
+          };
+          // A GUARD ROUND THE STAIRWELL. Cutting the hole made a 12 ft drop in
+          // the middle of the deck with nothing round it — the same fall the
+          // deck's own perimeter railing exists to stop, and code makes no
+          // distinction between an edge and an opening. Both long sides and
+          // the FAR end get a rail; the near end stays open, because that is
+          // where you step down onto the flight. A side that lies on the
+          // deck's own boundary is skipped — the perimeter rail is already
+          // standing there.
+          if (well && stDeck && !stDeck.blocked && dk.railKey !== 'none') {
+            const onBoundary = (v, edge) => Math.abs(v - edge) < 0.2;
+            const alongZ = stDeck.marchAxis === 'z';
+            const entryAt = stDeck.topAt;
+            if (alongZ) {
+              if (!onBoundary(well.x0, ex0)) railLine(false, well.x0 - 0.09, well.z0, well.z1);
+              if (!onBoundary(well.x1, ex0 + ew0)) railLine(false, well.x1 + 0.09, well.z0, well.z1);
+              const farZ = onBoundary(entryAt, well.z0) ? well.z1 : well.z0;
+              railLine(true, farZ + (farZ === well.z0 ? -0.09 : 0.09), well.x0, well.x1);
+            } else {
+              if (!onBoundary(well.z0, ey0)) railLine(true, well.z0 - 0.09, well.x0, well.x1);
+              if (!onBoundary(well.z1, ey0 + ed0)) railLine(true, well.z1 + 0.09, well.x0, well.x1);
+              const farX = onBoundary(entryAt, well.x0) ? well.x1 : well.x0;
+              railLine(false, farX + (farX === well.x0 ? -0.09 : 0.09), well.z0, well.z1);
+            }
+          }
           for (const [side, segs] of Object.entries(dk.openSides)) {
             for (const s of segs) {
               if (stepGap && stepGap.side === side && stepGap.a1 > s.a0 && stepGap.a0 < s.a1) {
@@ -3240,7 +3392,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const deckHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
           mesh = box(ew0, Math.max(1, railTop - deckTopY), ed0, ex0 + ew0 / 2, (deckTopY + railTop) / 2, ey0 + ed0 / 2, deckHandle);
           elementHeight = railTop - deckTopY;
-        } else if (element.roofType || element.category === 'carport' || element.category === 'porch') {
+        } else if ((element.roofType || element.category === 'carport' || element.category === 'porch') && !joinOf(element)) {
           // An open-air structure (carport, porch, covered deck) is a canopy
           // on posts over a low deck — NOT a building-sized translucent ghost
           // box. The full-volume handle stays for select/drag.
@@ -3257,7 +3409,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           }
           const openHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
           mesh = box(element.w, Math.max(7.4, elementHeight), element.d, element.x + element.w / 2, elevation + Math.max(7.4, elementHeight) / 2, element.y + element.d / 2, openHandle);
-        } else if (element.category === 'outbuilding') {
+        } else if (element.category === 'outbuilding' || joinOf(element)) {
+          // A JOINED CARPORT IS A BAY, NOT A CANOPY. Once a structure is part
+          // of a building it builds like the building does — four walls in its
+          // own covering (polycarbonate stays translucent), doors where it has
+          // them, under the shared roof — instead of a canopy on its own posts.
           // A SHED IS A BUILDING, NOT A BOX. An outbuilding had no render of
           // its own at all — it fell through to the generic element and drew as
           // a translucent coloured volume. Daniel asked for three doors out of
@@ -3266,7 +3422,11 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // walls on a floor, a shed roof falling away from the house — and
           // each side can carry a doorway (doorNorthFt / South / East / West,
           // a width in feet; absent or 0 means solid wall).
-          const obH = Math.max(6, Number(element.h) || 9);
+          // One building's walls all stand to one height, so a joined member
+          // takes the group's height rather than its own (a carport stored at
+          // 0.3 ft is a canopy's deck, not a wall height).
+          const obJoin = joinOf(element);
+          const obH = obJoin ? obJoin.h : Math.max(6, Number(element.h) || 9);
           const T = 0.5;
           const ox0 = element.x; const oz0 = element.y;
           const ox1 = element.x + element.w; const oz1 = element.y + element.d;
@@ -3285,36 +3445,20 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               side: THREE.DoubleSide
             })
             : new THREE.MeshStandardMaterial({ color: 0xbfae8e, roughness: 0.9, map: grainTexture('plaster'), bumpMap: bumpTexture('plaster'), bumpScale: 0.1 });
-          const obDoorMat = new THREE.MeshStandardMaterial({ color: 0x7a5c3e, roughness: 0.75, map: grainTexture('wood') });
+          // A DOOR IS MADE OF WHAT ITS WALL IS MADE OF. The leaf was wood no
+          // matter what stood around it, so a polycarbonate bay got a wooden
+          // barn door — the one part of the building that ignored the covering
+          // you chose. It follows the wall now unless the door says otherwise.
+          const obDoorCov = ROOF_COVERINGS[element.doorCovering] || obWallCov;
+          const obDoorMat = obDoorCov
+            ? new THREE.MeshStandardMaterial({
+              color: obDoorCov.color, roughness: obDoorCov.translucent ? 0.18 : 0.75,
+              transparent: Boolean(obDoorCov.translucent), opacity: obDoorCov.translucent ? 0.34 : 1,
+              metalness: obDoorCov.texture === 'metal' && !obDoorCov.translucent ? 0.5 : 0,
+              side: THREE.DoubleSide
+            })
+            : new THREE.MeshStandardMaterial({ color: 0x7a5c3e, roughness: 0.75, map: grainTexture('wood') });
           obPart(box(element.w, 0.3, element.d, (ox0 + ox1) / 2, elevation + 0.15, (oz0 + oz1) / 2, obWallMat));
-          // Each side: a solid run, or two runs and a header around a doorway.
-          const doorOn = (side) => Math.max(0, Math.min(Number(element[`door${side}Ft`]) || 0, (side === 'North' || side === 'South' ? element.w : element.d) - 1));
-          const DOOR_H = 6.8;
-          const wallRun = (side, horizontal, cross) => {
-            const span = horizontal ? element.w : element.d;
-            const a0 = horizontal ? ox0 : oz0;
-            const dw = doorOn(side);
-            const mk = (from, to, yBase, hgt) => {
-              if (to - from < 0.05 || hgt < 0.05) return;
-              const mid = (from + to) / 2;
-              obPart(horizontal
-                ? box(to - from, hgt, T, mid, elevation + yBase + hgt / 2, cross, obWallMat)
-                : box(T, hgt, to - from, cross, elevation + yBase + hgt / 2, mid, obWallMat));
-            };
-            if (dw <= 0.5) { mk(a0, a0 + span, 0.3, obH - 0.3); return; }
-            const dStart = a0 + (span - dw) / 2;
-            mk(a0, dStart, 0.3, obH - 0.3);
-            mk(dStart + dw, a0 + span, 0.3, obH - 0.3);
-            mk(dStart, dStart + dw, DOOR_H, Math.max(0.2, obH - DOOR_H));       // header over the opening
-            const dMid = dStart + dw / 2;                                        // the door leaf itself
-            obPart(horizontal
-              ? box(dw - 0.2, DOOR_H - 0.4, 0.14, dMid, elevation + 0.3 + (DOOR_H - 0.4) / 2, cross, obDoorMat)
-              : box(0.14, DOOR_H - 0.4, dw - 0.2, cross, elevation + 0.3 + (DOOR_H - 0.4) / 2, dMid, obDoorMat));
-          };
-          wallRun('North', true, oz0 + T / 2);
-          wallRun('South', true, oz1 - T / 2);
-          wallRun('West', false, ox0 + T / 2);
-          wallRun('East', false, ox1 - T / 2);
           // THE OUTBUILDINGS DRAIN THE WAY THE HOUSE DRAINS. This tipped its
           // roof "away from the house", which on Daniel's site pointed a shed
           // south while the house sheds north — two roofs arguing about which
@@ -3332,13 +3476,133 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const low = ['north', 'south', 'east', 'west'].includes(element.roofFall)
             ? element.roofFall : (roofSpec.lowSide || 'north');
           const fallsAlongZ = low === 'north' || low === 'south';
-          const runFt = fallsAlongZ ? element.d + obOv * 2 : element.w + obOv * 2;
+          // The roof spans the whole BUILDING — the group's footprint when this
+          // structure is joined to others, its own when it stands alone. One
+          // plane, one fall, one rise, so joined members cannot disagree about
+          // where the water goes.
+          const rx0 = obJoin ? obJoin.x0 : ox0; const rz0 = obJoin ? obJoin.z0 : oz0;
+          const rx1 = obJoin ? obJoin.x1 : ox1; const rz1 = obJoin ? obJoin.z1 : oz1;
+          const roofW = rx1 - rx0; const roofD = rz1 - rz0;
+          const runFt = fallsAlongZ ? roofD + obOv * 2 : roofW + obOv * 2;
           const rise = Math.max(0.8, runFt * 0.18);
-          const panel = box(element.w + obOv * 2, 0.3, element.d + obOv * 2, (ox0 + ox1) / 2, elevation + obH + rise / 2, (oz0 + oz1) / 2, obRoofMat);
-          // +x rotation drops the -z (north) edge; mirror it for a south fall.
-          if (fallsAlongZ) panel.rotation.x = Math.atan2(rise, runFt) * (low === 'north' ? -1 : 1);
-          else panel.rotation.z = Math.atan2(rise, runFt) * (low === 'west' ? 1 : -1);
-          obPart(panel);
+          // A WALL RISES TO MEET ITS ROOF. Every side was built to one height
+          // and the roof was then tilted above them, which left an open wedge
+          // on the high side and a raking gap down both flanks — Daniel: "none
+          // meet the walls properly". It is the same law the house already
+          // obeys with its north/south wall heights, and the same fix as the
+          // gable-end infill: the walls follow the plane instead of a number.
+          //
+          // The panel is rotated about its own centre, so its mid-plane stands
+          // at obH + rise/2 over the middle of the building and changes by
+          // slope per foot toward the high side. Wall tops track the plane's
+          // UNDERSIDE (half the 0.3 panel below the mid-plane).
+          const obSlope = rise / runFt;                       // tan of the tilt
+          const obCx = (rx0 + rx1) / 2; const obCz = (rz0 + rz1) / 2;
+          const obMid = obH + rise / 2;
+          // Half the panel thickness measured VERTICALLY, not perpendicular —
+          // a tilted 0.3 ft panel hangs a little lower than 0.15 beneath its
+          // own mid-plane, and a wall built to the wrong one pierces the roof.
+          const obUnder = 0.15 * Math.hypot(rise, runFt) / runFt;
+          const roofTopAt = (x, z) => {
+            const u = fallsAlongZ
+              ? (z - obCz) * (low === 'north' ? 1 : -1)
+              : (x - obCx) * (low === 'west' ? 1 : -1);
+            return Math.max(1, obMid + u * obSlope - obUnder);
+          };
+          // A wall with a sloping top: a prism, because a box only has one
+          // height. Mirrors gablePrism above — same eight corners, same faces,
+          // double-sided so it reads from inside the shed as well as out.
+          const obPrism = (horizontal, cross, from, to, yBot, h0, h1, mat) => {
+            const geometry = new THREE.BufferGeometry();
+            const c0 = cross - T / 2; const c1 = cross + T / 2;
+            const v = horizontal
+              ? [from, yBot, c0, from, yBot, c1, from, h0, c1, from, h0, c0,
+                to, yBot, c0, to, yBot, c1, to, h1, c1, to, h1, c0]
+              : [c0, yBot, from, c1, yBot, from, c1, h0, from, c0, h0, from,
+                c0, yBot, to, c1, yBot, to, c1, h1, to, c0, h1, to];
+            geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(v), 3));
+            geometry.setIndex([0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 0, 4, 5, 0, 5, 1,
+              3, 2, 6, 3, 6, 7, 0, 3, 7, 0, 7, 4, 1, 5, 6, 1, 6, 2]);
+            geometry.computeVertexNormals();
+            const m = new THREE.Mesh(geometry, mat);
+            m.castShadow = true; m.receiveShadow = true;
+            return obPart(m);
+          };
+          const obWallMatDS = obWallMat.clone();
+          obWallMatDS.side = THREE.DoubleSide;
+          // Each side: a solid run, or two runs and a header around a doorway.
+          const doorOn = (side) => Math.max(0, Math.min(Number(element[`door${side}Ft`]) || 0, (side === 'North' || side === 'South' ? element.w : element.d) - 1));
+          const DOOR_H = 6.8;
+          // NO WALL ON A SHARED EDGE. Where a joined sibling stands against
+          // this side, that stretch of wall is interior to the building and
+          // must not be built — it is the opening between the bay and the room.
+          // A small overlap or a hairline gap still counts as touching; two
+          // structures dragged together by hand never land exactly flush.
+          const TOUCH = 0.35;
+          const sharedOn = (side) => {
+            if (!obJoin) return [];
+            const out = [];
+            for (const s of obJoin.members) {
+              if (s.id === element.id) continue;
+              const sx0 = Number(s.x) || 0; const sz0 = Number(s.y) || 0;
+              const sx1 = sx0 + (Number(s.w) || 0); const sz1 = sz0 + (Number(s.d) || 0);
+              if (side === 'North' && Math.abs(sz1 - oz0) <= TOUCH) out.push([Math.max(ox0, sx0), Math.min(ox1, sx1)]);
+              if (side === 'South' && Math.abs(sz0 - oz1) <= TOUCH) out.push([Math.max(ox0, sx0), Math.min(ox1, sx1)]);
+              if (side === 'West' && Math.abs(sx1 - ox0) <= TOUCH) out.push([Math.max(oz0, sz0), Math.min(oz1, sz1)]);
+              if (side === 'East' && Math.abs(sx0 - ox1) <= TOUCH) out.push([Math.max(oz0, sz0), Math.min(oz1, sz1)]);
+            }
+            return out.filter(([a, b]) => b - a > 0.05);
+          };
+          // A SIDE CAN BE MISSING. A woodshed is open to the weather it dries
+          // in, a carport is a roof on posts, a barn stands open on its working
+          // side — and every structure was built with four walls regardless.
+          // An open side is not a doorway (a hole IN a wall); it is no wall.
+          const openSide = (side) => ['yes', 'true', '1', 'on']
+            .includes(String(element[`open${side}`] ?? '').toLowerCase());
+          const wallRun = (side, horizontal, cross) => {
+            if (openSide(side)) return;
+            const span = horizontal ? element.w : element.d;
+            const a0 = horizontal ? ox0 : oz0;
+            const dw = doorOn(side);
+            const shared = sharedOn(side);
+            const inShared = (a) => shared.some(([g0, g1]) => a > g0 && a < g1);
+            // whatever is left of [from,to] once the shared stretches are cut
+            const keep = (from, to) => shared.reduce((segs, [g0, g1]) => segs.flatMap(([s0, s1]) => (
+              g1 <= s0 || g0 >= s1 ? [[s0, s1]] : [...(g0 > s0 ? [[s0, g0]] : []), ...(g1 < s1 ? [[g1, s1]] : [])]
+            )), [[from, to]]);
+            const topAt = (a) => elevation + (horizontal ? roofTopAt(a, cross) : roofTopAt(cross, a));
+            // from→to, standing on yBase, topped by the roof plane at each end.
+            const mk = (from, to, yBase) => keep(from, to).forEach(([f, t]) => {
+              const h0 = topAt(f); const h1 = topAt(t);
+              const yb = elevation + yBase;
+              if (t - f < 0.05 || (h0 - yb < 0.05 && h1 - yb < 0.05)) return;
+              obPrism(horizontal, cross, f, t, yb, Math.max(h0, yb + 0.05), Math.max(h1, yb + 0.05), obWallMatDS);
+            });
+            if (dw <= 0.5) { mk(a0, a0 + span, 0.3); return; }
+            const dStart = a0 + (span - dw) / 2;
+            mk(a0, dStart, 0.3);
+            mk(dStart + dw, a0 + span, 0.3);
+            mk(dStart, dStart + dw, DOOR_H);                                     // header over the opening
+            const dMid = dStart + dw / 2;                                        // the door leaf itself
+            if (inShared(dMid)) return;                                          // a door onto the next bay is just an opening
+            obPart(horizontal
+              ? box(dw - 0.2, DOOR_H - 0.4, 0.14, dMid, elevation + 0.3 + (DOOR_H - 0.4) / 2, cross, obDoorMat)
+              : box(0.14, DOOR_H - 0.4, dw - 0.2, cross, elevation + 0.3 + (DOOR_H - 0.4) / 2, dMid, obDoorMat));
+          };
+          wallRun('North', true, oz0 + T / 2);
+          wallRun('South', true, oz1 - T / 2);
+          wallRun('West', false, ox0 + T / 2);
+          wallRun('East', false, ox1 - T / 2);
+          // ONE BUILDING, ONE ROOF: a joined group's roof is drawn once, by the
+          // first member, over the whole footprint. The others build only their
+          // walls and floor — and their walls already rise to this same plane.
+          if (!obJoin || obJoin.leader === element.id) {
+            const panel = box(roofW + obOv * 2, 0.3, roofD + obOv * 2, obCx, elevation + obMid, obCz, obRoofMat);
+            // +x rotation drops the -z (north) edge; mirror it for a south fall.
+            if (fallsAlongZ) panel.rotation.x = Math.atan2(rise, runFt) * (low === 'north' ? -1 : 1);
+            else panel.rotation.z = Math.atan2(rise, runFt) * (low === 'west' ? 1 : -1);
+            obPart(panel);
+          }
           const obHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
           mesh = box(element.w, obH, element.d, (ox0 + ox1) / 2, elevation + obH / 2, (oz0 + oz1) / 2, obHandle);
           elementHeight = obH;
@@ -3423,7 +3687,14 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
         // away from the house. All parts carry the element's roomId so
         // selection glow and explode move the assembly as one.
         const canopyKind = element.roofType || (element.category === 'carport' || element.category === 'porch' ? 'shed' : '');
-        if (canopyKind && element.category !== 'foundation' && element.category !== 'floor') {
+        // A STRUCTURE THAT IS PART OF A BUILDING IS ROOFED BY THE BUILDING.
+        // This block gives a canopy to anything carrying a roofType, which is
+        // right for a carport standing on its own and wrong the moment that
+        // carport is built against something: the building already roofed it,
+        // and the canopy laid a second panel on posts over the top of the
+        // first. Daniel, on the joined bay: "the carport still has an extra
+        // roof layer." Joining introduced this; joining has to answer for it.
+        if (canopyKind && !joinOf(element) && element.category !== 'foundation' && element.category !== 'floor') {
           // Posts stand on the deck (or a low volume) — never on top of a
           // tall handle volume, which floated the canopy 10ft up.
           // HOW MUCH ROOM IS UNDER IT. This was a constant: every carport,

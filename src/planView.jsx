@@ -536,6 +536,176 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
   // 2nd-floor layout, not the ground. (Roof openings are drawn in 3D only.)
   const openings = (spec.openings || []).filter((o) => o.wall !== 'roof' && Number(o.level || 1) === activeFloor);
 
+  // WHAT IS UNDERFOOT PAINTS FIRST.
+  // An SVG has no z-index: whatever is drawn last covers what came before, and
+  // the plan drew every element AFTER every room, in the order they were added.
+  // So a slab pad — the one thing that is by definition below the floor — buried
+  // whatever it was poured under. Daniel, on his woodshed (2026-07-27): "why does
+  // the woodshed slab appear on top of the room rather than under it?"
+  //
+  // It was never geometry. The 3D always had it right (a pad is a half-foot box
+  // centred below grade); only the drawing was wrong, and it hit ANY pad over
+  // ANYTHING added before it — rooms, outbuildings, decks. Fixed as a class:
+  // foundation paints before the rooms, EXCEPT in the Foundation chapter, where
+  // the pad is the subject you came to drag and has to stay on top and clickable.
+  // Add a category to isUnderfoot only if it truly lives below the floor.
+  const planElements = [...(spec.elements || []), ...sunspacePartitions(spec)].filter(planLevelFilter);
+  const isUnderfoot = (el) => el.category === 'foundation' && context !== 'foundation';
+  const renderPlanElement = (raw) => {
+    const el = roomAt(raw);
+    const isSel = raw.id === selectedRoom;
+    const w = Number(el.w) || 4;
+    const d = Number(el.d) || 4;
+    // A storey's extent plate. Its BODY is a non-interactive dashed
+    // outline (so a room click hits the room, never the plate). But you
+    // can still work the floor directly: drag its BORDER to move it, or a
+    // CORNER dot to resize — those thin handles are the only interactive
+    // parts, so rooms underneath stay clickable. (Numbers in Shape do the
+    // same job.) Only the upper floors are grabbable this way.
+    if (raw.category === 'floor') {
+      const isSel = raw.id === selectedRoom;
+      const grabbable = Number(raw.level || 1) > 1 && !buildingContext && !siteContext && Boolean(onResize);
+      return (
+        <g key={raw.id}>
+          <rect x={el.x} y={el.y} width={w} height={d} fill="none"
+            stroke={isSel ? 'var(--active-line)' : 'var(--line)'} strokeWidth={isSel ? 0.5 : 0.3}
+            strokeDasharray="1.2 0.8" opacity={0.7} pointerEvents="none" />
+          {grabbable && (
+            <>
+              {/* the border is the move handle — only the stroke is live,
+                  so clicks inside (on rooms) pass straight through */}
+              <rect x={el.x} y={el.y} width={w} height={d} fill="none"
+                stroke="transparent" strokeWidth={1.6} pointerEvents="stroke"
+                style={{ cursor: drag ? 'grabbing' : 'grab' }}
+                onPointerDown={(event) => startDrag(event, raw, 'move')}
+                onContextMenu={(event) => {
+                  if (!onContext) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onSelect?.(raw.id);
+                  onContext(raw.id, event.clientX, event.clientY);
+                }} />
+              {['nw', 'ne', 'sw', 'se'].map((corner) => {
+                const cx = el.x + (corner.includes('e') ? w : 0);
+                const cy = el.y + (corner.includes('s') ? d : 0);
+                return <circle key={corner} cx={cx} cy={cy} r={1} fill="var(--active-line)" stroke="#fff" strokeWidth={0.18}
+                  style={{ cursor: `${corner}-resize` }} onPointerDown={(event) => startDrag(event, raw, corner)} />;
+              })}
+            </>
+          )}
+        </g>
+      );
+    }
+    // A stair draws as what it IS — one or two runs with a landing
+    // between, treads ruled across each run, and an arrow showing which
+    // way you climb. Same resolveStair() the checks and the 3D use, so
+    // the drawing can never disagree with the model.
+    if (isStair(raw) && !raw.synthetic) {
+      const st = resolveStair(spec, el);
+      const dim = buildingContext ? 0.3 : 1;
+      return (
+        <g key={raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }} opacity={dim}
+          onPointerDown={(event) => startDrag(event, raw, 'move')}
+          onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}>
+          {st.parts.map((part, index) => (
+            <rect key={index} x={part.x} y={part.y} width={part.w} height={part.d}
+              fill={PLAN_ELEMENT_HEX.stair}
+              fillOpacity={part.kind === 'landing' ? (isSel ? 0.98 : 0.85) : (isSel ? 0.9 : 0.72)}
+              stroke={isSel ? 'var(--active-line)' : '#5a5348'} strokeWidth={isSel ? 0.4 : 0.22} />
+          ))}
+          {/* tread lines, ruled across the run at the real tread depth */}
+          {st.parts.filter((p) => p.kind === 'run').map((part) => {
+            const along = part.climb === 'east' || part.climb === 'west';
+            const n = Math.max(1, part.treads);
+            return Array.from({ length: n - 1 }, (_, i) => {
+              const t = (i + 1) / n;
+              return along
+                ? <line key={`${part.run}-${i}`} x1={part.x + part.w * t} y1={part.y} x2={part.x + part.w * t} y2={part.y + part.d}
+                  stroke="#f6f4ec" strokeWidth={0.09} opacity={0.75} pointerEvents="none" />
+                : <line key={`${part.run}-${i}`} x1={part.x} y1={part.y + part.d * t} x2={part.x + part.w} y2={part.y + part.d * t}
+                  stroke="#f6f4ec" strokeWidth={0.09} opacity={0.75} pointerEvents="none" />;
+            });
+          })}
+          {/* which way is up */}
+          {(() => {
+            const r1 = st.parts.find((p) => p.kind === 'run');
+            if (!r1) return null;
+            const cx = r1.x + r1.w / 2; const cy = r1.y + r1.d / 2;
+            const deg = { north: 0, east: 90, south: 180, west: 270 }[st.facing] || 0;
+            return (
+              <g transform={`translate(${cx} ${cy}) rotate(${deg})`} pointerEvents="none">
+                <line x1={0} y1={1.1} x2={0} y2={-1.1} stroke="#f6f4ec" strokeWidth={0.16} opacity={0.95} />
+                <path d="M -0.42 -0.6 L 0 -1.25 L 0.42 -0.6 Z" fill="#f6f4ec" opacity={0.95} />
+              </g>
+            );
+          })()}
+          {isSel && (
+            <text x={st.bbox.x + st.bbox.w / 2} y={st.bbox.y + st.bbox.d + 1.2} textAnchor="middle"
+              fontSize={0.95} fill="var(--ink)" fontWeight="600" pointerEvents="none">
+              {st.risers} risers · {st.riserIn.toFixed(1)}″
+            </text>
+          )}
+          {/* Corner handles, same as every other object. Drawing the stair
+              as real treads replaced the generic element body — and took
+              its grab handles with it, so a stair became the one thing on
+              the plan you could not resize. They pull the stair's WIDTH
+              (its run length is derived from the climb). */}
+          {isSel && onResize && ['nw', 'ne', 'sw', 'se'].map((corner) => {
+            const hx = st.bbox.x + (corner.includes('e') ? st.bbox.w : 0);
+            const hy = st.bbox.y + (corner.includes('s') ? st.bbox.d : 0);
+            return (
+              <g key={corner}>
+                <circle cx={hx} cy={hy} r={0.9} fill="transparent" style={{ cursor: `${corner}-resize` }}
+                  onPointerDown={(event) => startDrag(event, raw, corner)} />
+                <circle cx={hx} cy={hy} r={0.35} fill="var(--active-line)" stroke="#fff" strokeWidth={0.1} pointerEvents="none" />
+              </g>
+            );
+          })}
+        </g>
+      );
+    }
+    // In a building context most elements are backdrop — EXCEPT the ones
+    // the context is FOR: foundation runs are the subject of the
+    // Foundation view (drag them under whatever they carry).
+    const isContextSubject = context === 'foundation' && raw.category === 'foundation';
+    return (
+      <g key={raw.synKey || raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
+        <rect
+          x={el.x} y={el.y} width={w} height={d}
+          fill={PLAN_ELEMENT_HEX[raw.category] || '#8a7768'}
+          fillOpacity={raw.category === 'partition' ? (isSel ? 1 : 0.95) : (isSel ? 0.92 : 0.7) * (buildingContext && !isContextSubject ? 0.25 : 1)}
+          stroke={isSel ? 'var(--active-line)' : '#5a5348'}
+          strokeWidth={isSel ? 0.4 : 0.22}
+          strokeDasharray={raw.category === 'partition' ? undefined : '0.8 0.5'}
+          pointerEvents={raw.synthetic || (buildingContext && !isContextSubject) ? 'none' : undefined}
+          onPointerDown={(event) => startDrag(event, raw, 'move')}
+          onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}
+        />
+        {(() => {
+          if (isResizing(raw.id)) return liveDimsLabel({ x: el.x, y: el.y, w, d });
+          const lab = planLabelFit(raw.name, w, d, isSel, 1.5);
+          if (!lab) return null;
+          const ink = planLabelInk(PLAN_ELEMENT_HEX[raw.category] || '#8a7768');
+          const lineH = lab.size * 1.2;
+          return lab.lines.map((line, index) => (
+            <text
+              key={index}
+              x={el.x + w / 2}
+              y={el.y + d / 2 + 0.5 + (index - (lab.lines.length - 1) / 2) * lineH}
+              textAnchor="middle" fontSize={lab.size} fill={ink} fontWeight="600" pointerEvents="none"
+              paintOrder="stroke" stroke={lab.halo ? 'rgba(246,244,236,0.85)' : 'none'} strokeWidth={lab.halo ? lab.size * 0.22 : 0}
+            >{line}</text>
+          ));
+        })()}
+        {isSel && ['nw', 'ne', 'sw', 'se'].map((corner) => {
+          const cx = el.x + (corner.includes('e') ? w : 0);
+          const cy = el.y + (corner.includes('s') ? d : 0);
+          return <circle key={corner} cx={cx} cy={cy} r={0.8} fill="var(--active-line)" stroke="#fff" strokeWidth={0.15} style={{ cursor: `${corner}-resize` }} onPointerDown={(event) => startDrag(event, raw, corner)} />;
+        })}
+      </g>
+    );
+  };
+
   return (
     <div className="planWrap">
       <svg
@@ -654,6 +824,9 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
           const pts = s === 'north' ? [0, 0, W, 0] : s === 'south' ? [0, D, W, D] : s === 'east' ? [W, 0, W, D] : [0, 0, 0, D];
           return <line x1={pts[0]} y1={pts[1]} x2={pts[2]} y2={pts[3]} stroke="var(--active-line)" strokeWidth={0.7} opacity={0.9} pointerEvents="none" />;
         })()}
+        {/* underfoot first: a slab pad sits BELOW what it carries, so it paints
+            before the rooms — see renderPlanElement */}
+        {planElements.filter(isUnderfoot).map(renderPlanElement)}
         {/* rooms */}
         {(spec.rooms || []).map((raw) => {
           const onFloor = Number(raw.level || 1) === activeFloor;
@@ -729,160 +902,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
             read as objects/fixtures rather than rooms; drag + resize like rooms */}
         {/* placed elements PLUS the derived sunspace walls — the same list
             the 3D consumes, so a greenhouse's wall exists in both or neither */}
-        {[...(spec.elements || []), ...sunspacePartitions(spec)].filter(planLevelFilter).map((raw) => {
-          const el = roomAt(raw);
-          const isSel = raw.id === selectedRoom;
-          const w = Number(el.w) || 4;
-          const d = Number(el.d) || 4;
-          // A storey's extent plate. Its BODY is a non-interactive dashed
-          // outline (so a room click hits the room, never the plate). But you
-          // can still work the floor directly: drag its BORDER to move it, or a
-          // CORNER dot to resize — those thin handles are the only interactive
-          // parts, so rooms underneath stay clickable. (Numbers in Shape do the
-          // same job.) Only the upper floors are grabbable this way.
-          if (raw.category === 'floor') {
-            const isSel = raw.id === selectedRoom;
-            const grabbable = Number(raw.level || 1) > 1 && !buildingContext && !siteContext && Boolean(onResize);
-            return (
-              <g key={raw.id}>
-                <rect x={el.x} y={el.y} width={w} height={d} fill="none"
-                  stroke={isSel ? 'var(--active-line)' : 'var(--line)'} strokeWidth={isSel ? 0.5 : 0.3}
-                  strokeDasharray="1.2 0.8" opacity={0.7} pointerEvents="none" />
-                {grabbable && (
-                  <>
-                    {/* the border is the move handle — only the stroke is live,
-                        so clicks inside (on rooms) pass straight through */}
-                    <rect x={el.x} y={el.y} width={w} height={d} fill="none"
-                      stroke="transparent" strokeWidth={1.6} pointerEvents="stroke"
-                      style={{ cursor: drag ? 'grabbing' : 'grab' }}
-                      onPointerDown={(event) => startDrag(event, raw, 'move')}
-                      onContextMenu={(event) => {
-                        if (!onContext) return;
-                        event.preventDefault();
-                        event.stopPropagation();
-                        onSelect?.(raw.id);
-                        onContext(raw.id, event.clientX, event.clientY);
-                      }} />
-                    {['nw', 'ne', 'sw', 'se'].map((corner) => {
-                      const cx = el.x + (corner.includes('e') ? w : 0);
-                      const cy = el.y + (corner.includes('s') ? d : 0);
-                      return <circle key={corner} cx={cx} cy={cy} r={1} fill="var(--active-line)" stroke="#fff" strokeWidth={0.18}
-                        style={{ cursor: `${corner}-resize` }} onPointerDown={(event) => startDrag(event, raw, corner)} />;
-                    })}
-                  </>
-                )}
-              </g>
-            );
-          }
-          // A stair draws as what it IS — one or two runs with a landing
-          // between, treads ruled across each run, and an arrow showing which
-          // way you climb. Same resolveStair() the checks and the 3D use, so
-          // the drawing can never disagree with the model.
-          if (isStair(raw) && !raw.synthetic) {
-            const st = resolveStair(spec, el);
-            const dim = buildingContext ? 0.3 : 1;
-            return (
-              <g key={raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }} opacity={dim}
-                onPointerDown={(event) => startDrag(event, raw, 'move')}
-                onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}>
-                {st.parts.map((part, index) => (
-                  <rect key={index} x={part.x} y={part.y} width={part.w} height={part.d}
-                    fill={PLAN_ELEMENT_HEX.stair}
-                    fillOpacity={part.kind === 'landing' ? (isSel ? 0.98 : 0.85) : (isSel ? 0.9 : 0.72)}
-                    stroke={isSel ? 'var(--active-line)' : '#5a5348'} strokeWidth={isSel ? 0.4 : 0.22} />
-                ))}
-                {/* tread lines, ruled across the run at the real tread depth */}
-                {st.parts.filter((p) => p.kind === 'run').map((part) => {
-                  const along = part.climb === 'east' || part.climb === 'west';
-                  const n = Math.max(1, part.treads);
-                  return Array.from({ length: n - 1 }, (_, i) => {
-                    const t = (i + 1) / n;
-                    return along
-                      ? <line key={`${part.run}-${i}`} x1={part.x + part.w * t} y1={part.y} x2={part.x + part.w * t} y2={part.y + part.d}
-                        stroke="#f6f4ec" strokeWidth={0.09} opacity={0.75} pointerEvents="none" />
-                      : <line key={`${part.run}-${i}`} x1={part.x} y1={part.y + part.d * t} x2={part.x + part.w} y2={part.y + part.d * t}
-                        stroke="#f6f4ec" strokeWidth={0.09} opacity={0.75} pointerEvents="none" />;
-                  });
-                })}
-                {/* which way is up */}
-                {(() => {
-                  const r1 = st.parts.find((p) => p.kind === 'run');
-                  if (!r1) return null;
-                  const cx = r1.x + r1.w / 2; const cy = r1.y + r1.d / 2;
-                  const deg = { north: 0, east: 90, south: 180, west: 270 }[st.facing] || 0;
-                  return (
-                    <g transform={`translate(${cx} ${cy}) rotate(${deg})`} pointerEvents="none">
-                      <line x1={0} y1={1.1} x2={0} y2={-1.1} stroke="#f6f4ec" strokeWidth={0.16} opacity={0.95} />
-                      <path d="M -0.42 -0.6 L 0 -1.25 L 0.42 -0.6 Z" fill="#f6f4ec" opacity={0.95} />
-                    </g>
-                  );
-                })()}
-                {isSel && (
-                  <text x={st.bbox.x + st.bbox.w / 2} y={st.bbox.y + st.bbox.d + 1.2} textAnchor="middle"
-                    fontSize={0.95} fill="var(--ink)" fontWeight="600" pointerEvents="none">
-                    {st.risers} risers · {st.riserIn.toFixed(1)}″
-                  </text>
-                )}
-                {/* Corner handles, same as every other object. Drawing the stair
-                    as real treads replaced the generic element body — and took
-                    its grab handles with it, so a stair became the one thing on
-                    the plan you could not resize. They pull the stair's WIDTH
-                    (its run length is derived from the climb). */}
-                {isSel && onResize && ['nw', 'ne', 'sw', 'se'].map((corner) => {
-                  const hx = st.bbox.x + (corner.includes('e') ? st.bbox.w : 0);
-                  const hy = st.bbox.y + (corner.includes('s') ? st.bbox.d : 0);
-                  return (
-                    <g key={corner}>
-                      <circle cx={hx} cy={hy} r={0.9} fill="transparent" style={{ cursor: `${corner}-resize` }}
-                        onPointerDown={(event) => startDrag(event, raw, corner)} />
-                      <circle cx={hx} cy={hy} r={0.35} fill="var(--active-line)" stroke="#fff" strokeWidth={0.1} pointerEvents="none" />
-                    </g>
-                  );
-                })}
-              </g>
-            );
-          }
-          // In a building context most elements are backdrop — EXCEPT the ones
-          // the context is FOR: foundation runs are the subject of the
-          // Foundation view (drag them under whatever they carry).
-          const isContextSubject = context === 'foundation' && raw.category === 'foundation';
-          return (
-            <g key={raw.synKey || raw.id} style={{ cursor: drag ? 'grabbing' : 'grab' }}>
-              <rect
-                x={el.x} y={el.y} width={w} height={d}
-                fill={PLAN_ELEMENT_HEX[raw.category] || '#8a7768'}
-                fillOpacity={raw.category === 'partition' ? (isSel ? 1 : 0.95) : (isSel ? 0.92 : 0.7) * (buildingContext && !isContextSubject ? 0.25 : 1)}
-                stroke={isSel ? 'var(--active-line)' : '#5a5348'}
-                strokeWidth={isSel ? 0.4 : 0.22}
-                strokeDasharray={raw.category === 'partition' ? undefined : '0.8 0.5'}
-                pointerEvents={raw.synthetic || (buildingContext && !isContextSubject) ? 'none' : undefined}
-                onPointerDown={(event) => startDrag(event, raw, 'move')}
-                onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}
-              />
-              {(() => {
-                if (isResizing(raw.id)) return liveDimsLabel({ x: el.x, y: el.y, w, d });
-                const lab = planLabelFit(raw.name, w, d, isSel, 1.5);
-                if (!lab) return null;
-                const ink = planLabelInk(PLAN_ELEMENT_HEX[raw.category] || '#8a7768');
-                const lineH = lab.size * 1.2;
-                return lab.lines.map((line, index) => (
-                  <text
-                    key={index}
-                    x={el.x + w / 2}
-                    y={el.y + d / 2 + 0.5 + (index - (lab.lines.length - 1) / 2) * lineH}
-                    textAnchor="middle" fontSize={lab.size} fill={ink} fontWeight="600" pointerEvents="none"
-                    paintOrder="stroke" stroke={lab.halo ? 'rgba(246,244,236,0.85)' : 'none'} strokeWidth={lab.halo ? lab.size * 0.22 : 0}
-                  >{line}</text>
-                ));
-              })()}
-              {isSel && ['nw', 'ne', 'sw', 'se'].map((corner) => {
-                const cx = el.x + (corner.includes('e') ? w : 0);
-                const cy = el.y + (corner.includes('s') ? d : 0);
-                return <circle key={corner} cx={cx} cy={cy} r={0.8} fill="var(--active-line)" stroke="#fff" strokeWidth={0.15} style={{ cursor: `${corner}-resize` }} onPointerDown={(event) => startDrag(event, raw, corner)} />;
-              })}
-            </g>
-          );
-        })}
+        {planElements.filter((raw) => !isUnderfoot(raw)).map(renderPlanElement)}
         {/* openings as white gaps on the walls — DRAGGABLE along their wall
             (windows and doors find their spot on the plan). On a custom
             footprint each gap draws on the opening's actual polygon edge. */}

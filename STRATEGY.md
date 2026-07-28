@@ -16,16 +16,65 @@ TESTING.md), its referee and corpus keep guarding it, but NO session works
 on trace quality until design-from-scratch is nailed. The rest of this file
 is the trace-era strategy, kept for when that work resumes.
 
-## The one sentence that defines success (v2)
+## The two gates (revised 2026-07-27 — supersedes the v2 sentence below)
+
+The v2 success sentence was written as one test and read as two, and its
+"for an hour" got taken as an estimate of how long designing a house takes.
+Daniel called it: **finishing a real house in the app is a different test from
+a stranger's first hour, and it takes weeks, not an hour.** He is right. The
+two are now named separately. Neither blocks the other; both must pass.
+
+### Gate A — DEPTH: the house actually gets finished
+
+> Daniel designs his real house in the app, all the way through — rooms,
+> walls, roof, systems, costs, checks — and out the far end as permit sheets,
+> frame drawings or IFC, without having to leave the app to finish it.
+
+This is the harder test and the real proof. It has been running for weeks and
+will run for weeks more. It reaches a class of problem the first hour
+structurally cannot: detail, coordination between building systems, and
+everything that only breaks at export. **An hour was never an estimate for
+this** — measuring it in hours was the error in v2's wording.
+
+Standing hazard, straight from the top of this document: an app that can build
+*Daniel's* house is the instance, not the class. Every fix that comes out of
+Gate A gets the same treatment as every trace fix — fix the class, and prove it
+on something other than his design before ticking it off.
+
+### Gate B — BREADTH: no dead ends in the shallow end
+
+> A first-time user starts on empty land and works for an hour, without the
+> chat and without the manual, and never hits a "wait, why can't I—" they
+> cannot get past.
+
+This is a **dead-end detector**, not a design session. It can fail in eleven
+minutes, and it can pass without producing a house anyone would build. That is
+fine — it measures one thing: whether the common path is clear.
+
+**Daniel can no longer run Gate B.** He knows where the rough edges are and
+routes around them without noticing he is doing it. Weeks in, everything he
+finds is depth data. First-hour data can only come from someone who has never
+seen the app. That is the argument for putting the current build in front of
+2–3 testers *now*, in parallel with Gate A, rather than after it — the signal
+is not something he can manufacture himself by using it more.
+
+### The work list
+
+Every "why can't I—" from either gate goes into the **Why can't I** database on
+the 07 — House Notion page, in the finder's own words, before anyone triages
+it: <https://app.notion.com/p/6d17bcccdb4e42eab93686622e45778c>
+
+Gate A items skew toward depth gaps, where "post-MVP" is a legitimate answer.
+Gate B items skew toward shallow gaps, where it is not.
+
+The 287-check unit suite is the regression floor (free to run); the trace
+corpus/battery only guards the experimental corner.
+
+## The one sentence that defined success (v2 — superseded by the two gates)
 
 > A first-time user starts on empty land and designs a house they believe
 > in — rooms, walls, roof, costs, checks — for an hour, without the chat,
 > without the manual, and without once asking "wait, why can't I—".
-
-The gate: Daniel does that hour first, then his 2–3 testers. Every "why
-can't I" they hit becomes the work list, in their words. The 287-check unit
-suite is the regression floor (free to run); the trace corpus/battery only
-guards the experimental corner.
 
 ## The one sentence that defined success (v1, trace era — parked)
 
@@ -174,6 +223,10 @@ No compare view, no new surface. What it was for is covered without new UI:
 ## Rules of engagement (for every future session)
 
 1. Execute the current phase. Do not invent side quests.
+1b. Every "why can't I—" you hear, or cause, goes into the **Why can't I**
+   database on the 07 — House Notion page in the finder's own words, before
+   you triage it — including the ones you find yourself (mark them Internal).
+   A complaint that lives only in a chat transcript gets re-litigated.
 2. Every failure becomes a corpus set + an invariant + a class fix — never a
    one-off patch, never a hand-edit of Daniel's design (data repairs only on
    his explicit ask, and say so).
