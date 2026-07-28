@@ -1027,6 +1027,47 @@ export function resolveDeckStairs(spec, el, dkIn = null) {
     if (rise < 0.8) return { blocked: true, side, flat: true };
     const treads = Math.max(2, Math.ceil(rise / 0.65));
     const run = { side, mid, gapA0: mid - gapW / 2, gapA1: mid + gapW / 2, gapW, rise, targetTop, target, targetName, up: targetTop > dk.topFt, treads };
+    // A TURN FOLDS THE RUN. A storey of climb throws 17 ft of stair away from
+    // the deck, and a straight flight is often 17 ft the yard has not got —
+    // Daniel, with a workshop doorway under his: "can we shorten the stair
+    // run? or add a landing w a turn." Shortening is not on the table: the
+    // risers are already at code. Folding is. Half the treads go out, a
+    // landing turns the corner, and the rest run across — the same L the
+    // interior stairs have always had, and it costs about a third of the
+    // reach. `deckStairTurn` names the direction the SECOND leg travels,
+    // which must be perpendicular to the first.
+    const turn = String(el.deckStairTurn || '').toLowerCase();
+    const outAxis = side === 'north' || side === 'south' ? 'z' : 'x';
+    const legalTurns = outAxis === 'z' ? ['east', 'west'] : ['north', 'south'];
+    if (legalTurns.includes(turn)) {
+      const outward = side === 'north' || side === 'west' ? -1 : 1;
+      const edgeAt = side === 'north' ? ey : side === 'south' ? ey + ed : side === 'west' ? ex : ex + ew;
+      const n1 = Math.max(1, Math.round(treads / 2));      // out, then turn
+      const n2 = Math.max(1, treads - n1);
+      const landW = Math.max(gapW, 3.5);
+      const legOut = n1 * 0.9;
+      const turnPlus = turn === 'east' || turn === 'south';
+      const cornerFar = edgeAt + outward * (legOut + landW);
+      const acrossFrom = mid + (turnPlus ? 1 : -1) * (landW / 2);
+      const acrossTo = acrossFrom + (turnPlus ? 1 : -1) * n2 * 0.9;
+      const folded = {
+        ...run,
+        turn,
+        n1,
+        n2,
+        landW,
+        outward,
+        edgeAt,
+        outAxis,
+        reach: legOut + landW,                              // how far it leaves the deck
+        cornerAt: edgeAt + outward * legOut,
+        cornerFar,
+        acrossFrom,
+        acrossTo
+      };
+      const hit = stairRunObstruction(spec, el, folded);
+      return hit ? { blocked: true, side, turn, obstruction: hit } : folded;
+    }
     // A STAIR MAY NOT RUN THROUGH A BUILDING. The open-edge test only knows
     // about the house and other decks, so an edge with clear air right at the
     // deck could still march its whole flight straight into a shed twenty feet
@@ -1249,6 +1290,27 @@ export function resolveUnderDeckStair(spec, el, dk, side, fall) {
 // a patio, a pad or a lower deck, but not inside a shed. Anything under about
 // waist height is not an obstruction, it is something to step over.
 export function stairRunObstruction(spec, el, run) {
+  // A FOLDED RUN IS TWO RUNS AND A LANDING. Checking only the first leg would
+  // wave through a stair whose second leg lands in a wall.
+  if (run.turn) {
+    const alongZ = run.outAxis === 'z';
+    const c0 = Math.min(run.edgeAt, run.cornerFar); const c1 = Math.max(run.edgeAt, run.cornerFar);
+    const a0 = Math.min(run.gapA0, run.acrossFrom, run.acrossTo);
+    const a1 = Math.max(run.gapA1, run.acrossFrom, run.acrossTo);
+    // leg one + the landing, then the landing + leg two
+    const boxes = alongZ
+      ? [{ x0: run.gapA0, x1: run.gapA1, z0: c0, z1: c1 },
+        { x0: a0, x1: a1, z0: Math.min(run.cornerAt, run.cornerFar), z1: Math.max(run.cornerAt, run.cornerFar) }]
+      : [{ x0: c0, x1: c1, z0: run.gapA0, z1: run.gapA1 },
+        { x0: Math.min(run.cornerAt, run.cornerFar), x1: Math.max(run.cornerAt, run.cornerFar), z0: a0, z1: a1 }];
+    const solids = solidRects(spec, el.id);
+    for (const zone of boxes) {
+      const hit = solids.find((s) => Math.min(zone.x1, s.x1) - Math.max(zone.x0, s.x0) > 0.5
+        && Math.min(zone.z1, s.z1) - Math.max(zone.z0, s.z0) > 0.5);
+      if (hit) return hit.name;
+    }
+    return null;
+  }
   const horiz = run.side === 'north' || run.side === 'south';
   const ex = Number(el.x) || 0; const ey = Number(el.y) || 0;
   const ew = Math.max(1, Number(el.w) || 10); const ed = Math.max(1, Number(el.d) || 8);
