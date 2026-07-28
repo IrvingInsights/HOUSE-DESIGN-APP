@@ -924,11 +924,13 @@ export function resolveDeckStairs(spec, el, dkIn = null) {
   if (choice === 'none') return null;
   // WHICH SHAPE. Explicit first.
   const shapeSet = String(el.deckStairShape || '');
-  if (shapeSet === 'along') {
+  if (shapeSet === 'along' || shapeSet === 'u') {
     if (!['north', 'south', 'east', 'west'].includes(choice)) return null;
     const fall = ['north', 'south', 'east', 'west'].includes(el.deckStairFall) ? el.deckStairFall
       : (choice === 'north' || choice === 'south' ? 'east' : 'south');
-    return resolveUnderDeckStair(spec, el, dk, choice, fall);
+    return shapeSet === 'u'
+      ? resolveSwitchbackStair(spec, el, dk, choice, fall)
+      : resolveUnderDeckStair(spec, el, dk, choice, fall);
   }
   // ONE SURFACE, ONE AUTOMATIC STAIR. Left to itself every deck in a
   // wraparound would grow its own flight. The group places one: if any member
@@ -938,7 +940,12 @@ export function resolveDeckStairs(spec, el, dkIn = null) {
   if (choice === 'auto' && dk.needsSteps) {
     const group = deckGroupOf(spec, el, dk);
     if (group.length > 1) {
-      if (group.some((m) => ['north', 'south', 'east', 'west'].includes(m.el.deckStairs))) return null;
+      // A SIBLING'S CHOICE ONLY SPEAKS FOR A SIBLING. Testing this deck's own
+      // choice here is what silently deleted a stair: a blocked choice sent
+      // the resolver to the automatic path, and the automatic path then stood
+      // down because it saw the very choice that had just failed. If this deck
+      // had a choice that worked we would never be on this path at all.
+      if (group.some((m) => m.el.id !== el.id && ['north', 'south', 'east', 'west'].includes(m.el.deckStairs))) return null;
       // WHICH DECK CARRIES IT. The first answer here was order-of-creation,
       // which is not a fact about a building. The second was the widest open
       // edge — better, but it decided WHERE before asking WHAT, so a deck with
@@ -1092,6 +1099,20 @@ export function resolveDeckStairs(spec, el, dkIn = null) {
     const pick = held || candidates[0];
     const built = buildOn(pick.side, pick.seg);
     if (hasPlace && !held && !built.blocked) return { ...built, placedOff: true };
+    // A REFUSED CHOICE MUST NOT LEAVE YOU WITH NO WAY DOWN. Blocking the run
+    // and drawing nothing is the worst of both: the deck loses its stair and
+    // the only sign is a flag you may not be looking at. Daniel, after his
+    // chosen spot turned out to be a doorway: "i see no stairs." Honour the
+    // choice where it can be honoured; where it cannot, fall back to the
+    // automatic placement, DRAW it, and say plainly that it moved and why.
+    if (built.blocked) {
+      const auto = resolveDeckStairs(spec, {
+        ...el, deckStairs: 'auto', deckStairAt: 0, deckStairTurn: '', deckStairShape: el.deckStairShape
+      }, dk);
+      if (auto && !auto.blocked) {
+        return { ...auto, movedFrom: { side: choice, at: hasPlace ? placedAt : null, why: built.obstruction || 'that edge is built against something' } };
+      }
+    }
     return built;
   }
   if (!dk.needsSteps) return null;
@@ -1157,7 +1178,8 @@ function clearBeyond(spec, el, run) {
 // stairs will run parallel with the deck. Under, actually."
 export const DECK_STAIR_SHAPES = {
   out: { label: 'Straight out', note: 'A flight at right angles to the deck, landing out in front of it. Simplest, and it needs clear ground the length of the run.' },
-  along: { label: 'Along the deck, underneath', note: 'The flight runs parallel to the deck edge and sits under the deck. Costs no ground, and the deck keeps the weather off it — but the deck has to be long enough, and high enough to walk under.' }
+  along: { label: 'Along the deck, underneath', note: 'The flight runs parallel to the deck edge and sits under the deck. Costs no ground, and the deck keeps the weather off it — but the deck has to be long enough, and high enough to walk under.' },
+  u: { label: 'Switchback, underneath', note: 'Two flights side by side under the deck with a landing between them, doubling back. The most compact way down there is — it needs barely half the length a straight run does, and no ground at all. It wants a deck at least two flights wide.' }
 };
 const STAIR_SOLID_CATS = new Set(['outbuilding', 'carport', 'porch', 'greenhouse']);
 const STAIR_UNDER_WIDTH = 3.5;      // a comfortable flight
@@ -1171,6 +1193,20 @@ const STAIR_HEADROOM = 6.7;         // you have to be able to walk under the dec
 // ground level keeps a strip of clear ground outside it, the way a wall keeps
 // its whole footprint.
 const DOOR_KINDS = new Set(['door', 'french', 'slider', 'garage']);
+
+// WHERE ALONG THE FACE A DOORWAY SITS. A structure's doorway was centred on
+// its wall, always, and the app never said it had chosen — so a door meant to
+// open into a greenhouse drifted off the end of it when the building moved,
+// and would move again if the wall ever changed length. It is the same silent
+// centring the deck stairs had: where an opening goes is a decision, not an
+// average. `door<Side>At` is measured along the face the way an opening is
+// measured along a wall — from the WEST end of a north/south face, from the
+// NORTH end of an east/west one. Unset, it centres exactly as before.
+export function structureDoorStart(el, side, a0, span, wide) {
+  const at = Number(el?.[`door${side}At`]);
+  if (Number.isFinite(at) && at > 0) return Math.min(a0 + span - wide, Math.max(a0, at));
+  return a0 + (span - wide) / 2;
+}
 const DOOR_CLEAR_FT = 4;
 function doorClearZones(spec) {
   const W = Number(spec.shell?.widthFt) || 0; const D = Number(spec.shell?.depthFt) || 0;
@@ -1203,7 +1239,7 @@ function doorClearZones(spec) {
           const wide = Math.max(0, Math.min(Number(o[`door${side}Ft`]) || 0, (horiz ? ow : od) - 1));
           if (wide <= 0.5) return null;
           const span = horiz ? ow : od;
-          const a = (horiz ? ox : oz) + (span - wide) / 2;
+          const a = structureDoorStart(o, side, horiz ? ox : oz, span, wide);
           const name = `the ${side.toLowerCase()} door of ${o.name || 'a structure'}`;
           if (side === 'North') return { name, x0: a, x1: a + wide, z0: oz - DOOR_CLEAR_FT, z1: oz };
           if (side === 'South') return { name, x0: a, x1: a + wide, z0: oz + od, z1: oz + od + DOOR_CLEAR_FT };
@@ -1219,7 +1255,104 @@ function solidRects(spec, exceptId) {
     .map((o) => ({ name: o.name || 'a structure', x0: Number(o.x) || 0, x1: (Number(o.x) || 0) + (Number(o.w) || 0), z0: Number(o.y) || 0, z1: (Number(o.y) || 0) + (Number(o.d) || 0) }));
   const W = Number(spec.shell?.widthFt) || 0; const D = Number(spec.shell?.depthFt) || 0;
   if (W > 0 && D > 0) out.push({ name: 'the house', x0: 0, x1: W, z0: 0, z1: D });
+  // A ROOM IS ENCLOSED SPACE. Obstructions used to mean buildings, and a
+  // greenhouse is a room — so a flight could be run straight down through
+  // Daniel's sunspace and nothing objected, because the app was only ever
+  // looking for sheds. Anything you stand inside on the ground blocks a stair,
+  // whether it is called a shed or a room. (Rooms inside the house footprint
+  // are already covered by the house itself; the ones that matter are the
+  // sunspaces and annexes that reach beyond it.)
+  for (const r of (spec.rooms || [])) {
+    if (Number(r.level || 1) !== 1) continue;
+    const rw = Number(r.w) || 0; const rd = Number(r.d) || 0;
+    if (rw < 1 || rd < 1) continue;
+    out.push({ name: r.name || 'a room', x0: Number(r.x) || 0, x1: (Number(r.x) || 0) + rw, z0: Number(r.y) || 0, z1: (Number(r.y) || 0) + rd });
+  }
   return out.concat(doorClearZones(spec));
+}
+
+// THE SWITCHBACK. Two flights side by side under the deck with a landing
+// between them, doubling back on itself — the most compact way down there is.
+// A straight flight off a 12 ft deck needs 17 ft in one line; folded out into
+// the yard it still plants a landing twenty feet from the house; doubled back
+// underneath it needs about twelve feet of a deck's own length and no ground
+// at all, with the deck as its roof. Daniel asked for an elegant answer to a
+// deck on a long narrow side, and this is the one buildings actually use.
+//
+// It wants a deck wide enough for two flights side by side. Below that the
+// legs would be under the code minimum and it declines rather than drawing a
+// stair nobody could climb.
+export function resolveSwitchbackStair(spec, el, dk, side, fall) {
+  const alongX = side === 'north' || side === 'south';
+  const legal = alongX ? ['east', 'west'] : ['north', 'south'];
+  if (!legal.includes(fall)) return { blocked: true, side, shape: 'u', badFall: true };
+  if (dk.topFt < STAIR_HEADROOM + 0.8) return { blocked: true, side, shape: 'u', lowDeck: true };
+  const ex = Number(el.x) || 0; const ey = Number(el.y) || 0;
+  const ew = Math.max(1, Number(el.w) || 10); const ed = Math.max(1, Number(el.d) || 8);
+  const across = alongX ? ed : ew;                       // the deck's width, across the flights
+  const legW = Math.min(STAIR_UNDER_WIDTH, across / 2);
+  if (legW < STAIR_LIMITS.minWidthFt) {
+    return { blocked: true, side, shape: 'u', narrow: true, need: STAIR_LIMITS.minWidthFt * 2, have: across };
+  }
+  const rise = dk.topFt;
+  const treads = Math.max(2, Math.ceil(rise / 0.65));
+  const n1 = Math.max(1, Math.round(treads / 2));
+  const n2 = Math.max(1, treads - n1);
+  const need = Math.max(n1, n2) * 0.9 + legW;            // longest leg + the landing
+  // the two lanes, hugging the chosen side
+  const bandLo = side === 'north' ? ey : side === 'south' ? ey + ed - legW * 2
+    : side === 'west' ? ex : ex + ew - legW * 2;
+  const bandHi = bandLo + legW * 2;
+  const spanLo = alongX ? ex : ey;
+  const spanHi = alongX ? ex + ew : ey + ed;
+  if (spanHi - spanLo < need) return { blocked: true, side, shape: 'u', short: true, need, have: spanHi - spanLo };
+  let free = [[spanLo, spanHi]];
+  for (const r of solidRects(spec, el.id)) {
+    const cLo = alongX ? r.z0 : r.x0; const cHi = alongX ? r.z1 : r.x1;
+    if (Math.min(bandHi, cHi) - Math.max(bandLo, cLo) <= 0.5) continue;
+    const b0 = alongX ? r.x0 : r.z0; const b1 = alongX ? r.x1 : r.z1;
+    free = free.flatMap(([f0, f1]) => (b1 <= f0 || b0 >= f1 ? [[f0, f1]]
+      : [...(b0 > f0 ? [[f0, b0]] : []), ...(b1 < f1 ? [[b1, f1]] : [])]));
+  }
+  const usable = free.filter(([f0, f1]) => f1 - f0 >= need);
+  if (!usable.length) {
+    const worst = solidRects(spec, el.id).find((r) => {
+      const cLo = alongX ? r.z0 : r.x0; const cHi = alongX ? r.z1 : r.x1;
+      return Math.min(bandHi, cHi) - Math.max(bandLo, cLo) > 0.5;
+    });
+    return { blocked: true, side, shape: 'u', obstruction: worst ? worst.name : 'something under the deck' };
+  }
+  // the top sits at the `fall` end of the longest clear stretch and the flight
+  // walks AWAY from it, turns, and comes back — so you arrive where you left.
+  // A POSITION NAMES THE STRETCH here too. Longest-wins is only a default, and
+  // on a long deck the longest stretch is often the corner you came outside to
+  // sit in — Daniel: "the stairs in that spot take over the prime deck space
+  // and SE view." Where the way down goes is his decision, not the arithmetic's.
+  const downPlus = fall === 'east' || fall === 'south';
+  const marked = Number(el.deckStairAt);
+  const held = Number.isFinite(marked) && marked > 0
+    ? usable.find(([f0, f1]) => marked >= f0 - 0.01 && marked <= f1 + 0.01) : null;
+  const pick = held || usable.reduce((a, b) => ((b[1] - b[0]) > (a[1] - a[0]) ? b : a));
+  const top = downPlus ? pick[0] : pick[1];
+  const turnAt = downPlus ? top + n1 * 0.9 : top - n1 * 0.9;
+  const foot = downPlus ? turnAt + legW - n2 * 0.9 : turnAt - legW + n2 * 0.9;
+  const stepH = rise / treads;
+  const wellLen = Math.min(n1 * 0.9, STAIR_HEADROOM / (stepH / 0.9));
+  return {
+    shape: 'u', side, fall, rise, treads, n1, n2, legW, need,
+    marchAxis: alongX ? 'x' : 'z',
+    topAt: top, turnAt, botAt: foot,
+    lane1Lo: bandLo, lane1Hi: bandLo + legW,             // going away
+    lane2Lo: bandLo + legW, lane2Hi: bandHi,             // coming back
+    landFrom: downPlus ? turnAt : turnAt - legW,
+    landTo: downPlus ? turnAt + legW : turnAt,
+    wellFrom: Math.min(top, top + (downPlus ? wellLen : -wellLen)),
+    wellTo: Math.max(top, top + (downPlus ? wellLen : -wellLen)),
+    wellLen, wellA0: bandLo, wellA1: bandLo + legW,
+    crossMid: (bandLo + bandHi) / 2, gapW: legW * 2,
+    mid: (bandLo + bandHi) / 2, gapA0: bandLo, gapA1: bandHi,
+    target: 'grade', targetTop: 0, targetName: 'the ground', up: false
+  };
 }
 
 // The flight that runs along `side` and sits under the deck, descending toward
@@ -1262,7 +1395,10 @@ export function resolveUnderDeckStair(spec, el, dk, side, fall) {
   // downhill is +span for east/south, −span for west/north; put the BOTTOM at
   // the downhill end of the longest clear stretch, so the flight lands clear.
   const downPlus = fall === 'east' || fall === 'south';
-  const pickInterval = usable.reduce((a, b) => (downPlus ? (b[1] > a[1] ? b : a) : (b[0] < a[0] ? b : a)));
+  const markedA = Number(el.deckStairAt);                 // a position names the stretch
+  const heldA = Number.isFinite(markedA) && markedA > 0
+    ? usable.find(([f0, f1]) => markedA >= f0 - 0.01 && markedA <= f1 + 0.01) : null;
+  const pickInterval = heldA || usable.reduce((a, b) => (downPlus ? (b[1] > a[1] ? b : a) : (b[0] < a[0] ? b : a)));
   const bot = downPlus ? pickInterval[1] : pickInterval[0];
   const top = downPlus ? bot - runLen : bot + runLen;
   // THE HOLE THE STAIR COMES UP THROUGH. A flight under a deck is only usable
@@ -4803,15 +4939,23 @@ export function detectIssues(spec) {
     // to be missing — switched off, never offered, or aimed at an edge that is
     // built against the house — it is the same flag.
     const stDown = resolveDeckStairs(spec, el, dk);
-    if (dk.topFt >= 1.5 && !deckReaches.has(el.id)) {
+    if (dk.topFt >= 1.5 && (!deckReaches.has(el.id) || (stDown && stDown.movedFrom))) {
       const why = String(el.deckStairs || 'auto') === 'none'
         ? 'Tap the deck and give its steps an edge — or plan its only door back into the house knowingly.'
+        : stDown && stDown.movedFrom
+          ? `You put its steps on the ${stDown.movedFrom.side} side${stDown.movedFrom.at ? ` at ${Math.round(stDown.movedFrom.at * 10) / 10} ft` : ''}, and a flight that tall would run into ${stDown.movedFrom.why} — so they are on the ${stDown.side} side for now. Move them somewhere clear on the deck's card, or shift what is in the way.`
         : stDown && stDown.blocked
           ? (stDown.obstruction
             ? `Its steps are set to the ${stDown.side} side, and a flight that tall would run straight into ${stDown.obstruction} — pick a side with clear ground on the deck's card.`
             : `Its steps are set to the ${stDown.side} side, and that edge is built against something — pick an open side on the deck's card.`)
           : `Nothing reaches it from outside: it stands ${Math.round(dk.topFt * 10) / 10}′ up and the automatic steps only offer themselves on a ground-floor deck. Tap the deck and pick the edge its stairs run down — or plan its only door back into the house knowingly.`;
-      issues.push({ severity: 'warning', title: `${el.name || 'A deck'} has no way down`, owner: 'Architect', system: 'outdoors', fix: why });
+      issues.push({
+        severity: stDown && stDown.movedFrom ? 'warning' : 'warning',
+        title: stDown && stDown.movedFrom
+          ? `${el.name || 'A deck'}'s steps could not go where you put them`
+          : `${el.name || 'A deck'} has no way down`,
+        owner: 'Architect', system: 'outdoors', fix: why
+      });
     }
   });
   // 8. Per-storey and attached roofs that won't drain (or are extreme).

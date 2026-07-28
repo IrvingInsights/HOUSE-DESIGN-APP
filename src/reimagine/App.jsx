@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 212 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 216 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -2795,7 +2795,7 @@ export default function App() {
               // A shed with three doors out of it is a different building from
               // a shed with none. One width per side, 0 for a solid wall.
               <>
-                <div className="rz-field-num"><span className="rz-field-lead">Doorways — one per side, 0 for none</span></div>
+                <div className="rz-field-num"><span className="rz-field-lead">Doorways — one per side, 0 for none. The second number is how far along that face it sits (0 centres it): from the west end of a north/south face, from the north end of an east/west one.</span></div>
                 <div className="ctlChips" style={{ flexWrap: 'wrap', gap: 6 }}>
                   {['North', 'South', 'West', 'East'].map((side) => (
                     <label key={side} className="rz-field rz-field-num" style={{ flex: '0 0 auto', gap: 4 }}>
@@ -2806,6 +2806,15 @@ export default function App() {
                         disabled={isOpenSide(el, side)}
                         onCommit={(v) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: `door${side}Ft`, value: v }])}
                       />
+                      {Number(el[`door${side}Ft`]) > 0 && !isOpenSide(el, side) && (
+                        // WHERE ALONG THAT FACE. Centred is a guess; a door
+                        // lines up with what is on the other side of it.
+                        <NumInput
+                          value={Math.round((Number(el[`door${side}At`]) || 0) * 10) / 10}
+                          min={0} max={200} step={0.5} unit="ft from start"
+                          onCommit={(v) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: `door${side}At`, value: v }])}
+                        />
+                      )}
                     </label>
                   ))}
                 </div>
@@ -4076,6 +4085,7 @@ function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt, onTurn }
         : t?.obstruction ? `the run would go straight into ${t.obstruction}`
           : t?.short ? `only ${Math.round(t.have)} ft of edge — a flight this tall needs ${Math.round(t.need)}`
             : t?.lowDeck ? 'this deck is too low to walk under'
+              : t?.narrow ? `this deck is only ${Math.round(t.have)} ft across — a switchback needs ${t.need}`
           : t?.flat ? 'already level with what’s beside it'
             : 'that edge is built against the house or another deck'
     };
@@ -4092,7 +4102,7 @@ function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt, onTurn }
       <div className="ctlChips">
         <button type="button" className={`rz-pick-chip${isNone ? ' on' : ''}`} onClick={() => onSet('none')}>No steps</button>
       </div>
-      {!isNone && effective && shape === 'out' && (
+      {!isNone && effective && (
         // WHERE ALONG THAT SIDE. The one thing about a stair the plan cannot
         // work out for you: hard against a building, lined up with a path,
         // clear of a window. Measured the way a doorway is measured along its
@@ -4112,7 +4122,9 @@ function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt, onTurn }
           <span className="rz-shape-note">
             {resolved && resolved.placedOff
               ? 'Nothing open at that mark — the flight sat down in the nearest stretch that works. Move it, or clear what is in the way.'
-              : 'Leave it at 0 and the flight centres itself on the open stretch it finds.'}
+              : shape === 'out'
+                ? 'Leave it at 0 and the flight centres itself on the open stretch it finds.'
+                : 'Which run of clear deck the flight sits in. Leave it at 0 and it takes the longest one — which on a long deck is often the corner you came outside to sit in.'}
           </span>
         </label>
       )}
@@ -4153,7 +4165,7 @@ function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt, onTurn }
               </span>
             </div>
           )}
-          {shape === 'along' && (
+          {(shape === 'along' || shape === 'u') && (
             <div className="rz-field">
               <span>Which way you walk coming down</span>
               <div className="ctlChips">
@@ -4170,9 +4182,11 @@ function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt, onTurn }
       <div className="rz-shape-note">
         {isNone ? 'No steps off this deck.'
           : effective && resolved && !resolved.blocked
-            ? (resolved.shape === 'along'
-              ? `The flight runs along the ${effective} side and sits under the deck, falling toward the ${resolved.fall}: ${Math.round(resolved.rise * 10) / 10} ft, ${resolved.treads} treads, ${Math.round(resolved.runLen)} ft of the deck's length. It takes no ground at all, and the deck keeps the rain off it. The deck needs an opening at the top of the flight to step onto it.`
-              : `The stairs hang off the ${effective} side and run out ${effective}ward, so you walk ${CLIMB_TOWARD[effective]} as you climb: ${Math.round(resolved.rise * 10) / 10} ft, ${resolved.treads} treads, ${resolved.target === 'deck' ? `onto ${resolved.targetName}` : 'down to the ground'}. A flight this tall needs about ${Math.round(resolved.treads * 0.9)} ft of clear ground to land in.`)
+            ? (resolved.shape === 'u'
+              ? `A switchback under the deck: ${resolved.n1} treads out, a landing, ${resolved.n2} back — two ${resolved.legW} ft flights side by side, taking ${Math.round(resolved.need)} ft of the deck's length and no ground at all. You come off the bottom near where you stepped on.`
+              : resolved.shape === 'along'
+                ? `The flight runs along the ${effective} side and sits under the deck, falling toward the ${resolved.fall}: ${Math.round(resolved.rise * 10) / 10} ft, ${resolved.treads} treads, ${Math.round(resolved.runLen)} ft of the deck's length. It takes no ground at all, and the deck keeps the rain off it. The deck needs an opening at the top of the flight to step onto it.`
+                : `The stairs hang off the ${effective} side and run out ${effective}ward, so you walk ${CLIMB_TOWARD[effective]} as you climb: ${Math.round(resolved.rise * 10) / 10} ft, ${resolved.treads} treads, ${resolved.target === 'deck' ? `onto ${resolved.targetName}` : 'down to the ground'}. A flight this tall needs about ${Math.round(resolved.treads * 0.9)} ft of clear ground to land in.`)
             : `This deck sits ${Math.round(dk.topFt)} ft up and has no steps yet — pick a side above. Each one says which way you would be walking as you come up.`}
       </div>
     </>

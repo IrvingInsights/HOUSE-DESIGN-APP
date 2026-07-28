@@ -17,7 +17,8 @@ import {
 import {
   DEFAULT_OUTDOOR_GRID_SIZE_FT, clamp, padExtension, sitePadRect, objectBounds, titleCase, roofProfile, storeyInfo,
   upperPlateRect, resolveOverhangs, FOUNDATION_RUN_TYPES, DEFAULT_MODEL_LAYERS, siteOf, utilitiesOf, getSpecialBimObjects, wallAssemblyProfile,
-  WALL_SIDES, resolveWallSide, resolveDeck, resolveDeckStairs, sunspacePartitions, isStair, resolveStair
+  WALL_SIDES, resolveWallSide, resolveDeck, resolveDeckStairs, sunspacePartitions, isStair, resolveStair,
+  structureDoorStart
 } from './engine.js';
 
 // Some browsers run with graphics acceleration (WebGL) turned off — locked-
@@ -3175,7 +3176,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // under it and no hole is a deck you cannot get off.
           const stDeck = resolveDeckStairs(spec, element, dk);
           const thickD = dk.placement === 'grade' ? 0.25 : 0.35;
-          const well = stDeck && !stDeck.blocked && stDeck.shape === 'along' && stDeck.wellLen > 0.5
+          const well = stDeck && !stDeck.blocked && (stDeck.shape === 'along' || stDeck.shape === 'u') && stDeck.wellLen > 0.5
             ? (stDeck.marchAxis === 'x'
               ? { x0: Math.max(ex0, stDeck.wellFrom), x1: Math.min(ex0 + ew0, stDeck.wellTo), z0: Math.max(ey0, stDeck.wellA0), z1: Math.min(ey0 + ed0, stDeck.wellA1) }
               : { x0: Math.max(ex0, stDeck.wellA0), x1: Math.min(ex0 + ew0, stDeck.wellA1), z0: Math.max(ey0, stDeck.wellFrom), z1: Math.min(ey0 + ed0, stDeck.wellTo) })
@@ -3207,7 +3208,45 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           let stepGap = null;
           {
             const st = stDeck;
-            if (st && !st.blocked && st.shape === 'along') {
+            if (st && !st.blocked && st.shape === 'u') {
+              // THE SWITCHBACK: down one lane, a landing, back up the other —
+              // two flights side by side under the deck, so you arrive at the
+              // bottom roughly where you stepped on at the top.
+              const alongX = st.marchAxis === 'x';
+              const stepH = st.rise / st.treads;
+              const dir1 = st.turnAt > st.topAt ? 1 : -1;
+              const lane1 = (st.lane1Lo + st.lane1Hi) / 2;
+              const lane2 = (st.lane2Lo + st.lane2Hi) / 2;
+              const tread = (at, cross, y) => dp(alongX
+                ? box(0.9, stepH, st.legW - 0.3, at, y, cross, deckMatD)
+                : box(st.legW - 0.3, stepH, 0.9, cross, y, at, deckMatD));
+              for (let i = 1; i <= st.n1; i += 1) {
+                tread(st.topAt + dir1 * (i * 0.9 - 0.45), lane1, deckTopY - i * stepH + stepH / 2);
+              }
+              const landY = deckTopY - st.n1 * stepH;
+              const landCtr = (st.landFrom + st.landTo) / 2;
+              const bandCtr = (st.lane1Lo + st.lane2Hi) / 2;
+              dp(alongX
+                ? box(st.legW, 0.35, st.legW * 2, landCtr, landY, bandCtr, deckMatD)
+                : box(st.legW * 2, 0.35, st.legW, bandCtr, landY, landCtr, deckMatD));
+              const backFrom = dir1 > 0 ? st.landTo : st.landFrom;
+              for (let i = 1; i <= st.n2; i += 1) {
+                tread(backFrom - dir1 * (i * 0.9 - 0.45), lane2, landY - i * stepH + stepH / 2);
+              }
+              // a handrail down the outside of each flight
+              const rail = (len, riseLeg, ctrAlong, cross, topOfLeg, plus) => {
+                const railLen = Math.hypot(len, riseLeg);
+                const angle = Math.atan2(riseLeg, len);
+                const y = topOfLeg - riseLeg / 2 + 3;
+                let rm;
+                if (alongX) { rm = box(railLen, 0.15, 0.15, ctrAlong, y, cross, railMatD); rm.rotation.z = plus ? -angle : angle; }
+                else { rm = box(0.15, 0.15, railLen, cross, y, ctrAlong, railMatD); rm.rotation.x = plus ? angle : -angle; }
+                dp(rm);
+              };
+              rail(st.n1 * 0.9, st.n1 * stepH, (st.topAt + st.turnAt) / 2, st.lane1Lo + 0.12, deckTopY, dir1 > 0);
+              rail(st.n2 * 0.9, st.n2 * stepH, (backFrom + st.botAt) / 2, st.lane2Hi - 0.12, landY, dir1 < 0);
+              stepGap = null;
+            } else if (st && !st.blocked && st.shape === 'along') {
               // THE FLIGHT THAT RUNS UNDER THE DECK. Same treads and the same
               // handrails, but it marches ALONG the edge instead of away from
               // it, in a strip tucked beneath the deck — so it costs no ground
@@ -3630,7 +3669,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               obPrism(horizontal, cross, f, t, yb, Math.max(h0, yb + 0.05), Math.max(h1, yb + 0.05), obWallMatDS);
             });
             if (dw <= 0.5) { mk(a0, a0 + span, 0.3); return; }
-            const dStart = a0 + (span - dw) / 2;
+            const dStart = structureDoorStart(element, side, a0, span, dw);
             mk(a0, dStart, 0.3);
             mk(dStart + dw, a0 + span, 0.3);
             mk(dStart, dStart + dw, DOOR_H);                                     // header over the opening
