@@ -3247,6 +3247,56 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               const stepsN = st.treads;
               const stepH = st.rise / stepsN;
               const horiz = st.side === 'north' || st.side === 'south';
+              if (st.turn) {
+                // A FOLDED FLIGHT: out, a landing, then across. Same treads and
+                // the same rise — the yard just gets a third of it back.
+                const alongZ = st.outAxis === 'z';
+                const turnPlus = st.turn === 'east' || st.turn === 'south';
+                const landY = hiTop - st.n1 * stepH;
+                for (let i = 1; i <= st.n1; i += 1) {                       // leg one, going out
+                  const topY = hiTop - i * stepH + stepH / 2;
+                  const off = st.edgeAt + st.outward * (i * 0.9 - 0.45);
+                  dp(alongZ
+                    ? box(st.gapW - 0.3, stepH, 0.9, st.mid, topY, off, deckMatD)
+                    : box(0.9, stepH, st.gapW - 0.3, off, topY, st.mid, deckMatD));
+                }
+                const landCtr = (st.cornerAt + st.cornerFar) / 2;           // the landing
+                const landAcross = st.mid + (turnPlus ? 1 : -1) * (st.landW / 2 - st.gapW / 2);
+                dp(alongZ
+                  ? box(st.gapW + st.landW - st.gapW, 0.35, st.landW, landAcross, landY, landCtr, deckMatD)
+                  : box(st.landW, 0.35, st.gapW + st.landW - st.gapW, landCtr, landY, landAcross, deckMatD));
+                for (let i = 1; i <= st.n2; i += 1) {                       // leg two, going across
+                  const topY = landY - i * stepH + stepH / 2;
+                  const at = st.acrossFrom + (turnPlus ? 1 : -1) * (i * 0.9 - 0.45);
+                  dp(alongZ
+                    ? box(0.9, stepH, st.gapW - 0.3, at, topY, landCtr, deckMatD)
+                    : box(st.gapW - 0.3, stepH, 0.9, landCtr, topY, at, deckMatD));
+                }
+                // one handrail down the outside of each leg
+                const railFor = (len, riseLeg, ctrAlong, ctrAcross, topOfLeg, alongIsZ, plus) => {
+                  const railLen = Math.hypot(len, riseLeg);
+                  const angle = Math.atan2(riseLeg, len);
+                  const y = topOfLeg - riseLeg / 2 + 3;
+                  let rm;
+                  if (alongIsZ) {
+                    rm = box(0.15, 0.15, railLen, ctrAcross, y, ctrAlong, railMatD);
+                    rm.rotation.x = plus ? angle : -angle;
+                  } else {
+                    rm = box(railLen, 0.15, 0.15, ctrAlong, y, ctrAcross, railMatD);
+                    rm.rotation.z = plus ? -angle : angle;
+                  }
+                  dp(rm);
+                };
+                const leg1Len = st.n1 * 0.9; const leg1Rise = st.n1 * stepH;
+                const leg2Len = st.n2 * 0.9; const leg2Rise = st.n2 * stepH;
+                [st.gapA0 + 0.12, st.gapA1 - 0.12].forEach((across) => {
+                  railFor(leg1Len, leg1Rise, (st.edgeAt + st.cornerAt) / 2, across, hiTop, alongZ, st.outward > 0);
+                });
+                [landCtr - st.gapW / 2 + 0.12, landCtr + st.gapW / 2 - 0.12].forEach((across) => {
+                  railFor(leg2Len, leg2Rise, (st.acrossFrom + st.acrossTo) / 2, across, landY, !alongZ, turnPlus);
+                });
+                stepGap = { side: st.side, a0: st.gapA0, a1: st.gapA1 };
+              } else {
               const edgeAt = st.side === 'north' ? ey0 : st.side === 'south' ? ey0 + ed0 : st.side === 'west' ? ex0 : ex0 + ew0;
               const outDir = (st.side === 'north' || st.side === 'west') ? -1 : 1;
               // descending AWAY from whichever surface is higher: outward when
@@ -3278,6 +3328,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
                   }
                   dp(rm);
                 });
+              }
               }
             }
           }

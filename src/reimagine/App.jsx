@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 211 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 212 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -2692,7 +2692,7 @@ export default function App() {
                       <option value="gable">Covered — a little peak (gable)</option>
                     </select>
                   </label>
-                  <DeckStepControls spec={spec} el={el} dk={dk} onSet={(v) => setDk('deckStairs', v)} onShape={(v) => setDk('deckStairShape', v)} onFall={(v) => setDk('deckStairFall', v)} onAt={(v) => setDk('deckStairAt', v)} />
+                  <DeckStepControls spec={spec} el={el} dk={dk} onSet={(v) => setDk('deckStairs', v)} onShape={(v) => setDk('deckStairShape', v)} onFall={(v) => setDk('deckStairFall', v)} onAt={(v) => setDk('deckStairAt', v)} onTurn={(v) => setDk('deckStairTurn', v)} />
                   <div className="rz-shape-note">
                     Railings and their cost only grow on edges facing open air — push this deck against the house (a doorway) or against another deck (a wraparound) and the shared edge opens up.
                     {dk.needsSteps ? ' Its floor sits high, so steps come down the longest open side automatically.' : ''}
@@ -4061,7 +4061,9 @@ function DirectionDial({ heading, current, options, onPick }) {
 // facts are on the control now, in words.
 const isOpenSide = (el, side) => ['yes', 'true', '1', 'on'].includes(String(el?.[`open${side}`] ?? '').toLowerCase());
 const CLIMB_TOWARD = { north: 'south', south: 'north', east: 'west', west: 'east' };
-function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt }) {
+function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt, onTurn }) {
+  const turnNow = ['north', 'south', 'east', 'west'].includes(String(el.deckStairTurn || '').toLowerCase())
+    ? String(el.deckStairTurn).toLowerCase() : '';
   const shape = String(el.deckStairShape || 'out') === 'along' ? 'along' : 'out';
   const options = ['north', 'east', 'south', 'west'].map((dir) => {
     const t = resolveDeckStairs(spec, { ...el, deckStairs: dir }, dk);
@@ -4127,6 +4129,30 @@ function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt }) {
               ))}
             </div>
           </div>
+          {shape === 'out' && (
+            // DOES IT TURN? A storey of climb throws 17 ft of stair into the
+            // yard, and folding it at a landing costs about a third of that
+            // back. The direction named is the one the SECOND leg travels,
+            // because that is the thing you can see from the deck.
+            <div className="rz-field">
+              <span>Does it turn on a landing?</span>
+              <div className="ctlChips">
+                <button type="button" className={`rz-pick-chip${turnNow ? '' : ' on'}`}
+                  onClick={() => onTurn('')}
+                >Straight run</button>
+                {(effective === 'north' || effective === 'south' ? ['east', 'west'] : ['north', 'south']).map((t) => (
+                  <button key={t} type="button" className={`rz-pick-chip${turnNow === t ? ' on' : ''}`}
+                    onClick={() => onTurn(t)}
+                  >Turn {t}ward</button>
+                ))}
+              </div>
+              <span className="rz-shape-note">
+                {resolved && !resolved.blocked && resolved.turn
+                  ? `Half the flight goes out, a landing turns it, the rest runs ${resolved.turn}ward — ${resolved.n1} treads then ${resolved.n2}. It leaves the deck by ${Math.round(resolved.reach * 10) / 10} ft instead of ${Math.round(resolved.treads * 0.9 * 10) / 10}.`
+                  : 'A straight flight needs its whole run in one line. Turning it on a landing folds that in half and gives the yard back — useful when a door, a path or a boundary is in the way.'}
+              </span>
+            </div>
+          )}
           {shape === 'along' && (
             <div className="rz-field">
               <span>Which way you walk coming down</span>
