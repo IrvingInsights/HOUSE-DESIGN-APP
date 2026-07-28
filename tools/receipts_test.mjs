@@ -155,7 +155,13 @@ for (const row of COST_ROWS) {
   ok(Boolean(find(/^Deck roof — shed/)), 'decked: the covered deck prices its shed roof');
   ok(Math.abs(find(/^Deck roof — shed/).qty - 80) < 0.5, 'decked: 80 sf covered');
   ok(Boolean(find(/^Deck steps/)), 'decked: stem-wall house → the raised decks price steps down');
-  ok(find(/^Deck steps/).qty === 2, 'decked: two raised decks, two stairs (the patio needs none)');
+  // CHANGED (update 201, deliberately): this pinned TWO stairs — one per raised
+  // deck. dk1 and dk2 are a wraparound; they share an edge at the same height,
+  // which the railing rule three lines below already treats as a join. Two
+  // decks you can walk between are one walking surface, and one surface needs
+  // one way down. The old number was the per-deck rule showing through, and it
+  // priced a flight of stairs nobody would build.
+  ok(find(/^Deck steps/).qty === 1, 'decked: the wraparound is one surface — one stair serves it (the patio needs none)');
   // railing: dk1 keeps south (12) + west (8) = 20 lf of wood — its north edge
   // faces the house and its east edge faces dk2 (the wraparound join)
   const woodRail = find(/^Deck railing — wood/);
@@ -178,8 +184,10 @@ for (const row of COST_ROWS) {
 }
 
 // Deck STAIRS everywhere — resolveDeckStairs is the one answer for the
-// renderer, the receipts, and the deck card. 'auto' keeps the old rule
-// (pinned above: two auto stairs on the decked fixture); a NAMED edge runs
+// renderer, the receipts, and the deck card. 'auto' now asks the general
+// question at any level — is this raised walking surface, and everything
+// touching it, reachable? — and places ONE run for the group (pinned above:
+// one auto stair across the decked fixture's wraparound). A NAMED edge runs
 // deck→deck between levels, priced by the climb; 'none' clears it; an edge
 // leaning on the house reports blocked instead of inventing a run.
 {
@@ -196,8 +204,13 @@ for (const row of COST_ROWS) {
   ok(Boolean(st) && st.rise > 6 && st.treads >= 10, `stairs: a storey of climb, real treads (rise ${st && st.rise.toFixed(1)}, ${st && st.treads} treads)`);
   const d = deriveDesign(spec, getWallSections(spec));
   const line = d.receipts.systems.outdoors.find((l) => /^Deck steps/.test(l.label));
-  ok(Boolean(line) && line.qty === 4, `stairs: 4 runs price (3 auto + the balcony's) (got ${line?.qty})`);
-  ok(Boolean(line) && line.amount > 4 * 260, `stairs: the tall balcony run prices MORE than a flat $260 (line $${line?.amount && Math.round(line.amount)})`);
+  // CHANGED (update 201, deliberately): this pinned FOUR — one per raised deck
+  // plus the balcony. dk1, dk2 and the landing all touch, so they are one
+  // ground-level surface with one way down; the balcony is a storey up and
+  // carries its own named run. Two, not four, and the two that vanished were
+  // stairs onto a deck you could already walk to.
+  ok(Boolean(line) && line.qty === 2, `stairs: 2 runs price (one for the ground-level surface + the balcony's) (got ${line?.qty})`);
+  ok(Boolean(line) && line.amount > 2 * 260, `stairs: the tall balcony run prices MORE than a flat $260 (line $${line?.amount && Math.round(line.amount)})`);
   // 'none' clears the run; a house-facing edge is blocked, not invented
   const balNone = structuredClone(spec);
   balNone.elements.find((e) => e.id === 'bal').deckStairs = 'none';

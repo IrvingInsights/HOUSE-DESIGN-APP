@@ -17,7 +17,7 @@ import {
   WALL_SIDES, WALL_SIDE_LABELS, WALL_ASSEMBLIES, resolveWallSide, FOUNDATION_RUN_TYPES, FOUNDATION_RUN_PRESETS,
   ROOM_PRESETS, planNewRoomPlacements, roomPresetFromName,
   resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons, downloadFile,
-  DECK_SURFACES, resolveDeck, resolveDeckStairs, derivePartitionOps, interiorFixtures, sourceNote,
+  DECK_SURFACES, DECK_STAIR_SHAPES, resolveDeck, resolveDeckStairs, derivePartitionOps, interiorFixtures, sourceNote,
   isStair, resolveStair, STAIR_SHAPES, STAIR_FACINGS, STAIR_TURNS, STAIR_DEFAULTS, STAIR_FACING_ORDER, HEATER_FACINGS,
   SHADE_DEVICES, ROOM_ENVELOPES, resolveRoomEnvelope, OUTBUILDING_PRESETS, OUTBUILDING_CONSTRUCTION
 } from '../engine.js';
@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 197 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 211 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -2692,7 +2692,7 @@ export default function App() {
                       <option value="gable">Covered — a little peak (gable)</option>
                     </select>
                   </label>
-                  <DeckStepControls spec={spec} el={el} dk={dk} onSet={(v) => setDk('deckStairs', v)} />
+                  <DeckStepControls spec={spec} el={el} dk={dk} onSet={(v) => setDk('deckStairs', v)} onShape={(v) => setDk('deckStairShape', v)} onFall={(v) => setDk('deckStairFall', v)} onAt={(v) => setDk('deckStairAt', v)} />
                   <div className="rz-shape-note">
                     Railings and their cost only grow on edges facing open air — push this deck against the house (a doorway) or against another deck (a wraparound) and the shared edge opens up.
                     {dk.needsSteps ? ' Its floor sits high, so steps come down the longest open side automatically.' : ''}
@@ -2803,13 +2803,77 @@ export default function App() {
                       <NumInput
                         value={Math.round((Number(el[`door${side}Ft`]) || 0) * 10) / 10}
                         min={0} max={16} step={0.5} unit="ft"
+                        disabled={isOpenSide(el, side)}
                         onCommit={(v) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: `door${side}Ft`, value: v }])}
                       />
                     </label>
                   ))}
                 </div>
+                {/* A SIDE CAN BE MISSING ALTOGETHER. Every structure got four
+                    walls whether the building had four or not — and plenty do
+                    not. A woodshed is open to the weather it dries in; a
+                    carport is a roof and posts; a hay barn stands open on its
+                    working side. Not a doorway, which is a hole IN a wall —
+                    no wall at all, and no covering priced for one. */}
+                <div className="rz-field-num"><span className="rz-field-lead">Sides left open — no wall at all</span></div>
+                <div className="ctlChips" style={{ flexWrap: 'wrap', gap: 6 }}>
+                  {['North', 'South', 'West', 'East'].map((side) => (
+                    <button key={side} type="button"
+                      className={`rz-pick-chip${isOpenSide(el, side) ? ' on' : ''}`}
+                      title={`Leave the ${side.toLowerCase()} side open — a woodshed, a carport bay, an open-sided barn`}
+                      onClick={() => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: `open${side}`, value: isOpenSide(el, side) ? '' : 'yes' }])}
+                    >{side}</button>
+                  ))}
+                </div>
+                {['North', 'South', 'West', 'East'].some((side) => isOpenSide(el, side)) && (
+                  <div className="rz-shape-note">An open side costs no wall and prices none. Its roof still needs carrying — posts, or the frame either side of the opening.</div>
+                )}
               </>
             )}
+            {el && STRUCTURE_CATS.has(el.category) && (() => {
+              // ONE BUILDING, NOT TWO SHEDS SIDE BY SIDE. Daniel's workshop and
+              // the bay next to it are one building — a poly-walled bay with an
+              // insulated room framed into its end — and the app could only draw
+              // them as two, wall down the middle, a roof over each half. Say
+              // they are joined and they get ONE roof over the pair, one fall,
+              // and no wall where they meet. Each keeps its own skin, so the
+              // poly bay and the insulated room still read as different rooms of
+              // the same building. Only structures that TOUCH are offered — a
+              // shed across the yard is not part of this building.
+              const TOUCH = 0.35;
+              const touches = (a, b) => {
+                const ax0 = Number(a.x) || 0; const az0 = Number(a.y) || 0;
+                const ax1 = ax0 + (Number(a.w) || 0); const az1 = az0 + (Number(a.d) || 0);
+                const bx0 = Number(b.x) || 0; const bz0 = Number(b.y) || 0;
+                const bx1 = bx0 + (Number(b.w) || 0); const bz1 = bz0 + (Number(b.d) || 0);
+                const overlapX = Math.min(ax1, bx1) - Math.max(ax0, bx0) > 0.5;
+                const overlapZ = Math.min(az1, bz1) - Math.max(az0, bz0) > 0.5;
+                return (overlapX && (Math.abs(bz0 - az1) <= TOUCH || Math.abs(az0 - bz1) <= TOUCH))
+                  || (overlapZ && (Math.abs(bx0 - ax1) <= TOUCH || Math.abs(ax0 - bx1) <= TOUCH));
+              };
+              const neighbours = (spec.elements || []).filter((o) => o.id !== el.id
+                && STRUCTURE_CATS.has(o.category) && Number(o.level || 1) === Number(el.level || 1) && touches(el, o));
+              if (!neighbours.length) return null;
+              const apart = ['yes', 'true', '1', 'on'].includes(String(el.standsAlone ?? '').toLowerCase());
+              return (
+                <div className="rz-field">
+                  <span>{neighbours.length === 1 ? 'It stands against another structure' : `It stands against ${neighbours.length} other structures`}</span>
+                  <div className="ctlChips">
+                    <button type="button" className={`rz-pick-chip${apart ? '' : ' on'}`}
+                      onClick={() => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'standsAlone', value: '' }])}
+                    >One building</button>
+                    <button type="button" className={`rz-pick-chip${apart ? ' on' : ''}`}
+                      onClick={() => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'standsAlone', value: 'yes' }])}
+                    >Separate buildings</button>
+                  </div>
+                  <span className="rz-shape-note">
+                    {apart
+                      ? 'Built as its own building: its own roof, and a wall on the edge they share.'
+                      : 'Anything built against it is the same building — one roof over the lot, and no wall where they meet. Each part keeps its own walls, doors and cladding.'}
+                  </span>
+                </div>
+              );
+            })()}
             {el && STRUCTURE_CATS.has(el.category) && (
               // WHICH WAY THIS BUILDING SHEDS. It follows the house unless you
               // say otherwise: a shed tucked against a slope or a bank often
@@ -3988,28 +4052,102 @@ function DirectionDial({ heading, current, options, onPick }) {
 // gone from the face — an unset deck still auto-adds steps on a ground floor,
 // and the dial simply highlights whichever edge that lands on, so there is
 // never a mystery mode, only a direction. A "No steps" toggle sits beside it.
-function DeckStepControls({ spec, el, dk, onSet }) {
+// WHICH WAY YOU WALK, NOT WHICH WAY THE COMPASS POINTS. A stair off the north
+// edge is one you climb heading SOUTH, and "north" alone left that ambiguous:
+// Daniel described the run he wanted as north and meant the direction he would
+// be walking as he came up, which is the opposite edge. A compass bearing is
+// the right way to say where a WALL is; it is a poor way to say where a STAIR
+// goes, because a stair has a direction of travel and a wall does not. Both
+// facts are on the control now, in words.
+const isOpenSide = (el, side) => ['yes', 'true', '1', 'on'].includes(String(el?.[`open${side}`] ?? '').toLowerCase());
+const CLIMB_TOWARD = { north: 'south', south: 'north', east: 'west', west: 'east' };
+function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt }) {
+  const shape = String(el.deckStairShape || 'out') === 'along' ? 'along' : 'out';
   const options = ['north', 'east', 'south', 'west'].map((dir) => {
     const t = resolveDeckStairs(spec, { ...el, deckStairs: dir }, dk);
     const ok = Boolean(t && !t.blocked);
-    return { dir, ok, hint: ok ? `${Math.round(t.rise * 10) / 10} ft down to ${t.target === 'deck' ? t.targetName : 'the ground'}` : (t?.flat ? 'already level with what’s beside it' : 'leans on the house or another deck') };
+    return {
+      dir,
+      ok,
+      hint: ok
+        ? `${Math.round(t.rise * 10) / 10} ft down to ${t.target === 'deck' ? t.targetName : 'the ground'} — you climb ${CLIMB_TOWARD[dir]}ward`
+        : t?.obstruction ? `the run would go straight into ${t.obstruction}`
+          : t?.short ? `only ${Math.round(t.have)} ft of edge — a flight this tall needs ${Math.round(t.need)}`
+            : t?.lowDeck ? 'this deck is too low to walk under'
+          : t?.flat ? 'already level with what’s beside it'
+            : 'that edge is built against the house or another deck'
+    };
   });
   const isNone = el.deckStairs === 'none';
   const resolved = resolveDeckStairs(spec, el, dk);
+  const fallNow = ['north', 'south', 'east', 'west'].includes(el.deckStairFall) ? el.deckStairFall : (resolved && resolved.fall) || '';
   // the edge actually in effect — an explicit choice, else whatever auto found
   const effective = isNone ? null
     : (['north', 'south', 'east', 'west'].includes(el.deckStairs) ? el.deckStairs : (resolved && !resolved.blocked ? resolved.side : null));
   return (
     <>
-      <DirectionDial heading="Which edge you step down" current={effective} options={options} onPick={onSet} />
+      <DirectionDial heading="Which side the stairs hang off" current={effective} options={options} onPick={onSet} />
       <div className="ctlChips">
         <button type="button" className={`rz-pick-chip${isNone ? ' on' : ''}`} onClick={() => onSet('none')}>No steps</button>
       </div>
+      {!isNone && effective && shape === 'out' && (
+        // WHERE ALONG THAT SIDE. The one thing about a stair the plan cannot
+        // work out for you: hard against a building, lined up with a path,
+        // clear of a window. Measured the way a doorway is measured along its
+        // wall — from the west end of a north/south side, from the north end
+        // of an east/west side.
+        <label className="rz-field rz-field-num">
+          <span>{effective === 'north' || effective === 'south'
+            ? 'How far along, from the west end'
+            : 'How far along, from the north end'}</span>
+          <NumInput
+            value={Number.isFinite(Number(el.deckStairAt)) && Number(el.deckStairAt) > 0
+              ? Math.round(Number(el.deckStairAt) * 10) / 10
+              : (resolved && !resolved.blocked ? Math.round(resolved.mid * 10) / 10 : 0)}
+            min={0} max={200} step={0.5} unit="ft"
+            onCommit={(v) => onAt(v)}
+          />
+          <span className="rz-shape-note">
+            {resolved && resolved.placedOff
+              ? 'Nothing open at that mark — the flight sat down in the nearest stretch that works. Move it, or clear what is in the way.'
+              : 'Leave it at 0 and the flight centres itself on the open stretch it finds.'}
+          </span>
+        </label>
+      )}
+      {!isNone && effective && (
+        <>
+          <div className="rz-field">
+            <span>Which way the flight runs</span>
+            <div className="ctlChips">
+              {Object.entries(DECK_STAIR_SHAPES).map(([k, sh]) => (
+                <button key={k} type="button" title={sh.note}
+                  className={`rz-pick-chip${shape === k ? ' on' : ''}`}
+                  onClick={() => onShape(k)}
+                >{sh.label}</button>
+              ))}
+            </div>
+          </div>
+          {shape === 'along' && (
+            <div className="rz-field">
+              <span>Which way you walk coming down</span>
+              <div className="ctlChips">
+                {(effective === 'north' || effective === 'south' ? ['east', 'west'] : ['north', 'south']).map((f) => (
+                  <button key={f} type="button" className={`rz-pick-chip${fallNow === f ? ' on' : ''}`}
+                    onClick={() => onFall(f)}
+                  >Down toward the {f}</button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
       <div className="rz-shape-note">
         {isNone ? 'No steps off this deck.'
           : effective && resolved && !resolved.blocked
-            ? `Steps run down the ${effective} edge — ${Math.round(resolved.rise * 10) / 10} ft, ${resolved.treads} treads, ${resolved.target === 'deck' ? `onto ${resolved.targetName}` : 'to the ground'}.`
-            : `This deck sits ${Math.round(dk.topFt)} ft up and has no steps yet — pick an open edge above.`}
+            ? (resolved.shape === 'along'
+              ? `The flight runs along the ${effective} side and sits under the deck, falling toward the ${resolved.fall}: ${Math.round(resolved.rise * 10) / 10} ft, ${resolved.treads} treads, ${Math.round(resolved.runLen)} ft of the deck's length. It takes no ground at all, and the deck keeps the rain off it. The deck needs an opening at the top of the flight to step onto it.`
+              : `The stairs hang off the ${effective} side and run out ${effective}ward, so you walk ${CLIMB_TOWARD[effective]} as you climb: ${Math.round(resolved.rise * 10) / 10} ft, ${resolved.treads} treads, ${resolved.target === 'deck' ? `onto ${resolved.targetName}` : 'down to the ground'}. A flight this tall needs about ${Math.round(resolved.treads * 0.9)} ft of clear ground to land in.`)
+            : `This deck sits ${Math.round(dk.topFt)} ft up and has no steps yet — pick a side above. Each one says which way you would be walking as you come up.`}
       </div>
     </>
   );
