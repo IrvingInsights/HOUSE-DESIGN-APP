@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 216 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 217 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -2692,7 +2692,7 @@ export default function App() {
                       <option value="gable">Covered — a little peak (gable)</option>
                     </select>
                   </label>
-                  <DeckStepControls spec={spec} el={el} dk={dk} onSet={(v) => setDk('deckStairs', v)} onShape={(v) => setDk('deckStairShape', v)} onFall={(v) => setDk('deckStairFall', v)} onAt={(v) => setDk('deckStairAt', v)} onTurn={(v) => setDk('deckStairTurn', v)} />
+                  <DeckStepControls spec={spec} el={el} dk={dk} onSet={(v) => setDk('deckStairs', v)} onShape={(v) => setDk('deckStairShape', v)} onFall={(v) => setDk('deckStairFall', v)} onAt={(v) => setDk('deckStairAt', v)} onTurn={(v) => setDk('deckStairTurn', v)} onSplit={(v) => setDk('deckStairSplit', v)} />
                   <div className="rz-shape-note">
                     Railings and their cost only grow on edges facing open air — push this deck against the house (a doorway) or against another deck (a wraparound) and the shared edge opens up.
                     {dk.needsSteps ? ' Its floor sits high, so steps come down the longest open side automatically.' : ''}
@@ -4070,7 +4070,7 @@ function DirectionDial({ heading, current, options, onPick }) {
 // facts are on the control now, in words.
 const isOpenSide = (el, side) => ['yes', 'true', '1', 'on'].includes(String(el?.[`open${side}`] ?? '').toLowerCase());
 const CLIMB_TOWARD = { north: 'south', south: 'north', east: 'west', west: 'east' };
-function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt, onTurn }) {
+function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt, onTurn, onSplit }) {
   const turnNow = ['north', 'south', 'east', 'west'].includes(String(el.deckStairTurn || '').toLowerCase())
     ? String(el.deckStairTurn).toLowerCase() : '';
   const shape = String(el.deckStairShape || 'out') === 'along' ? 'along' : 'out';
@@ -4141,6 +4141,24 @@ function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt, onTurn }
               ))}
             </div>
           </div>
+          {shape === 'out' && turnNow && (
+            // HOW FAR OUT BEFORE IT TURNS. Near zero and the flight turns at
+            // the deck and runs ALONG the building — a stair down a wall
+            // rather than a stair standing in the yard.
+            <label className="rz-field rz-field-num">
+              <span>How much of it goes out before the turn</span>
+              <NumInput
+                value={Math.round((Number(el.deckStairSplit) || 0.5) * 100)}
+                min={5} max={95} step={5} unit="%"
+                onCommit={(v) => onSplit(Math.min(0.95, Math.max(0.05, v / 100)))}
+              />
+              <span className="rz-shape-note">
+                {resolved && !resolved.blocked && resolved.turn
+                  ? `${resolved.n1} treads out, then ${resolved.n2} running ${resolved.turn}ward. Half and half makes a balanced L; a small number turns it at the deck so the long leg runs along the building.`
+                  : 'Half and half makes a balanced L. A small number turns it almost at once, so the long leg runs along the building instead of out into the open.'}
+              </span>
+            </label>
+          )}
           {shape === 'out' && (
             // DOES IT TURN? A storey of climb throws 17 ft of stair into the
             // yard, and folding it at a landing costs about a third of that
