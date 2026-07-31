@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 219 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 220 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1719,6 +1719,7 @@ export default function App() {
           <div className="st-toolbar st-panel">
             <SiteQuickRow
               chapter={activeChapter} spec={spec} derived={derived} floors={floors}
+              moreOpen={moreOpen}
               onShape={setShape} onSizeShell={resizeShell}
               onAddFloor={addFloor} onRemoveFloor={removeFloor}
               onAddRoomPreset={addRoomPreset}
@@ -5589,7 +5590,7 @@ function chapterFlagged(flags, chapterId) {
 }
 
 function SiteQuickRow({
-  chapter, spec, derived, floors, openWall, activeFloor,
+  chapter, spec, derived, floors, openWall, activeFloor, moreOpen = false,
   onShape, onSizeShell, onAddFloor, onRemoveFloor, onAddRoomPreset,
   onFoundation, onSelectWall, onFrame, onRoofType, onPitch, onShedFall,
   onAddOpening, onCladding, onJump, onMore, onPickStorey,
@@ -5600,6 +5601,13 @@ function SiteQuickRow({
   if (chapter === 'shape') {
     const fp = shell.footprint;
     const active = fp === 'round' ? 'round' : Array.isArray(fp) || typeof fp === 'string' && fp ? '' : 'rect';
+    // "More" (opened here, or from ≡ designs) shows the Shape chapter's own
+    // Outline card — the SAME Width/Depth, full-size, a few inches below.
+    // Two live number boxes for one measurement, open at once, was a
+    // confirmed past complaint (Law 3 — "one editor per thing"; update-219
+    // UX review, finding #5). Rather than remove either one, this copy goes
+    // read-only while the fuller one is open — same number, one place you
+    // can actually type into it.
     return (
       <>
         <span className="st-toolbar-label">Shape</span>
@@ -5609,10 +5617,14 @@ function SiteQuickRow({
           ))}
         </span>
         <label className="st-num" data-cap="cap-shape-size">Width
-          <input key={`w${shell.widthFt}`} defaultValue={Math.round(Number(shell.widthFt) || 0)} onBlur={(e) => onSizeShell(e.target.value, shell.depthFt)} onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }} />
+          <input key={`w${shell.widthFt}`} defaultValue={Math.round(Number(shell.widthFt) || 0)}
+            disabled={moreOpen} title={moreOpen ? 'Editing below — this box is a readout while the Outline panel is open' : undefined}
+            onBlur={(e) => onSizeShell(e.target.value, shell.depthFt)} onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }} />
         </label>
         <label className="st-num">Depth
-          <input key={`d${shell.depthFt}`} defaultValue={Math.round(Number(shell.depthFt) || 0)} onBlur={(e) => onSizeShell(shell.widthFt, e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }} />
+          <input key={`d${shell.depthFt}`} defaultValue={Math.round(Number(shell.depthFt) || 0)}
+            disabled={moreOpen} title={moreOpen ? 'Editing below — this box is a readout while the Outline panel is open' : undefined}
+            onBlur={(e) => onSizeShell(shell.widthFt, e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }} />
         </label>
         {fitInfo && onFitWalls && (
           <button className="st-pill" data-cap="cap-shape-fit-walls" title="Pull the walls in to hug the rooms — undoes the slack a big drag left behind"

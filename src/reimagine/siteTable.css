@@ -26,7 +26,14 @@
 .st-rail {
   position: absolute; top: 52px; left: 16px; bottom: 88px; width: 128px;
   border-radius: 16px; padding: 8px 6px; z-index: 6;
-  display: flex; flex-direction: column; overflow: hidden;
+  display: flex; flex-direction: column;
+  /* NOT overflow:hidden — the "Worth a look" flags popup (.st-flags) is a
+     child of this rail, positioned to open beside it at 340px wide (the
+     rail itself is only 128px). Clipping the rail clipped the popup 100%,
+     every time (update-219 UX review, finding #3). The rail-list below has
+     its own independent overflow-y:auto, so it still scrolls correctly
+     with this container left open. */
+  overflow: visible;
 }
 .st-rail-list {
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
@@ -124,6 +131,14 @@
 .st-num input {
   width: 58px; font: inherit; font-weight: 600; color: var(--ink, #22251f);
   padding: 5px 8px; border: 1px solid #dbd9ce; border-radius: 9px; background: #fff;
+}
+/* One editor per number (Law 3): while the fuller Outline panel is open
+   below (More ▾, or ≡ designs) with the SAME Width/Depth live, this copy
+   goes read-only rather than staying a second place to type the same
+   figure — a dashed border reads as "see below", not "broken". */
+.st-num input:disabled {
+  background: rgba(219, 217, 206, 0.28); color: var(--muted, #868a7c);
+  border-style: dashed; cursor: not-allowed;
 }
 .st-stepper {
   width: 28px; height: 28px; border-radius: 8px; border: 1px solid #dbd9ce;

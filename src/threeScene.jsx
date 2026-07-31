@@ -52,6 +52,58 @@ function cutPlanes(spec, cut) {
   return [new THREE.Plane(new THREE.Vector3(0, 0, -1), cutZ)];
 }
 
+// A view-preset flight (Corner/Top/Front/Side, and the initial framing on
+// mount) — one formula, shared by the button-driven effect below and the
+// mount-time catch-up, so both fly the SAME way. Orbits around the CURRENT
+// target at the CURRENT camera-to-target distance; it does not, by itself,
+// guarantee the whole house is in frame — the caller is responsible for the
+// camera already sitting at a distance that fits (see defaultCameraFraming).
+function viewRequestTween(camera, controls, viewRequest) {
+  const target = controls.target.clone();
+  const dist = Math.max(12, camera.position.distanceTo(target));
+  const pos = viewRequest.mode === 'top' ? new THREE.Vector3(target.x, target.y + dist, target.z + 0.02)
+    : viewRequest.mode === 'front' ? new THREE.Vector3(target.x, target.y + dist * 0.12, target.z + dist)
+    : viewRequest.mode === 'side' ? new THREE.Vector3(target.x + dist, target.y + dist * 0.12, target.z)
+    : new THREE.Vector3(target.x + dist * 0.62, target.y + dist * 0.6, target.z + dist * 0.62);
+  return { fromPos: camera.position.clone(), fromTarget: controls.target.clone(), pos, target, t: 0 };
+}
+
+// FIT-TO-CONTENT DEFAULT CAMERA. Replaces a hardcoded camera.position.set(36,
+// 42, 42) that only happened to work for the one shell size it was eyeballed
+// against — any taller roof, upper storey, or bigger footprint left the
+// camera grazing the roof deck from inches away on the very first frame
+// (update-219 UX review, finding #2: "3D opens on a broken, disorienting
+// close-up", reproduced fresh on every entry to 3D because the component
+// fully unmounts between chapters, so this runs again and again). Computed
+// straight from the spec's own shell dimensions — holds for ANY house, not
+// the seed design it was tuned on.
+function defaultCameraFraming(spec, aspect = 16 / 9, vFovDeg = 45) {
+  const W = Number(spec?.shell?.widthFt) || 36;
+  const D = Number(spec?.shell?.depthFt) || 28;
+  const si = storeyInfo(spec?.shell || {});
+  const rp = roofProfile(spec?.shell || {});
+  const eaveFt = Math.max(6, si.baseWallFt + si.extraFt);
+  // Ridge sits above the high eave by pitch × half the roof's run — a
+  // generous-not-tight estimate is fine here; this only sets the STARTING
+  // distance, and the whole point is "comfortably fits", not "framed tight".
+  const ridgeFt = eaveFt + Math.max(0, Number(rp.pitch) || 0) * (Math.max(W, D) / 2) + 2;
+  const H = Math.max(10, ridgeFt);
+  // Half-diagonal of the shell's bounding box (the radius of the smallest
+  // sphere that contains the whole house), padded so eaves/decks that reach
+  // past the walls aren't clipped right at the frame edge.
+  const R = Math.sqrt((W / 2) ** 2 + (D / 2) ** 2 + (H / 2) ** 2) * 1.3;
+  const vFov = (vFovDeg * Math.PI) / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(0.01, aspect));
+  const halfFov = Math.min(vFov, hFov) / 2;
+  const dist = Math.max(24, R / Math.sin(halfFov));
+  const target = new THREE.Vector3(W / 2, H * 0.32, D / 2);
+  // Same pleasant corner angle the "Corner" view button flies to — just at a
+  // distance computed to actually fit the whole building, not whatever
+  // distance the camera happened to already be at.
+  const pos = new THREE.Vector3(target.x + dist * 0.62, target.y + dist * 0.6, target.z + dist * 0.62);
+  return { pos, target };
+}
+
 // ── THE JOINTS TABLE ─────────────────────────────────────────────────────────
 // Every seam offset in the model, named once. Builders read these instead of
 // scattering magic numbers — a seam fix is a one-line change here, and the
@@ -78,6 +130,18 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
   const tweenRef = useRef(null);
   const focusIdRef = useRef(null);
   const sectionCutRef = useRef(1);
+  // The initial viewRequest (mode:'iso', n:1) used to silently never apply:
+  // the effect below guards on the scene already existing, but on first
+  // mount it runs BEFORE the scene-creation effect has had a chance to build
+  // the camera/controls — and since the dependency ([viewRequest]) never
+  // changes again on its own, that guard failing was permanent, not a retry.
+  // viewRequestRef mirrors the latest prop value (updated every render, not
+  // just in an effect) so the mount-time catch-up in animate() below can see
+  // it the moment the camera actually exists. appliedViewNRef is the single
+  // record of which request.n has already been flown, shared by both paths,
+  // so neither re-flies a request the other already handled.
+  const viewRequestRef = useRef(viewRequest);
+  const appliedViewNRef = useRef(null);
   // The heavy WebGL engine (renderer, camera, controls, PMREM env map, post
   // pipeline) is now built ONCE and reused across edits — only renderModel()
   // re-runs when the design changes. So the engine's long-lived closures and
@@ -92,6 +156,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
   specRef.current = spec;
   layersRef.current = layers;
   contextRef.current = context;
+  viewRequestRef.current = viewRequest;
 
   useEffect(() => {
     selectedRoomRef.current = selectedRoom;
@@ -102,18 +167,15 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
   }, [onSelectRoom, onMoveStart, onMoveEnd, onResizeEnd, onDimensionPreview, onContext]);
 
   // View preset buttons: fly the camera to top / front (south) / side (east) /
-  // iso at the CURRENT orbit distance, keeping the current target.
+  // iso at the CURRENT orbit distance, keeping the current target. This
+  // covers every request AFTER the scene exists (button clicks). The very
+  // first request (set before the scene exists) is caught up separately —
+  // see appliedViewNRef / animate() in the mount effect below.
   useEffect(() => {
     const live = sceneRef.current;
     if (!viewRequest || !live?.camera || !live?.controls) return;
-    const { camera, controls } = live;
-    const target = controls.target.clone();
-    const dist = Math.max(12, camera.position.distanceTo(target));
-    const pos = viewRequest.mode === 'top' ? new THREE.Vector3(target.x, target.y + dist, target.z + 0.02)
-      : viewRequest.mode === 'front' ? new THREE.Vector3(target.x, target.y + dist * 0.12, target.z + dist)
-      : viewRequest.mode === 'side' ? new THREE.Vector3(target.x + dist, target.y + dist * 0.12, target.z)
-      : new THREE.Vector3(target.x + dist * 0.62, target.y + dist * 0.6, target.z + dist * 0.62);
-    tweenRef.current = { fromPos: camera.position.clone(), fromTarget: controls.target.clone(), pos, target, t: 0 };
+    appliedViewNRef.current = viewRequest.n;
+    tweenRef.current = viewRequestTween(live.camera, live.controls, viewRequest);
   }, [viewRequest]);
 
   // Section cut: one global vertical clip plane sliding north→south. Applied
@@ -134,11 +196,17 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     // Faint atmospheric falloff so the site melts into the paper backdrop.
     scene.fog = new THREE.Fog(0xecefdf, 220, 520);
 
-    const camera = new THREE.PerspectiveCamera(45, mount.clientWidth / mount.clientHeight, 0.1, 2000);
+    const aspect = mount.clientWidth / Math.max(1, mount.clientHeight);
+    const camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 2000);
+    // Fit-to-content default — NOT a fixed guess. A hardcoded (36,42,42) only
+    // ever suited the one shell it was eyeballed against; any other footprint,
+    // roof pitch, or storey count left the camera grazing the roof from
+    // inches away on the first frame (update-219 UX review, finding #2).
+    const fit = defaultCameraFraming(specRef.current, aspect, 45);
     if (cameraStateRef.current?.position) {
       camera.position.copy(cameraStateRef.current.position);
     } else {
-      camera.position.set(36, 42, 42);
+      camera.position.copy(fit.pos);
     }
 
     let renderer;
@@ -168,9 +236,16 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     if (cameraStateRef.current?.target) {
       controls.target.copy(cameraStateRef.current.target);
     } else {
-      controls.target.set(18, 5, 14);
+      controls.target.copy(fit.target);
     }
     controls.update();
+    // Whichever default the camera just got (restored, or freshly fit to the
+    // shell) already IS the answer to the pending initial viewRequest — mark
+    // it handled so the animate() catch-up below doesn't re-fly it. That
+    // catch-up stays as a safety net for any request that arrives in the
+    // gap between this effect running and the button-driven effect above
+    // getting a chance to see the now-live camera/controls.
+    appliedViewNRef.current = viewRequestRef.current?.n ?? null;
 
     // Warm late-morning light: sky slightly cool, bounce warm like dry grass,
     // sun a touch golden with soft-edged shadows sized to the site.
@@ -5382,6 +5457,18 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
 
     let rafId = 0;
     function animate() {
+      // Safety net for the ordering bug this replaces: a viewRequest that
+      // changes before the [viewRequest] effect above gets to run against a
+      // live camera (a real race — effects run in declaration order on the
+      // SAME commit, but the scene-creation effect after it is what makes
+      // camera/controls exist) would otherwise be silently dropped forever,
+      // same as the old initial-mount bug. Checked every frame, only acts
+      // when the request actually changed.
+      const pendingVr = viewRequestRef.current;
+      if (pendingVr && appliedViewNRef.current !== pendingVr.n) {
+        appliedViewNRef.current = pendingVr.n;
+        tweenRef.current = viewRequestTween(camera, controls, pendingVr);
+      }
       const tween = tweenRef.current;
       if (tween) {
         tween.t = Math.min(1, tween.t + 0.06);

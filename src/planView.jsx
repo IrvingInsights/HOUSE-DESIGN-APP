@@ -7,7 +7,7 @@ import {
 import { Grid3X3, Plus } from 'lucide-react';
 import {
   clamp, floorCount, floorLabel, resolveOverhangs, utilitiesOf, resolveWallSide, PLAN_ELEMENT_HEX, planLabelInk,
-  isStair, resolveStair,
+  isStair, resolveStair, overlappingRoomIds,
 } from './engine.js';
 import { ScaleGrid } from './scaleGrid.jsx';
 import {
@@ -503,6 +503,13 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
   }
 
   const roomAt = (room) => (drag && drag.id === room.id ? { ...room, ...drag.ghost } : room);
+  // A drop is always honored right where it lands — the Law of Placement
+  // (src/placement.js) never slides a room away from another one to dodge a
+  // pile-up. So the pile-up has to be SEEN instead: outline whichever rooms
+  // currently overlap, live, using the dragged room's ghost position while a
+  // drag is in flight (not just the last-committed spec) — the warning
+  // appears and clears in real time as you drag, not only after you drop.
+  const overlapIds = overlappingRoomIds({ rooms: (spec.rooms || []).map(roomAt) });
   // Live size readout DURING a corner drag: big digits inside the box that
   // track every half-foot as it changes — nobody should have to read tiny
   // numbers somewhere else while their hand is mid-resize.
@@ -836,6 +843,7 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
           }
           const room = roomAt(raw);
           const isSel = raw.id === selectedRoom;
+          const isPiled = overlapIds.has(raw.id);
           // On a round house an indoor room clips to the curve: it can slide
           // all the way into the "corner" and the wall trims what pokes past.
           const clipToShell = fpRound && Number(raw.level || 1) === 1
@@ -846,13 +854,29 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
                 x={room.x} y={room.y} width={room.w} height={room.d}
                 fill={PLAN_ZONE_HEX[raw.type] || '#86a0a8'}
                 fillOpacity={(isSel ? 0.9 : 0.66) * roomsDim}
-                stroke={isSel ? 'var(--active-line)' : 'var(--line)'}
-                strokeWidth={isSel ? 0.4 : 0.18}
+                stroke={isPiled ? '#AE452F' : isSel ? 'var(--active-line)' : 'var(--line)'}
+                strokeWidth={isPiled ? 0.45 : isSel ? 0.4 : 0.18}
                 clipPath={clipToShell ? 'url(#rzRoundShellClip)' : undefined}
                 pointerEvents={buildingContext || siteContext ? 'none' : undefined}
                 onPointerDown={(event) => startDrag(event, raw, 'move')}
                 onContextMenu={(event) => { if (onContext) { event.preventDefault(); onContext(raw.id, event.clientX, event.clientY); } }}
               />
+              {/* A drop is always honored where it lands — never silently
+                  slid apart from another room (the Law of Placement). This
+                  is the visible half of that: a pulsing-width dashed red
+                  outline plus a label, live, so a pile-up is never a
+                  silent "where did my room go". */}
+              {isPiled && (
+                <>
+                  <rect x={room.x} y={room.y} width={room.w} height={room.d}
+                    fill="none" stroke="#AE452F" strokeWidth={0.3} strokeDasharray="0.6 0.35"
+                    clipPath={clipToShell ? 'url(#rzRoundShellClip)' : undefined}
+                    pointerEvents="none" />
+                  <text x={room.x + room.w / 2} y={room.y + 0.9} textAnchor="middle" fontSize={0.75}
+                    fill="#fff" fontWeight="700" pointerEvents="none"
+                    paintOrder="stroke" stroke="#AE452F" strokeWidth={0.34}>⚠ overlaps another room</text>
+                </>
+              )}
               {(() => {
                 // mid-resize the room speaks in one voice: its live size
                 if (isResizing(raw.id)) return liveDimsLabel(room);
