@@ -4419,6 +4419,31 @@ export function sunspacePartitions(spec) {
   return out;
 }
 
+// ROOM OVERLAP — the client-side twin of the identical check in bim-core.mjs
+// ("rooms don't pile on each other"): true when two rooms on the same floor
+// share more than a third of the smaller one's area. THE LAW OF PLACEMENT
+// (src/placement.js) always honors a drop at the coordinates it was given —
+// it never silently relocates a room to dodge another one — so this is the
+// visible half of that contract: a pile-up isn't prevented, it's SURFACED,
+// here and as a Review flag (detectIssues below), so it's never a silent
+// "why did that room disappear." Exported so the Plan view can outline the
+// offenders live, including mid-drag (call it with the dragged room's ghost
+// position substituted in, not just the committed spec).
+export function overlappingRoomIds(spec) {
+  const rooms = spec.rooms || [];
+  const bad = new Set();
+  for (let i = 0; i < rooms.length; i += 1) {
+    for (let j = i + 1; j < rooms.length; j += 1) {
+      const a = rooms[i]; const b = rooms[j];
+      if (Number(a.level || 1) !== Number(b.level || 1)) continue;
+      const ov = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x))
+        * Math.max(0, Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y));
+      if (ov > 0.35 * Math.min(a.w * a.d, b.w * b.d)) { bad.add(a.id); bad.add(b.id); }
+    }
+  }
+  return bad;
+}
+
 export function detectIssues(spec) {
   const issues = [];
 
@@ -4508,6 +4533,24 @@ export function detectIssues(spec) {
       && (room.x < -0.5 || room.y < -0.5 || room.x + room.w > spec.shell.widthFt + 0.5 || room.y + room.d > spec.shell.depthFt + 0.5));
     if (strays.length) {
       issues.push({ severity: 'critical', title: strays.length === 1 ? `${strays[0].name} sits outside the walls` : `${strays.length} ground-floor rooms sit outside the walls`, owner: 'Architect', system: 'shell', fixId: 'enclose-rooms', fix: 'The shell only covers part of the ground floor. Grow the walls to take these rooms in — an upper storey can still cover just the core: resize its Storey extent (2nd-floor group in the selector, or drag it on the 2nd-floor Plan), and the roof steps down over the rest.' });
+    }
+  }
+
+  // A dragged room is always honored right where it's dropped — the app
+  // never silently slides it away from another room to avoid a pile-up (the
+  // Law of Placement). So a pile-up has to be visible some other way: it
+  // shows up here, and the Plan view outlines the offending rooms in red.
+  {
+    const pileIds = overlappingRoomIds(spec);
+    if (pileIds.size) {
+      const names = spec.rooms.filter((r) => pileIds.has(r.id)).map((r) => r.name || 'Room');
+      issues.push({
+        severity: 'critical',
+        title: names.length === 2 ? `"${names[0]}" and "${names[1]}" sit on top of each other` : `${names.length} rooms are piled on top of each other`,
+        owner: 'Architect',
+        system: 'rooms',
+        fix: `Drag ${names.length === 2 ? 'one of them' : 'them'} apart in the Plan view: ${names.join(', ')}. A drop always lands exactly where you put it, so this needs a nudge from you, not the app.`
+      });
     }
   }
 
