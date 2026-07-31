@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 220 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 221 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1978,27 +1978,33 @@ export default function App() {
                     Rooms until update 172 only because Rooms owned the plan
                     view — but a stair is not a room, it is the thing that
                     makes a second storey reachable, and every flag about one
-                    ("upper space has no stair") is a storeys question. */}
-                {(floors > 1 || hasBasement) && (
-                  <div className="rz-found">
-                    <div className="rz-found-head">Stairs — what connects the floors</div>
-                    <button
-                      type="button"
-                      className="rz-floorbar-outline"
-                      title="A stair on this floor — drag it where the climb should start. Its length is worked out from the climb, and you can turn it or fold it into an L or a U below."
-                      onClick={addStair}
-                    >＋ Stairs — connect the floors</button>
-                    <StairsAndSteps
-                      spec={spec}
-                      level={activeFloor >= 1 ? activeFloor : 1}
-                      selectedId={selectedId}
-                      onSelect={setSelectedId}
-                      onDeckSteps={setDeckSteps}
-                      onMoveStair={(el, x, y) => moveObject(el.id, x, y)}
-                      onStair={setStairField}
-                    />
-                  </div>
-                )}
+                    ("upper space has no stair") is a storeys question.
+                    Always visible, not gated by floors>1||hasBasement: a
+                    single-storey house can still want a stair (down to a
+                    basement/crawlspace a "hasBasement" heuristic might miss,
+                    or placed ahead of adding the floor above it) — classic's
+                    stair fixture was never gated this way either, and hiding
+                    the control until a precondition is met is exactly the
+                    "control existed, discoverability was the failure"
+                    pattern this app treats as a bug everywhere else. */}
+                <div className="rz-found">
+                  <div className="rz-found-head">Stairs — what connects the floors</div>
+                  <button
+                    type="button"
+                    className="rz-floorbar-outline"
+                    title="A stair on this floor — drag it where the climb should start. Its length is worked out from the climb, and you can turn it or fold it into an L or a U below."
+                    onClick={addStair}
+                  >＋ Stairs — connect the floors</button>
+                  <StairsAndSteps
+                    spec={spec}
+                    level={activeFloor >= 1 ? activeFloor : 1}
+                    selectedId={selectedId}
+                    onSelect={setSelectedId}
+                    onDeckSteps={setDeckSteps}
+                    onMoveStair={(el, x, y) => moveObject(el.id, x, y)}
+                    onStair={setStairField}
+                  />
+                </div>
               </>
             )}
             {activeChapter === 'rooms' && (
@@ -5653,11 +5659,9 @@ function SiteQuickRow({
           title="A full storey below grade — it IS the foundation choice"
           onClick={() => onFoundation(hasBasement ? (utilitiesOf(spec).foundationType || 'rubble') : 'basement')}>
           Basement<small>{hasBasement ? 'built — tap to remove' : 'dig one below'}</small></button>
-        {(floors > 1 || hasBasement) && (
-          <button className="st-pill" data-cap="cap-storeys-stair-add"
-            title="A stair on the floor you're on — drag it where the climb should start. Shape it (straight, L or U), turn it, and set where its runs break under More."
-            onClick={onAddStair}>+ Stairs<small>{stairCount ? `${stairCount} placed` : 'connect the floors'}</small></button>
-        )}
+        <button className="st-pill" data-cap="cap-storeys-stair-add"
+          title="A stair on the floor you're on — drag it where the climb should start. Shape it (straight, L or U), turn it, and set where its runs break under More."
+          onClick={onAddStair}>+ Stairs<small>{stairCount ? `${stairCount} placed` : 'connect the floors'}</small></button>
         <button className="st-pill" data-cap="cap-more-storeys" onClick={onMore}>+ more…<small>each floor’s numbers · shape a stair</small></button>
       </>
     );
