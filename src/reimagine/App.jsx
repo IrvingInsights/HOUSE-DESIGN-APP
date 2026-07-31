@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 218 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 219 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
