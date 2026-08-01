@@ -19,7 +19,7 @@ import {
   resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons, downloadFile,
   DECK_SURFACES, DECK_STAIR_SHAPES, resolveDeck, resolveDeckStairs, derivePartitionOps, interiorFixtures, sourceNote,
   isStair, resolveStair, STAIR_SHAPES, STAIR_FACINGS, STAIR_TURNS, STAIR_DEFAULTS, STAIR_FACING_ORDER, HEATER_FACINGS,
-  SHADE_DEVICES, ROOM_ENVELOPES, resolveRoomEnvelope, OUTBUILDING_PRESETS, OUTBUILDING_CONSTRUCTION
+  SHADE_DEVICES, ROOM_ENVELOPES, resolveRoomEnvelope, OUTBUILDING_PRESETS, OUTBUILDING_CONSTRUCTION, FENCE_TYPES
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms, OUTDOOR_TYPES } from '../placement.js';
 import { STARTER_DESIGNS } from './starters.js';
@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 227 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 228 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -2514,6 +2514,9 @@ export default function App() {
           onRemove={() => removeObject(selectedRoom)}
           onClose={() => setSelectedId(null)}
           onSetEnvelope={(value) => applyOps([{ type: 'update_object', targetId: selectedRoom.id, name: selectedRoom.name, field: 'envelope', value }])}
+          onFence={OUTDOOR_TYPES.has(selectedRoom.type)
+            ? (value) => applyOps([{ type: 'update_object', targetId: selectedRoom.id, name: selectedRoom.name, field: 'fenceKey', value }])
+            : null}
           onRotate={() => rotate90(selectedRoom)}
           onMassWall={selectedRoom.type === 'plant'
             && (Number(selectedRoom.y) || 0) + (Number(selectedRoom.d) || 0) >= (Number(spec.shell.depthFt) || 28) - 1
@@ -3493,7 +3496,7 @@ function RotateButton({ onRotate, label = 'Turn it 90°' }) {
     >↻ {label}</button>
   );
 }
-function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose, onMassWall = null, onGlassWall = null, doorSides = [], onAddOpening = null, interiorWalls = [], onSetWallDoor = null, onSetEnvelope = null, onRotate = null }) {
+function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose, onMassWall = null, onGlassWall = null, doorSides = [], onAddOpening = null, interiorWalls = [], onSetWallDoor = null, onSetEnvelope = null, onFence = null, onRotate = null }) {
   const [doorSideRaw, setDoorSide] = useState('');
   const doorSide = doorSides.includes(doorSideRaw) ? doorSideRaw : doorSides[0];
   const [expanded, setExpanded] = useState(false);
@@ -3582,6 +3585,24 @@ function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose
                 className={`rz-pick-chip${resolveRoomEnvelope(room) === env.key ? ' on' : ''}`}
                 onClick={() => onSetEnvelope(env.key)}
               >{env.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* FENCING — around this room's own perimeter, not tied to any
+          structure. Only offered on outdoor rooms (paddock, garden, animal
+          run…) — a bedroom has no use for a fence. No gate yet: said in the
+          receipts note, not modeled here either. */}
+      {onFence && (
+        <div className="rz-field">
+          <span>Fence around it</span>
+          <div className="ctlChips">
+            {Object.entries(FENCE_TYPES).map(([key, f]) => (
+              <button
+                key={key} type="button" title={f.label}
+                className={`rz-pick-chip${(room.fenceKey || 'none') === key ? ' on' : ''}`}
+                onClick={() => onFence(key === 'none' ? '' : key)}
+              >{f.label}</button>
             ))}
           </div>
         </div>

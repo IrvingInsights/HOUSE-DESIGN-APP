@@ -18,7 +18,7 @@ import {
   DEFAULT_OUTDOOR_GRID_SIZE_FT, clamp, padExtension, sitePadRect, objectBounds, titleCase, roofProfile, storeyInfo,
   upperPlateRect, resolveOverhangs, FOUNDATION_RUN_TYPES, DEFAULT_MODEL_LAYERS, siteOf, utilitiesOf, getSpecialBimObjects, wallAssemblyProfile,
   WALL_SIDES, resolveWallSide, resolveDeck, resolveDeckStairs, sunspacePartitions, isStair, resolveStair,
-  structureDoorStart
+  structureDoorStart, FENCE_TYPES
 } from './engine.js';
 
 // Some browsers run with graphics acceleration (WebGL) turned off — locked-
@@ -2843,6 +2843,41 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           label.position.set(room.x + room.w / 2, 0.42 + roomLift, room.y + room.d / 2);
           parts.label = label;
           group.add(label);
+        }
+
+        // A FENCE ROUND AN OUTDOOR ROOM — post & rail, woven wire, or picket,
+        // its own perimeter, not tied to any structure. Same idea as a deck's
+        // railing but on the ground: posts at intervals, a top and bottom rail
+        // (or a wire mesh look) running the whole way round. No gate cut yet —
+        // said in the receipts note, not modeled here either.
+        if (layers.elements && room.fenceKey && room.fenceKey !== 'none' && FENCE_TYPES[room.fenceKey] && roomLevel === 1) {
+          const fk = FENCE_TYPES[room.fenceKey];
+          const fenceMat = new THREE.MeshStandardMaterial({ color: room.fenceKey === 'woven_wire' ? 0x9a978c : 0x8a6a48, roughness: 0.8, map: grainTexture(room.fenceKey === 'woven_wire' ? 'metal' : 'wood'), bumpScale: 0.08 });
+          const fx0 = room.x; const fz0 = room.y;
+          const fx1 = room.x + room.w; const fz1 = room.y + room.d;
+          const postEvery = 8;
+          const fenceLine = (horiz, at, a0, a1) => {
+            if (a1 - a0 < 0.2) return;
+            const n = Math.max(1, Math.round((a1 - a0) / postEvery));
+            for (let i = 0; i <= n; i += 1) {
+              const p = a0 + ((a1 - a0) * i) / n;
+              const post = horiz
+                ? box(0.2, fk.heightFt, 0.2, p, fk.heightFt / 2, at, fenceMat)
+                : box(0.2, fk.heightFt, 0.2, at, fk.heightFt / 2, p, fenceMat);
+              post.userData.roomId = room.id; post.userData.generated = true; group.add(post);
+            }
+            const railHeights = room.fenceKey === 'woven_wire' ? [fk.heightFt * 0.5, fk.heightFt * 0.95] : [fk.heightFt * 0.35, fk.heightFt * 0.9];
+            railHeights.forEach((rh) => {
+              const rail = horiz
+                ? box(a1 - a0, 0.1, 0.1, (a0 + a1) / 2, rh, at, fenceMat)
+                : box(0.1, 0.1, a1 - a0, at, rh, (a0 + a1) / 2, fenceMat);
+              rail.userData.roomId = room.id; rail.userData.generated = true; group.add(rail);
+            });
+          };
+          fenceLine(true, fz0, fx0, fx1);
+          fenceLine(true, fz1, fx0, fx1);
+          fenceLine(false, fx0, fz0, fz1);
+          fenceLine(false, fx1, fz0, fz1);
         }
       });
 
