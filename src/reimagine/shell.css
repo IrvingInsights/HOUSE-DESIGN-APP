@@ -787,6 +787,13 @@ button.rz-storey-name:hover { color: var(--evergreen, #3c6472); background: colo
   border-radius: 10px; padding: 6px 10px; font-size: 13px; color: #4a4f47;
   box-shadow: 0 2px 8px rgba(34, 37, 31, 0.08); z-index: 4; max-width: calc(100% - 24px);
 }
+/* The svg draws the whole wall — ground line and corner labels included —
+   across its FULL container height, with .rz-wallpick then floating on top
+   of whatever ended up there. Reserve real space instead: shrink the
+   drawing so ground-level content can never land under the floating strip.
+   Scoped to the wall-face view only (rz-elev is shared with stackView,
+   which has no such floating toolbar and shouldn't lose the space). */
+.rz-facewall-wrap .rz-elev { height: calc(100% - 64px); }
 .rz-wallpick button {
   padding: 4px 10px; font-size: 13px; font-weight: 600; cursor: pointer;
   border: 1px solid var(--line, #dbd9ce); border-radius: 8px; background: #fff; color: #4a4f47;

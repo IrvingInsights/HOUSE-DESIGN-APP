@@ -416,7 +416,7 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
   const zoomPct = Math.round((baseBox.w / curBox.w) * 100);
 
   return (
-    <div ref={containerRef} className="planWrap rz-elev-wrap">
+    <div ref={containerRef} className="planWrap rz-elev-wrap rz-facewall-wrap">
       {onPickWall && (
         <div
           className="rz-wallpick"
@@ -481,8 +481,10 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
 
         {/* the wall face — tinted by what the wall actually WEARS (its
             cladding, or the wall system's own rendered face), so this view
-            answers the system/face selects instead of ignoring both */}
-        <polygon points={facePts} fill={faceFill} stroke="#4a4f47" strokeWidth={0.16} strokeLinejoin="round" />
+            answers the system/face selects instead of ignoring both. Left at
+            full opacity this painted the grid out of existence — the plan
+            view keeps its rooms see-through for exactly this reason. */}
+        <polygon points={facePts} fill={faceFill} fillOpacity="0.88" stroke="#4a4f47" strokeWidth={0.16} strokeLinejoin="round" />
 
         {/* sun-glazed stretches: kneewall line, glass band up to the roofline
             (or the 2nd floor on a multi-storey house), timber mullions */}
@@ -550,14 +552,25 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
           const isClamped = Boolean(band && band.clamped);
           const sel = String(selectedId || '') === `opening-${i}`;
           const drawX = flipX ? run - along - w : along;
+          // An opening's label is centered ON the opening — fine mid-wall,
+          // but an opening near either end pushed its centered text straight
+          // off the drawn wall (and under whatever UI sits past its edge).
+          // Keep the label itself inside the wall's run; it can stop looking
+          // perfectly centered over its opening once that opening is this
+          // close to a corner.
+          const labelCx = (text, fontSize) => {
+            const halfW = (String(text).length / 2) * fontSize * 0.55;
+            const cx = drawX + w / 2;
+            return Math.min(run - halfW, Math.max(halfW, cx));
+          };
           return (
             <g key={i}>
               <rect
                 x={drawX} y={Y(bottom + drawH)} width={w} height={drawH}
                 fill={prof.glazed ? '#c4dbe8' : '#b98f61'}
-                stroke={isClamped ? '#c28a2e' : sel ? '#3C6472' : '#5d6157'}
+                stroke={isClamped ? '#c0392b' : sel ? '#3C6472' : '#5d6157'}
                 strokeDasharray={isClamped ? '0.5 0.3' : undefined}
-                strokeWidth={sel ? 0.24 : isClamped ? 0.2 : 0.13}
+                strokeWidth={isClamped ? 0.3 : sel ? 0.24 : 0.13}
                 opacity={isGhost ? 0.8 : 1}
                 style={{ cursor: 'move' }}
                 onPointerDown={(e) => startDrag(e, i, 'move')}
@@ -568,22 +581,59 @@ export function ElevationView({ spec, wall, selectedId, onSelect, onPlace, onSiz
                   onContext(i, e.clientX, e.clientY);
                 }}
               />
+              {/* Loud, not just a thin dashed edge — plan view's overlap
+                  warning is a red outline PLUS a banner; this opening was
+                  silently moved from where it was asked to sit, so it gets
+                  the same "advice, not a whisper" treatment, always on. */}
               {/* a center mullion so glazing reads as a window */}
               {prof.glazed && drawH > 1.2 && (
                 <line x1={drawX + w / 2} y1={Y(bottom + drawH) + 0.15} x2={drawX + w / 2} y2={Y(bottom) - 0.15} stroke="#7c96a5" strokeWidth={0.07} pointerEvents="none" />
               )}
-              {sel && (
-                <g>
-                  {/* side handles — pull to widen; the labels live in feet */}
-                  <rect x={drawX - 0.45} y={Y(bottom + drawH / 2) - 0.45} width={0.9} height={0.9} rx={0.18} fill="#3C6472" stroke="#fff" strokeWidth={0.1}
-                    style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDrag(e, i, flipX ? 'end' : 'start')} />
-                  <rect x={drawX + w - 0.45} y={Y(bottom + drawH / 2) - 0.45} width={0.9} height={0.9} rx={0.18} fill="#3C6472" stroke="#fff" strokeWidth={0.1}
-                    style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDrag(e, i, flipX ? 'start' : 'end')} />
-                  <text x={drawX + w / 2} y={Y(bottom + drawH) - 0.5} textAnchor="middle" fontSize="1.1" fill="#22251F" fontWeight="600" pointerEvents="none">
-                    {(o.label || prof.label)} — {Math.round(w * 10) / 10}′ wide · bottom {Math.round(sill * 10) / 10}′ above its floor{isClamped ? ' · pulled to fit its wall' : ''}
+              {!sel && (
+                isClamped ? (
+                  // Loud, not just a thin dashed edge — plan view's overlap
+                  // warning is a red outline PLUS a banner; this opening was
+                  // silently moved from where it was asked to sit, so it
+                  // gets the same "advice, not a whisper" treatment, always on.
+                  <text x={labelCx('⚠ pulled to fit its wall', 0.85)} y={Y(bottom + drawH) - 0.3} textAnchor="middle" fontSize="0.85" fontWeight="600" fill="#c0392b" pointerEvents="none">
+                    ⚠ pulled to fit its wall
                   </text>
-                </g>
+                ) : w > 1.3 && (
+                  // Bare width, always on — the plan view names every room
+                  // at a glance; an unselected opening here showed nothing
+                  // at all until tapped. Full name + details still wait for
+                  // a tap, so this stays terse enough not to clutter a wall
+                  // full of openings.
+                  <text x={labelCx(`${Math.round(w * 10) / 10}′`, 0.85)} y={Y(bottom + drawH) - 0.3} textAnchor="middle" fontSize="0.85" fill="#565a4f" pointerEvents="none">
+                    {Math.round(w * 10) / 10}′
+                  </text>
+                )
               )}
+              {sel && (() => {
+                const nameText = o.label || prof.label;
+                const dimsText = `${Math.round(w * 10) / 10}′ wide · bottom ${Math.round(sill * 10) / 10}′ above its floor${isClamped ? ' · pulled to fit its wall' : ''}`;
+                return (
+                  <g>
+                    {/* side handles — pull to widen; the labels live in feet */}
+                    <rect x={drawX - 0.45} y={Y(bottom + drawH / 2) - 0.45} width={0.9} height={0.9} rx={0.18} fill="#3C6472" stroke="#fff" strokeWidth={0.1}
+                      style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDrag(e, i, flipX ? 'end' : 'start')} />
+                    <rect x={drawX + w - 0.45} y={Y(bottom + drawH / 2) - 0.45} width={0.9} height={0.9} rx={0.18} fill="#3C6472" stroke="#fff" strokeWidth={0.1}
+                      style={{ cursor: 'ew-resize' }} onPointerDown={(e) => startDrag(e, i, flipX ? 'start' : 'end')} />
+                    {/* Two short lines beat one long sentence — a single line
+                        this long was the thing running under the side rail on
+                        one edge and the receipts panel on the other. Both
+                        stay clamped inside the wall's run too, same as the
+                        always-on labels below, so a corner opening's card
+                        doesn't run off under that same chrome. */}
+                    <text x={labelCx(nameText, 1.1)} y={Y(bottom + drawH) - 1.5} textAnchor="middle" fontSize="1.1" fill="#22251F" fontWeight="600" pointerEvents="none">
+                      {nameText}
+                    </text>
+                    <text x={labelCx(dimsText, 0.85)} y={Y(bottom + drawH) - 0.35} textAnchor="middle" fontSize="0.85" fill="#565a4f" pointerEvents="none">
+                      {dimsText}
+                    </text>
+                  </g>
+                );
+              })()}
             </g>
           );
         })}
