@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 226 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 227 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -260,6 +260,11 @@ export default function App() {
   // it has to line up with, without switching away from the finished house.
   // Layers on top of whatever modelShow preset is picked, same as classic.
   const [xrayOn, setXrayOn] = useState(false);
+  // Slice: a real cutting plane, same one classic's own "Slice" control
+  // drives (cutPlanes() in threeScene.jsx) — 1 = whole house, sliding down
+  // saws it open from the south. A true cross-section, unlike X-ray's ghost:
+  // slice removes what's in front of the cut, X-ray keeps it but sees through.
+  const [sectionCut, setSectionCut] = useState(1);
   // THE SITE TABLE — Daniel's chosen Claude Design direction (Jul 2026): the
   // chapters run as a strip across the top, the model owns the center, money
   // sits on the table. 'classic' keeps the left-Trail look one tap away.
@@ -1613,6 +1618,7 @@ export default function App() {
               : viewMode === 'frame' ? MODEL_SHOW_PRESETS.bones
               : xrayOn ? { ...DEFAULT_MODEL_LAYERS, ...(MODEL_SHOW_PRESETS[modelShow] || null), xray: true }
               : (MODEL_SHOW_PRESETS[modelShow] || undefined)}
+            sectionCut={timelineOpen ? 1 : sectionCut}
             context={!timelineOpen && (viewMode === 'frame' || activeChapter === 'frame') ? 'frame' : null}
             viewRequest={viewRequest}
             onSelectRoom={timelineOpen ? () => {} : setSelectedId}
@@ -1843,6 +1849,10 @@ export default function App() {
                   title="See the exterior walls and roof ghosted, so an interior stair or wall can be checked against them without hiding them entirely"
                   onClick={() => setXrayOn((v) => !v)}
                 >X-ray</button>
+                <label className="cutSlider" title="Slice the model open — slide to cut away the south side and see a true cross-section">
+                  <span>Slice</span>
+                  <input type="range" min="8" max="100" value={Math.round(sectionCut * 100)} onChange={(e) => setSectionCut(Number(e.target.value) / 100)} />
+                </label>
               </>
             )}
           </div>
@@ -1948,6 +1958,12 @@ export default function App() {
             title="See the exterior walls and roof ghosted, so an interior stair or wall can be checked against them without hiding them entirely"
             onClick={() => setXrayOn((v) => !v)}
           >X-ray</button>
+        )}
+        {viewMode === '3d' && (
+          <label className="cutSlider" title="Slice the model open — slide to cut away the south side and see a true cross-section">
+            <span>Slice</span>
+            <input type="range" min="8" max="100" value={Math.round(sectionCut * 100)} onChange={(e) => setSectionCut(Number(e.target.value) / 100)} />
+          </label>
         )}
       </div>}
 
