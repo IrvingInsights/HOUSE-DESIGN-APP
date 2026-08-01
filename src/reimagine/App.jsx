@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 225 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 226 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -255,6 +255,11 @@ export default function App() {
   // 3D "Show" filter: see just part of the build (frame on its foundation,
   // the house without its roof) — the same layer system the Time Machine uses.
   const [modelShow, setModelShow] = useState('finished');
+  // X-ray: exterior walls (and the roof) go translucent so an interior
+  // element — a stair, a partition — can be checked against the exterior
+  // it has to line up with, without switching away from the finished house.
+  // Layers on top of whatever modelShow preset is picked, same as classic.
+  const [xrayOn, setXrayOn] = useState(false);
   // THE SITE TABLE — Daniel's chosen Claude Design direction (Jul 2026): the
   // chapters run as a strip across the top, the model owns the center, money
   // sits on the table. 'classic' keeps the left-Trail look one tap away.
@@ -1606,6 +1611,7 @@ export default function App() {
             selectedRoom={selectedId}
             layers={timelineOpen ? timelineLayers
               : viewMode === 'frame' ? MODEL_SHOW_PRESETS.bones
+              : xrayOn ? { ...DEFAULT_MODEL_LAYERS, ...(MODEL_SHOW_PRESETS[modelShow] || null), xray: true }
               : (MODEL_SHOW_PRESETS[modelShow] || undefined)}
             context={!timelineOpen && (viewMode === 'frame' || activeChapter === 'frame') ? 'frame' : null}
             viewRequest={viewRequest}
@@ -1831,6 +1837,12 @@ export default function App() {
                   <option value="frame">Show: just the frame</option>
                   <option value="noroof">Show: no roof</option>
                 </select>
+                <button
+                  type="button"
+                  className={xrayOn ? 'on' : ''}
+                  title="See the exterior walls and roof ghosted, so an interior stair or wall can be checked against them without hiding them entirely"
+                  onClick={() => setXrayOn((v) => !v)}
+                >X-ray</button>
               </>
             )}
           </div>
@@ -1928,6 +1940,14 @@ export default function App() {
             <option value="frame">Just the frame</option>
             <option value="noroof">No roof</option>
           </select>
+        )}
+        {viewMode === '3d' && (
+          <button
+            type="button"
+            className={xrayOn ? 'on' : ''}
+            title="See the exterior walls and roof ghosted, so an interior stair or wall can be checked against them without hiding them entirely"
+            onClick={() => setXrayOn((v) => !v)}
+          >X-ray</button>
         )}
       </div>}
 
