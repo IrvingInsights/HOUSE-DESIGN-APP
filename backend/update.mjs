@@ -10,24 +10,31 @@ const git = (args) => new Promise((resolve) => {
   });
 });
 
+// `@{u}` (the upstream-tracking ref) only resolves if this clone's `main` was
+// ever set up to track `origin/main` — a manual clone/checkout easily skips
+// that step, and every git call here then fails quietly (by design, so a
+// missing git install never breaks the app) which reads EXACTLY like "you're
+// already current." A build sitting 8 real updates behind showed nothing
+// wrong for a session that hit this. `origin/main` by name needs no tracking
+// config at all, so it can't go silently blind the same way.
 export async function checkForUpdate() {
-  const fetched = await git(['fetch', '--quiet']);
+  const fetched = await git(['fetch', '--quiet', 'origin', 'main']);
   if (fetched.err) return { behind: 0 };
-  const count = await git(['rev-list', '--count', 'HEAD..@{u}']);
+  const count = await git(['rev-list', '--count', 'HEAD..origin/main']);
   const behind = count.err ? 0 : Number(count.stdout) || 0;
   if (!behind) return { behind: 0 };
-  const latest = await git(['log', '-1', '--format=%s', '@{u}']);
+  const latest = await git(['log', '-1', '--format=%s', 'origin/main']);
   return { behind, latest: latest.stdout || '' };
 }
 
 export async function applyUpdate() {
   const before = (await git(['rev-parse', 'HEAD'])).stdout;
-  let pulled = await git(['pull', '--ff-only']);
+  let pulled = await git(['pull', '--ff-only', 'origin', 'main']);
   if (pulled.err && /would be overwritten|commit your changes|move or remove them/i.test(`${pulled.stderr}\n${pulled.stdout}`)) {
     // A stray local file edit must never brick the one-tap update. Stash it
     // (kept, never deleted — recoverable with `git stash pop`) and retry.
     const stashed = await git(['stash', 'push', '--include-untracked', '-m', 'auto-stash before self-update']);
-    if (!stashed.err) pulled = await git(['pull', '--ff-only']);
+    if (!stashed.err) pulled = await git(['pull', '--ff-only', 'origin', 'main']);
   }
   if (pulled.err) return { ok: false, error: pulled.stderr || pulled.stdout || 'update failed' };
   const after = (await git(['rev-parse', 'HEAD'])).stdout;

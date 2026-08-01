@@ -762,6 +762,16 @@ export const DECK_RAILS = {
   cable: { label: 'Steel cables', costLf: 28, carbonLf: 4 },
   none: { label: 'No railing', costLf: 0, carbonLf: 0 }
 };
+// A fence around an outdoor room (paddock, garden, run…) — its own perimeter,
+// not tied to any structure. Priced by the linear foot around that room's own
+// rectangle, the same way deck railing prices by the open foot. No gate yet —
+// said honestly, not modeled: a real gap for later, not a silent omission.
+export const FENCE_TYPES = {
+  none: { label: 'No fence', costLf: 0, carbonLf: 0, heightFt: 0 },
+  post_rail: { label: 'Wood post & rail', costLf: 16, carbonLf: 1.8, heightFt: 4 },
+  woven_wire: { label: 'Woven wire (field fence)', costLf: 9, carbonLf: 0.9, heightFt: 4 },
+  picket: { label: 'Wood picket', costLf: 24, carbonLf: 2.6, heightFt: 3.5 }
+};
 export const DECK_ROOFS = {
   shed: { label: 'Shed roof — one slope', costPsf: 14, carbonPsf: 5 },
   gable: { label: 'Gable roof — a peak', costPsf: 16, carbonPsf: 6 }
@@ -5777,6 +5787,22 @@ export function deriveDesign(spec, wallSectionsParam) {
     + [...deckBuckets.rail.values()].reduce((s, b) => s + b.lf * b.rate, 0)
     + [...deckBuckets.roof.values()].reduce((s, b) => s + b.area * b.rate, 0)
     + deckStepsCost;
+  // A fence around an outdoor room — its own perimeter, priced by the linear
+  // foot the same way deck railing is. Only rooms carrying a real fenceKey
+  // count; a room with no fence set costs nothing here.
+  const fenceBuckets = new Map();
+  let fenceCarbon = 0;
+  for (const room of (spec.rooms || [])) {
+    const key = room.fenceKey;
+    if (!key || key === 'none' || !FENCE_TYPES[key]) continue;
+    const f = FENCE_TYPES[key];
+    const lf = 2 * ((Number(room.w) || 0) + (Number(room.d) || 0));
+    if (lf <= 0) continue;
+    const fb = fenceBuckets.get(key) || { label: f.label, rate: f.costLf, lf: 0 };
+    fb.lf += lf; fenceBuckets.set(key, fb);
+    fenceCarbon += lf * f.carbonLf;
+  }
+  const fenceCost = [...fenceBuckets.values()].reduce((s, b) => s + b.lf * b.rate, 0);
   // Shade you build or plant — awnings, a trellis, a tree. They are outdoor
   // pieces and they price like outdoor pieces, but they earn their line here
   // by changing the summer numbers, which nothing else in this budget does.
@@ -5791,7 +5817,7 @@ export function deriveDesign(spec, wallSectionsParam) {
         .reduce((s, element) => s + Math.max(24, (Number(element.w) || item.w) * (Number(element.d) || item.d)) * greenhouseCostSf, 0);
     }
     return sum + item.cost;
-  }, 0) + outbuildingCost + canopyCost + deckCost + shadeCost;
+  }, 0) + outbuildingCost + canopyCost + deckCost + shadeCost + fenceCost;
 
   // Floor assembly = finished floor over the whole heated area + the structural
   // subfloor deck under the ground floor (a slab foundation is its own deck, so
@@ -5937,7 +5963,7 @@ export function deriveDesign(spec, wallSectionsParam) {
   const stairsCarbon = stairsCarbonRaw * srcFac('stairs', 'carbon');
   // shadeCarbon can be NEGATIVE — a planted tree is the one line in this whole
   // model that takes carbon back out of the air instead of putting it in.
-  const carbonKg = foundationCarbon + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + deckCarbon + furnishingsCarbon + stairsCarbon + shadeCarbon + (heatFacing?.carbon || 0) + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
+  const carbonKg = foundationCarbon + foundationRunCarbon + wallCarbon + frameCarbon + flooringCarbon + roofCarbon + deckCarbon + furnishingsCarbon + stairsCarbon + shadeCarbon + fenceCarbon + (heatFacing?.carbon || 0) + (panels > 0 ? 400 : 0) + (batteryKwh > 0 ? 600 : 0);
 
   // What the sourcing choices saved vs. buying every system new — salvage and
   // local milling both land here.
@@ -6112,6 +6138,9 @@ export function deriveDesign(spec, wallSectionsParam) {
       lines.push(n > 1
         ? rline(s.label, n * s.cost, n, 'on the house', s.cost, `shades about ${Math.round(s.summer * 100)}% of that glass in summer`, true)
         : rline(s.label, s.cost, null, '', null, `shades about ${Math.round(s.summer * 100)}% of that glass in summer, ${Math.round(s.winter * 100)}% in winter`));
+    }
+    for (const b of fenceBuckets.values()) {
+      lines.push(rline(`Fence — ${b.label.toLowerCase()}`, b.lf * b.rate, b.lf, 'ft of fence', b.rate, 'around that room’s own perimeter — no gate priced yet'));
     }
     costReceipts.outdoors = lines;
   }
