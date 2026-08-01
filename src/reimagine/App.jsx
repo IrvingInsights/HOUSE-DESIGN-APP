@@ -21,7 +21,7 @@ import {
   isStair, resolveStair, STAIR_SHAPES, STAIR_FACINGS, STAIR_TURNS, STAIR_DEFAULTS, STAIR_FACING_ORDER, HEATER_FACINGS,
   SHADE_DEVICES, ROOM_ENVELOPES, resolveRoomEnvelope, OUTBUILDING_PRESETS, OUTBUILDING_CONSTRUCTION
 } from '../engine.js';
-import { planObjectMove, planObjectResize, fitShellToRooms } from '../placement.js';
+import { planObjectMove, planObjectResize, fitShellToRooms, OUTDOOR_TYPES } from '../placement.js';
 import { STARTER_DESIGNS } from './starters.js';
 import { AUDIT_BATTERY_SPECS, fuzzBatterySpecs } from './auditBattery.js';
 import '../styles.css';
@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 223 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 224 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -2572,6 +2572,7 @@ export default function App() {
                 obj={el}
                 onMove={(x, y) => moveObject(el.id, x, y)}
                 onResize={(w, d) => resizeObject(el.id, Number(el.x) || 0, Number(el.y) || 0, w, d)}
+                boundToShell={false}
               />
             )}
             {el && (el.category === 'post' || el.category === 'beam') && (
@@ -3357,7 +3358,19 @@ function PhaseCard({ row, derived, onClose }) {
 // from the west and north walls, in feet — the numeric twin of dragging) and
 // Size (the numeric twin of the corner drag). One anatomy for rooms and
 // elements alike, so "how do I adjust this?" always has the same answer.
-function PlaceSizeRows({ obj, onMove, onResize }) {
+// boundToShell=true reuses the shell's own max size as the position/size
+// ceiling — right for an ordinary room, which really does live inside the
+// house. boundToShell=false (free elements, and outdoor-type rooms) gets a
+// generous, shell-independent site-scale range instead — src/placement.js's
+// own Law of Placement already says "outdoor spaces and free elements roam
+// without shell rules," so a workshop 80 ft from a 36-ft-wide house must not
+// have its position silently clamped by the HOUSE's own size ceiling. These
+// two ranges are a sane UI safety rail against typos, not a real limit —
+// keep SITE_POS_MAX/SITE_DIM_MAX well clear of anything a real homestead
+// would need.
+const SITE_POS_MAX = 300;
+const SITE_DIM_MAX = 300;
+function PlaceSizeRows({ obj, onMove, onResize, boundToShell = true }) {
   const x = Math.round((Number(obj.x) || 0) * 10) / 10;
   const y = Math.round((Number(obj.y) || 0) * 10) / 10;
   const w = Math.round((Number(obj.w) || 0) * 10) / 10;
@@ -3366,20 +3379,25 @@ function PlaceSizeRows({ obj, onMove, onResize }) {
   // Interior walls are thin — let them size down to 6 inches (0.5 ft); rooms
   // keep a sensible 1-ft floor.
   const minDim = obj.category === 'partition' ? 0.5 : 1;
+  const posMin = boundToShell ? -48 : -SITE_POS_MAX;
+  const xMax = boundToShell ? 96 : SITE_POS_MAX;
+  const yMax = boundToShell ? 80 : SITE_POS_MAX;
+  const dimMax = boundToShell ? 96 : SITE_DIM_MAX;
+  const dMax = boundToShell ? 80 : SITE_DIM_MAX;
   return (
     <>
       {onMove && (
         <div className="rz-run-size rz-card-size">
-          <label>From west<NumInput value={x} min={-48} max={96} step={0.5} unit="" onCommit={(v) => onMove(v, y)} /></label>
+          <label>From west<NumInput value={x} min={posMin} max={xMax} step={0.5} unit="" onCommit={(v) => onMove(v, y)} /></label>
           <span className="rz-run-x">·</span>
-          <label>From north<NumInput value={y} min={-48} max={80} step={0.5} unit="ft" onCommit={(v) => onMove(x, v)} /></label>
+          <label>From north<NumInput value={y} min={posMin} max={yMax} step={0.5} unit="ft" onCommit={(v) => onMove(x, v)} /></label>
         </div>
       )}
       {onResize && (
         <div className="rz-run-size rz-card-size">
-          <label>Width<NumInput value={w} min={minDim} max={96} step={0.5} unit="" onCommit={(v) => onResize(v, d)} /></label>
+          <label>Width<NumInput value={w} min={minDim} max={dimMax} step={0.5} unit="" onCommit={(v) => onResize(v, d)} /></label>
           <span className="rz-run-x">×</span>
-          <label>Depth<NumInput value={d} min={minDim} max={80} step={0.5} unit="ft" onCommit={(v) => onResize(w, v)} /></label>
+          <label>Depth<NumInput value={d} min={minDim} max={dMax} step={0.5} unit="ft" onCommit={(v) => onResize(w, v)} /></label>
           <span className="rz-run-area">{fmtNum(area)} sf</span>
         </div>
       )}
@@ -3452,8 +3470,11 @@ function RoomCard({ room, derived, onRename, onMove, onResize, onRemove, onClose
         <button className="rz-x" onClick={onClose}>×</button>
       </div>
 
-      {/* place + size by the numbers — the same edits as dragging on the plan */}
-      <PlaceSizeRows obj={room} onMove={onMove} onResize={onResize} />
+      {/* place + size by the numbers — the same edits as dragging on the plan.
+          An outdoor-type room (garden, paddock, water...) isn't shell-bound
+          either — same rule src/placement.js's westNorthGrowth already uses
+          to decide whether a drop should grow the house or just be honored. */}
+      <PlaceSizeRows obj={room} onMove={onMove} onResize={onResize} boundToShell={!OUTDOOR_TYPES.has(room.type)} />
       {onGlassWall && (
         <button type="button" className="rz-move-fit" style={{ alignSelf: 'stretch' }} onClick={onGlassWall}
           title="Splits the south wall at this room's stretch and makes JUST that section kneewall + slanted sun glass — the bale wall carries on either side">
