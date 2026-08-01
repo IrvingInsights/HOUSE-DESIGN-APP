@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 222 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 223 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -2001,7 +2001,6 @@ export default function App() {
                     selectedId={selectedId}
                     onSelect={setSelectedId}
                     onDeckSteps={setDeckSteps}
-                    onMoveStair={(el, x, y) => moveObject(el.id, x, y)}
                     onStair={setStairField}
                   />
                 </div>
@@ -4222,7 +4221,7 @@ function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt, onTurn, 
 // two unrelated controls in two unrelated places — the deck's only appeared if
 // you knew to tap the deck itself, which is how you end up with steps facing
 // the wrong way and no idea where to change it. This panel lists them all.
-function StairsAndSteps({ spec, level, selectedId, onSelect, onStair, onDeckSteps, onMoveStair }) {
+function StairsAndSteps({ spec, level, selectedId, onSelect, onStair, onDeckSteps }) {
   const stairs = (spec.elements || []).filter((e) => isStair(e) && Number(e.level || 1) === level);
   const decks = (spec.elements || []).filter((e) => e.category === 'deck' && Number(resolveDeck(spec, e).level || 1) === level);
   if (!stairs.length && !decks.length) return null;
@@ -4231,7 +4230,7 @@ function StairsAndSteps({ spec, level, selectedId, onSelect, onStair, onDeckStep
       <div className="rz-found-head">Stairs &amp; steps on this floor</div>
       {stairs.map((el) => (
         <StairControls key={el.id} spec={spec} el={el} selected={selectedId === el.id}
-          onSelect={() => onSelect(el.id)} onStair={(f, v) => onStair(el, f, v)} onMove={onMoveStair ? (x, y) => onMoveStair(el, x, y) : null} />
+          onSelect={() => onSelect(el.id)} onStair={(f, v) => onStair(el, f, v)} />
       ))}
       {decks.map((el) => {
         const dk = resolveDeck(spec, el);
@@ -4255,7 +4254,7 @@ function StairsAndSteps({ spec, level, selectedId, onSelect, onStair, onDeckStep
 // set the run. The rest (which way an L turns, where a U breaks, the tread
 // depth) is a rarely-touched fine-tune, tucked behind one line.
 const STAIR_SHAPE_SHORT = { straight: 'Straight', l: 'L-turn', u: 'U-turn' };
-function StairControls({ spec, el, selected, onSelect, onStair, onMove }) {
+function StairControls({ spec, el, selected, onSelect, onStair }) {
   const st = resolveStair(spec, el);
   const [tune, setTune] = useState(false);
   // WHICH STAIR IS THIS? Two stairs both called "Stairs" is how you end up
@@ -4274,14 +4273,13 @@ function StairControls({ spec, el, selected, onSelect, onStair, onMove }) {
       {outside && (
         <div className="rz-shape-note"><b>⚠</b> This stair stands outside the building, so it climbs to open air — put a deck or a door where it lands, drag it inside, or remove it.</div>
       )}
-      {/* One-tap rotate. There used to be a four-way compass above this, naming
-          the direction you climb in the abstract. It went: you select the stair
-          and shape it by hand on the plan — drag it, grab a corner — and this
-          button swings it round. Choosing "east" off a dial while looking at a
-          drawing is a translation step nobody asked for. */}
-      <button type="button" className="rz-floorbar-outline"
-        onClick={() => onStair('facing', STAIR_FACING_ORDER[(STAIR_FACING_ORDER.indexOf(st.facing) + 1) % 4])}
-      >↻ Turn it 90°</button>
+      {/* Turn and Width are NOT here — they're the same "click ↻ / drag a
+          corner" universal controls every selected object already gets on
+          its floating plan card (PlaceSizeRows + RotateButton), writing the
+          exact same widthFt/facing this card would. A second pair of
+          controls for the same two numbers is what made this card feel like
+          "too many controls to do the same things." What's left below is
+          what ONLY a stair has: its shape, and the fine-tune. */}
       <div className="rz-field">
         <span>Shape</span>
         <div className="ctlChips">
@@ -4291,10 +4289,6 @@ function StairControls({ spec, el, selected, onSelect, onStair, onMove }) {
           ))}
         </div>
       </div>
-      <label className="rz-field">
-        <span>Width (ft)</span>
-        <input type="number" step="0.5" min="2.5" max="8" value={st.widthFt} onChange={(e) => onStair('widthFt', e.target.value)} />
-      </label>
       <div className="rz-shape-note">
         {STAIR_SHAPES[st.shape].label} climbing {st.facing} — <b>{st.risers} steps up {fmtNum(st.rise)}′</b>
         {st.twoRun ? `, ${st.run1Treads} + ${st.run2Treads} across a landing` : ''}. Takes {st.bbox.w.toFixed(1)}′ × {st.bbox.d.toFixed(1)}′. Drag it on the plan to place it.
@@ -4322,23 +4316,6 @@ function StairControls({ spec, el, selected, onSelect, onStair, onMove }) {
             <span>Tread depth (in)</span>
             <input type="number" step="0.5" min="9" max="14" value={st.treadIn} onChange={(e) => onStair('treadIn', e.target.value)} />
           </label>
-          {/* TYPE ITS POSITION. Dragging is the everyday way to place a stair —
-              this is the fallback for a stair that ended up out in the yard,
-              a fiddly drag back across a zoomed-out plan. Same two numbers
-              the plan drag writes, so both paths agree. Tucked in fine-tune,
-              not the default card, since it's a second path to the same
-              thing dragging already does. */}
-          {onMove && (
-            <div className="rz-field rz-field-num">
-              <span>Corner position (ft from west · from north)</span>
-              <span style={{ display: 'flex', gap: 6 }}>
-                <input type="number" step="0.5" value={Math.round(ex * 10) / 10}
-                  onChange={(e) => onMove(Number(e.target.value), ey)} />
-                <input type="number" step="0.5" value={Math.round(ey * 10) / 10}
-                  onChange={(e) => onMove(ex, Number(e.target.value))} />
-              </span>
-            </div>
-          )}
         </>
       )}
     </div>
