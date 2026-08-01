@@ -130,6 +130,14 @@
 .rz-views button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 70%, transparent); color: var(--ink); }
 .rz-views button.on { background: var(--evergreen, #3c6472); color: #fff; }
 .rz-views-sep { width: 1px; align-self: stretch; background: var(--line2, #cac8bb); margin: 2px 4px; }
+.rz-views .cutSlider, .st-dock .cutSlider {
+  display: flex; align-items: center; gap: 6px; padding-left: 8px; margin-left: 4px;
+  border-left: 1px solid var(--line2, #cac8bb);
+}
+.rz-views .cutSlider span, .st-dock .cutSlider span {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #77715f;
+}
+.rz-views .cutSlider input[type='range'], .st-dock .cutSlider input[type='range'] { width: 92px; accent-color: var(--evergreen, #3c6472); }
 
 /* SURFACE 2 — the Trail spine, left edge. Centered when short; when a chapter's
    controls make it taller than the screen it caps to the viewport and scrolls
