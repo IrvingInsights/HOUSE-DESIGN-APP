@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 221 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 222 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -4295,21 +4295,6 @@ function StairControls({ spec, el, selected, onSelect, onStair, onMove }) {
         <span>Width (ft)</span>
         <input type="number" step="0.5" min="2.5" max="8" value={st.widthFt} onChange={(e) => onStair('widthFt', e.target.value)} />
       </label>
-      {/* TYPE ITS POSITION. Dragging is fine when the stair is on screen, but a
-          stair that ends up out in the yard is a fiddly drag back across a
-          zoomed-out plan — and there was no other way to place one exactly.
-          Same two numbers the plan drag writes, so both paths agree. */}
-      {onMove && (
-        <div className="rz-field rz-field-num">
-          <span>Corner position (ft from west · from north)</span>
-          <span style={{ display: 'flex', gap: 6 }}>
-            <input type="number" step="0.5" value={Math.round(ex * 10) / 10}
-              onChange={(e) => onMove(Number(e.target.value), ey)} />
-            <input type="number" step="0.5" value={Math.round(ey * 10) / 10}
-              onChange={(e) => onMove(ex, Number(e.target.value))} />
-          </span>
-        </div>
-      )}
       <div className="rz-shape-note">
         {STAIR_SHAPES[st.shape].label} climbing {st.facing} — <b>{st.risers} steps up {fmtNum(st.rise)}′</b>
         {st.twoRun ? `, ${st.run1Treads} + ${st.run2Treads} across a landing` : ''}. Takes {st.bbox.w.toFixed(1)}′ × {st.bbox.d.toFixed(1)}′. Drag it on the plan to place it.
@@ -4337,6 +4322,23 @@ function StairControls({ spec, el, selected, onSelect, onStair, onMove }) {
             <span>Tread depth (in)</span>
             <input type="number" step="0.5" min="9" max="14" value={st.treadIn} onChange={(e) => onStair('treadIn', e.target.value)} />
           </label>
+          {/* TYPE ITS POSITION. Dragging is the everyday way to place a stair —
+              this is the fallback for a stair that ended up out in the yard,
+              a fiddly drag back across a zoomed-out plan. Same two numbers
+              the plan drag writes, so both paths agree. Tucked in fine-tune,
+              not the default card, since it's a second path to the same
+              thing dragging already does. */}
+          {onMove && (
+            <div className="rz-field rz-field-num">
+              <span>Corner position (ft from west · from north)</span>
+              <span style={{ display: 'flex', gap: 6 }}>
+                <input type="number" step="0.5" value={Math.round(ex * 10) / 10}
+                  onChange={(e) => onMove(Number(e.target.value), ey)} />
+                <input type="number" step="0.5" value={Math.round(ey * 10) / 10}
+                  onChange={(e) => onMove(ex, Number(e.target.value))} />
+              </span>
+            </div>
+          )}
         </>
       )}
     </div>
