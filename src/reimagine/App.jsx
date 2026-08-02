@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 230 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 231 · Jul 2026 Rebuild';
 // ONE rendering of the update status, used everywhere it's shown (classic's
 // rz-stamp, site's st-stamp-chip) — a build once sat 8 updates behind with no
 // warning anywhere, because "confirmed current" and "couldn't tell" both
@@ -280,11 +280,9 @@ export default function App() {
   const [sectionCut, setSectionCut] = useState(1);
   // THE SITE TABLE — Daniel's chosen Claude Design direction (Jul 2026): the
   // chapters run as a strip across the top, the model owns the center, money
-  // sits on the table. 'classic' keeps the left-Trail look one tap away.
-  const [lookMode, setLookMode] = useState(() => {
-    try { return localStorage.getItem('rz.look.v1') === 'classic' ? 'classic' : 'site'; } catch { return 'site'; }
-  });
-  const setLook = (v) => { setLookMode(v); try { localStorage.setItem('rz.look.v1', v); } catch { /* fine */ } };
+  // sits on the table. Was one of two switchable looks; the left-Trail
+  // "Classic look" fallback was retired (Daniel, Aug 2) — one interface now,
+  // not two, so a future layout fix only ever needs checking in one place.
   const [moreOpen, setMoreOpen] = useState(false); // the full chapter controls, one tap from the quick toolbar
   const [receiptsOpen, setReceiptsOpen] = useState(true); // the cost list; collapses to just its total
   const [flagsPopOpen, setFlagsPopOpen] = useState(false);
@@ -1577,7 +1575,7 @@ export default function App() {
     : (chapter.planContext || null);
 
   return (
-    <div className={`rz-root${lookMode === 'site' ? ' st-look' : ''}${lookMode === 'site' && moreOpen ? ' st-more-open' : ''}`}>
+    <div className={`rz-root st-look${moreOpen ? ' st-more-open' : ''}`}>
       {/* SURFACE 1 — the Model / Plan, center stage and full-bleed */}
       <div className="rz-model">
         {viewMode === 'wall' ? (
@@ -1692,9 +1690,11 @@ export default function App() {
           Chapters as a strip across the top; the active chapter's everyday
           controls in one slim toolbar (the FULL controls stay one "More" tap
           away — the Trail itself becomes that panel); receipts on the table;
-          floors + views + show in one bottom dock. Classic stays one tap
-          away, and both looks drive the SAME state and handlers. */}
-      {lookMode === 'site' && !timelineOpen && (
+          floors + views + show in one bottom dock. The only look now — the
+          left-Trail "Classic look" fallback this used to switch away to was
+          retired (Daniel, Aug 2): one interface, not two, so a layout fix
+          only ever needs checking in one place. */}
+      {!timelineOpen && (
         <>
           <div className="st-rail st-panel">
             <div className="st-rail-list">
@@ -1755,7 +1755,6 @@ export default function App() {
               <button className="st-mini" disabled={!undoStack.length} title="Undo (Ctrl+Z)" onClick={undo}>↶</button>
               <button className="st-mini" disabled={!redoStack.length} title="Redo (Ctrl+Y)" onClick={redo}>↷</button>
               <button className="st-mini" title="Your saved designs, backups, and starters" onClick={() => { setMoreOpen(true); setDesignsOpen(true); }}>≡ designs</button>
-              <button className="st-mini" title="Back to the left-bar look" onClick={() => setLook('classic')}>Classic look</button>
             </div>
             <span className="st-toolbar-div" aria-hidden="true" />
             <SiteQuickRow
@@ -2528,9 +2527,6 @@ export default function App() {
             <span className="rz-update-status" title={updateStatus && updateStatus.checked === false ? 'Could not reach GitHub to check for updates — this is not the same as being current.' : undefined}>
               {' · '}{updateStatusText(updateStatus)}
             </span>
-            {lookMode === 'classic' && (
-              <button type="button" className="rz-storey-link-inline" style={{ marginLeft: 8 }} title="Try the new Site Table look — chapters across the top, the model center stage" onClick={() => setLook('site')}>✨ new look</button>
-            )}
           </div>
       </aside>
 
