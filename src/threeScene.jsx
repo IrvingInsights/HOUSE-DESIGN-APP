@@ -3299,11 +3299,45 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
                     ? box(st.gapW - 0.3, stepH, 0.9, st.mid, topY, off, deckMatD)
                     : box(0.9, stepH, st.gapW - 0.3, off, topY, st.mid, deckMatD));
                 }
-                const landCtr = (st.cornerAt + st.cornerFar) / 2;           // the landing
-                const landAcross = st.mid + (turnPlus ? 1 : -1) * (st.landW / 2 - st.gapW / 2);
+                // THE LANDING, AND A GUARD ROUND IT. A landing on a folded
+                // flight is a platform ten feet up with two ways off it and no
+                // sides — the same fall the deck's own rail exists to stop.
+                // Daniel: "need railings at the landing." Every edge gets one
+                // except the mouth the second flight leaves by.
+                const landLo = Math.min(st.cornerAt, st.cornerFar);
+                const landHi = Math.max(st.cornerAt, st.cornerFar);
+                const acrossLo = Math.min(st.mid - st.gapW / 2, st.acrossFrom);
+                const acrossHi = Math.max(st.mid + st.gapW / 2, st.acrossFrom);
+                const landCtr = (landLo + landHi) / 2;
+                const landAcrossCtr = (acrossLo + acrossHi) / 2;
                 dp(alongZ
-                  ? box(st.gapW + st.landW - st.gapW, 0.35, st.landW, landAcross, landY, landCtr, deckMatD)
-                  : box(st.landW, 0.35, st.gapW + st.landW - st.gapW, landCtr, landY, landAcross, deckMatD));
+                  ? box(acrossHi - acrossLo, 0.35, landHi - landLo, landAcrossCtr, landY, landCtr, deckMatD)
+                  : box(landHi - landLo, 0.35, acrossHi - acrossLo, landCtr, landY, landAcrossCtr, deckMatD));
+                if (dk.railKey !== 'none') {
+                  const railH = 3;
+                  const guard = (x0, z0, x1, z1) => {
+                    const len = Math.hypot(x1 - x0, z1 - z0);
+                    if (len < 0.6) return;
+                    dp(box(Math.max(0.18, Math.abs(x1 - x0)), 0.18, Math.max(0.18, Math.abs(z1 - z0)),
+                      (x0 + x1) / 2, landY + railH, (z0 + z1) / 2, railMatD));
+                    const n = Math.max(1, Math.round(len / 4));
+                    for (let i = 0; i <= n; i += 1) {
+                      dp(box(0.15, railH, 0.15, x0 + ((x1 - x0) * i) / n, landY + railH / 2, z0 + ((z1 - z0) * i) / n, railMatD));
+                    }
+                  };
+                  // alongZ: the first leg runs in Z, the landing spreads in X
+                  const lx0 = alongZ ? acrossLo : landLo; const lx1 = alongZ ? acrossHi : landHi;
+                  const lz0 = alongZ ? landLo : acrossLo; const lz1 = alongZ ? landHi : acrossHi;
+                  if (alongZ) {
+                    guard(lx0, lz0, lx1, lz0);                       // the two long sides
+                    guard(lx0, lz1, lx1, lz1);
+                    guard(turnPlus ? lx0 : lx1, lz0, turnPlus ? lx0 : lx1, lz1);   // the closed end
+                  } else {
+                    guard(lx0, lz0, lx0, lz1);
+                    guard(lx1, lz0, lx1, lz1);
+                    guard(lx0, turnPlus ? lz0 : lz1, lx1, turnPlus ? lz0 : lz1);
+                  }
+                }
                 for (let i = 1; i <= st.n2; i += 1) {                       // leg two, going across
                   const topY = landY - i * stepH + stepH / 2;
                   const at = st.acrossFrom + (turnPlus ? 1 : -1) * (i * 0.9 - 0.45);

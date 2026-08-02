@@ -1060,11 +1060,21 @@ export function resolveDeckStairs(spec, el, dkIn = null) {
       const split = Number.isFinite(splitRaw) && splitRaw > 0 && splitRaw < 1 ? splitRaw : 0.5;
       const n1 = Math.min(treads - 1, Math.max(1, Math.round(treads * split)));
       const n2 = Math.max(1, treads - n1);
-      const landW = Math.max(gapW, 3.5);
+      // HOW LONG THE LANDING IS. It was always just wide enough to turn on.
+      // A landing is also the one part of a folded stair that is FLAT and
+      // HIGH, so lengthening it walks the turn past whatever you do not want
+      // a sloping flight in front of — a window keeps its light and its view
+      // under a landing in a way it does not under a stair descending through
+      // eye level. Daniel: "lengthen the landing deck thereby avoiding the
+      // window on the N wall."
+      const landRaw = Number(el.deckStairLandingFt);
+      const landW = Number.isFinite(landRaw) && landRaw >= 3
+        ? Math.min(40, landRaw)
+        : Math.max(gapW, 3.5);
       const legOut = n1 * 0.9;
       const turnPlus = turn === 'east' || turn === 'south';
-      const cornerFar = edgeAt + outward * (legOut + landW);
-      const acrossFrom = mid + (turnPlus ? 1 : -1) * (landW / 2);
+      const cornerFar = edgeAt + outward * (legOut + gapW + 0.5);
+      const acrossFrom = mid + (turnPlus ? 1 : -1) * (gapW / 2 + landW);
       const acrossTo = acrossFrom + (turnPlus ? 1 : -1) * n2 * 0.9;
       const folded = {
         ...run,
@@ -1079,7 +1089,10 @@ export function resolveDeckStairs(spec, el, dkIn = null) {
         cornerAt: edgeAt + outward * legOut,
         cornerFar,
         acrossFrom,
-        acrossTo
+        acrossTo,
+        landDeep: gapW + 0.5,          // how far out from the deck the landing reaches
+        landLong: landW                // how far along the turn it runs before the flight
+        
       };
       const hit = stairRunObstruction(spec, el, folded);
       return hit ? { blocked: true, side, turn, obstruction: hit } : folded;

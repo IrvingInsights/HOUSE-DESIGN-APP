@@ -178,7 +178,7 @@ function planLabelFit(name, w, d, isSel, maxSize = 2) {
   return null;
 }
 
-export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShell, onMoveEdge, onMoveOpening, onContext = null, context = null, activeFloor = 1 }) {
+export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onResizeShell, onMoveEdge, onMoveOpening, onContext = null, context = null, activeFloor = 1, onSelectFloor = null }) {
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
   const [shellGhost, setShellGhost] = useState(null);
@@ -550,6 +550,36 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
   // the pad is the subject you came to drag and has to stay on top and clickable.
   // Add a category to isUnderfoot only if it truly lives below the floor.
   const planElements = [...(spec.elements || []), ...sunspacePartitions(spec)].filter(planLevelFilter);
+  // A room on another floor ghosts for context. An element on another floor used
+  // to simply vanish — so a deck built at level 2 was invisible (and untouchable)
+  // from the ground floor. Same law for both now: off this floor, draw it faint.
+  // Floor plates are excluded: they ARE the floor, not an object on it.
+  const offFloorElements = [...(spec.elements || []), ...sunspacePartitions(spec)]
+    .filter((el) => el.category !== 'floor' && !planLevelFilter(el));
+  // One law for every ghost, room or element: it shows you what is up (or down)
+  // there, and tapping it takes the plan to that floor and selects the thing —
+  // so nothing is ever stranded on a floor you happen not to be looking at.
+  const ghostRect = (raw, box) => {
+    const reach = typeof onSelectFloor === 'function';
+    const lvl = Number(raw.level || 1);
+    return (
+      <rect
+        key={`ghost-${raw.id}`}
+        x={box.x} y={box.y} width={box.w} height={box.d}
+        fill="var(--ink3)" fillOpacity={0.1}
+        stroke="var(--line)" strokeWidth={0.1} strokeDasharray="0.5 0.5"
+        pointerEvents={reach ? 'auto' : 'none'}
+        style={reach ? { cursor: 'pointer' } : undefined}
+        onPointerDown={reach ? (event) => {
+          event.stopPropagation();
+          onSelectFloor(lvl);
+          if (onSelect) onSelect(raw.id);
+        } : undefined}
+      >
+        {reach ? <title>{`${raw.name || 'On another floor'} — ${floorLabel(spec, lvl)}. Tap to go there and move it.`}</title> : null}
+      </rect>
+    );
+  };
   const isUnderfoot = (el) => el.category === 'foundation' && context !== 'foundation';
   const renderPlanElement = (raw) => {
     const el = roomAt(raw);
@@ -827,12 +857,17 @@ export function PlanView({ spec, selectedRoom, onSelect, onMove, onResize, onRes
         {/* underfoot first: a slab pad sits BELOW what it carries, so it paints
             before the rooms — see renderPlanElement */}
         {planElements.filter(isUnderfoot).map(renderPlanElement)}
+        {/* elements on another floor — same faint ghost the rooms get */}
+        {offFloorElements.map((raw) => {
+          const el = roomAt(raw);
+          return ghostRect(raw, { x: Number(el.x) || 0, y: Number(el.y) || 0, w: Number(el.w) || 4, d: Number(el.d) || 4 });
+        })}
         {/* rooms */}
         {(spec.rooms || []).map((raw) => {
           const onFloor = Number(raw.level || 1) === activeFloor;
           if (!onFloor) {
-            // other floors: faint ghost for context, not interactive
-            return <rect key={raw.id} x={raw.x} y={raw.y} width={raw.w} height={raw.d} fill="var(--ink3)" fillOpacity={0.1} stroke="var(--line)" strokeWidth={0.1} strokeDasharray="0.5 0.5" pointerEvents="none" />;
+            // other floors: faint ghost for context — tap it to go to its floor
+            return ghostRect(raw, { x: raw.x, y: raw.y, w: raw.w, d: raw.d });
           }
           const room = roomAt(raw);
           const isSel = raw.id === selectedRoom;

@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 217 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 219 · Jul 2026 Rebuild';
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -748,6 +748,21 @@ export default function App() {
     applyOps(ops);
     if (hasBasement && activeFloor === BASEMENT_LEVEL) setActiveFloor(1);
   };
+  // SELECT A THING AND THE PLAN GOES TO ITS FLOOR. Tapping a second-floor deck
+  // in 3D used to open its card while the plan stayed on the ground floor, so
+  // the thing you had just selected was nowhere you could grab it. Anything
+  // with a level — room, deck, structure, stair — now brings the floor with it.
+  useEffect(() => {
+    if (!selectedId) return;
+    const hit = [...(spec.rooms || []), ...(spec.elements || [])].find((o) => o.id === selectedId);
+    if (!hit || hit.category === 'floor') return;
+    const lvl = Number(hit.level || 1);
+    if (!Number.isFinite(lvl) || lvl === activeFloor) return;
+    if (lvl === BASEMENT_LEVEL && !hasBasement) return;
+    if (lvl > 1 && lvl > floorCount(spec)) return;
+    setActiveFloor(lvl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
   const setUtilityField = (field, value) => applyOps([{ type: 'set_utility', field, value: String(value) }]);
   const setShellField = (field, value) => applyOps([{ type: 'set_shell', field, value: String(value) }]);
   const placeSlabPad = () => {
@@ -1541,6 +1556,21 @@ export default function App() {
     : activeChapter === 'walls' && String(selectedId || '').startsWith('wall-') ? 'shell'
     : (chapter.planContext || null);
 
+  // WHICH FLOOR THE PLAN DRAWS. Chapters about the whole building sit on the
+  // ground floor by default — but the moment you have something selected that
+  // lives on a floor, the plan follows it there, or you'd be looking at an
+  // empty floor while its card is open beside you.
+  const planFloor = (() => {
+    const chapterFollowsFloor = ['rooms', 'walls', 'storeys', 'outbuildings'].includes(activeChapter);
+    if (chapterFollowsFloor) return activeFloor;
+    const hit = [...(spec.rooms || []), ...(spec.elements || [])].find((o) => o.id === selectedId);
+    if (hit && hit.category !== 'floor') {
+      const lvl = Number(hit.level || 1);
+      if (Number.isFinite(lvl)) return lvl;
+    }
+    return 1;
+  })();
+
   return (
     <div className={`rz-root${lookMode === 'site' ? ' st-look' : ''}${lookMode === 'site' && moreOpen ? ' st-more-open' : ''}`}>
       {/* SURFACE 1 — the Model / Plan, center stage and full-bleed */}
@@ -1598,7 +1628,8 @@ export default function App() {
             onMoveOpening={moveOpening}
             context={planContext}
             onContext={timelineOpen ? null : openContext}
-            activeFloor={activeChapter === 'rooms' || activeChapter === 'walls' || activeChapter === 'storeys' || activeChapter === 'outbuildings' ? activeFloor : 1}
+            activeFloor={planFloor}
+            onSelectFloor={setActiveFloor}
           />
         ) : (
           <ThreeScene

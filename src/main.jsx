@@ -3678,6 +3678,7 @@ function App() {
               onMoveOpening={planMoveOpening}
               context={consoleView === 'systems' ? systemView : null}
               activeFloor={activeFloor}
+              onSelectFloor={setActiveFloor}
             />
           ) : (
             <ThreeScene
