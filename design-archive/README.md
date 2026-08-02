@@ -22,9 +22,15 @@ where it came from, and commit it.
 | `Natural House Designer.html` | 2026-07-05 | Single-file HTML prototype of the designer. | Downloads |
 | `Claude Design House Builder App.pdf` | 2026-07-05 | Concept/spec document for the house builder app. | Downloads |
 | `# House Design App Redesign.zip` | 2026-07-19 | Redesign exploration for the app. | Downloads |
+| `house_design_studio/` | 2026-07-03 (last active commit) | The evolved continuation of the prototype above, after `peakhinge-freecad`'s 2026-07-27 restructuring split it out from the PeakHinge shelter workflow: a standalone Python/FreeCAD app that turns a brief into a parametric BIM house model, runs a 6-role AI "council of experts" in a self-revising loop, and produces PE-review-ready documentation (drawings, IFC/STEP, audit trail). Its own README still says "Active project," but it hasn't been touched since 2026-07-03 while this repo has had 70+ updates in the same window — superseded in practice, not just in an old snapshot. All 96 git-tracked files, copied exactly (no local cache/venv artifacts). | `peakhinge-freecad` repo, `house_design_studio/` (Daniel: "move all into one repo rather than two, not the freeCAD peak hinge repo," 2026-08-02) |
 
 ## Cleanup log
 
+- **2026-08-02** — consolidated `house_design_studio/` in from the separate
+  `peakhinge-freecad` repo per Daniel's direct request to bring everything
+  into one repo. That repo's actual PeakHinge-shelter archive
+  (`archive/peakhinge/`) was explicitly excluded per his own instruction and
+  is untouched — this move only concerns the *other* project that repo held.
 - **2026-07-31** — the two zip/folder pairs flagged above as "safe to delete
   once verified" were actually verified (full recursive content diff, byte-
   for-byte after accounting for this repo's own `.gitattributes` CRLF/LF
