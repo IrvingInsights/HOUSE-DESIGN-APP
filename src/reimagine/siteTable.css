@@ -123,7 +123,14 @@
   font: inherit; font-size: 11.5px; color: var(--muted2, #565a4f); cursor: pointer; white-space: nowrap;
 }
 .st-toolbar-util .st-mini:disabled { opacity: 0.4; cursor: default; }
-.st-stamp-chip { font-size: 10.5px; color: var(--muted, #868a7c); padding: 4px 6px; white-space: nowrap; }
+/* flex-basis:100% forces a line break before this in the wrapping toolbar
+   row, so the stamp always sits on its own line under the bar's buttons —
+   not squeezed onto the same line and stealing their width (Daniel, Aug 2). */
+.st-stamp-chip {
+  flex: 1 0 100%; font-size: 10.5px; color: var(--muted, #868a7c);
+  padding: 2px 6px 0; margin-top: 2px; white-space: nowrap;
+  border-top: 1px solid rgba(219, 217, 206, 0.5);
+}
 /* a thin rule, not a box — reads as "two groups, one row" instead of a wall */
 .st-toolbar-div { width: 1px; align-self: stretch; margin: 4px 2px; background: rgba(219, 217, 206, 0.7); flex: 0 0 auto; }
 /* Inside the wrapping toolbar a group must not wrap as one solid block
@@ -269,7 +276,10 @@
 
 /* the self-update chip sits at top:60 in classic — dead center over the site
    toolbar. Down by the dock instead, where nothing else lives. */
-.st-look .rz-update { top: auto; bottom: 72px; }
+/* was bottom:72px — a 2-line update message (a long PR title easily wraps)
+   left only ~6px clear of the dock below it, measured live. 92px keeps a
+   real gap even wrapped. */
+.st-look .rz-update { top: auto; bottom: 92px; }
 
 .st-look .rz-trail { display: none; }
 .st-look.st-more-open .rz-trail {
