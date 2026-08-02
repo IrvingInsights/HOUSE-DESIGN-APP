@@ -1,7 +1,14 @@
 // Self-update: the app checks GitHub for newer work and applies it on one
 // tap — nobody should have to close a window and double-click start.bat to
-// get a fix. Everything fails SOFT: no git, no connection, no upstream —
-// the check just says "nothing new" and the app keeps working.
+// get a fix.
+//
+// A build once sat 8 real updates behind with zero warning — not because
+// nothing was wrong, but because "couldn't verify" and "confirmed current"
+// both collapsed to the same silent `{behind: 0}`, which the UI then didn't
+// show at all either way. Both bugs are fixed now: this always reports
+// WHICH of the two happened (`checked: true/false`, with a `reason` when
+// false), and the UI (below, in App.jsx) renders that status permanently
+// next to the version stamp — never only when something's already wrong.
 import { execFile } from 'node:child_process';
 
 const git = (args) => new Promise((resolve) => {
@@ -12,19 +19,20 @@ const git = (args) => new Promise((resolve) => {
 
 // `@{u}` (the upstream-tracking ref) only resolves if this clone's `main` was
 // ever set up to track `origin/main` — a manual clone/checkout easily skips
-// that step, and every git call here then fails quietly (by design, so a
-// missing git install never breaks the app) which reads EXACTLY like "you're
-// already current." A build sitting 8 real updates behind showed nothing
-// wrong for a session that hit this. `origin/main` by name needs no tracking
-// config at all, so it can't go silently blind the same way.
+// that step. `origin/main` by name needs no tracking config at all, so it
+// can't go blind the same way.
 export async function checkForUpdate() {
   const fetched = await git(['fetch', '--quiet', 'origin', 'main']);
-  if (fetched.err) return { behind: 0 };
+  if (fetched.err) {
+    const reason = /enoent|not recognized|not found/i.test(fetched.err.message || '') ? 'no-git' : 'offline';
+    return { checked: false, behind: 0, reason };
+  }
   const count = await git(['rev-list', '--count', 'HEAD..origin/main']);
-  const behind = count.err ? 0 : Number(count.stdout) || 0;
-  if (!behind) return { behind: 0 };
+  if (count.err) return { checked: false, behind: 0, reason: 'no-history' };
+  const behind = Number(count.stdout) || 0;
+  if (!behind) return { checked: true, behind: 0 };
   const latest = await git(['log', '-1', '--format=%s', 'origin/main']);
-  return { behind, latest: latest.stdout || '' };
+  return { checked: true, behind, latest: latest.stdout || '' };
 }
 
 export async function applyUpdate() {
