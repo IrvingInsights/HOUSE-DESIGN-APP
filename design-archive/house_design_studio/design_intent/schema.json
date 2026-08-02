@@ -1,0 +1,541 @@
+{
+  "$defs": {
+    "Footprint": {
+      "properties": {
+        "shape": {
+          "$ref": "#/$defs/FootprintShape",
+          "default": "rectangle"
+        },
+        "width_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Width M",
+          "type": "number"
+        },
+        "depth_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Depth M",
+          "type": "number"
+        },
+        "wall_height_m": {
+          "description": "Eave height (single story).",
+          "exclusiveMinimum": 0.0,
+          "title": "Wall Height M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "width_m",
+        "depth_m",
+        "wall_height_m"
+      ],
+      "title": "Footprint",
+      "type": "object"
+    },
+    "FootprintShape": {
+      "enum": [
+        "rectangle",
+        "l_shape",
+        "rectangle_with_bump"
+      ],
+      "title": "FootprintShape",
+      "type": "string"
+    },
+    "Foundation": {
+      "properties": {
+        "foundation_type": {
+          "$ref": "#/$defs/FoundationType",
+          "default": "slab_on_grade"
+        },
+        "slab_thickness_m": {
+          "default": 0.1,
+          "exclusiveMinimum": 0.0,
+          "title": "Slab Thickness M",
+          "type": "number"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        }
+      },
+      "title": "Foundation",
+      "type": "object"
+    },
+    "FoundationType": {
+      "enum": [
+        "slab_on_grade",
+        "crawlspace",
+        "basement"
+      ],
+      "title": "FoundationType",
+      "type": "string"
+    },
+    "LotShape": {
+      "enum": [
+        "rectangular",
+        "irregular"
+      ],
+      "title": "LotShape",
+      "type": "string"
+    },
+    "Opening": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "host_wall_id": {
+          "title": "Host Wall Id",
+          "type": "string"
+        },
+        "opening_type": {
+          "$ref": "#/$defs/OpeningType",
+          "default": "window"
+        },
+        "width_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Width M",
+          "type": "number"
+        },
+        "height_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Height M",
+          "type": "number"
+        },
+        "sill_height_m": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Sill Height M",
+          "type": "number"
+        },
+        "position_along_wall_m": {
+          "description": "Distance from host wall.start to opening centreline.",
+          "minimum": 0.0,
+          "title": "Position Along Wall M",
+          "type": "number"
+        },
+        "egress_rated": {
+          "default": false,
+          "title": "Egress Rated",
+          "type": "boolean"
+        },
+        "swing_or_operation": {
+          "default": "",
+          "title": "Swing Or Operation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "host_wall_id",
+        "width_m",
+        "height_m",
+        "position_along_wall_m"
+      ],
+      "title": "Opening",
+      "type": "object"
+    },
+    "OpeningType": {
+      "enum": [
+        "door",
+        "window"
+      ],
+      "title": "OpeningType",
+      "type": "string"
+    },
+    "RidgeOrientation": {
+      "enum": [
+        "parallel_to_width",
+        "parallel_to_depth"
+      ],
+      "title": "RidgeOrientation",
+      "type": "string"
+    },
+    "Roof": {
+      "properties": {
+        "roof_type": {
+          "$ref": "#/$defs/RoofType",
+          "default": "gable"
+        },
+        "pitch_ratio": {
+          "default": 0.33,
+          "description": "Rise over run, e.g. 0.33 = 4:12.",
+          "minimum": 0.0,
+          "title": "Pitch Ratio",
+          "type": "number"
+        },
+        "overhang_m": {
+          "default": 0.3,
+          "minimum": 0.0,
+          "title": "Overhang M",
+          "type": "number"
+        },
+        "ridge_orientation": {
+          "$ref": "#/$defs/RidgeOrientation",
+          "default": "parallel_to_width"
+        },
+        "material_notes": {
+          "default": "",
+          "title": "Material Notes",
+          "type": "string"
+        }
+      },
+      "title": "Roof",
+      "type": "object"
+    },
+    "RoofType": {
+      "enum": [
+        "gable",
+        "shed",
+        "hip",
+        "flat"
+      ],
+      "title": "RoofType",
+      "type": "string"
+    },
+    "Room": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "polygon": {
+          "description": "Axis-aligned rectangle (4 points) in the footprint's local frame for Phase 1.",
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Polygon",
+          "type": "array"
+        },
+        "area_m2": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Area M2",
+          "type": "number"
+        },
+        "room_type": {
+          "$ref": "#/$defs/RoomType",
+          "default": "other"
+        },
+        "min_ceiling_height_m": {
+          "default": 2.4,
+          "exclusiveMinimum": 0.0,
+          "title": "Min Ceiling Height M",
+          "type": "number"
+        }
+      },
+      "title": "Room",
+      "type": "object"
+    },
+    "RoomType": {
+      "enum": [
+        "bedroom",
+        "bathroom",
+        "kitchen",
+        "living",
+        "dining",
+        "utility",
+        "hallway",
+        "closet",
+        "garage",
+        "other"
+      ],
+      "title": "RoomType",
+      "type": "string"
+    },
+    "Setbacks": {
+      "properties": {
+        "front": {
+          "default": 0.0,
+          "title": "Front",
+          "type": "number"
+        },
+        "rear": {
+          "default": 0.0,
+          "title": "Rear",
+          "type": "number"
+        },
+        "left": {
+          "default": 0.0,
+          "title": "Left",
+          "type": "number"
+        },
+        "right": {
+          "default": 0.0,
+          "title": "Right",
+          "type": "number"
+        }
+      },
+      "title": "Setbacks",
+      "type": "object"
+    },
+    "Site": {
+      "properties": {
+        "address_or_description": {
+          "default": "",
+          "title": "Address Or Description",
+          "type": "string"
+        },
+        "orientation_deg_from_north": {
+          "default": 0.0,
+          "description": "Rotation of the building's local +Y axis clockwise from true north. 0 means the local frame is north-up.",
+          "maximum": 360.0,
+          "minimum": 0.0,
+          "title": "Orientation Deg From North",
+          "type": "number"
+        },
+        "lot_shape": {
+          "$ref": "#/$defs/LotShape",
+          "default": "rectangular"
+        },
+        "lot_width_m": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Lot Width M",
+          "type": "number"
+        },
+        "lot_depth_m": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Lot Depth M",
+          "type": "number"
+        },
+        "setbacks_m": {
+          "$ref": "#/$defs/Setbacks"
+        },
+        "climate_notes": {
+          "default": "",
+          "title": "Climate Notes",
+          "type": "string"
+        }
+      },
+      "title": "Site",
+      "type": "object"
+    },
+    "Source": {
+      "properties": {
+        "input_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Text"
+        },
+        "input_image_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Image Refs",
+          "type": "array"
+        }
+      },
+      "title": "Source",
+      "type": "object"
+    },
+    "StructuralFramingAssumptions": {
+      "properties": {
+        "floor_joist_or_slab": {
+          "default": "",
+          "title": "Floor Joist Or Slab",
+          "type": "string"
+        },
+        "roof_rafter_or_truss": {
+          "default": "",
+          "title": "Roof Rafter Or Truss",
+          "type": "string"
+        },
+        "wall_stud_spec": {
+          "default": "",
+          "title": "Wall Stud Spec",
+          "type": "string"
+        },
+        "disclaimer": {
+          "default": "Heuristic assumptions only. Not engineered. A licensed Professional Engineer must independently review and size all structural members.",
+          "title": "Disclaimer",
+          "type": "string"
+        }
+      },
+      "title": "StructuralFramingAssumptions",
+      "type": "object"
+    },
+    "Wall": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "start": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Start",
+          "type": "array"
+        },
+        "end": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "End",
+          "type": "array"
+        },
+        "height_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Height M",
+          "type": "number"
+        },
+        "thickness_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Thickness M",
+          "type": "number"
+        },
+        "wall_type": {
+          "$ref": "#/$defs/WallType",
+          "default": "exterior_bearing"
+        },
+        "material": {
+          "default": "",
+          "title": "Material",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "height_m",
+        "thickness_m"
+      ],
+      "title": "Wall",
+      "type": "object"
+    },
+    "WallType": {
+      "enum": [
+        "exterior_bearing",
+        "exterior_nonbearing",
+        "interior_bearing",
+        "interior_partition"
+      ],
+      "title": "WallType",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "intent_id": {
+      "title": "Intent Id",
+      "type": "string"
+    },
+    "revision": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "created_at": {
+      "title": "Created At",
+      "type": "string"
+    },
+    "updated_at": {
+      "title": "Updated At",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/Source"
+    },
+    "site": {
+      "$ref": "#/$defs/Site"
+    },
+    "stories": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Stories",
+      "type": "integer"
+    },
+    "footprint": {
+      "$ref": "#/$defs/Footprint"
+    },
+    "rooms": {
+      "items": {
+        "$ref": "#/$defs/Room"
+      },
+      "title": "Rooms",
+      "type": "array"
+    },
+    "walls": {
+      "items": {
+        "$ref": "#/$defs/Wall"
+      },
+      "title": "Walls",
+      "type": "array"
+    },
+    "openings": {
+      "items": {
+        "$ref": "#/$defs/Opening"
+      },
+      "title": "Openings",
+      "type": "array"
+    },
+    "roof": {
+      "$ref": "#/$defs/Roof"
+    },
+    "foundation": {
+      "$ref": "#/$defs/Foundation"
+    },
+    "structural_framing_assumptions": {
+      "$ref": "#/$defs/StructuralFramingAssumptions"
+    },
+    "materials_notes": {
+      "default": "",
+      "title": "Materials Notes",
+      "type": "string"
+    },
+    "open_questions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Open Questions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "footprint"
+  ],
+  "title": "DesignIntent",
+  "type": "object"
+}

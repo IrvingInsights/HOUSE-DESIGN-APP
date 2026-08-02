@@ -1,0 +1,10 @@
+# Runtime job outputs (audit trail is regenerated per run).
+jobs/
+# Local secrets / config.
+.env
+# First-run marker (desktop shortcut created).
+.shortcut_created
+# Python.
+__pycache__/
+*.pyc
+.pytest_cache/
