@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 229 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 230 · Jul 2026 Rebuild';
 // ONE rendering of the update status, used everywhere it's shown (classic's
 // rz-stamp, site's st-stamp-chip) — a build once sat 8 updates behind with no
 // warning anywhere, because "confirmed current" and "couldn't tell" both
@@ -1756,7 +1756,6 @@ export default function App() {
               <button className="st-mini" disabled={!redoStack.length} title="Redo (Ctrl+Y)" onClick={redo}>↷</button>
               <button className="st-mini" title="Your saved designs, backups, and starters" onClick={() => { setMoreOpen(true); setDesignsOpen(true); }}>≡ designs</button>
               <button className="st-mini" title="Back to the left-bar look" onClick={() => setLook('classic')}>Classic look</button>
-              <span className="st-stamp-chip">{UPDATE_STAMP} · {updateStatusText(updateStatus)}</span>
             </div>
             <span className="st-toolbar-div" aria-hidden="true" />
             <SiteQuickRow
@@ -1790,6 +1789,9 @@ export default function App() {
             <button className={`st-more ${moreOpen ? 'on' : ''}`} onClick={() => setMoreOpen((v) => !v)}>
               {moreOpen ? '× Close' : 'More ▾'}
             </button>
+            {/* forced onto its own line (flex-basis:100% below) — under the bar,
+                not competing with its buttons for width on the same line */}
+            <span className="st-stamp-chip">{UPDATE_STAMP} · {updateStatusText(updateStatus)}</span>
           </div>
 
           <div className={`st-receipts st-panel${receiptsOpen ? '' : ' collapsed'}`}>

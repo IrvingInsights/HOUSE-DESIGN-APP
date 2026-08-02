@@ -31,8 +31,16 @@ export async function checkForUpdate() {
   if (count.err) return { checked: false, behind: 0, reason: 'no-history' };
   const behind = Number(count.stdout) || 0;
   if (!behind) return { checked: true, behind: 0 };
-  const latest = await git(['log', '-1', '--format=%s', 'origin/main']);
-  return { checked: true, behind, latest: latest.stdout || '' };
+  // The newest commit is very often a GitHub merge commit — "Merge pull
+  // request #19 from irvinginsights/claude/some-branch-name" — which is
+  // exactly what showed in the update banner instead of anything a person
+  // would want to read (Daniel, Aug 2). Every real change in this repo is
+  // titled "update N: ...", so prefer the newest one of those within the
+  // behind range; only a merge subject exists at all as the fallback.
+  const titled = await git(['log', '--format=%s', 'HEAD..origin/main']);
+  const latestTitled = titled.stdout.split('\n').find((line) => /^update \d+:/.test(line));
+  const latest = latestTitled || (await git(['log', '-1', '--format=%s', 'origin/main'])).stdout || '';
+  return { checked: true, behind, latest };
 }
 
 export async function applyUpdate() {
