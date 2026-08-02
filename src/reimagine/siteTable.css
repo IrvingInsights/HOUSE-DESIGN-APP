@@ -24,7 +24,7 @@
    width, no sideways scrolling, labels never clipped. Worth-a-look and the
    running total live at its foot. ─────────────────────────────────────── */
 .st-rail {
-  position: absolute; top: 52px; left: 16px; bottom: 88px; width: 128px;
+  position: absolute; top: 10px; left: 16px; bottom: 88px; width: 128px;
   border-radius: 16px; padding: 8px 6px; z-index: 6;
   display: flex; flex-direction: column;
   /* NOT overflow:hidden — the "Worth a look" flags popup (.st-flags) is a
@@ -72,7 +72,8 @@
 .st-strip-total { font-size: 12px; color: var(--muted2, #565a4f); white-space: nowrap; }
 .st-strip-total b { color: var(--ink, #22251f); cursor: pointer; display: block; font-size: 13px; }
 
-/* flags popover opens beside the rail's foot */
+/* flags popover opens beside the rail's foot — anchored to the rail's own
+   bottom, so raising the rail's top doesn't move this. */
 .st-flags {
   position: absolute; left: 136px; bottom: 4px; top: auto; right: auto; width: 340px;
   border-radius: 14px; padding: 12px 14px; z-index: 7;
@@ -92,9 +93,19 @@
 }
 .st-flags-foot { margin-top: 8px; font-size: 11px; color: var(--muted, #868a7c); }
 
-/* ── the quick toolbar (active chapter's everyday controls) ────────────── */
+/* ── the toolbar (utility cluster + the active chapter's everyday controls,
+   merged into ONE row) ──────────────────────────────────────────────────
+   This used to be two stacked bars: a top-left utility row (undo/redo/
+   designs/look-toggle/stamp) floating above a second, wider chapter-toolbar
+   row. Two rows for one strip of controls cost real height off the model
+   and, on a browser window narrower than 1120px, let the lower row's
+   right edge reach all the way to right:16 — straight into the compass's
+   own top-right corner (Daniel, Aug 2). Merged into one row here; the right
+   edge now always stops at COMPASS_CLEAR (below), at every window width,
+   so that specific collision can't come back regardless of how narrow the
+   window gets. */
 .st-toolbar {
-  position: absolute; top: 52px; left: 156px; right: 296px;
+  position: absolute; top: 10px; left: 156px; right: 296px;
   border-radius: 14px;
   padding: 6px 14px; z-index: 5; min-height: 54px;
   display: flex; align-items: center; gap: 4px 12px;
@@ -105,10 +116,26 @@
   overflow-x: hidden; overflow-y: auto;
   max-height: 190px;
 }
+.st-toolbar-util { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.st-toolbar-util .st-mini {
+  border: 1px solid rgba(219, 217, 206, 0.7); background: rgba(251, 250, 246, 0.88);
+  border-radius: 8px; padding: 4px 9px;
+  font: inherit; font-size: 11.5px; color: var(--muted2, #565a4f); cursor: pointer; white-space: nowrap;
+}
+.st-toolbar-util .st-mini:disabled { opacity: 0.4; cursor: default; }
+.st-stamp-chip { font-size: 10.5px; color: var(--muted, #868a7c); padding: 4px 6px; white-space: nowrap; }
+/* a thin rule, not a box — reads as "two groups, one row" instead of a wall */
+.st-toolbar-div { width: 1px; align-self: stretch; margin: 4px 2px; background: rgba(219, 217, 206, 0.7); flex: 0 0 auto; }
 /* Inside the wrapping toolbar a group must not wrap as one solid block
    (that stacked one group per row) — let its pills pack the rows densely. */
 .st-toolbar .st-tool-group { display: contents; }
-@media (max-width: 1120px) { .st-toolbar { right: 16px; } }
+/* COMPASS_CLEAR: the compass (.rz-compass) is a fixed 54px circle at
+   top:16/right:16 — an 86px reservation (54 + 16 margin + 16 buffer) keeps
+   the toolbar's right edge clear of it at any window width, including the
+   narrow case below where the receipts panel's own reserved 296px isn't
+   needed any more. Was right:16 here, which is exactly the compass's own
+   right offset — a guaranteed overlap, not just a possible one. */
+@media (max-width: 1120px) { .st-toolbar { right: 86px; } }
 .st-toolbar-label {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
   color: var(--muted, #868a7c); flex: 0 0 auto;
@@ -227,18 +254,6 @@
   cursor: pointer; white-space: nowrap; box-shadow: 0 8px 30px rgba(30, 40, 30, 0.16);
 }
 
-/* top-left utility row (undo/redo + shelf + look toggle live here) */
-.st-topleft {
-  position: absolute; top: 10px; left: 16px; z-index: 7;
-  display: flex; align-items: center; gap: 6px;
-}
-.st-topleft .st-mini {
-  border: 1px solid rgba(219, 217, 206, 0.7); background: rgba(251, 250, 246, 0.88);
-  backdrop-filter: blur(10px); border-radius: 8px; padding: 4px 9px;
-  font: inherit; font-size: 11.5px; color: var(--muted2, #565a4f); cursor: pointer; white-space: nowrap;
-}
-.st-topleft .st-mini:disabled { opacity: 0.4; cursor: default; }
-.st-stamp-chip { font-size: 10.5px; color: var(--muted, #868a7c); padding: 4px 6px; white-space: nowrap; }
 
 /* ── site mode re-frames the CLASSIC surfaces (same components, new home) ──
    The old left Trail becomes the "More" panel: hidden until the toolbar's

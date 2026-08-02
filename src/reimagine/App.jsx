@@ -75,7 +75,20 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 228 · Jul 2026 Rebuild';
+const UPDATE_STAMP = 'update 229 · Jul 2026 Rebuild';
+// ONE rendering of the update status, used everywhere it's shown (classic's
+// rz-stamp, site's st-stamp-chip) — a build once sat 8 updates behind with no
+// warning anywhere, because "confirmed current" and "couldn't tell" both
+// silently rendered as nothing. Every state gets its own word, always.
+function updateStatusText(updateStatus) {
+  if (updateStatus === 'checking' || updateStatus === null) return 'checking…';
+  if (updateStatus.checked === false) {
+    const why = updateStatus.reason === 'no-git' ? 'git not found' : updateStatus.reason === 'no-history' ? 'no update history' : 'offline?';
+    return `couldn’t check (${why})`;
+  }
+  if (updateStatus.behind > 0) return `${updateStatus.behind} behind`;
+  return '✓ up to date';
+}
 
 // ---- The Time Machine ------------------------------------------------------
 // Short names for the timeline chips (full titles live on the phase card).
@@ -1270,15 +1283,27 @@ export default function App() {
   };
 
   // --- self-update: the app notices new versions and applies them itself -----
+  // ONE status, always current, never silent: "confirmed current" and
+  // "couldn't tell" used to collapse into the same nothing-shown state, which
+  // is how a build sat 8 updates behind with no warning. `updateStatus` is
+  // rendered permanently next to the version stamp below — checking / current
+  // / behind / couldn't-check are each their own visible words, always.
   const [update, setUpdate] = useState(null); // {behind, latest} | 'applying' | {error}
+  const [updateStatus, setUpdateStatus] = useState(null); // {checked, behind, latest?, reason?} | 'checking'
   useEffect(() => {
     let alive = true;
     const check = async () => {
+      setUpdateStatus((cur) => (cur === null ? 'checking' : cur));
       try {
         const r = await fetch('/api/update/check', { cache: 'no-store' });
         const j = await r.json();
-        if (alive && j.behind > 0) setUpdate((cur) => (cur === 'applying' ? cur : j));
-      } catch { /* engine busy/offline — try again next round */ }
+        if (!alive) return;
+        setUpdateStatus(j);
+        if (j.checked && j.behind > 0) setUpdate((cur) => (cur === 'applying' ? cur : j));
+      } catch {
+        // engine busy/offline — say so; try again next round
+        if (alive) setUpdateStatus({ checked: false, reason: 'offline' });
+      }
     };
     check();
     const timer = setInterval(check, 5 * 60 * 1000);
@@ -1671,14 +1696,6 @@ export default function App() {
           away, and both looks drive the SAME state and handlers. */}
       {lookMode === 'site' && !timelineOpen && (
         <>
-          <div className="st-topleft">
-            <button className="st-mini" disabled={!undoStack.length} title="Undo (Ctrl+Z)" onClick={undo}>↶</button>
-            <button className="st-mini" disabled={!redoStack.length} title="Redo (Ctrl+Y)" onClick={redo}>↷</button>
-            <button className="st-mini" title="Your saved designs, backups, and starters" onClick={() => { setMoreOpen(true); setDesignsOpen(true); }}>≡ designs</button>
-            <button className="st-mini" title="Back to the left-bar look" onClick={() => setLook('classic')}>Classic look</button>
-            <span className="st-stamp-chip">{UPDATE_STAMP}</span>
-          </div>
-
           <div className="st-rail st-panel">
             <div className="st-rail-list">
               {CHAPTERS.map((c, i) => (
@@ -1729,6 +1746,19 @@ export default function App() {
           </div>
 
           <div className="st-toolbar st-panel">
+            {/* the utility cluster (undo/redo/designs/look-toggle/stamp) used to
+                float in its own row above this one — two stacked bars for what
+                is really one strip of controls. Merged into this row's start so
+                the two rows become one: less height claimed from the model,
+                one place to look, not two. */}
+            <div className="st-toolbar-util">
+              <button className="st-mini" disabled={!undoStack.length} title="Undo (Ctrl+Z)" onClick={undo}>↶</button>
+              <button className="st-mini" disabled={!redoStack.length} title="Redo (Ctrl+Y)" onClick={redo}>↷</button>
+              <button className="st-mini" title="Your saved designs, backups, and starters" onClick={() => { setMoreOpen(true); setDesignsOpen(true); }}>≡ designs</button>
+              <button className="st-mini" title="Back to the left-bar look" onClick={() => setLook('classic')}>Classic look</button>
+              <span className="st-stamp-chip">{UPDATE_STAMP} · {updateStatusText(updateStatus)}</span>
+            </div>
+            <span className="st-toolbar-div" aria-hidden="true" />
             <SiteQuickRow
               chapter={activeChapter} spec={spec} derived={derived} floors={floors}
               moreOpen={moreOpen}
@@ -2487,10 +2517,19 @@ export default function App() {
             </div>
 
           </div>
-          {/* pinned OUTSIDE the scrolling body so the version is always visible */}
-          <div className="rz-stamp">{UPDATE_STAMP}{lookMode === 'classic' && (
-            <button type="button" className="rz-storey-link-inline" style={{ marginLeft: 8 }} title="Try the new Site Table look — chapters across the top, the model center stage" onClick={() => setLook('site')}>✨ new look</button>
-          )}</div>
+          {/* pinned OUTSIDE the scrolling body so the version is always visible.
+              The status word next to it is the whole point of updateStatus:
+              current / behind / couldn't-check are each said out loud, always
+              — never silence standing in for "everything's fine." */}
+          <div className="rz-stamp">
+            {UPDATE_STAMP}
+            <span className="rz-update-status" title={updateStatus && updateStatus.checked === false ? 'Could not reach GitHub to check for updates — this is not the same as being current.' : undefined}>
+              {' · '}{updateStatusText(updateStatus)}
+            </span>
+            {lookMode === 'classic' && (
+              <button type="button" className="rz-storey-link-inline" style={{ marginLeft: 8 }} title="Try the new Site Table look — chapters across the top, the model center stage" onClick={() => setLook('site')}>✨ new look</button>
+            )}
+          </div>
       </aside>
 
       {/* SURFACE 4a — the Budget sheet: the first live Sheet. Every line opens
