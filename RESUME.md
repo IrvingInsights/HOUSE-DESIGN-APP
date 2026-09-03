@@ -1,5 +1,5 @@
 # RESUME — Natural Building studio
-Fresh-session brief. Rewritten 2026-09-03 (updates 233–243). Git history holds
+Fresh-session brief. Rewritten 2026-09-03 (updates 233–244). Git history holds
 the old status stack.
 
 ## What this is
@@ -14,7 +14,7 @@ Run: `node server.mjs` from this folder (or start.bat — it pulls, moves the
 folder onto the main line, and self-restarts). Port 5184. **Backend `.mjs`
 edits need a server restart** (module cache); the frontend hot-reloads.
 
-## STATE (2026-09-03, update 243)
+## STATE (2026-09-03, update 244)
 - **ONE app, not two.** `src/main.jsx` and `classic.html` — the old parallel
   build — were retired in update 242, after everything they alone could do was
   brought into the live app. `index.html` → `src/reimagine/main.jsx` →
@@ -29,12 +29,13 @@ edits need a server restart** (module cache); the frontend hot-reloads.
   on a side branch back onto `main` (that is why a session once ran a month
   behind); a real **Start on empty land**; the verdict tiles moved to the top
   of the left bar; one history list instead of two.
+- **The 3D view can no longer open blank** (244): a pane measured before it had a width made the camera stand 8,100 ft back, past its own far plane. Fixed at three points and pinned by tools/camera_fit_test.mjs (152 checks, verified to fail when reverted).
 - **All batteries green:** design_space 15,316 · op_smoke 228 · placement
   2,312 · receipts 439 · golden_numbers 189 pinned / 0 drifted · capability
   272 across 57 capabilities · studio_ask 34 · trace_flags 13 ·
   from_scratch_audit 0 gaps · deck_stair · outbuilding_roof · thermal ·
   timeline · greenhouse · face_law · floor_resize · persistence · geom_core ·
-  trace_repair.
+  trace_repair · camera_fit 152.
 - **No AI key on this machine.** `.env.local` does not exist, so the chat's AI
   paths and the drawing reader cannot be proven end to end here. The app says
   so plainly rather than failing oddly, and the keyless paths (local room

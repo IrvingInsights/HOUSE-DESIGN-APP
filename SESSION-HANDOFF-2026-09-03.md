@@ -141,3 +141,43 @@ controls that belong to the app's chrome rather than to a chapter.
   twice; "from north" being the drawing's north, not a surveyed bearing.
 - **Gate B has still never been run.** A stranger, an hour, no dead ends.
   Daniel cannot run it himself.
+
+---
+
+## LATE FIND: THE 3D VIEW COULD OPEN ON A BLANK SCREEN (update 244)
+
+Caught in the final pass, on his own house, and it was not something the port
+introduced — it was live.
+
+`defaultCameraFraming` works out how far back to stand from the shell's own
+size. It divides by the sine of the field of view, and the field of view comes
+from the pane's aspect ratio. When the 3D pane mounts before the layout has
+given it a width — a chapter switch, a hidden tab — `clientWidth` is 0, and a
+guard turned that into an "aspect" of 0.01. Dividing by the sine of an almost
+zero angle put the camera **8,100 feet** out, past its own 2,000 ft far plane.
+Every mesh in the scene was drawn behind the horizon. The pane was pure white.
+
+Three things then conspired to make it permanent rather than a flicker:
+
+1. There was no `maxDistance` on the controls, so a few wheel turns could put
+   the camera out there too.
+2. The camera position is remembered between chapters — a stranded camera was
+   restored faithfully, forever.
+3. The view buttons (Corner / Top / Front / Side) only change the ANGLE and
+   keep your distance, so the one thing a person does when they see nothing
+   did not help.
+
+Fixed at all three: an unmeasured pane falls back to an ordinary widescreen
+shape and the fit is capped inside the far plane; the wheel is fenced at both
+ends against the house's own fit distance; a remembered camera that can no
+longer see the house is discarded rather than restored.
+
+`tools/camera_fit_test.mjs` (152 checks) holds it: six houses from a cabin to
+the largest the app allows, six pane shapes including three that have not been
+measured, each held to "the whole building fits" and "inside the far plane".
+**Verified to fail (34 checks) when the fix is reverted** — a battery that
+cannot fail is decor.
+
+Worth remembering: this is the third time the same *symptom* has appeared and
+the third different *cause* (a hardcoded camera in 219, an unmeasured pane
+now). The symptom is always "the 3D looks broken". It is worth a battery.
