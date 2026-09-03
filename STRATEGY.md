@@ -1,5 +1,12 @@
 # STRATEGY — from whack-a-mole to a finished app
 
+> **2026-09-03 (updates 233–243): the app is one build again.** Daniel's call
+> was "complete app, one build": the chat, the drawing reader, the exports,
+> Layers/Explode and the one-tap fixes came out of the retired `classic.html`
+> and into the live app, and the old build was deleted. The docs now describe
+> what exists. What remains is Gate A depth work and Gate B — a stranger's
+> first hour — below.
+
 Written 2026-07-12 after Daniel called the pattern: piecemeal fixes, each
 proven on one drawing, failing on the next. This document is the whole board
 and the plan. **Every session on this app executes this plan in order and
@@ -11,7 +18,7 @@ does not freelance.** RESUME.md says where we are; this says where we're going.
 > Once we nail that, we can move on to the interpretation of drawings."
 
 This outranks everything below. The trace pipeline stays in the app as an
-**experimental** entry point (labeled as such in the opening card and
+**experimental** entry point (labeled as such where it is offered and in
 TESTING.md), its referee and corpus keep guarding it, but NO session works
 on trace quality until design-from-scratch is nailed. The rest of this file
 is the trace-era strategy, kept for when that work resumes.

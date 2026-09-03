@@ -1,5 +1,11 @@
 # HANDOFF — for the next tool/agent taking over this app
 
+**Updated 2026-09-03 (update 243).** The app is now ONE build: the old parallel
+`classic.html` / `src/main.jsx` was retired in update 242 after its chat,
+drawing reading, exports, layers, one-tap fixes and site controls were brought
+into the live app. Anything below that describes two builds, or names
+`src/main.jsx`, is history. `RESUME.md` has the current state and map.
+
 Written 2026-07-12. The owner (Daniel) is handing this project to fresh eyes.
 He and his one other user are total non-coders: plain language everywhere,
 zero jargon in the UI or in messages to him.
@@ -103,7 +109,18 @@ revision snapshots. Public repo: github.com/IrvingInsights/HOUSE-DESIGN-APP.
 - Two browser tabs fight over the one shared project (autosave clobbers).
   One tab at a time; park test tabs on a JSON endpoint when done.
 
-## State at handoff (2026-07-12)
+## State at handoff (2026-09-03)
+
+- One app, one entry point (`index.html` → `src/reimagine/`). All batteries
+  green: design_space 15,316 · op_smoke 228 · placement 2,312 · receipts 439 ·
+  golden_numbers 189/0 drifted · capability 272 · studio_ask 34 · trace_flags
+  13 · from_scratch_audit 0 gaps.
+- **No `.env.local` on this machine**, so the AI chat and the drawing reader
+  are unproven end to end since the port. Everything keyless is proven.
+- The trace corpus is empty here (`.data/trace-corpus/`): drop any floor-plan
+  PDF in it and it is in the regression tests from then on.
+
+## State at the previous handoff (2026-07-12)
 
 - All three unit suites green (113 + 111 + 41).
 - **Corpus at handoff: CLEAN — all 4 sets 11/11 hands-off** (columbia-rev1

@@ -89,7 +89,7 @@ yourself. **Never silently skip the Notion update.**
 
 | Path | What belongs there |
 |---|---|
-| `src/` | React/Vite frontend. `engine.js` is the client mirror of the model. |
+| `src/` | React/Vite frontend — ONE app: `reimagine/App.jsx` + `studio/` (the chat). `engine.js` is the client mirror of the model. The old `main.jsx`/`classic.html` build was retired in update 242. |
 | `backend/` | Node backend. `bim-core.mjs` is the model authority; `planner.mjs` is the drawing-trace pipeline. |
 | `tools/` | The verification batteries. These are the contract — see HANDOFF.md. |
 | `design-archive/` | Prior explorations, exported drawings, model packages, superseded prototypes. Reference material, **not** live code. Every item gets a line in `design-archive/README.md`. |

@@ -1,57 +1,110 @@
-# RESUME — Natural Building studio (house-bim-app)
-Fresh-session brief. Rewritten 2026-07-12 (~2am, session end). Git history holds the old status stack.
+# RESUME — Natural Building studio
+Fresh-session brief. Rewritten 2026-09-03 (updates 233–243). Git history holds
+the old status stack.
 
 ## What this is
-A local-first home-design studio for Daniel (and one friend) — both total non-coders. Live 3D/plan/detail model, per-system design pages, costs/code-checks/carbon, AI chat + drawing tracing (Gemini), permit/frame-drawing/IFC export. Node backend (zero backend deps), React/Vite frontend, one shared current project with revision snapshots. Public repo: github.com/IrvingInsights/HOUSE-DESIGN-APP — **push after every job; Daniel pulls via GitHub Desktop.**
+A local-first home-design studio for Daniel (and one friend) — both total
+non-coders. Live 3D / plan / wall model, one page per building system,
+costs / code checks / carbon, a chat that makes changes in plain words, a
+drawing reader, and permit / frame / IFC export. Node backend (zero backend
+deps), React/Vite frontend, one shared current project with revision
+snapshots. Public repo: github.com/IrvingInsights/HOUSE-DESIGN-APP.
 
-Run: `node server.mjs` with cwd = this folder (or start.bat — it self-restarts). Port 5184. Backend `.mjs` edits need a server restart (module cache); frontend hot-reloads (and an HMR full-reload reopens the welcome card in open tabs).
+Run: `node server.mjs` from this folder (or start.bat — it pulls, moves the
+folder onto the main line, and self-restarts). Port 5184. **Backend `.mjs`
+edits need a server restart** (module cache); the frontend hot-reloads.
 
-## STATE (2026-07-12)
-- **MVP: ~95%.** Remaining errands, in order: (1) diagnose the one open corpus item (below), (2) 20-min TESTING.md known-limitations refresh, (3) send the link to 2–3 testers. Their first hour is the MVP gate. No missing capabilities remain on the list.
-- **Trace pipeline** (all shipped + corpus-verified): async background jobs w/ live progress notes (`backend/trace-jobs.mjs`, `POST /api/bim/apply {async:true}` → poll `GET /api/bim/job/<id>`); staged 4-pass read (structure/rooms/openings/elements, per-pass minimal schemas, 8k caps) with classic single-call fallback; drawing manifest (the set's own index incl. envelope dims); measurement strictness (unmeasured rooms bounce back by name); dead-op scrub; deterministic rescues (outdoor-room reclassify, basement re-level, geometry re-anchor + effective-rect shell grow + partition clamps); self-audit loop (≤2 rounds, removal-capped, converges).
-- **Corpus ledger** (`node tools/trace_corpus_test.mjs`, sets in gitignored `.data/trace-corpus/`): columbia-st 9/9 ×2, fl0-carport 9/9, fl0-v6 9/9 on the classic path — **8/9 on the newly-alive staged path: KITCHEN outside the shell, evidence dumped**.
-- **Costs fixed**: thinking budget 0 on planner calls + minimal pass schemas → traces cost pennies (was: a $25 prepayment in a day; dashboard smoking gun = 1.7M output vs 672k input tokens). Tier-1 paid project "Natural Design Builder"; `gemini-flash-latest` slid 2.5→3.5 Flash mid-month — rolling alias = resilience, but watch pricing.
-- **Look**: Sage Studio (sage paper ground, white cards, teal=act-here, wheat highlights, wood secondaries, sepia ink), Architects Daughter hand lettering app-wide (Segoe Print offline fallback), the drawn-bent brand mark. Value-step layer at the end of styles.css; older theme layers beneath are inert but present.
-- **UX**: pinned Inspector (bottom of left bar, collapsible), Fine-tune ▸ disclosure on system pages, journey rail (← prev / Next → through build order → Review), visited-system dots, House|Site plan framing + edge arrows + wheel-zoom/pan, model toolbar above the view, chat starts closed w/ unread badge, engine-offline banner + auto-recovery.
+## STATE (2026-09-03, update 243)
+- **ONE app, not two.** `src/main.jsx` and `classic.html` — the old parallel
+  build — were retired in update 242, after everything they alone could do was
+  brought into the live app. `index.html` → `src/reimagine/main.jsx` →
+  `src/reimagine/App.jsx` is the whole frontend now.
+- **What came back from the old build** (updates 237–242): export (permit
+  sheets, frame drawings, written brief, BIM data, IFC/Blender), the Layers
+  panel with exploded view, fifteen one-tap fixes on the flags, the Studio
+  chat, drawing reading, and the site controls (postcode, latitude, rain,
+  slope) that would otherwise have gone down with the old build — the
+  from-scratch audit caught that one.
+- **Also new** (233–236): start.bat and the in-app updater put a folder parked
+  on a side branch back onto `main` (that is why a session once ran a month
+  behind); a real **Start on empty land**; the verdict tiles moved to the top
+  of the left bar; one history list instead of two.
+- **All batteries green:** design_space 15,316 · op_smoke 228 · placement
+  2,312 · receipts 439 · golden_numbers 189 pinned / 0 drifted · capability
+  272 across 57 capabilities · studio_ask 34 · trace_flags 13 ·
+  from_scratch_audit 0 gaps · deck_stair · outbuilding_roof · thermal ·
+  timeline · greenhouse · face_law · floor_resize · persistence · geom_core ·
+  trace_repair.
+- **No AI key on this machine.** `.env.local` does not exist, so the chat's AI
+  paths and the drawing reader cannot be proven end to end here. The app says
+  so plainly rather than failing oddly, and the keyless paths (local room
+  adds, duplicate-opening cleanup) are proven by `tools/studio_ask_test.mjs`.
 
 ## START HERE
-1. ~~Staged-path fl0-v6 failure~~ **DONE (commits 4235d36 + cce73fe):** two classes — junk-field set_shell ops the engine swallowed while the repair "grew" them (shared `isDimensionShorthandShellOp` predicate now), and rescues that skipped audit-added ops (`applyDeterministicRescues` runs after EVERY AI stage). Floor stacks are structural now too (level updates raise storeys + land at `storeyElevationFt`; plates cover their level's rooms in normalizeRooms BOTH copies). fl0-v6 9/9 staged.
-2. ~~TESTING.md refresh~~ **DONE.**
-3. **Re-run the full corpus when Daniel is idle** (`node tools/trace_corpus_test.mjs` — the confirmation run was stopped because it shares his Gemini quota while he live-tests).
-4. Tell Daniel to send the repo link to his testers. Resist building more first — tester surprises are the last mile.
-- Queued/optional: richer staged-read notes in the planning bubble; ifc_writer.py → JS port (drop Blender entirely); light/dark toggle from the retired dark layers; rotate the Gemini key (old ask); Cloudflare tunnel is installed but NOT started (start only on Daniel's explicit word).
+1. **Get a Gemini key into `.env.local`**, then run one drawing through
+   *+ New → Start from a drawing* and `node tools/trace_corpus_test.mjs`. That
+   is the one part of the app that has not been exercised end to end since the
+   port.
+2. Then the depth work in the **Why can't I** list on the Notion hub: the L /
+   wrap deck stair, an asymmetric gable on a structure, plywood as a wall
+   covering, heat-source clearance to combustibles, and the fact that two
+   joined structures are still priced as two.
+3. Gate B still stands: a first-time user, an hour, no dead ends. Daniel
+   cannot run it — he routes around the rough edges without noticing.
 
 ## The disciplines (hard-won — keep them)
 **Ops & data**
-- Every new op = THREE registrations: bim-core handler + client mirror (main.jsx/engine.js) + planner schema enum. Grep the enum when an op "doesn't work via chat."
-- WALL_ASSEMBLIES / WALL_SIDES / wallAssemblyKeyFromText / resolveWallSide now live ONCE in bim-core.mjs; engine.js imports + re-exports them (dual copy collapsed). STILL dual-copied and deliberately DIVERGED: detectIssues / normalizeRooms (server-lite in bim-core, full in engine — see the LAYERING NOTE in both files). The house-math is pinned by tools/golden_numbers_test.mjs — run it after any engine/bim-core change.
-- Zero-filled ops: 0 means "unset" (the basement is level -1 precisely because 0 is swallowed). update_object writes strings — use move_object/resize_object for numbers.
-- Multi-step UI actions = ONE batched dispatch or chained baseSpec — never N calls on stale state.
-- updateShell has an 18-ft minimum clamp branch trap: new shell fields need their own branch.
-- After bim-core edits run `node tools/op_smoke_test.mjs` (106); planner edits `node tools/trace_repair_test.mjs` (96); geometry work `node tools/geom_core_test.mjs` (41).
+- Every new op = THREE registrations: bim-core handler + client mirror
+  (engine.js) + planner schema enum. Grep the enum when an op "doesn't work
+  via chat". `tools/from_scratch_audit.mjs` catches the reverse: an op with no
+  screen behind it. It follows one hop through the shared planners in
+  engine.js/placement.js, so a control that calls a helper still counts.
+- Zero-filled ops: 0 means "unset" (the basement is level -1 for this reason).
+  `update_object` writes strings — use move_object/resize_object for numbers.
+- Multi-step UI actions = ONE batched dispatch — never N calls on stale state.
+- updateShell has an 18-ft minimum clamp branch: new shell fields need their
+  own branch or they get clamped absurdly.
+- detectIssues / normalizeRooms are deliberately DUAL-COPIED and diverged by
+  layer (server-lite in bim-core, full in engine) — see the LAYERING NOTE in
+  both. Run `tools/golden_numbers_test.mjs` after any house-math change.
 
-**LLM calls**
-- Log the raw tail of every unparseable reply (see the parsePass evidence pattern) — one log line replaced three guessing rounds (the digit-loop: 33k chars of '0').
-- Minimal response schemas per task; never grow the op schema's required list (truncation). Per-call maxOutputTokens via callGemini.
-- thinkingConfig.thinkingBudget 0 for schema calls (GEMINI_THINKING_BUDGET overrides). Slow + expensive + truncating = check thinking FIRST.
-- API refusals ≠ pipeline failures (the corpus harness SKIPs them). Pace bulk runs; estimate spend before test campaigns.
-
-**Generalize (Daniel's standing rule)**
-- "Not just my examples — ANY drawings." Fix the class via industry conventions (e.g. shell = conditioned envelope), verify with the corpus's universal invariants, add every misbehaving set to `.data/trace-corpus/`, dump evidence on failure.
+**The app's own honesty rules**
+- A dead AI is SAID, never covered over. No canned paragraph in place of an
+  answer; no "read" of a drawing that was never read. `studio_ask_test.mjs`
+  holds this from the command line.
+- Anything hidden in the 3D view is announced on screen, with the reminder
+  that the costs still cover the whole house.
+- A drawing reader's doubts are ORDINARY flags in "Worth a look", not a
+  separate screen, and they clear themselves when fixed (`trace_flags_test`).
+- THE CLIPPING LAW: a popup that opens out of a scrolling strip must not be a
+  child of it. The flags popup was invisible for weeks this way; the export
+  and layers menus are portalled to the page for the same reason.
 
 **Live-app testing**
-- Daniel uses the app between and during sessions — never assume which design/rev is live. Backup first: GET /api/projects/current → save the JSON; restore: park the test tab on a JSON endpoint, wait ~3s, POST the state to /api/projects/current/save. Tests use persist:false.
-- Browser pane: screenshots time out (use window.__nbView + the cap-server pattern for framed 3D renders; JS geometry checks otherwise). Same-tick DOM reads after .click() see the pre-render DOM. Computed styles LIE mid-HMR — verify on a fresh load. Synthetic canvas drags MOVE ROOMS. Un-toggle persisted view state (layers) before closing test tabs.
-- Server ops: kill by CommandLine match (`Get-CimInstance Win32_Process` filtered on server.mjs) — zombies accumulate because the crash guard keeps EADDRINUSE processes alive. Probe with PowerShell Invoke-WebRequest when Git-Bash curl acts dead. Never chain `&` inside run_in_background commands.
-
-**Styling**
-- Two scopes: paper (drawing surfaces + chips floating on them) vs chrome (columns/toolbar). When overriding, re-pin CUSTOM PROPERTIES at equal/higher specificity — later background rules alone lose to token scoping. QC any retheme with the luminance sweep (flag opaque backgrounds under L33) on a FRESH load. No new bare hexes — the scope law comment sits in styles.css.
+- Daniel uses the app between sessions — never assume which design is live.
+  Back up `.data/projects/reimagine/project-state.json` first (the folder's own
+  convention: `project-state.BEFORE-<what>.json`).
+- Never hand-edit his design data to make a symptom go away; the app has to be
+  able to do it. Remove a test object through the app's own control.
+- Undo does not survive a page reload — the designs shelf does.
+- Kill a stuck server by CommandLine match; zombies accumulate because the
+  crash guard keeps EADDRINUSE processes alive.
 
 **Daniel**
-- Novice; plain language everywhere, no jargon in the UI or in messages to him. "The APP must be able to do it, not you" — every capability lands as UI control + chat vocabulary + trace mandate. Comprehensive, not piecemeal. For taste decisions, offer 2–3 directions via AskUserQuestion — it has worked every time.
+- Plain language everywhere, no jargon in the UI or in messages to him.
+- Fix the class, never the instance: it must work for ANY house, not his.
+- For taste decisions offer 2–3 directions and let him choose.
 
 ## Map
-- `backend/`: server.mjs (crash-guarded), routes.mjs (runBimApply shared by sync + async), trace-jobs.mjs, planner.mjs (trace pipeline: staged read → manifest → scrub → rescues → repair → audit loop; pure parts exported + tested), bim-core.mjs (ops, dual-copy tables), gemini.mjs (callGemini, thinking/caps), project-store.mjs (atomic chained saves), blender-launcher/bridge.
-- `src/`: main.jsx (App ~4k lines), engine.js (spec logic/tables/fetchers incl. requestServerAppliedBimAsync), threeScene.jsx (viewport incl. grainTexture, meshFromTris-with-UVs, roofUnderAt, greenhouse render), planView.jsx (PlanView w/ framing + zoom, JointDetail), docExports.js, frameDrawings.js (hand-lettered F-sheets), styles.css (layered; final layers win).
-- `tools/`: op_smoke_test.mjs, trace_repair_test.mjs, geom_test.mjs, trace_corpus_test.mjs, blender_headless_server.py.
-- `.data/` (gitignored): projects + revisions, trace-corpus + lastfail evidence, server-errors.log (route errors + staged-pass truncation tails).
+- `backend/`: server.mjs (crash-guarded), routes.mjs, planner.mjs (the drawing
+  pipeline), bim-core.mjs (ops + the model authority), studio.mjs (the chat's
+  server half), gemini.mjs, project-store.mjs, update.mjs (self-update, and
+  branch-aware since 233), trace-jobs.mjs, blender-launcher/bridge.
+- `src/`: `reimagine/App.jsx` (the app, ~6k lines) + shell.css / siteTable.css,
+  `studio/` (ask.js — the chat ladder as a pure function, ChatDrawer.jsx,
+  attachments.js), engine.js (spec logic, tables, fetchers), threeScene.jsx,
+  planView.jsx, placement.js (the LAW OF PLACEMENT), docExports.js,
+  frameDrawings.js, blenderBridge.js, styles.css.
+- `tools/`: the batteries. `prove_it.mjs` / PROVE-IT.bat runs the set;
+  `capabilities.json` is the user-facing capability inventory.
+- `.data/` (gitignored): projects + revisions, trace corpus, server-errors.log.
