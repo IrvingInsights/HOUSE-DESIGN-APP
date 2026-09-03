@@ -60,6 +60,9 @@ function cutPlanes(spec, cut) {
 // camera already sitting at a distance that fits (see defaultCameraFraming).
 function viewRequestTween(camera, controls, viewRequest) {
   const target = controls.target.clone();
+  // Keeps your current distance and only changes the angle. That is safe now
+  // because the distance itself is fenced where it is set (controls.min/
+  // maxDistance below) — you cannot be at a distance that shows nothing.
   const dist = Math.max(12, camera.position.distanceTo(target));
   const pos = viewRequest.mode === 'top' ? new THREE.Vector3(target.x, target.y + dist, target.z + 0.02)
     : viewRequest.mode === 'front' ? new THREE.Vector3(target.x, target.y + dist * 0.12, target.z + dist)
@@ -93,9 +96,15 @@ function defaultCameraFraming(spec, aspect = 16 / 9, vFovDeg = 45) {
   // past the walls aren't clipped right at the frame edge.
   const R = Math.sqrt((W / 2) ** 2 + (D / 2) ** 2 + (H / 2) ** 2) * 1.3;
   const vFov = (vFovDeg * Math.PI) / 180;
-  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(0.01, aspect));
+  // A 0.01 "aspect" is not a narrow window, it is a window that has not been
+  // measured yet — and treating it as real drove the fit distance to eight
+  // thousand feet, past the camera's own far plane, so the view opened blank.
+  // Below a quarter-width the shape is not believable: use a plain widescreen.
+  const safeAspect = Number.isFinite(aspect) && aspect > 0.25 ? aspect : 16 / 9;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * safeAspect);
   const halfFov = Math.min(vFov, hFov) / 2;
-  const dist = Math.max(24, R / Math.sin(halfFov));
+  // And whatever comes out, a house is never further away than the far plane.
+  const dist = Math.min(900, Math.max(24, R / Math.sin(halfFov)));
   const target = new THREE.Vector3(W / 2, H * 0.32, D / 2);
   // Same pleasant corner angle the "Corner" view button flies to — just at a
   // distance computed to actually fit the whole building, not whatever
@@ -196,17 +205,33 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
     // Faint atmospheric falloff so the site melts into the paper backdrop.
     scene.fog = new THREE.Fog(0xecefdf, 220, 520);
 
-    const aspect = mount.clientWidth / Math.max(1, mount.clientHeight);
+    // A PANE WITH NO SIZE YET MUST NOT SET THE CAMERA. If this mounts before
+    // the layout has given the pane a width (a chapter switch, a hidden tab),
+    // clientWidth is 0, and the fit below divides by the sine of an almost
+    // zero field of view — which put the camera EIGHT THOUSAND FEET out, past
+    // its own 2,000 ft far plane, so the 3D view opened pure white with the
+    // whole house drawn behind the horizon. Fall back to an ordinary
+    // widescreen shape; the resize handler corrects it the moment the pane
+    // has real dimensions.
+    const rawAspect = mount.clientWidth / Math.max(1, mount.clientHeight);
+    const aspect = Number.isFinite(rawAspect) && rawAspect > 0.2 ? rawAspect : 16 / 9;
     const camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 2000);
     // Fit-to-content default — NOT a fixed guess. A hardcoded (36,42,42) only
     // ever suited the one shell it was eyeballed against; any other footprint,
     // roof pitch, or storey count left the camera grazing the roof from
     // inches away on the first frame (update-219 UX review, finding #2).
     const fit = defaultCameraFraming(specRef.current, aspect, 45);
-    if (cameraStateRef.current?.position) {
-      camera.position.copy(cameraStateRef.current.position);
+    // A remembered position is only worth restoring if it can still SEE the
+    // house — a stranded camera restored faithfully is a blank screen that
+    // survives a reload.
+    const remembered = cameraStateRef.current?.position;
+    const rememberedTarget = cameraStateRef.current?.target || fit.target;
+    const rememberedDist = remembered ? remembered.distanceTo(rememberedTarget) : 0;
+    if (remembered && rememberedDist < camera.far * 0.8) {
+      camera.position.copy(remembered);
     } else {
       camera.position.copy(fit.pos);
+      cameraStateRef.current = null;
     }
 
     let renderer;
@@ -231,6 +256,18 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
+    // YOU CANNOT ZOOM OUT OF THE WORLD. Nothing limited the wheel, and the
+    // camera only draws things within 2,000 ft (its far plane) — so a few
+    // seconds of scrolling put the house behind that plane and the 3D view
+    // went white. Nothing recovered it either: the view buttons only change
+    // the ANGLE and keep whatever distance you are at, and the camera's
+    // position is remembered between chapters, so a blank view stayed blank
+    // and looked exactly like a broken app. Both ends are fenced against the
+    // house's own fit distance: close enough to put your nose on a wall, far
+    // enough to see the whole site, and never past the point of no return.
+    const fitDistance = fit.pos.distanceTo(fit.target);
+    controls.minDistance = Math.max(2, fitDistance * 0.06);
+    controls.maxDistance = Math.min(1400, fitDistance * 6);
     // Grabbing the view cancels any camera flight in progress.
     controls.addEventListener('start', () => { tweenRef.current = null; });
     if (cameraStateRef.current?.target) {
