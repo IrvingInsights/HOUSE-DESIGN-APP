@@ -347,6 +347,37 @@
       "label": "Take a one-tap fix on anything worth a look — the app makes the change itself",
       "marker": "cap-review-fix",
       "site": "shell"
+    },
+    {
+      "id": "chat.ask",
+      "chapter": "shape",
+      "label": "Ask for a change in plain words — the app makes it",
+      "marker": "cap-chat-open",
+      "site": "shell"
+    },
+    {
+      "id": "chat.design",
+      "chapter": "shape",
+      "label": "Ask the app to change the design in plain words",
+      "marker": "cap-chat-design",
+      "site": "shell",
+      "classic": "ChatDrawer"
+    },
+    {
+      "id": "chat.team",
+      "chapter": "shape",
+      "label": "Ask about building it — materials, structure, what a builder would say",
+      "marker": "cap-chat-team",
+      "site": "shell",
+      "classic": "ChatDrawer"
+    },
+    {
+      "id": "chat.attach",
+      "chapter": "shape",
+      "label": "Attach a floor plan, photo or PDF and have the app read it into a design",
+      "marker": "cap-chat-attach",
+      "site": "shell",
+      "classic": "ChatDrawer"
     }
   ]
 }

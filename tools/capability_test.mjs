@@ -33,7 +33,20 @@ import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appPath = join(here, '..', 'src', 'reimagine', 'App.jsx');
-const src = readFileSync(appPath, 'utf8');
+const appSrc = readFileSync(appPath, 'utf8');
+// THE APP IS NOT ONE FILE ANY MORE. When a control moves into its own module
+// (the chat drawer did, update 240), a checker that reads only App.jsx says
+// the control has vanished — or worse, stops noticing when it really does.
+// So: App.jsx plus every local file it imports, read as one surface. A
+// capability is reachable if it is reachable from the app's own import graph.
+const localImports = [...appSrc.matchAll(/^import[^']*'(\.[^']+)'/gm)].map((m) => m[1]);
+const partSources = localImports
+  .filter((rel) => /\.jsx?$/.test(rel))
+  .map((rel) => {
+    try { return readFileSync(join(here, '..', 'src', 'reimagine', rel), 'utf8'); }
+    catch { return ''; }
+  });
+const src = [appSrc, ...partSources].join('\n');
 const manifest = JSON.parse(readFileSync(join(here, 'capabilities.json'), 'utf8'));
 
 let passed = 0;
@@ -48,7 +61,7 @@ const ok = (cond, label) => {
 // House convention: top-level functions open with `function Name(` at column 0
 // and close with `}` at column 0.
 const sliceFunction = (name) => {
-  const open = src.search(new RegExp(`^function ${name}\\(`, 'm'));
+  const open = src.search(new RegExp(`^(?:export )?function ${name}\\(`, 'm'));
   if (open < 0) return null;
   // The close is `}` alone at column 0. A multi-line destructured parameter
   // list also puts `}` at column 0 — but followed by `) {`, so skip those.
@@ -74,9 +87,9 @@ marks.forEach((mk, i) => {
 });
 
 const chaptersSrc = (() => {
-  const open = src.indexOf('const CHAPTERS = [');
-  const close = src.indexOf('];', open);
-  return open >= 0 && close > open ? src.slice(open, close) : '';
+  const open = appSrc.indexOf('const CHAPTERS = [');
+  const close = appSrc.indexOf('];', open);
+  return open >= 0 && close > open ? appSrc.slice(open, close) : '';
 })();
 
 // --- the checks ------------------------------------------------------------

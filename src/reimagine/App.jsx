@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { ChatDrawer } from '../studio/ChatDrawer.jsx';
+import { askStudio } from '../studio/ask.js';
+import { readAttachment, attachmentFromPaste } from '../studio/attachments.js';
 import { ThreeScene, webglAvailable } from '../threeScene.jsx';
 import { PlanView } from '../planView.jsx';
 import { ElevationView } from './elevationView.jsx';
@@ -20,7 +23,8 @@ import {
   resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons, downloadFile,
   DECK_SURFACES, DECK_STAIR_SHAPES, resolveDeck, resolveDeckStairs, derivePartitionOps, interiorFixtures, sourceNote,
   isStair, resolveStair, STAIR_SHAPES, STAIR_FACINGS, STAIR_TURNS, STAIR_DEFAULTS, STAIR_FACING_ORDER, HEATER_FACINGS,
-  SHADE_DEVICES, ROOM_ENVELOPES, resolveRoomEnvelope, OUTBUILDING_PRESETS, OUTBUILDING_CONSTRUCTION, FENCE_TYPES, emptyLandSpec
+  SHADE_DEVICES, ROOM_ENVELOPES, resolveRoomEnvelope, OUTBUILDING_PRESETS, OUTBUILDING_CONSTRUCTION, FENCE_TYPES, emptyLandSpec,
+  ensureProjectBrain, compactChatForStorage, cleanSavedChatMessages
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms, OUTDOOR_TYPES } from '../placement.js';
 import { createDrawingSetHtml, createIfcSummary } from '../docExports.js';
@@ -79,7 +83,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 239 · Sep 2026';
+const UPDATE_STAMP = 'update 240 · Sep 2026';
 // ONE rendering of the update status, used everywhere it's shown (classic's
 // rz-stamp, site's st-stamp-chip) — a build once sat 8 updates behind with no
 // warning anywhere, because "confirmed current" and "couldn't tell" both
@@ -329,6 +333,17 @@ export default function App() {
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const exportBtnRef = useRef(null);
+  // THE CHAT. Closed by default — the model is what you came to look at — and
+  // anything that arrives while it is closed badges the button.
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatTarget, setChatTarget] = useState('design');
+  const [chatPrompt, setChatPrompt] = useState('');
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatNote, setChatNote] = useState('');
+  const [chatUnread, setChatUnread] = useState(0);
+  const [attachments, setAttachments] = useState([]);
+  const [projectBrain, setProjectBrain] = useState(null);
   const [flagsOpen, setFlagsOpen] = useState(false);
   const [activeFloor, setActiveFloor] = useState(1); // 1=ground, 2/3=upper, BASEMENT_LEVEL=basement
   // The Time Machine: open/closed, playhead in weeks, playing, Daniel's custom
@@ -440,6 +455,60 @@ export default function App() {
     if (report?.spec) commitSpec(report.spec);
     return report; // callers may need the new spec (e.g. select what was just made)
   };
+  // ASKING FOR A CHANGE. The ladder itself lives in src/studio/ask.js so it
+  // can be tested without a browser; this is only the wiring: what was on
+  // screen when you asked, what to do with the answer, and the one guard that
+  // matters — a drawing read takes minutes, and whatever you changed while it
+  // ran must not be thrown away by its result.
+  const sendChat = async () => {
+    const said = chatPrompt.trim();
+    if ((!said && !attachments.length) || chatBusy) return;
+    const sentSpec = spec;
+    setChatPrompt('');
+    setChatBusy(true);
+    setChatNote('');
+    try {
+      const result = await askStudio({
+        prompt: said, spec: sentSpec, target: chatTarget,
+        selected: selectedObj(),
+        chatMessages, projectBrain, attachments,
+        onNote: (n) => setChatNote(n)
+      });
+      setChatMessages((items) => [...items, ...(result.messages || [])]);
+      if (result.nextSpec) {
+        // The design moved under a long read: keep BOTH, and let the person
+        // choose. Committing blind here would silently undo their work.
+        if (JSON.stringify(spec) !== JSON.stringify(sentSpec)) {
+          snapshotBeforeReplace();
+          setChatMessages((items) => [...items, {
+            role: 'studio', speaker: 'Studio',
+            text: 'You changed the design while I was reading, so I have not replaced it. What you had is saved on the shelf under designs — open it there if you want it back, or press Undo to step back from this.'
+          }]);
+        }
+        commitSpec(result.nextSpec); // ONE undoable step, like any other edit
+        if (result.changedIds?.[0]) setSelectedId(result.changedIds[0]);
+      }
+      setAttachments([]);
+      if (!chatOpen) setChatUnread((n) => n + 1);
+    } finally {
+      setChatBusy(false);
+      setChatNote('');
+    }
+  };
+  const attachToChat = (file) => readAttachment(file, {
+    onAttach: (att) => {
+      setAttachments((items) => [att, ...items].slice(0, 6));
+      setChatMessages((items) => [...items, {
+        role: 'studio', speaker: 'Studio',
+        text: att.kind === 'image'
+          ? `"${att.name}" is attached. Tell me what to do with it — "read this drawing and build the model", or something narrower like "match this roof shape".`
+          : `"${att.name}" is attached. Ask me to read it: "read this drawing and build the model".`
+      }]);
+      setChatOpen(true);
+    },
+    onProblem: (text) => { setChatMessages((items) => [...items, { role: 'studio', speaker: 'Studio', text }]); setChatOpen(true); }
+  });
+
   const undo = () => {
     if (!undoStack.length) return;
     const prev = undoStack[undoStack.length - 1];
@@ -1871,6 +1940,11 @@ export default function App() {
               <button className="st-mini" disabled={!undoStack.length} title="Undo (Ctrl+Z)" onClick={undo}>↶</button>
               <button className="st-mini" disabled={!redoStack.length} title="Redo (Ctrl+Y)" onClick={redo}>↷</button>
               <button className="st-mini" title="Your saved designs, backups, and starters" onClick={() => { setMoreOpen(true); setDesignsOpen(true); }}>≡ designs</button>
+              <button className={`st-mini ${chatOpen ? 'on' : ''}`} data-cap="cap-chat-open"
+                title="Ask for a change in your own words, or attach a floor plan for the app to read"
+                onClick={() => { setChatOpen((v) => !v); setChatUnread(0); }}>
+                ✎ ask{chatUnread > 0 && !chatOpen ? ` (${chatUnread})` : ''}
+              </button>
               <div className="st-export">
                 <button ref={exportBtnRef} className="st-mini" title="Take the design out of the app — permit sheets, frame drawings, a BIM file" onClick={() => setExportOpen((v) => !v)}>⬇ export {exportOpen ? '▴' : '▾'}</button>
                 {exportOpen && <ExportMenu spec={spec} flags={flags} anchor={exportBtnRef} onClose={() => setExportOpen(false)} />}
@@ -2017,6 +2091,18 @@ export default function App() {
 
           <button className="st-build" onClick={openTimeline}>▶ Watch it build</button>
         </>
+      )}
+
+      {chatOpen && (
+        <ChatDrawer
+          messages={chatMessages} prompt={chatPrompt} onPrompt={setChatPrompt}
+          onSend={sendChat} busy={chatBusy} note={chatNote}
+          target={chatTarget} onTarget={setChatTarget}
+          attachments={attachments} onAttach={attachToChat}
+          onRemoveAttachment={(id) => setAttachments((items) => items.filter((f) => f.id !== id))}
+          onPaste={(e) => { const f = attachmentFromPaste(e); if (f) { e.preventDefault(); attachToChat(f); } }}
+          onClose={() => { setChatOpen(false); setChatUnread(0); }}
+        />
       )}
 
       {/* LAYERS — anything can be switched off, and anything switched off is
