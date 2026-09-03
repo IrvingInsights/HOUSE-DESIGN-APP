@@ -79,7 +79,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 237 · Sep 2026';
+const UPDATE_STAMP = 'update 238 · Sep 2026';
 // ONE rendering of the update status, used everywhere it's shown (classic's
 // rz-stamp, site's st-stamp-chip) — a build once sat 8 updates behind with no
 // warning anywhere, because "confirmed current" and "couldn't tell" both
@@ -277,6 +277,13 @@ export default function App() {
   // it has to line up with, without switching away from the finished house.
   // Layers on top of whatever modelShow preset is picked, same as classic.
   const [xrayOn, setXrayOn] = useState(false);
+  // LAYERS — the Show dropdown picks the base; these are your edits on top of
+  // it, so "no roof" and "hide the north wall" are the same mechanism rather
+  // than two competing ones. Session-only on purpose: a hidden roof that came
+  // back tomorrow would read as a lost roof.
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [layerEdits, setLayerEdits] = useState({});
+  const layersBtnRef = useRef(null);
   // Slice: a real cutting plane, same one classic's own "Slice" control
   // drives (cutPlanes() in threeScene.jsx) — 1 = whole house, sliding down
   // saws it open from the south. A true cross-section, unlike X-ray's ghost:
@@ -343,6 +350,24 @@ export default function App() {
   const wallSections = useMemo(() => getWallSections(spec), [spec]);
   const derived = useMemo(() => deriveDesign(spec, wallSections), [spec, wallSections]);
   const flags = useMemo(() => detectIssues(spec).filter((i) => i.severity !== 'pass'), [spec]);
+  // What the 3D view is actually showing: the Show preset as the base, your
+  // own checkboxes over it, x-ray last. One object, one place to reason about.
+  const shownLayers = useMemo(() => ({
+    ...DEFAULT_MODEL_LAYERS,
+    ...(MODEL_SHOW_PRESETS[modelShow] || null),
+    ...layerEdits,
+    xray: xrayOn || Boolean(layerEdits.xray)
+  }), [modelShow, layerEdits, xrayOn]);
+  // Anything YOU switched off is SAID OUT LOUD — a hidden part must never be
+  // mistaken for a missing one, and the costs still cover the whole house.
+  // Counted against the chosen Show preset, not against everything: "finished
+  // house" leaves the timber frame out by design, and announcing that as
+  // something hidden would cry wolf on the view the app opens in.
+  const hiddenLayerCount = useMemo(() => {
+    const base = { ...DEFAULT_MODEL_LAYERS, ...(MODEL_SHOW_PRESETS[modelShow] || null) };
+    const keys = ['wallNorth', 'wallSouth', 'wallEast', 'wallWest', 'roof', 'upperFloors', 'openings', 'rooms', 'frame', 'foundation', 'pad', 'ground', 'elements', 'labels'];
+    return keys.filter((k) => shownLayers[k] === false && base[k] !== false).length + (shownLayers.hiddenCats || []).length;
+  }, [shownLayers, modelShow]);
 
   // Timeline data: phases adapt to the design, hard dependencies come from
   // the construction, the default order honors them, and the schedule
@@ -1651,8 +1676,7 @@ export default function App() {
             selectedRoom={selectedId}
             layers={timelineOpen ? timelineLayers
               : viewMode === 'frame' ? MODEL_SHOW_PRESETS.bones
-              : xrayOn ? { ...DEFAULT_MODEL_LAYERS, ...(MODEL_SHOW_PRESETS[modelShow] || null), xray: true }
-              : (MODEL_SHOW_PRESETS[modelShow] || undefined)}
+              : shownLayers}
             sectionCut={timelineOpen ? 1 : sectionCut}
             context={!timelineOpen && (viewMode === 'frame' || activeChapter === 'frame') ? 'frame' : null}
             viewRequest={viewRequest}
@@ -1903,12 +1927,38 @@ export default function App() {
                   <span>Slice</span>
                   <input type="range" min="8" max="100" value={Math.round(sectionCut * 100)} onChange={(e) => setSectionCut(Number(e.target.value) / 100)} />
                 </label>
+                <button
+                  ref={layersBtnRef}
+                  type="button"
+                  className={layersOpen || hiddenLayerCount > 0 ? 'on' : ''}
+                  title="Show or hide any part of the model — a wall, the roof, the frame, what stands on the site — or pull the whole thing apart"
+                  onClick={() => setLayersOpen((v) => !v)}
+                >Layers{hiddenLayerCount > 0 ? ' · ' + hiddenLayerCount + ' off' : ''}</button>
               </>
             )}
           </div>
 
           <button className="st-build" onClick={openTimeline}>▶ Watch it build</button>
         </>
+      )}
+
+      {/* LAYERS — anything can be switched off, and anything switched off is
+          said out loud. The badge is the whole honesty of the feature: a
+          hidden roof must never be mistaken for a missing roof, and the money
+          and the checks always cover the entire house either way. */}
+      {viewMode === '3d' && webglOK && hiddenLayerCount > 0 && !timelineOpen && (
+        <div className="st-view-badge">
+          <span>Showing part of the house — {hiddenLayerCount} thing{hiddenLayerCount === 1 ? '' : 's'} hidden{shownLayers.xray ? ', x-ray on' : ''}. The costs and the checks still cover all of it.</span>
+          <button type="button" onClick={() => { setLayerEdits({}); setXrayOn(false); }}>Show it all</button>
+        </div>
+      )}
+      {layersOpen && viewMode === '3d' && webglOK && !timelineOpen && (
+        <LayersPanel
+          spec={spec} shown={shownLayers} anchor={layersBtnRef}
+          onSet={(patch) => setLayerEdits((cur) => ({ ...cur, ...patch }))}
+          onReset={() => { setLayerEdits({}); setXrayOn(false); }}
+          onClose={() => setLayersOpen(false)}
+        />
       )}
 
       {/* The flags card — every "to look at" opens to its plain-language
@@ -3792,6 +3842,70 @@ const DIY_TRADES = [
   { field: 'diyRoof', label: 'Roof', costKey: 'roof', fracField: 'sweatRoofFrac', frac: 0.55, note: 'sheathing and covering the roof' },
   { field: 'diyHeat', label: 'Heat', costKey: 'heat', fracField: 'sweatHeatFrac', frac: 0.45, installOnly: true, note: 'setting the heater — the kit is still bought' }
 ];
+// LAYERS — every part of the model, on or off, plus the exploded view that
+// pulls the systems apart. The renderer has understood all of these keys for
+// a long time; nothing in the current app ever offered them.
+function LayersPanel({ spec, shown, anchor, onSet, onReset, onClose }) {
+  // Same clipping law as the export menu: the dock scrolls, so this goes to
+  // the page and positions itself off the button's own rectangle.
+  const rect = anchor?.current?.getBoundingClientRect?.();
+  const style = rect
+    ? { position: 'fixed', bottom: Math.round(window.innerHeight - rect.top + 8), left: Math.round(Math.max(8, Math.min(rect.left - 90, window.innerWidth - 268))) }
+    : { position: 'fixed', bottom: 80, left: 300 };
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  const check = (key, label) => (
+    <label className="st-layer" key={key}>
+      <input type="checkbox" checked={shown[key] !== false} onChange={(e) => onSet({ [key]: e.target.checked })} />
+      <span>{label}</span>
+    </label>
+  );
+  const cats = [...new Set((spec.elements || []).map((el) => el.category || 'custom'))];
+  const hiddenCats = shown.hiddenCats || [];
+  const storeys = storeyInfo(spec.shell).storeys;
+  return createPortal((
+    <div className="st-layers" style={style} data-cap="cap-layers">
+      <div className="st-layers-head"><b>Layers</b><button type="button" onClick={onClose}>×</button></div>
+      <div className="st-layers-group"><span>The building</span>
+        {check('wallNorth', 'North wall')}
+        {check('wallSouth', 'South wall')}
+        {check('wallEast', 'East wall')}
+        {check('wallWest', 'West wall')}
+        {check('roof', 'Roof')}
+        {storeys > 1 && check('upperFloors', 'Upper floors')}
+        {check('openings', 'Windows & doors')}
+        {check('rooms', 'Rooms')}
+        {check('frame', 'Frame')}
+        {check('foundation', 'Foundation')}
+      </div>
+      <div className="st-layers-group"><span>The site</span>
+        {check('pad', 'Site pad')}
+        {check('ground', 'Ground & grid')}
+        {check('elements', 'Everything placed on it')}
+        {shown.elements !== false && cats.map((cat) => (
+          <label className="st-layer sub" key={'cat-' + cat}>
+            <input type="checkbox" checked={!hiddenCats.includes(cat)}
+              onChange={(e) => onSet({ hiddenCats: e.target.checked ? hiddenCats.filter((c) => c !== cat) : [...hiddenCats, cat] })} />
+            <span>{String(cat).charAt(0).toUpperCase() + String(cat).slice(1)}</span>
+          </label>
+        ))}
+      </div>
+      <div className="st-layers-group"><span>How it is drawn</span>
+        {check('labels', 'Room labels')}
+        {check('xray', 'X-ray — walls and roof go see-through')}
+        <label className="st-layer">
+          <input type="checkbox" checked={Boolean(shown.explode)} onChange={(e) => onSet({ explode: e.target.checked })} />
+          <span>Exploded view — pull the parts apart</span>
+        </label>
+      </div>
+      <button type="button" className="st-layers-reset" onClick={onReset}>Show it all again</button>
+    </div>
+  ), document.body);
+}
+
 // TAKING THE DESIGN OUT OF THE APP. The drawing sets, the frame sheets and
 // the BIM file were written years ago and have been sitting in modules
 // nothing rendered — the app could design a house and then not hand you

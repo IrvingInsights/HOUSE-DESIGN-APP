@@ -332,6 +332,14 @@
       "marker": "cap-export",
       "site": "shell",
       "classic": "ExportMenu"
+    },
+    {
+      "id": "layers.panel",
+      "chapter": "shape",
+      "label": "Layers — show or hide any part of the model, x-ray it, or pull it apart (exploded view)",
+      "marker": "cap-layers",
+      "site": "shell",
+      "classic": "LayersPanel"
     }
   ]
 }
