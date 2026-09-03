@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 235 · Sep 2026';
+const UPDATE_STAMP = 'update 236 · Sep 2026';
 // ONE rendering of the update status, used everywhere it's shown (classic's
 // rz-stamp, site's st-stamp-chip) — a build once sat 8 updates behind with no
 // warning anywhere, because "confirmed current" and "couldn't tell" both
@@ -1703,6 +1703,15 @@ export default function App() {
       {!timelineOpen && (
         <>
           <div className="st-rail st-panel">
+            {/* The verdict FIRST — what the house costs so far and what is
+                worth a look — then the chapters. It used to sit under all ten
+                chapters, below the fold on a short window (UX review, Jul 31). */}
+            <div className="st-rail-foot">
+              {flags.length === 0
+                ? <span className="st-strip-clear">all clear</span>
+                : <button className="st-strip-flags" onClick={() => setFlagsPopOpen((v) => !v)}>Worth a look ({flags.length})</button>}
+              <span className="st-strip-total">So far <b onClick={() => setBudgetOpen(true)}>{fmtMoney(derived.total)}</b></span>
+            </div>
             <div className="st-rail-list">
               {CHAPTERS.map((c, i) => (
                 <button key={c.id} className={`st-chapter ${c.id === activeChapter ? 'active' : ''}`}
@@ -1714,12 +1723,6 @@ export default function App() {
                   <span className="st-chapter-label">{c.label}</span>
                 </button>
               ))}
-            </div>
-            <div className="st-rail-foot">
-              {flags.length === 0
-                ? <span className="st-strip-clear">all clear</span>
-                : <button className="st-strip-flags" onClick={() => setFlagsPopOpen((v) => !v)}>Worth a look ({flags.length})</button>}
-              <span className="st-strip-total">So far <b onClick={() => setBudgetOpen(true)}>{fmtMoney(derived.total)}</b></span>
             </div>
             {flagsPopOpen && flags.length > 0 && (
               <div className="st-flags st-panel">
@@ -2474,11 +2477,17 @@ export default function App() {
                       and every half hour of editing. Restoring is safe: what
                       you have now goes to the shelf first. */}
                   {(() => {
+                    // ONE history, not three. The engine's own list below is
+                    // the superset (every save from every window lands there),
+                    // so the browser's ring only shows when the engine cannot
+                    // be reached — two lists with the same names side by side
+                    // read as the same list twice (UX review #10, Jul 31).
+                    if (!backendDown && serverHistory.length > 0) return null;
                     const backups = loadBackups();
                     if (!backups.length) return null;
                     return (
                       <>
-                        <div className="rz-found-head">Backups (kept automatically)</div>
+                        <div className="rz-found-head">Backups kept in this browser</div>
                         {backups.map((b, i) => (
                           <div key={`bk${b.savedAt}-${i}`} className="rz-designs-item">
                             <button className="rz-designs-open" title="Bring this backup back — your current design is saved to the shelf first" onClick={() => {
@@ -2501,7 +2510,7 @@ export default function App() {
                       Restoring is safe: what you have now is snapshotted too. */}
                   {serverHistory.length > 0 && (
                     <>
-                      <div className="rz-found-head">Every save, kept on this computer</div>
+                      <div className="rz-found-head">Earlier moments — every save, kept on this computer</div>
                       {serverHistory.map((rv) => (
                         <div key={rv.file} className="rz-designs-item">
                           <button className="rz-designs-open" title="Bring this saved moment back — your current design is kept too" onClick={async () => {

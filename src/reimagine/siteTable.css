@@ -60,7 +60,8 @@
   border-radius: 50%; background: var(--warn, #a9781f); border: 2px solid #fbfaf6;
 }
 .st-rail-foot {
-  border-top: 1px solid rgba(219, 217, 206, 0.7); margin-top: 6px; padding: 7px 7px 2px;
+  /* sits ABOVE the chapters since update 236: the verdict first, then the map */
+  border-bottom: 1px solid rgba(219, 217, 206, 0.7); margin-bottom: 6px; padding: 2px 7px 8px;
   display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
 }
 .st-strip-flags {
@@ -72,10 +73,9 @@
 .st-strip-total { font-size: 12px; color: var(--muted2, #565a4f); white-space: nowrap; }
 .st-strip-total b { color: var(--ink, #22251f); cursor: pointer; display: block; font-size: 13px; }
 
-/* flags popover opens beside the rail's foot — anchored to the rail's own
-   bottom, so raising the rail's top doesn't move this. */
+/* flags popover opens beside the rail's head (where the verdict now lives). */
 .st-flags {
-  position: absolute; left: 136px; bottom: 4px; top: auto; right: auto; width: 340px;
+  position: absolute; left: 136px; top: 4px; bottom: auto; right: auto; width: 340px;
   border-radius: 14px; padding: 12px 14px; z-index: 7;
   box-shadow: 0 14px 44px rgba(30, 40, 30, 0.18);
 }
