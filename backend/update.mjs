@@ -45,6 +45,16 @@ export async function checkForUpdate() {
 
 export async function applyUpdate() {
   const before = (await git(['rev-parse', 'HEAD'])).stdout;
+  // A folder parked on a side branch is not "current" just because that
+  // branch has nothing new: the work lives on main. Move there first when it
+  // is safe (nothing unsaved); otherwise say so in one sentence and stop.
+  const branch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).stdout;
+  if (branch && branch !== 'main') {
+    const dirty = (await git(['status', '--porcelain'])).stdout;
+    if (dirty) return { ok: false, error: `This folder is on the side branch "${branch}" and has unsaved changes. Run push-to-github.bat to save them, then update again.` };
+    const moved = await git(['checkout', 'main']);
+    if (moved.err) return { ok: false, error: moved.stderr || 'could not switch to the main line' };
+  }
   let pulled = await git(['pull', '--ff-only', 'origin', 'main']);
   if (pulled.err && /would be overwritten|commit your changes|move or remove them/i.test(`${pulled.stderr}\n${pulled.stdout}`)) {
     // A stray local file edit must never brick the one-tap update. Stash it

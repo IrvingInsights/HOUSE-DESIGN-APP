@@ -9,9 +9,13 @@ where git >nul 2>nul && (
   echo Checking for updates...
   git pull --ff-only
 )
+rem Then make sure this folder is on the main line with the newest work - a
+rem folder parked on a side branch never sees main's updates otherwise.
+if exist "tools\update-to-main.cmd" call "tools\update-to-main.cmd"
 rem NOTE: everything above this line must stay byte-identical between
 rem versions — cmd resumes reading THIS file right here after the pull
-rem rewrites it. New logic goes below this point only.
+rem rewrites it (the update-to-main call above lives in its own file for
+rem the same reason). New logic goes below this point only.
 rem Clear any copy of the engine that's already running (old folders too),
 rem so this one always gets the address. Fixes "port already in use".
 powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -like '*server.mjs*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>nul
