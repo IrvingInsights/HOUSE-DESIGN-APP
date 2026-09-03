@@ -385,6 +385,46 @@
       "label": "Start from a drawing — read a floor plan PDF or photo into a design",
       "marker": "cap-trace-start",
       "site": "shell"
+    },
+    {
+      "id": "site.place",
+      "chapter": "systems",
+      "label": "Where the house stands — postcode, and it fills in the rest",
+      "marker": "cap-site-place",
+      "site": "more",
+      "classic": "SiteControls"
+    },
+    {
+      "id": "site.numbers",
+      "chapter": "systems",
+      "label": "How far north, rain a year, and how far the ground falls",
+      "marker": "cap-site-latitude",
+      "site": "more",
+      "classic": "SiteControls"
+    },
+    {
+      "id": "site.rain",
+      "chapter": "systems",
+      "label": "Rain a year, for what the roof can catch",
+      "marker": "cap-site-rain",
+      "site": "more",
+      "classic": "SiteControls"
+    },
+    {
+      "id": "site.slope",
+      "chapter": "systems",
+      "label": "How far the ground falls across the site",
+      "marker": "cap-site-slope",
+      "site": "more",
+      "classic": "SiteControls"
+    },
+    {
+      "id": "site.slope-dir",
+      "chapter": "systems",
+      "label": "Which way the ground falls",
+      "marker": "cap-site-slope-dir",
+      "site": "more",
+      "classic": "SiteControls"
     }
   ]
 }

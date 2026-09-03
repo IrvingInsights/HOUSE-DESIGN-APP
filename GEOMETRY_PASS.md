@@ -48,7 +48,7 @@ per-storey walls, plates, and insulation all shipped safely; copy it).
 
 ## Where the rectangle assumption lives (the map)
 
-All in `src/main.jsx` unless noted. Line numbers drift — search the symbol.
+All in `src/engine.js` and `src/reimagine/App.jsx` unless noted (the old `src/main.jsx` build was retired in update 242). Line numbers drift — search the symbol.
 
 | Symbol | What it assumes | Notes |
 |---|---|---|

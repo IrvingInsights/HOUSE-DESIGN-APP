@@ -100,7 +100,7 @@ function wallAssemblyProfile(envelopeText = '') {
   return { key: 'framed', label: 'Framed Vapor-Open Wall Assembly', thicknessFt: 0.55 };
 }
 
-// --- Per-wall assembly model (shared shape with the client in src/main.jsx) ---
+// --- Per-wall assembly model (shared shape with the client in src/engine.js) ---
 export const WALL_SIDES = ['north', 'south', 'east', 'west'];
 
 export const WALL_ASSEMBLIES = {

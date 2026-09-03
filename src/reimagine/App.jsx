@@ -24,7 +24,7 @@ import {
   DECK_SURFACES, DECK_STAIR_SHAPES, resolveDeck, resolveDeckStairs, derivePartitionOps, interiorFixtures, sourceNote,
   isStair, resolveStair, STAIR_SHAPES, STAIR_FACINGS, STAIR_TURNS, STAIR_DEFAULTS, STAIR_FACING_ORDER, HEATER_FACINGS,
   SHADE_DEVICES, ROOM_ENVELOPES, resolveRoomEnvelope, OUTBUILDING_PRESETS, OUTBUILDING_CONSTRUCTION, FENCE_TYPES, emptyLandSpec,
-  ensureProjectBrain, compactChatForStorage, cleanSavedChatMessages
+  ensureProjectBrain, compactChatForStorage, cleanSavedChatMessages, zipRegionInfo
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms, OUTDOOR_TYPES } from '../placement.js';
 import { createDrawingSetHtml, createIfcSummary } from '../docExports.js';
@@ -83,7 +83,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 241 · Sep 2026';
+const UPDATE_STAMP = 'update 242 · Sep 2026';
 // ONE rendering of the update status, used everywhere it's shown (classic's
 // rz-stamp, site's st-stamp-chip) — a build once sat 8 updates behind with no
 // warning anywhere, because "confirmed current" and "couldn't tell" both
@@ -1712,6 +1712,25 @@ export default function App() {
   const setAllCladding = (value) => applyOps(WALL_SIDES.map((side) => ({ type: 'set_wall_side', wall: side, field: 'cladding', value })));
   const setSourcing = (system, source) => applyOps([{ type: 'set_sourcing', system, value: source }]);
 
+  // --- THE LAND ITSELF ------------------------------------------------------
+  // Where the house stands changes almost every number the app reports: how
+  // much sun the south glass gets, how much rain the roof catches, how far the
+  // ground falls under the foundation. It was editable only in the old build,
+  // which is how retiring that build would have quietly taken it away — the
+  // from-scratch audit caught exactly that and this is the answer to it.
+  const setSite = (field, value) => applyOps([{ type: 'set_site', field, value: String(value) }]);
+  const setSiteZip = (zip) => {
+    const cleaned = String(zip || '').replace(/\D/g, '').slice(0, 5);
+    const info = cleaned.length === 5 ? zipRegionInfo(cleaned) : null;
+    const ops = [{ type: 'set_site', field: 'zip', value: cleaned }];
+    if (info) {
+      ops.push({ type: 'set_site', field: 'latitudeDeg', value: String(info.lat) });
+      ops.push({ type: 'set_site', field: 'rainInYr', value: String(info.rain) });
+    }
+    applyOps(ops);
+    if (info) setRoomNote(`${cleaned} looks like ${info.name} — about ${info.lat.toFixed(1)}° north, and ${info.rain} inches of rain a year. Change either below if you know better.`);
+  };
+
   // --- roof: shape, pitch, insulation, overhang, shed direction --------------
   const setRoofType = (value) => {
     // Switching TO a shed with level eaves needs a fall or it won't drain — so
@@ -2462,13 +2481,16 @@ export default function App() {
               </div>
             )}
             {activeChapter === 'systems' && (
-              <SystemsControls
-                spec={spec}
-                derived={derived}
-                onUtility={setUtilityField}
-                onAddShade={placeShade}
-                onRemoveShade={(d) => removeObject((spec.elements || []).find((el) => el.id === d.id))}
-              />
+              <>
+                <SiteControls spec={spec} onSite={setSite} onZip={setSiteZip} />
+                <SystemsControls
+                  spec={spec}
+                  derived={derived}
+                  onUtility={setUtilityField}
+                  onAddShade={placeShade}
+                  onRemoveShade={(d) => removeObject((spec.elements || []).find((el) => el.id === d.id))}
+                />
+              </>
             )}
             {activeChapter === 'finishes' && (
               <FinishesControls
@@ -5098,6 +5120,50 @@ function SummerControls({ derived, onUtility, onAddShade, onRemoveShade }) {
   );
 }
 const titleCaseWord = (s) => String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1);
+// THE LAND — postcode, how far north, rain, and which way the ground falls.
+// Plain numbers, and the postcode fills in the first two for you rather than
+// asking a person to know their own latitude.
+function SiteControls({ spec, onSite, onZip }) {
+  const site = spec.site || {};
+  return (
+    <div className="rz-found">
+      <div className="rz-shape-note" style={{ marginTop: 0 }}>
+        Where the house stands. This is what the sun, rain and heating numbers are worked out from.
+      </div>
+      <label className="rz-field" data-cap="cap-site-place">
+        <span>Postcode (fills in the rest)</span>
+        <input type="text" inputMode="numeric" maxLength={5} defaultValue={site.zip || ''}
+          placeholder="e.g. 04938"
+          onBlur={(e) => onZip(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }} />
+      </label>
+      <label className="rz-field rz-field-num" data-cap="cap-site-latitude">
+        <span>How far north (degrees)</span>
+        <input type="number" min="0" max="70" step="0.5" value={Number(site.latitudeDeg) || 43}
+          onChange={(e) => onSite('latitudeDeg', e.target.value)} />
+      </label>
+      <label className="rz-field rz-field-num" data-cap="cap-site-rain">
+        <span>Rain a year (inches)</span>
+        <input type="number" min="0" max="200" step="1" value={Number(site.rainInYr) || 38}
+          onChange={(e) => onSite('rainInYr', e.target.value)} />
+      </label>
+      <label className="rz-field rz-field-num" data-cap="cap-site-slope">
+        <span>How far the ground falls across the site (feet)</span>
+        <input type="number" min="0" max="60" step="0.5" value={Number(site.slopeFt) || 0}
+          onChange={(e) => onSite('slopeFt', e.target.value)} />
+      </label>
+      <PickRow label="Which way it falls" value={site.slopeDir || 'south'} onChange={(v) => onSite('slopeDir', v)}
+        data-cap="cap-site-slope-dir"
+        options={[
+          { value: 'south', label: 'South', desc: 'Falls away toward the sun.' },
+          { value: 'north', label: 'North', desc: 'Falls away from the sun.' },
+          { value: 'east', label: 'East', desc: 'Falls toward the morning.' },
+          { value: 'west', label: 'West', desc: 'Falls toward the evening.' }
+        ]} />
+    </div>
+  );
+}
+
 function SystemsControls({ spec, derived, onUtility, onAddShade, onRemoveShade }) {
   const u = utilitiesOf(spec);
   const gpd = Math.round(Number(derived?.septicGpd) || 0);

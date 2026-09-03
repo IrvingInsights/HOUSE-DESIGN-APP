@@ -27,7 +27,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const bimCore = read('backend/bim-core.mjs');
 const plannerEnum = read('backend/planner.mjs');
 // Every UI surface a person can actually click.
-const uiFiles = ['src/main.jsx', 'src/reimagine/App.jsx', 'src/planView.jsx', 'src/threeScene.jsx',
+const uiFiles = ['src/reimagine/App.jsx', 'src/studio/ask.js', 'src/planView.jsx', 'src/threeScene.jsx',
   'src/reimagine/elevationView.jsx', 'src/reimagine/stackView.jsx', 'src/reimagine/interiorWallView.jsx',
   'src/reimagine/siteTable.jsx', 'src/reimagine/shell.jsx'];
 const ui = uiFiles.filter((f) => fs.existsSync(path.join(ROOT, f))).map(read).join('\n');
@@ -38,7 +38,36 @@ const opTypes = [...new Set([
   ...bimCore.matchAll(/op\.type === '([a-z_]+)'/g)
 ].map((m) => m[1]))].sort();
 
-const emittedInUi = (op) => new RegExp(`type:\\s*'${op}'|"type"\\s*:\\s*"${op}"|'${op}'`).test(ui);
+// A screen can fire an op two ways: by writing it out itself, or by calling a
+// shared planner that writes it. Both are "buildable by hand" — planners exist
+// so the same click lands the same object from anywhere. What is NOT allowed
+// is an op only the assistant can reach.
+//
+// So the call is followed, one hop, by name: find the exported helper whose
+// body writes the op, and ask whether any screen calls that helper. This
+// replaced a plain text search of the screens, which quietly counted an op as
+// reachable only while some file happened to mention it — when the old build
+// was retired in update 242, four ops "vanished" that a person could still
+// click, because the string had been in the deleted file.
+const helperSources = ['src/engine.js', 'src/placement.js']
+  .filter((f) => fs.existsSync(path.join(ROOT, f)))
+  .map(read).join('\n');
+const opWritten = (text, op) => new RegExp(`type:\\s*'${op}'|"type"\\s*:\\s*"${op}"|'${op}'`).test(text);
+const helpersWriting = (op) => {
+  const out = [];
+  const fnRe = /export (?:async )?function (\w+)\(/g;
+  const starts = [...helperSources.matchAll(fnRe)].map((m) => ({ name: m[1], at: m.index }));
+  starts.forEach((fn, i) => {
+    const body = helperSources.slice(fn.at, i + 1 < starts.length ? starts[i + 1].at : helperSources.length);
+    if (opWritten(body, op)) out.push(fn.name);
+  });
+  return out;
+};
+const emittedInUi = (op) => {
+  if (opWritten(ui, op)) return true;
+  // one hop: a screen calls a helper, and the helper writes the op
+  return helpersWriting(op).some((fn) => new RegExp(`\\b${fn}\\s*\\(`).test(ui));
+};
 const inPlannerEnum = (op) => plannerEnum.includes(`'${op}'`);
 
 // ---- 2. what a real design is actually MADE of ----------------------------
@@ -67,7 +96,10 @@ const PROBES = [
   { id: 'frame-members', label: 'Hand-placed / hand-removed frame members', ops: ['set_frame'], has: (s) => (s.frame?.removedMembers || []).length > 0 || (s.elements || []).some((e) => e.category === 'framemember') },
   { id: 'roof-profile', label: 'Roof shape, pitch, and fall direction', ops: ['set_roof_profile'], has: (s) => Boolean(s.shell?.roofType) },
   { id: 'roof-planes', label: 'Extra roof planes (dormers, lean-tos over an outdoor room)', ops: ['add_roof_plane', 'add_element'], has: (s) => (s.roofPlanes || []).length > 0 || (s.elements || []).some((e) => e.roofType) },
-  { id: 'sunspace', label: 'A greenhouse / sunspace (glazed south band)', ops: ['set_wall_side'], field: 'sunGlazing', has: (s) => (s.rooms || []).some((r) => r.type === 'plant') },
+  // The glazed south band is built as a greenhouse OPENING in the south wall
+  // (Walls & openings → the greenhouse button), which is a different op from
+  // the old build's wall-level sunGlazing field. Same construct, one control.
+  { id: 'sunspace', label: 'A greenhouse / sunspace (glazed south band)', ops: ['add_opening'], field: 'greenhouse', has: (s) => (s.rooms || []).some((r) => r.type === 'plant') },
   { id: 'shade', label: 'Shade you build or plant — awnings, a trellis, a tree', ops: ['add_element'], has: (s) => (s.elements || []).some((e) => e.category === 'shade') },
   { id: 'flooring', label: 'Floor finish + subfloor', ops: ['set_flooring'], has: (s) => Boolean(s.flooring) },
   { id: 'sourcing', label: 'Where each material comes from', ops: ['set_sourcing'], has: (s) => Boolean(s.sourcing) },
@@ -108,7 +140,12 @@ const PLANNER_CONTROL_OPS = ['no_change', 'request_clarification', 'trace_image_
 // handler as set_roof_profile and added no plane at all. It has its own handler
 // now and its own button in the Roof chapter, so it is a real op with a real
 // screen and belongs in neither list.
-const SUPERSEDED_OPS = { add_floor: 'set_shell storeys + add_element', add_level: 'set_shell storeys', add_loft: 'add_element', add_tower: 'add_element', edit_level: 'resize_object', set_reclaimed: 'set_sourcing', set_roof: 'set_roof_profile', set_wall_assembly: 'set_wall_side', set_wall_segment_assembly: 'resize_wall_segment', add_site_element: 'add_element', add_pad_extension: 'add_element' };
+const SUPERSEDED_OPS = {
+  // A section's LENGTH is set by dragging the wall edge on the plan, and the
+  // whole-house wall system by setting every side at once — so these two
+  // never needed a button of their own in this build.
+  resize_wall_segment: 'move_wall_edge + split_wall_edge on the plan',
+  set_assembly: 'set_wall_side on every side at once', add_floor: 'set_shell storeys + add_element', add_level: 'set_shell storeys', add_loft: 'add_element', add_tower: 'add_element', edit_level: 'resize_object', set_reclaimed: 'set_sourcing', set_roof: 'set_roof_profile', set_wall_assembly: 'set_wall_side', set_wall_segment_assembly: 'resize_wall_segment', add_site_element: 'add_element', add_pad_extension: 'add_element' };
 const orphanOps = opTypes.filter((op) => !emittedInUi(op) && !PLANNER_CONTROL_OPS.includes(op));
 
 const args = process.argv.slice(2);
