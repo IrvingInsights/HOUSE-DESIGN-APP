@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ThreeScene, webglAvailable } from '../threeScene.jsx';
 import { PlanView } from '../planView.jsx';
 import { ElevationView } from './elevationView.jsx';
@@ -22,6 +23,9 @@ import {
   SHADE_DEVICES, ROOM_ENVELOPES, resolveRoomEnvelope, OUTBUILDING_PRESETS, OUTBUILDING_CONSTRUCTION, FENCE_TYPES, emptyLandSpec
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms, OUTDOOR_TYPES } from '../placement.js';
+import { createDrawingSetHtml, createIfcSummary } from '../docExports.js';
+import { createFrameDrawingSetHtml } from '../frameDrawings.js';
+import { exportIfcViaBlender, pushToBlender } from '../blenderBridge.js';
 import { STARTER_DESIGNS } from './starters.js';
 import { AUDIT_BATTERY_SPECS, fuzzBatterySpecs } from './auditBattery.js';
 import '../styles.css';
@@ -75,7 +79,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 236 · Sep 2026';
+const UPDATE_STAMP = 'update 237 · Sep 2026';
 // ONE rendering of the update status, used everywhere it's shown (classic's
 // rz-stamp, site's st-stamp-chip) — a build once sat 8 updates behind with no
 // warning anywhere, because "confirmed current" and "couldn't tell" both
@@ -316,6 +320,8 @@ export default function App() {
   const [heading, setHeading] = useState(0); // camera compass heading (radians) for the overlay compass
   // (the Ask bar's state lived here — parked with the bar, see SURFACE 4b)
   const [budgetOpen, setBudgetOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportBtnRef = useRef(null);
   const [flagsOpen, setFlagsOpen] = useState(false);
   const [activeFloor, setActiveFloor] = useState(1); // 1=ground, 2/3=upper, BASEMENT_LEVEL=basement
   // The Time Machine: open/closed, playhead in weeks, playing, Daniel's custom
@@ -1764,6 +1770,10 @@ export default function App() {
               <button className="st-mini" disabled={!undoStack.length} title="Undo (Ctrl+Z)" onClick={undo}>↶</button>
               <button className="st-mini" disabled={!redoStack.length} title="Redo (Ctrl+Y)" onClick={redo}>↷</button>
               <button className="st-mini" title="Your saved designs, backups, and starters" onClick={() => { setMoreOpen(true); setDesignsOpen(true); }}>≡ designs</button>
+              <div className="st-export">
+                <button ref={exportBtnRef} className="st-mini" title="Take the design out of the app — permit sheets, frame drawings, a BIM file" onClick={() => setExportOpen((v) => !v)}>⬇ export {exportOpen ? '▴' : '▾'}</button>
+                {exportOpen && <ExportMenu spec={spec} flags={flags} anchor={exportBtnRef} onClose={() => setExportOpen(false)} />}
+              </div>
             </div>
             <span className="st-toolbar-div" aria-hidden="true" />
             <SiteQuickRow
@@ -3782,6 +3792,84 @@ const DIY_TRADES = [
   { field: 'diyRoof', label: 'Roof', costKey: 'roof', fracField: 'sweatRoofFrac', frac: 0.55, note: 'sheathing and covering the roof' },
   { field: 'diyHeat', label: 'Heat', costKey: 'heat', fracField: 'sweatHeatFrac', frac: 0.45, installOnly: true, note: 'setting the heater — the kit is still bought' }
 ];
+// TAKING THE DESIGN OUT OF THE APP. The drawing sets, the frame sheets and
+// the BIM file were written years ago and have been sitting in modules
+// nothing rendered — the app could design a house and then not hand you
+// anything to build it with. Every item here is the same generator the old
+// build used; only the menu is new. Blender is optional: those two say so
+// plainly when it isn't installed rather than failing silently.
+function ExportMenu({ spec, flags, anchor, onClose }) {
+  const [busy, setBusy] = useState(null);
+  const [note, setNote] = useState(null);
+  // THE CLIPPING LAW, learned twice: a popup that opens out of a scrolling
+  // strip must not be a child of it. The toolbar is overflow:hidden/auto, so
+  // an in-flow menu was cut off at the toolbar's own edge — the same failure
+  // that made the flags popup invisible for weeks (UX review #3). It goes to
+  // the page itself, positioned off the button's real rectangle.
+  const rect = anchor?.current?.getBoundingClientRect?.();
+  const style = rect
+    ? { position: 'fixed', top: Math.round(rect.bottom + 6), left: Math.round(Math.min(rect.left, window.innerWidth - 346)) }
+    : { position: 'fixed', top: 60, left: 200 };
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  // The old build's "schematic readiness" score, from the same input: how
+  // many things are still worth a look. It rides on the permit sheets.
+  const score = Math.max(42, 100 - (flags?.length || 0) * 16);
+  const rev = spec.revision;
+  const go = (label, run) => async () => {
+    setBusy(label); setNote(null);
+    try { const said = await run(); setNote(said || null); if (!said) onClose(); }
+    catch (e) { setNote(String(e?.message || e)); }
+    finally { setBusy(null); }
+  };
+  return createPortal((
+    <div className="st-export-menu" style={style} data-cap="cap-export">
+      <button type="button" disabled={Boolean(busy)} onClick={go('permit', () => {
+        downloadFile(`permit-set-rev-${rev}.html`, createDrawingSetHtml(spec, score, flags || []), 'text/html');
+      })}><b>Permit sheets</b>Plan, elevations, wall section and foundation, drawn to scale. Opens in a browser; print to paper or PDF.</button>
+
+      <button type="button" disabled={Boolean(busy)} onClick={go('frame', () => {
+        downloadFile(`frame-drawings-rev-${rev}.html`, createFrameDrawingSetHtml(spec), 'text/html');
+      })}><b>Frame drawings</b>Shop sheets of the structure — posts, plates, braces, rafters — with a member list. Print at 11×17.</button>
+
+      <button type="button" disabled={Boolean(busy)} onClick={go('brief', () => {
+        const lines = [
+          `${spec.projectName} — save #${rev}`, '',
+          `Worth a look: ${(flags || []).length} item(s)`,
+          ...(flags || []).map((f) => `- ${f.title}${f.fix ? ` — ${f.fix}` : ''}`), '',
+          'Rooms',
+          ...(spec.rooms || []).map((r) => `- ${r.name}: ${Math.round((r.w || 0) * (r.d || 0))} sq ft, ${r.type || 'room'}`), '',
+          'Systems',
+          ...Object.entries(spec.systems || {}).map(([k, v]) => `- ${k}: ${v}`)
+        ];
+        downloadFile(`design-brief-rev-${rev}.md`, lines.join(String.fromCharCode(10)), 'text/markdown');
+      })}><b>Written brief</b>The design in words — rooms, systems, and everything still worth a look.</button>
+
+      <button type="button" disabled={Boolean(busy)} onClick={go('data', () => {
+        downloadFile(`bim-data-rev-${rev}.json`, JSON.stringify(createIfcSummary(spec), null, 2), 'application/json');
+      })}><b>BIM data (for other software)</b>The building as structured data. To reopen it here instead, use "Save to a file" under designs.</button>
+
+      <button type="button" disabled={Boolean(busy)} onClick={go('ifc', async () => {
+        const r = await exportIfcViaBlender(spec);
+        return r && r.ok
+          ? `IFC written: ${r.path} (${r.count} parts). Open it in any BIM viewer.`
+          : `Could not write the IFC file: ${(r && r.error) || 'unknown'}. This one needs Blender installed.`;
+      })}><b>IFC file (needs Blender)</b>A real BIM model for architects and engineers. Only this and the next need Blender installed.</button>
+
+      <button type="button" disabled={Boolean(busy)} onClick={go('blender', async () => {
+        await pushToBlender(spec);
+        return 'Sent to Blender — the model is rebuilding there.';
+      })}><b>Send to Blender</b>Rebuild this design in Blender to render or keep working on it.</button>
+
+      {busy && <div className="st-export-note">Working on it…</div>}
+      {note && <div className="st-export-note">{note}</div>}
+    </div>
+  ), document.body);
+}
+
 function BudgetSheet({ derived, onClose, onToggleDiy }) {
   const [openKey, setOpenKey] = useState(null);
   const rows = COST_ROWS

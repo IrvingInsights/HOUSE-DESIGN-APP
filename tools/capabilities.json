@@ -324,6 +324,14 @@
       "marker": "cap-structures-add",
       "site": "more",
       "classic": "StructurePalette"
+    },
+    {
+      "id": "export.set",
+      "chapter": "shape",
+      "label": "Export — permit sheets, frame drawings, a written brief, BIM data, IFC via Blender",
+      "marker": "cap-export",
+      "site": "shell",
+      "classic": "ExportMenu"
     }
   ]
 }

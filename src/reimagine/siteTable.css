@@ -301,3 +301,25 @@
 .st-look.st-more-open .rz-trail .rz-stamp { display: none; }
 .st-look.st-more-open .rz-trail .rz-trail-toggle { display: none; }
 .st-look.st-more-open .rz-trail-body { flex: 1; min-height: 0; overflow-y: auto; }
+
+/* Export — the design leaving the app: sheets, drawings, a BIM file. */
+.st-export { position: relative; }
+.st-export-menu {
+  /* positioned by the component (fixed, off the button's rect) because the
+     toolbar clips its own children — see THE CLIPPING LAW in App.jsx. */
+  z-index: 60; width: 330px;
+  display: flex; flex-direction: column; gap: 3px; padding: 6px;
+  background: #fff; border: 1px solid rgba(219, 217, 206, 0.9); border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(30, 40, 30, 0.18);
+}
+.st-export-menu button {
+  display: block; width: 100%; text-align: left; padding: 7px 9px; border: 0; border-radius: 8px; background: transparent;
+  font: inherit; font-size: 11.5px; color: var(--muted2, #565a4f); line-height: 1.35; cursor: pointer;
+}
+.st-export-menu button b { display: block; font-size: 13px; color: var(--ink, #22251f); }
+.st-export-menu button:hover:not(:disabled) { background: rgba(226, 236, 238, 0.6); }
+.st-export-menu button:disabled { opacity: 0.5; cursor: default; }
+.st-export-note {
+  padding: 7px 9px; font-size: 11.5px; line-height: 1.4; color: var(--ink, #22251f);
+  background: rgba(226, 236, 238, 0.5); border-radius: 8px;
+}
