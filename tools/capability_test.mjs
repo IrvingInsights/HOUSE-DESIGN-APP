@@ -88,6 +88,22 @@ for (const cap of manifest.capabilities) {
   // component is actually rendered somewhere. Added when the sweat-equity
   // switches went into the budget — the trades you take on yourself are worth
   // tens of thousands, and they belong where you read the total.
+  // site:"shell" — a control that belongs to the app's own chrome, not to any
+  // chapter or sheet: starting a design, exporting one, asking the studio,
+  // choosing what the 3D view shows. The contract is simply that a control
+  // carrying the marker exists in the default look; if it also names a
+  // component, that component must be rendered. Added with 'Start on empty
+  // land' (update 235) — the first capability with no chapter to live in.
+  if (cap.site === 'shell') {
+    ok(src.includes(`data-cap="${cap.marker}"`), `${tag} — no control carries data-cap="${cap.marker}" anywhere`);
+    if (cap.classic) {
+      const comp = sliceFunction(cap.classic);
+      ok(Boolean(comp), `${tag} — component '${cap.classic}' not found`);
+      ok(Boolean(comp && comp.includes(cap.marker)), `${tag} — marker '${cap.marker}' missing from ${cap.classic}`);
+      ok(src.includes(`<${cap.classic}`), `${tag} — ${cap.classic} is never rendered, so nothing can open it`);
+    }
+    continue;
+  }
   if (cap.site === 'sheet') {
     const sheet = cap.classic ? sliceFunction(cap.classic) : null;
     ok(src.includes(`data-cap="${cap.marker}"`), `${tag} — no control carries data-cap="${cap.marker}" anywhere`);

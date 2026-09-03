@@ -132,6 +132,22 @@ export const seedSpec = {
   notes: 'A compact professional schematic home with farm entry, wet core, south-facing commons, natural materials, and BIM-ready object hierarchy.'
 };
 
+// EMPTY LAND — the honest blank start. The seed above is the SAMPLE HOUSE
+// (six rooms, five openings); for years '+ New' loaded it silently, so there
+// was no way to begin from nothing and place your own rooms. This keeps the
+// seed's shell (the 18-ft minimum in updateShell means a shell must exist)
+// and empties everything that stands in or on it.
+export function emptyLandSpec() {
+  const next = structuredClone(seedSpec);
+  next.projectName = 'My natural home';
+  next.revision = 1;
+  next.rooms = [];
+  next.elements = [];
+  next.openings = [];
+  next.levels = [];
+  return next;
+}
+
 export function loadSavedDashboardState() {
   if (typeof window === 'undefined') return null;
   try {

@@ -189,6 +189,7 @@ const KNEEWALL_OPENINGS = (() => {
 // law, finite meshes. Deterministic seeds so a failure replays exactly; any
 // failure gets pinned above as a named design forever.
 import { generateFuzzDesign } from './designFuzz.js';
+import { emptyLandSpec } from '../engine.js';
 export function fuzzBatterySpecs(count = 12, seed = 4242) {
   const out = [];
   for (let n = 0; n < count; n += 1) {
@@ -205,6 +206,9 @@ export function fuzzBatterySpecs(count = 12, seed = 4242) {
 // lists mesh tags that MUST be present in the rendered scene — absence is a
 // failure (that's how a silently-culled greenhouse gets caught).
 export const AUDIT_BATTERY_SPECS = [
+  // The blank start: a bare shell with nothing in it must render, cost, and
+  // check without a single throw — it is what 'Start on empty land' commits.
+  { name: 'empty land (bare shell, no rooms)', spec: emptyLandSpec() },
   { name: 'legacy set-back shed (rev-435 shape)', spec: LEGACY_SETBACK_SHED },
   { name: 'legacy 96-ft porch tier', spec: LEGACY_PORCH_TIER_96 },
   { name: 'fresh 17/10 shed, 3 storeys', spec: FRESH_TALL_SHED },

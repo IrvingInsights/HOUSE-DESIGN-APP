@@ -19,7 +19,7 @@ import {
   resolveDrainage, DRAINAGE_DISCHARGE, roofRunoffGallons, downloadFile,
   DECK_SURFACES, DECK_STAIR_SHAPES, resolveDeck, resolveDeckStairs, derivePartitionOps, interiorFixtures, sourceNote,
   isStair, resolveStair, STAIR_SHAPES, STAIR_FACINGS, STAIR_TURNS, STAIR_DEFAULTS, STAIR_FACING_ORDER, HEATER_FACINGS,
-  SHADE_DEVICES, ROOM_ENVELOPES, resolveRoomEnvelope, OUTBUILDING_PRESETS, OUTBUILDING_CONSTRUCTION, FENCE_TYPES
+  SHADE_DEVICES, ROOM_ENVELOPES, resolveRoomEnvelope, OUTBUILDING_PRESETS, OUTBUILDING_CONSTRUCTION, FENCE_TYPES, emptyLandSpec
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms, OUTDOOR_TYPES } from '../placement.js';
 import { STARTER_DESIGNS } from './starters.js';
@@ -75,7 +75,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 234 · Sep 2026';
+const UPDATE_STAMP = 'update 235 · Sep 2026';
 // ONE rendering of the update status, used everywhere it's shown (classic's
 // rz-stamp, site's st-stamp-chip) — a build once sat 8 updates behind with no
 // warning anywhere, because "confirmed current" and "couldn't tell" both
@@ -1271,11 +1271,17 @@ export default function App() {
     });
   };
   // "Start a new design" — the current one is auto-saved to the shelf first.
-  const startFresh = () => {
-    if (!window.confirm('Start a new design?\n\nYour current design is saved to the My designs shelf automatically, so you can always come back to it.')) return;
+  // Two honest starts: EMPTY LAND (a bare shell, nothing in it — you place the
+  // rooms) and THE SAMPLE HOUSE (the six-room seed). '+ New' used to load the
+  // sample silently, so there was no way at all to begin from nothing.
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
+  const startNew = (kind) => {
+    const empty = kind === 'empty';
+    if (!window.confirm(`${empty ? 'Start on empty land?' : 'Start from the sample house?'}\n\nYour current design is saved to the My designs shelf automatically, so you can always come back to it.`)) return;
+    setNewMenuOpen(false);
     snapshotBeforeReplace();
     try { localStorage.removeItem(STORE_KEY); } catch { /* fine */ }
-    commitSpec(structuredClone(seedSpec)); // undoable — Ctrl+Z brings the design back
+    commitSpec(empty ? emptyLandSpec() : structuredClone(seedSpec)); // undoable — Ctrl+Z brings the design back
     setSelectedId(null);
     setPhaseOrder(null);
   };
@@ -2338,8 +2344,14 @@ export default function App() {
                 <button className="rz-designs-toggle" onClick={() => setDesignsOpen((v) => !v)} title="Your saved designs">
                   {designsOpen ? '▾' : '▸'} My designs{designs.length ? ` (${designs.length})` : ''}
                 </button>
-                <button className="rz-designs-new" title="Start a brand-new design (your current one is auto-saved to the shelf first)" onClick={startFresh}>+ New</button>
+                <button className="rz-designs-new" title="Start a brand-new design (your current one is auto-saved to the shelf first)" onClick={() => setNewMenuOpen((v) => !v)}>+ New {newMenuOpen ? '▴' : '▾'}</button>
               </div>
+              {newMenuOpen && (
+                <div className="rz-new-menu" data-cap="cap-new-design">
+                  <button type="button" onClick={() => startNew('empty')}><b>Start on empty land</b>A bare shell with nothing in it — you place the rooms.</button>
+                  <button type="button" onClick={() => startNew('sample')}><b>Start from the sample house</b>Six rooms already laid out, yours to rework.</button>
+                </div>
+              )}
               {designsOpen && (
                 <div className="rz-designs-panel">
                   <button className="rz-designs-save" onClick={handleSaveDesign}>💾 Save this design</button>

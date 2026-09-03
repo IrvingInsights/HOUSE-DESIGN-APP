@@ -27,6 +27,7 @@ import {
   buildTimeline, materialsTakeoff, planNewRoomPlacements
 } from '../src/engine.js';
 import { generateFuzzDesign, injectLegacyDamage } from '../src/reimagine/designFuzz.js';
+import { emptyLandSpec } from '../src/engine.js';
 
 const argOf = (name, dflt) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -169,6 +170,31 @@ for (let n = 0; n < COUNT; n += 1) {
       runInvariants(healed, seed, 'damaged');
     }
   }
+}
+
+// EMPTY LAND — the blank start ('Start on empty land', update 235). A bare
+// shell with no rooms, elements, openings or levels must satisfy every
+// invariant on its own, and must take the first few things a person does on
+// it (a room, a wall size, a door) without a throw. Fixed seed 0 so a failure
+// here always says "empty land", never a fuzz number.
+{
+  const empty = emptyLandSpec();
+  check(Array.isArray(empty.rooms) && empty.rooms.length === 0, 0, 'empty-land starts with no rooms');
+  runInvariants(empty, 0, 'empty-land');
+  let grown = empty;
+  const firstMoves = [
+    { type: 'set_shell', field: 'widthFt', value: 30 },
+    { type: 'add_room', name: 'Great Room', w: 16, d: 14, x: 0.01, y: 0.01, roomType: 'living' },
+    { type: 'add_opening', wall: 'south', openingType: 'door', widthFt: 3, x: 4 }
+  ];
+  for (const op of firstMoves) {
+    try {
+      const r = applyBimOperations(grown, { operations: [op] });
+      grown = r.spec || r;
+      check(Boolean(grown && grown.shell), 0, `empty-land takes ${op.type}`);
+    } catch (e) { check(false, 0, `empty-land ${op.type} throws`, e && e.message); }
+  }
+  runInvariants(grown, 0, 'empty-land+first-moves');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

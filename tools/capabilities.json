@@ -2,6 +2,13 @@
   "_what": "The user-facing capability inventory. Every entry names a control that must be reachable in the DEFAULT (site) look. site:'quick' = its data-cap marker must render inside SiteQuickRow's branch for that chapter. site:'more' = it may live behind the More panel (the classic component named in 'classic'), but that chapter's quick row must then carry a cap-more-<chapter> signpost or an onMore control. Removing a control without editing this file is a test failure — that is the point. Checker: tools/capability_test.mjs (static reachability; it cannot catch CSS hiding or occlusion — that is the live elementFromPoint audit's job).",
   "capabilities": [
     {
+      "id": "new.empty-land",
+      "chapter": "shape",
+      "label": "Start on empty land — a bare shell with no rooms, or the sample house, from + New",
+      "marker": "cap-new-design",
+      "site": "shell"
+    },
+    {
       "id": "shape.outline",
       "chapter": "shape",
       "label": "Pick the building outline — rectangle, L, T, U, round",
