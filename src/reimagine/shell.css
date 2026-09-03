@@ -852,9 +852,18 @@ button.rz-storey-name:hover { color: var(--evergreen, #3c6472); background: colo
   background: #fff; border: 1px solid var(--line, #d8d2c4); border-radius: 8px;
 }
 .rz-new-menu button {
-  text-align: left; padding: 7px 9px; border: 0; border-radius: 6px;
+  display: block; width: 100%; text-align: left; padding: 7px 9px; border: 0; border-radius: 6px;
   background: transparent; color: var(--ink, #3b3328); font: inherit; font-size: 12.5px; cursor: pointer; line-height: 1.3;
 }
 .rz-new-menu button b { font-size: 13.5px; }
 .rz-new-menu button b { display: block; }
 .rz-new-menu button:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 60%, transparent); }
+
+/* "Start from a drawing" sits in the New menu and behaves like its siblings. */
+.st-new-trace {
+  display: block; text-align: left; padding: 7px 9px; border-radius: 6px;
+  font-size: 12.5px; color: var(--ink, #3b3328); line-height: 1.3; cursor: pointer;
+}
+.st-new-trace b { display: block; font-size: 13.5px; }
+.st-new-trace:hover { background: color-mix(in srgb, var(--sage, #e2ecee) 60%, transparent); }
+.st-new-trace input { display: none; }

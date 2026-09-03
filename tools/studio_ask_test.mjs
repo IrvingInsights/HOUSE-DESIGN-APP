@@ -16,7 +16,7 @@
 //
 // Run: node tools/studio_ask_test.mjs
 import { seedSpec } from '../src/engine.js';
-import { askStudio, aiUnavailableNotice, isConnectionError } from '../src/studio/ask.js';
+import { askStudio, aiUnavailableNotice, isConnectionError, plainDescription } from '../src/studio/ask.js';
 
 let pass = 0; let fail = 0;
 const check = (ok, label, detail = '') => {
@@ -127,6 +127,23 @@ console.log('the ask ladder:');
   check(isConnectionError(new Error('NetworkError when attempting to fetch')), 'firefox wording');
   check(isConnectionError(new Error('Load failed')), 'safari wording');
   check(!isConnectionError(new Error('BIM apply failed with HTTP 500')), 'a server error is not a connection error');
+}
+
+// 10 — asking the team with no AI key: an honest note plus the app's own
+// plain description, never a canned paragraph that reads like an answer.
+{
+  globalThis.fetch = async () => ({
+    ok: true, status: 200,
+    json: async () => ({ source: 'studio-error', reply: '', warnings: ['Cannot read properties of undefined'] })
+  });
+  const r = await askStudio({ prompt: 'what is this house made of?', spec: base, target: 'team' });
+  const text = said(r);
+  check(/needs an AI key|not set up/i.test(text), 'it says the AI is not switched on');
+  check(/\d+ by \d+ feet/.test(text), 'and still describes the house in plain words', text.slice(0, 90));
+  check(!/\bBIM\b|snapshot|\bprompt\b/i.test(text), 'with no jargon in it', text.slice(0, 130));
+  check(!r.nextSpec, 'and asking the team never changes the design');
+  const plain = plainDescription(base);
+  check(!/\bBIM\b|\bspec\b|\bshell\b/i.test(plain), 'the plain description carries no jargon either', plain.slice(0, 90));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

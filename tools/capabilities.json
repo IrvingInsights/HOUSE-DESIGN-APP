@@ -378,6 +378,13 @@
       "marker": "cap-chat-attach",
       "site": "shell",
       "classic": "ChatDrawer"
+    },
+    {
+      "id": "trace.start",
+      "chapter": "shape",
+      "label": "Start from a drawing — read a floor plan PDF or photo into a design",
+      "marker": "cap-trace-start",
+      "site": "shell"
     }
   ]
 }

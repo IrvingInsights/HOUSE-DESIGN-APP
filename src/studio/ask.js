@@ -78,11 +78,20 @@ export async function askStudio({
         question: said, prompt: said, spec, bim: spec, selected,
         chatMessages: chatMessages.slice(-12), projectBrain
       });
+      const answer = String(result?.answer || result?.reply || '').trim();
+      // The app's own facts, when the server sends them instead of an answer.
       const down = aiUnavailableNotice(result?.warnings);
-      return { messages: [...mine, studio(down || result?.answer || buildStudioConversationResponse(said, spec, selected, detectIssues(spec), attachments))] };
+      // An empty answer with a warning attached is the AI having failed, and
+      // it must read as that. The old build filled the silence with a canned
+      // paragraph about "BIM edits" — jargon, and worse, it looked like a
+      // real answer to a question nothing had actually read.
+      if (!answer) {
+        return { messages: [...mine, studio(`${down || AI_NOT_SET_UP}\n\n${String(result?.facts || '').trim() || plainDescription(spec)}`)] };
+      }
+      return { messages: [...mine, studio(answer)] };
     } catch (error) {
       if (isConnectionError(error)) return { messages: [...mine, studio(ENGINE_OFFLINE)] };
-      return { messages: [...mine, studio(buildStudioConversationResponse(said, spec, selected, detectIssues(spec), attachments) + `\n\n(The AI service was unavailable just now — ${error.message} — so this is the app's own answer, not a read of your design by the AI.)`)] };
+      return { messages: [...mine, studio(`${AI_NOT_SET_UP}\n\n${plainDescription(spec)}`)] };
     }
   }
 
@@ -162,3 +171,26 @@ export async function askStudio({
 }
 
 export const ENGINE_OFFLINE = 'I could not reach the design engine, so nothing was changed — this is not about your request. The engine is the black window that opened with the app; if it has closed, double-click start.bat in the app folder and try again.';
+
+export const AI_NOT_SET_UP = 'The part of the app that answers questions needs an AI key, and there is none on this computer, so this answer is the app\'s own — not an expert reading your design. To switch the AI on, copy .env.example to .env.local in the app folder and put a Gemini key in it (free at aistudio.google.com).';
+
+// What the app can say about a house on its own, in the words a person would
+// use. No jargon, no invented opinions: only what is actually in the design.
+export function plainDescription(spec) {
+  const s = spec.shell || {};
+  const u = spec.utilities || {};
+  const rooms = (spec.rooms || []).filter((r) => Number(r.level || 1) > 0);
+  const inside = rooms.reduce((sum, r) => sum + (Number(r.w) || 0) * (Number(r.d) || 0), 0);
+  const walls = (spec.walls && Object.values(spec.walls).map((w) => w?.assembly).filter(Boolean)) || [];
+  const wallWord = walls.length ? [...new Set(walls)].join(' and ').replace(/-/g, ' ') : 'not chosen yet';
+  const storeys = Math.max(1, Math.round(Number(s.storeys) || 1));
+  // A stored value nobody typed ("masonry_heater") read out loud.
+  const humanWord = (v) => (v ? String(v).replace(/_/g, ' ') : '');
+  const HEAT = { wood_stove: 'a wood stove', masonry: 'a masonry heater', masonry_heater: 'a masonry heater', mini_split: 'a heat pump', none: 'nothing yet' };
+  const lines = [
+    `What the design says right now: ${Math.round(Number(s.widthFt) || 0)} by ${Math.round(Number(s.depthFt) || 0)} feet, ${storeys === 1 ? 'one floor' : `${storeys} floors`}, about ${Math.round(inside).toLocaleString()} square feet of room laid out in ${rooms.length} room${rooms.length === 1 ? '' : 's'}.`,
+    `Walls: ${wallWord}. Roof: ${s.roofType || 'not chosen'}.`,
+    `Heat: ${HEAT[u.heatSource] || humanWord(u.heatSource) || 'not chosen'}. Water: ${humanWord(u.waterSource) || 'not chosen'}. Power: ${humanWord(u.powerMode) || 'not chosen'}.`
+  ];
+  return lines.join('\n');
+}

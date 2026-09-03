@@ -2,24 +2,34 @@ import { OPENAI_IMAGE_MAX, OPENAI_STUDIO_MODEL } from './config.mjs';
 import { callGemini, geminiParts, hasGemini } from './gemini.mjs';
 import { getCached, makeCacheKey, setCached } from './cache.mjs';
 
+// WITH NO AI KEY, THE HONEST ANSWER IS "I CANNOT ANSWER THAT".
+//
+// This used to reply "I read that as a design discussion prompt. Current model
+// snapshot: 28' x 32', roof shed, 19 rooms, 29 openings…" — jargon, addressed
+// to a non-coder, and worse: it has the shape of an answer, so a question that
+// was never read looks answered. The app's own rule is that a dead AI is said
+// out loud, never covered over. So: no invented reply, a warning that names
+// the real cause, and the plain facts of the house, which the app does know
+// without any AI at all.
 function localStudioResponse(payload) {
   const spec = payload.spec || payload.bim || {};
-  const prompt = String(payload.prompt || '');
-  const attachedImages = payload.attachedImages || [];
-  const shell = spec?.shell ? `${spec.shell.widthFt}' x ${spec.shell.depthFt}'` : 'unknown shell';
-  const roof = spec?.shell?.roofType || 'unknown roof';
-  const selected = payload.selected?.name || 'nothing selected';
-  const roomCount = Array.isArray(spec.rooms) ? spec.rooms.length : 0;
-  const openingCount = Array.isArray(spec.openings) ? spec.openings.length : 0;
-
-  const text = attachedImages.length
-    ? `I can discuss the current BIM model, but I still cannot truly inspect the attached image in fallback mode. Current model snapshot: ${shell}, roof ${roof}, ${roomCount} rooms, ${openingCount} openings, selected object ${selected}.`
-    : `I read that as a design discussion prompt. Current model snapshot: ${shell}, roof ${roof}, ${roomCount} rooms, ${openingCount} openings, selected object ${selected}.`;
-
+  const shell = spec?.shell || {};
+  const rooms = Array.isArray(spec.rooms) ? spec.rooms.filter((r) => Number(r.level || 1) > 0) : [];
+  const floorArea = rooms.reduce((sum, r) => sum + (Number(r.w) || 0) * (Number(r.d) || 0), 0);
+  const storeys = Math.max(1, Math.round(Number(shell.storeys) || 1));
+  const utilities = spec.utilities || {};
+  // A stored value nobody typed ("masonry_heater") read out loud.
+  const humanWord = (v) => (v ? String(v).replace(/_/g, ' ') : '');
+  const HEAT = { wood_stove: 'a wood stove', masonry: 'a masonry heater', masonry_heater: 'a masonry heater', mini_split: 'a heat pump', none: 'nothing yet' };
+  const facts = [
+    `${Math.round(Number(shell.widthFt) || 0)} by ${Math.round(Number(shell.depthFt) || 0)} feet, ${storeys === 1 ? 'one floor' : storeys + ' floors'}, ${rooms.length} room${rooms.length === 1 ? '' : 's'} covering about ${Math.round(floorArea).toLocaleString()} square feet.`,
+    `Roof: ${shell.roofType || 'not chosen yet'}. Heat: ${HEAT[utilities.heatSource] || humanWord(utilities.heatSource) || 'not chosen yet'}.`
+  ].join(' ');
   return {
     source: 'local-studio-fallback',
-    reply: `${text} Prompt received: "${prompt}".`,
-    warnings: attachedImages.length ? ['Vision comparison is unavailable in fallback mode.'] : []
+    reply: '',
+    facts,
+    warnings: ['AI planner unavailable: no API key is configured on this computer.']
   };
 }
 

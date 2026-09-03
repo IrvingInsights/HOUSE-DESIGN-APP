@@ -83,7 +83,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 240 · Sep 2026';
+const UPDATE_STAMP = 'update 241 · Sep 2026';
 // ONE rendering of the update status, used everywhere it's shown (classic's
 // rz-stamp, site's st-stamp-chip) — a build once sat 8 updates behind with no
 // warning anywhere, because "confirmed current" and "couldn't tell" both
@@ -159,6 +159,14 @@ function scrubLayers(schedule, scrubWeek, spec) {
 // browser's local storage (this machine only), and the app picks it back up
 // on the next open. Losing an hour of design to a refresh is not a thing.
 const STORE_KEY = 'rz.design.v1';
+// The conversation is kept too, trimmed of attached images (a base64 drawing
+// in every save would bloat the file the design itself lives in). A chat that
+// empties itself on reload reads as work lost.
+const CHAT_KEY = 'rz.chat.v1';
+const loadChat = () => {
+  try { return cleanSavedChatMessages(JSON.parse(localStorage.getItem(CHAT_KEY) || '[]')); }
+  catch { return []; }
+};
 // The engine-side design store's project id — the reimagine app's own folder
 // (.data/projects/reimagine), separate from the classic console's.
 const PROJECT_QS = '?project=reimagine';
@@ -336,14 +344,14 @@ export default function App() {
   // THE CHAT. Closed by default — the model is what you came to look at — and
   // anything that arrives while it is closed badges the button.
   const [chatOpen, setChatOpen] = useState(false);
-  const [chatMessages, setChatMessages] = useState([]);
+  const [chatMessages, setChatMessages] = useState(loadChat);
   const [chatTarget, setChatTarget] = useState('design');
   const [chatPrompt, setChatPrompt] = useState('');
   const [chatBusy, setChatBusy] = useState(false);
   const [chatNote, setChatNote] = useState('');
   const [chatUnread, setChatUnread] = useState(0);
   const [attachments, setAttachments] = useState([]);
-  const [projectBrain, setProjectBrain] = useState(null);
+  const [projectBrain, setProjectBrain] = useState(() => ensureProjectBrain(null, seedSpec));
   const [flagsOpen, setFlagsOpen] = useState(false);
   const [activeFloor, setActiveFloor] = useState(1); // 1=ground, 2/3=upper, BASEMENT_LEVEL=basement
   // The Time Machine: open/closed, playhead in weeks, playing, Daniel's custom
@@ -495,6 +503,28 @@ export default function App() {
       setChatNote('');
     }
   };
+  // Begin on empty land with the drawing attached and the ask already
+  // written, so "read my plan" is one action rather than four.
+  const startFromDrawing = (file) => {
+    setNewMenuOpen(false);
+    snapshotBeforeReplace();
+    commitSpec(emptyLandSpec());
+    setSelectedId(null);
+    setChatOpen(true);
+    setChatPrompt('Read this drawing and build the model from it.');
+    attachToChat(file);
+  };
+  // The conversation keeps itself, on its own clock. Hanging it off the
+  // design's autosave meant a chat that only survived a reload if you had
+  // ALSO moved something — which is the kind of "sometimes" bug nobody can
+  // report usefully.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try { localStorage.setItem(CHAT_KEY, JSON.stringify(compactChatForStorage(chatMessages).slice(-40))); } catch { /* storage blocked */ }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [chatMessages]);
+
   const attachToChat = (file) => readAttachment(file, {
     onAttach: (att) => {
       setAttachments((items) => [att, ...items].slice(0, 6));
@@ -2579,6 +2609,14 @@ export default function App() {
                 <div className="rz-new-menu" data-cap="cap-new-design">
                   <button type="button" onClick={() => startNew('empty')}><b>Start on empty land</b>A bare shell with nothing in it — you place the rooms.</button>
                   <button type="button" onClick={() => startNew('sample')}><b>Start from the sample house</b>Six rooms already laid out, yours to rework.</button>
+                  {/* THE DRAWING DOOR. The reader is good but not perfect, and
+                      says so here rather than in a footnote — it is a strong
+                      starting point, not a copy, and it grades its own work. */}
+                  <label className="st-new-trace" data-cap="cap-trace-start">
+                    <b>Start from a drawing</b>Read a floor plan (PDF or photo) into a design you can then change. A good starting point, not an exact copy — the app grades its own reading.
+                    <input type="file" accept="image/*,application/pdf,.pdf"
+                      onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) startFromDrawing(f); }} />
+                  </label>
                 </div>
               )}
               {designsOpen && (
