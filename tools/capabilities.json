@@ -340,6 +340,13 @@
       "marker": "cap-layers",
       "site": "shell",
       "classic": "LayersPanel"
+    },
+    {
+      "id": "review.fixes",
+      "chapter": "shape",
+      "label": "Take a one-tap fix on anything worth a look — the app makes the change itself",
+      "marker": "cap-review-fix",
+      "site": "shell"
     }
   ]
 }

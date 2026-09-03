@@ -79,7 +79,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 238 · Sep 2026';
+const UPDATE_STAMP = 'update 239 · Sep 2026';
 // ONE rendering of the update status, used everywhere it's shown (classic's
 // rz-stamp, site's st-stamp-chip) — a build once sat 8 updates behind with no
 // warning anywhere, because "confirmed current" and "couldn't tell" both
@@ -946,6 +946,80 @@ export default function App() {
       ? `Added the ${plan.names[0]} — no free floor, so it landed mid-plan overlapping. Drag rooms apart, shrink something, or grow the Shape; the walls and foundation stayed exactly where you set them.`
       : `Added the ${plan.names[0]}${level !== 1 ? ` on the ${floorLabel(spec, level).toLowerCase()}` : ''}.`);
   };
+  // ONE-TAP FIXES. Every flag that has a known remedy carries a fixId; this
+  // turns that id into real operations. They all go through applyOps, so a fix
+  // is one undoable step like any other edit, and the same healing runs over
+  // it. Ported from the old build, which had fifteen of these while this one
+  // had three — the flags said what was wrong and then made you go and do it.
+  const FIX_LABELS = {
+    'enclose-rooms': 'Grow the walls to take them in',
+    'give-shed-fall': 'Give the roof its fall',
+    'add-wet-core': 'Add a bathroom',
+    'add-mudroom': 'Add a mudroom',
+    'add-south-entry': 'Put a door in the south wall',
+    'add-south-glass': 'Add a south window',
+    'add-stair': 'Add a stair',
+    'raise-stemwall': 'Raise the stem wall',
+    'add-stemwall': 'Put it on a stem wall',
+    'well-septic': 'Move the well and septic apart',
+    'deepen-overhang': 'Deepen the overhangs',
+    'reduce-south-overhang': 'Trim the south overhang',
+    'thicken-bale-wall': 'Thicken that wall',
+    'set-stick-frame': 'Add a light frame to carry it',
+    'add-eave-gutter': 'Put a gutter on the low eave'
+  };
+  const fixFlag = (flag) => {
+    const preset = (name) => ROOM_PRESETS.find((p) => p.name === name);
+    const clampFt = (v) => Math.max(18, Math.min(120, v));
+    switch (flag.fixId) {
+      case 'enclose-rooms': {
+        // Grow the shell until every indoor ground room is inside it; rooms on
+        // the negative side slide in first. ONE dispatch — separate calls race
+        // on stale state and only the last would land.
+        const strays = (spec.rooms || []).filter((r) => Number(r.level || 1) === 1 && !OUTDOOR_TYPES.has(r.type)
+          && (r.x < -0.5 || r.y < -0.5 || r.x + r.w > spec.shell.widthFt + 0.5 || r.y + r.d > spec.shell.depthFt + 0.5));
+        if (!strays.length) return;
+        const moves = strays.filter((r) => r.x < 0 || r.y < 0)
+          .map((r) => ({ type: 'move_object', targetId: r.id, name: r.name, x: Math.max(0.5, r.x), y: Math.max(0.5, r.y) }));
+        const needW = Math.ceil(Math.max(Number(spec.shell.widthFt), ...strays.map((r) => Math.max(0.5, r.x) + r.w + 1)));
+        const needD = Math.ceil(Math.max(Number(spec.shell.depthFt), ...strays.map((r) => Math.max(0.5, r.y) + r.d + 1)));
+        applyOps([
+          ...moves,
+          { type: 'set_shell', field: 'widthFt', value: String(clampFt(needW)) },
+          { type: 'set_shell', field: 'depthFt', value: String(clampFt(needD)) }
+        ]);
+        setRoomNote('Grew the walls to ' + clampFt(needW) + ' × ' + clampFt(needD) + ' ft so every room downstairs is inside them.');
+        return;
+      }
+      case 'give-shed-fall': {
+        const hi = Math.max(7, Number(spec.shell.southWallHeightFt || spec.shell.wallHeightFt || 10));
+        applyOps([{ type: 'set_roof_profile', roofType: 'shed', southWallHeightFt: hi, northWallHeightFt: Math.max(2, hi - 2) }]);
+        return;
+      }
+      case 'add-wet-core': return void addRoomPreset(preset('Bathroom'));
+      case 'add-mudroom': return void addRoomPreset(preset('Mudroom'));
+      case 'add-south-entry': return void addOpening('south', 'door', 1);
+      case 'add-south-glass': return void addOpening('south', 'window', 1);
+      case 'add-stair': return void addStair();
+      case 'raise-stemwall': return void applyOps([{ type: 'set_utility', field: 'stemwallHeightFt', value: 1.5 }]);
+      case 'add-stemwall': return void applyOps([
+        { type: 'set_utility', field: 'foundationType', value: 'stemwall' },
+        { type: 'set_utility', field: 'stemwallHeightFt', value: 1.5 }
+      ]);
+      case 'well-septic': return void applyOps([{ type: 'set_utility', field: 'wellSepticFt', value: 100 }]);
+      case 'deepen-overhang': return void applyOps([{ type: 'set_overhang', wall: 'all', value: 2 }]);
+      case 'reduce-south-overhang': return void applyOps([{ type: 'set_overhang', wall: 'south', value: 2.5 }]);
+      case 'thicken-bale-wall': {
+        if (!flag.side) return;
+        applyOps([{ type: 'set_wall_side', wall: flag.side, field: 'thicknessFt', value: flag.fixThicknessFt || 1.5 }]);
+        return;
+      }
+      case 'set-stick-frame': return void applyOps([{ type: 'set_frame', value: 'stick' }]);
+      case 'add-eave-gutter': return void applyOps([{ type: 'set_shell', field: 'gutters', value: 'eaves' }]);
+      default: return;
+    }
+  };
+
   const removeObject = (obj) => {
     applyOps([{ type: 'remove_object', targetId: obj.id, name: obj.name }]);
     if (selectedId === obj.id) setSelectedId(null);
@@ -1764,6 +1838,9 @@ export default function App() {
                   <div key={i} className="st-flag">
                     <div className="st-flag-title"><span className="dot" />{f.title}</div>
                     {f.fix && <div className="st-flag-fix">{f.fix}</div>}
+                    {FIX_LABELS[f.fixId] && (
+                      <button type="button" className="st-flag-btn" data-cap="cap-review-fix" onClick={() => fixFlag(f)}>{FIX_LABELS[f.fixId]}</button>
+                    )}
                     {f.fixId === 'fit-opening' && Number.isFinite(f.openingIndex) && (() => {
                       const op = spec.openings?.[f.openingIndex];
                       if (!op) return null;
@@ -1977,6 +2054,9 @@ export default function App() {
                 {f.title}
               </div>
               {f.fix && <div className="rz-flags-fix">{f.fix}</div>}
+              {FIX_LABELS[f.fixId] && (
+                <button type="button" className="rz-fresh" style={{ alignSelf: 'flex-start', marginTop: 4 }} onClick={() => fixFlag(f)}>{FIX_LABELS[f.fixId]}</button>
+              )}
               {/* one-tap remedies */}
               {f.fixId === 'greenhouse-glass' && (() => {
                 const ghRoom = (spec.rooms || []).find((r) => r.id === f.roomId) || southPlantRoom();
