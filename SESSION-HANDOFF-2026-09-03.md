@@ -207,3 +207,51 @@ cannot fail is decor.
 Worth remembering: this is the third time the same *symptom* has appeared and
 the third different *cause* (a hardcoded camera in 219, an unmeasured pane
 now). The symptom is always "the 3D looks broken". It is worth a battery.
+
+---
+
+## THE DECK STAIR THAT TURNS A CORNER (update 247)
+
+Asked for in July and again today. It is a THIRD shape, not a tweak to the
+fold that already existed:
+
+- **`out` + a turn** (already there) goes OUT from the deck, turns on a
+  landing, and runs across. It costs ground — about a third of a straight
+  run back — and it is what wraps the corner of a BUILDING.
+- **`wrap`** (new) runs ALONG one deck edge, turns on a landing at the
+  corner, and carries on round the next edge, tucked underneath. It costs no
+  ground at all. It is what wraps the corner of the DECK.
+
+Both existed as ideas in the July handoff; only the first was built. The new
+one exists because on a tall deck the other two shapes can BOTH run out of
+room: a storey of climb is about 17 ft of run, a straight flight needs that
+much yard, and a single tucked flight needs it in one straight edge. A deck
+that wraps a building has the length — bent round a corner.
+
+**Two laws it inherits rather than invents.** Decks that touch at one height
+are one walking surface, so the second leg may carry on across a neighbouring
+deck — which is the whole point, since each single deck is usually too short
+that way. And the corner is DERIVED: you say which edge the flight starts on
+and which way you walk, and the corner is where those two facts meet. Nothing
+points at another object.
+
+**On Daniel's own house it refuses, and the refusal is the interesting part.**
+Every direction is blocked, and the app now names why: the clear ground of the
+east ground-floor slider sits exactly at the corner the flight would turn at,
+and the greenhouse stands under the main deck where the second leg would run.
+That is precisely what the July note predicted — a wrap round his NE corner
+does not work, because the turn has to land in y 1.5 to 7.5, which is a
+ground-floor slider. The shape is proven on a clean two-deck fixture built
+from scratch, not on his design.
+
+**Fixed along the way, both found by using it:**
+- The deck card collapsed every shape that was not `along` into `out`, so the
+  switchback chip never lit and its own control could not be reached at all.
+- The obstruction namer only checked one axis, so it blamed a woodshed forty
+  feet up the site. It now names what actually stands in the strip, nearest
+  the corner — which is how "the east sliding door" surfaced as the real
+  reason instead of a wrong one.
+
+`tools/deck_stair_test.mjs` is 51 checks now (13 new). The load-bearing one —
+that the second leg carries on across the deck it meets — was **verified to
+fail when that law is reverted**.

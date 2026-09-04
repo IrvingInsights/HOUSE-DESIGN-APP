@@ -1,5 +1,5 @@
 # RESUME — Natural Building studio
-Fresh-session brief. Rewritten 2026-09-03 (updates 233–245). Git history holds
+Fresh-session brief. Rewritten 2026-09-03 (updates 233–247). Git history holds
 the old status stack.
 
 ## What this is
@@ -14,7 +14,7 @@ Run: `node server.mjs` from this folder (or start.bat — it pulls, moves the
 folder onto the main line, and self-restarts). Port 5184. **Backend `.mjs`
 edits need a server restart** (module cache); the frontend hot-reloads.
 
-## STATE (2026-09-03, update 245)
+## STATE (2026-09-03, update 247)
 - **ONE app, not two.** `src/main.jsx` and `classic.html` — the old parallel
   build — were retired in update 242, after everything they alone could do was
   brought into the live app. `index.html` → `src/reimagine/main.jsx` →
@@ -35,7 +35,14 @@ edits need a server restart** (module cache); the frontend hot-reloads.
   272 across 57 capabilities · studio_ask 34 · trace_flags 13 ·
   from_scratch_audit 0 gaps · deck_stair · outbuilding_roof · thermal ·
   timeline · greenhouse · face_law · floor_resize · persistence · geom_core ·
-  trace_repair · camera_fit 152 · studio_ask 43.
+  trace_repair · camera_fit 152 · studio_ask 43 · deck_stair 51.
+- **Deck stairs can turn a corner (247).** A third shape: along one deck edge,
+  a landing at the corner, then round the next edge, tucked under and costing
+  no ground. The second leg may carry on across a touching deck, because decks
+  that meet are one surface. On his own house it refuses in every direction and
+  names why (the east slider’s clear ground at the corner; the greenhouse under
+  the main deck) — exactly what the July handoff predicted. 13 new checks in
+  deck_stair_test (51 total); the load-bearing one verified to fail when reverted.
 - **The AI half is proven live (245).** Daniel put a Gemini key in
   `.env.local` (gitignored, never committed). Through the running app: the
   expert answered a real question about his house in plain words naming the
@@ -53,8 +60,7 @@ edits need a server restart** (module cache); the frontend hot-reloads.
 1. Drop a real floor-plan PDF into `.data/trace-corpus/` and run
    `node tools/trace_corpus_test.mjs` — the reader is proven on an image of
    his own plan, not yet on an architect's PDF here.
-2. Then the depth work in the **Why can't I** list on the Notion hub: the L /
-   wrap deck stair, an asymmetric gable on a structure, plywood as a wall
+2. Then the depth work on the Photion project (PRJ-911): an asymmetric gable on a structure, plywood as a wall
    covering, heat-source clearance to combustibles, and the fact that two
    joined structures are still priced as two.
 3. Gate B still stands: a first-time user, an hour, no dead ends. Daniel
