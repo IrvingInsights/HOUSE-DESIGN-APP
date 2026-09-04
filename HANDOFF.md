@@ -115,8 +115,9 @@ revision snapshots. Public repo: github.com/IrvingInsights/HOUSE-DESIGN-APP.
   green: design_space 15,316 · op_smoke 228 · placement 2,312 · receipts 439 ·
   golden_numbers 189/0 drifted · capability 272 · studio_ask 34 · trace_flags
   13 · from_scratch_audit 0 gaps.
-- **No `.env.local` on this machine**, so the AI chat and the drawing reader
-  are unproven end to end since the port. Everything keyless is proven.
+- `.env.local` holds Daniel's Gemini key (gitignored). The chat, the expert
+  answers and the drawing reader are proven live through the running app
+  (update 245).
 - The trace corpus is empty here (`.data/trace-corpus/`): drop any floor-plan
   PDF in it and it is in the regression tests from then on.
 

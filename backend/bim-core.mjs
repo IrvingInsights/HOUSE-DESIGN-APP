@@ -1506,7 +1506,14 @@ export function operationDescription(operation, spec) {
   if (op.type === 'add_opening_from_reference' || op.type === 'trace_image_request') return op.reason || 'Image tracing needs wall, type, width, and location before BIM openings can be placed.';
   if (op.type === 'request_clarification') return op.reason || 'More information is needed before changing the BIM.';
   if (op.type === 'move_object') return `Moved ${op.name || op.targetId || 'object'} to X ${op.x}', Y ${op.y}'.`;
-  if (op.type === 'resize_object') return `Resized ${op.name || op.targetId || 'object'} to ${op.w}' x ${op.d}'.`;
+  if (op.type === 'resize_object') {
+    // Say only what was set. A missing side used to print as 0' — "Resized
+    // Kitchen to 12' x 0'" — which reads as the app having crushed the room.
+    const name = op.name || op.targetId || 'object';
+    const w = Number(op.w) > 0 ? `${op.w}' wide` : '';
+    const d = Number(op.d) > 0 ? `${op.d}' deep` : '';
+    return `Resized ${name} to ${[w, d].filter(Boolean).join(' by ') || 'the same size'}.`;
+  }
   if (op.type === 'update_object') return `Updated ${op.name || op.targetId || 'object'} ${op.field}.`;
   if (op.type === 'remove_object') return `Removed ${op.name || op.targetId || 'object'}.`;
   return op.reason || 'No model change.';

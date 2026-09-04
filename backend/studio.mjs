@@ -58,13 +58,23 @@ export async function studioRespond(payload) {
     rooms: spec?.rooms,
     elements: spec?.elements,
     openings: spec?.openings,
+    // What the house is MADE of was never sent — so the AI, asked what the
+    // walls were, could only say it had no idea. Everything a builder would
+    // ask about goes with the question now.
+    walls: spec?.walls,
+    wallSegments: spec?.wallSegments,
+    frame: spec?.frame,
+    utilities: spec?.utilities,
+    flooring: spec?.flooring,
+    sourcing: spec?.sourcing,
+    site: spec?.site,
     selected
   };
 
   const content = [
     {
       type: 'input_text',
-      text: `You are Studio, the conversational design intelligence for a natural building BIM dashboard.
+      text: `You are Studio, the friendly expert inside a natural-building home design app. The person asking is not a builder or a coder: answer in plain words, never say "BIM" or "spec" or "model state", and name real materials and real trade-offs.
 
 Your job here is not to force every message into a BIM edit. When the user asks for comparison, critique, interpretation, mismatch review, or plain-language analysis, answer conversationally and intelligently.
 

@@ -16,7 +16,7 @@
 //
 // Run: node tools/studio_ask_test.mjs
 import { seedSpec } from '../src/engine.js';
-import { askStudio, aiUnavailableNotice, isConnectionError, plainDescription } from '../src/studio/ask.js';
+import { askStudio, aiUnavailableNotice, isConnectionError, plainDescription, parseLocalResize } from '../src/studio/ask.js';
 
 let pass = 0; let fail = 0;
 const check = (ok, label, detail = '') => {
@@ -127,6 +127,23 @@ console.log('the ask ladder:');
   check(isConnectionError(new Error('NetworkError when attempting to fetch')), 'firefox wording');
   check(isConnectionError(new Error('Load failed')), 'safari wording');
   check(!isConnectionError(new Error('BIM apply failed with HTTP 500')), 'a server error is not a connection error');
+}
+
+// 9b — a size for a room that exists is exact arithmetic: no AI, ever.
+{
+  let called = false;
+  globalThis.fetch = async () => { called = true; throw new Error('failed to fetch'); };
+  const r = await askStudio({ prompt: 'make the kitchen 12 by 16 feet', spec: base });
+  const k = (r.nextSpec?.rooms || []).find((x) => /kitchen/i.test(x.name));
+  check(Boolean(r.nextSpec), 'a room size is applied without the AI');
+  check(!called, 'and the planner was never called for it');
+  check(k && k.w === 12 && k.d === 16, 'width 12, depth 16 — both numbers land', k ? `${k.w} x ${k.d}` : 'no kitchen');
+  check(/12 by 16/.test(said(r)), 'and the reply says both numbers');
+  check(parseLocalResize('resize the great room to 20 x 18', base)?.room?.name === 'Great Room', 'finds a room by its whole name');
+  check(parseLocalResize('Kitchen 14 by 12', base)?.w === 14, 'works without a verb');
+  check(parseLocalResize('make the attic 12 by 16', base) === null, 'a room that does not exist is not guessed at');
+  check(parseLocalResize('make the kitchen 12 by 900', base) === null, 'a nonsense size is refused');
+  check(parseLocalResize('add a bedroom 12 by 14', base) === null, 'an ADD with a size is left to the room-adder');
 }
 
 // 10 — asking the team with no AI key: an honest note plus the app's own

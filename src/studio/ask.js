@@ -115,6 +115,18 @@ export async function askStudio({
     };
   }
 
+  // 3b — "make the kitchen 12 by 16": a size for a room that already exists
+  // is exact arithmetic, not a judgement call, so it never goes to the AI.
+  // (The AI once put the 16 in x and y and lost it — and said "12' x 0'".)
+  const resize = !attachments.length ? parseLocalResize(said, spec) : null;
+  if (resize) {
+    const report = applyBimOperations(spec, { operations: [{ type: 'resize_object', targetId: resize.room.id, name: resize.room.name, w: resize.w, d: resize.d }] });
+    return {
+      nextSpec: report.spec, changedIds: [resize.room.id],
+      messages: [...mine, studio(`Made ${resize.room.name} ${resize.w} by ${resize.d} feet.`)]
+    };
+  }
+
   // 4 — "add a bedroom and a bathroom": the layout engine places them.
   const localRooms = attachments.length ? null : parseLocalRoomAdds(said);
   if (localRooms && localRooms.length) {
@@ -193,4 +205,20 @@ export function plainDescription(spec) {
     `Heat: ${HEAT[u.heatSource] || humanWord(u.heatSource) || 'not chosen'}. Water: ${humanWord(u.waterSource) || 'not chosen'}. Power: ${humanWord(u.powerMode) || 'not chosen'}.`
   ];
   return lines.join('\n');
+}
+
+// "make the kitchen 12 by 16", "resize the great room to 20 x 18 feet",
+// "kitchen 14 by 12". The room is found by name in the design; the numbers
+// are width then depth, the way a person says a room size.
+export function parseLocalResize(text, spec) {
+  const m = String(text || '').match(/^\s*(?:(?:make|resize|size|set|change)\s+)?(?:the\s+)?(.+?)\s+(?:to\s+|be\s+)?(\d+(?:\.\d+)?)\s*(?:ft|feet|foot|')?\s*(?:by|x|×)\s*(\d+(?:\.\d+)?)\s*(?:ft|feet|foot|')?\s*\.?\s*$/i);
+  if (!m) return null;
+  const wanted = m[1].trim().toLowerCase();
+  const w = Number(m[2]); const d = Number(m[3]);
+  if (!(w > 0 && d > 0) || w > 200 || d > 200) return null;
+  const rooms = spec?.rooms || [];
+  const byName = rooms.find((r) => String(r.name || '').toLowerCase() === wanted)
+    || rooms.find((r) => String(r.name || '').toLowerCase().includes(wanted))
+    || rooms.find((r) => wanted.includes(String(r.name || '').toLowerCase()) && String(r.name || '').length > 2);
+  return byName ? { room: byName, w, d } : null;
 }

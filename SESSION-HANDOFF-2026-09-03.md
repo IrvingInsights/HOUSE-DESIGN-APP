@@ -127,13 +127,39 @@ controls that belong to the app's chrome rather than to a chapter.
 
 ---
 
+## THE KEY WENT IN, AND THE AI HALF WAS PROVEN LIVE (update 245)
+
+Daniel pasted a Gemini key into `.env.local` (a newer key format — it does
+not start with `AIza` — and Google accepted it). Through the running app:
+
+- **The expert** answered "what is this house made of, and what would a
+  builder check first?" in plain words naming the real materials: straw bale
+  with lime plaster, wood frame over an insulated earthen slab, a metal shed
+  roof, the rubble foundation's moisture detailing. Before that worked, one
+  fix: the question was never sent the walls, frame, heating or site — asked
+  what the house was made of, the AI said it had no idea. It carries the
+  whole house now, and the prompt tells it who it is talking to (no "BIM").
+- **The planner** changed a copy of the design with `persist:false`; the
+  design file on disk stayed byte-identical. It also exposed a bug: "make the
+  kitchen 12 by 16" came back as w:12 with the 16 put in x and y, and the
+  reply said "Resized Kitchen to 12' x 0'". Three fixes: a size for a room
+  that exists is exact arithmetic and never goes to the AI (`parseLocalResize`
+  in `src/studio/ask.js`, nine new checks); the planner's schema now says what
+  w and d mean and that a size never goes in x or y; and the wording only
+  says what was set, never a 0.
+- **The drawing reader** was handed a PNG of Daniel's own floor plan (drawn
+  from the plan view in the page and posted as a background job, so his
+  design was never touched). It read back Great Room 18×19, Kitchen 10×15,
+  Primary Bedroom 10×10, Mud/Laundry, ½ Bath, Pantry, Closet — names and
+  sizes right — 15 openings, scored itself 10 of 11, and its one doubt
+  ("rooms don't pile on each other") is exactly the kind of ordinary flag
+  `trace_flags_test` holds it to.
+
 ## OPEN
 
-- **No `.env.local` on this machine.** The AI chat and the drawing reader are
-  therefore unproven end to end since the port. Everything keyless is proven.
-  First job next session: put a key in, read one real drawing, and run
-  `node tools/trace_corpus_test.mjs` (the corpus folder is empty here — drop
-  any floor-plan PDF into `.data/trace-corpus/` and it is in the tests forever).
+- The reader is proven on an image of his own plan, not yet on an
+  architect's PDF here: drop one into `.data/trace-corpus/` and run
+  `node tools/trace_corpus_test.mjs` — it is in the tests forever after.
 - **Still not built**, all from the Why-can't-I list: the L / wrap deck stair;
   an asymmetric gable on a structure (outbuilding roofs are one sloped plane);
   plywood as a wall covering; heat-source clearance to combustibles; two

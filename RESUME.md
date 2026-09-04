@@ -1,5 +1,5 @@
 # RESUME — Natural Building studio
-Fresh-session brief. Rewritten 2026-09-03 (updates 233–244). Git history holds
+Fresh-session brief. Rewritten 2026-09-03 (updates 233–245). Git history holds
 the old status stack.
 
 ## What this is
@@ -14,7 +14,7 @@ Run: `node server.mjs` from this folder (or start.bat — it pulls, moves the
 folder onto the main line, and self-restarts). Port 5184. **Backend `.mjs`
 edits need a server restart** (module cache); the frontend hot-reloads.
 
-## STATE (2026-09-03, update 244)
+## STATE (2026-09-03, update 245)
 - **ONE app, not two.** `src/main.jsx` and `classic.html` — the old parallel
   build — were retired in update 242, after everything they alone could do was
   brought into the live app. `index.html` → `src/reimagine/main.jsx` →
@@ -35,17 +35,24 @@ edits need a server restart** (module cache); the frontend hot-reloads.
   272 across 57 capabilities · studio_ask 34 · trace_flags 13 ·
   from_scratch_audit 0 gaps · deck_stair · outbuilding_roof · thermal ·
   timeline · greenhouse · face_law · floor_resize · persistence · geom_core ·
-  trace_repair · camera_fit 152.
-- **No AI key on this machine.** `.env.local` does not exist, so the chat's AI
-  paths and the drawing reader cannot be proven end to end here. The app says
-  so plainly rather than failing oddly, and the keyless paths (local room
-  adds, duplicate-opening cleanup) are proven by `tools/studio_ask_test.mjs`.
+  trace_repair · camera_fit 152 · studio_ask 43.
+- **The AI half is proven live (245).** Daniel put a Gemini key in
+  `.env.local` (gitignored, never committed). Through the running app: the
+  expert answered a real question about his house in plain words naming the
+  real materials; the planner changed a copy of his design with persist:false
+  and the design file stayed byte-identical; the drawing reader read an image
+  of his own plan back as seven correctly named and sized rooms, scored itself
+  10 of 11, and its one doubt is an ordinary flag. Two things it exposed were
+  fixed the same hour: the expert was never sent the walls or heating (it said
+  it had no idea what the house was made of), and "make the kitchen 12 by 16"
+  through the AI lost the 16 and reported "12' x 0'" — a room size is exact
+  arithmetic now (`parseLocalResize` in ask.js, never the AI), the planner's
+  schema says what w and d mean, and the wording never prints a 0.
 
 ## START HERE
-1. **Get a Gemini key into `.env.local`**, then run one drawing through
-   *+ New → Start from a drawing* and `node tools/trace_corpus_test.mjs`. That
-   is the one part of the app that has not been exercised end to end since the
-   port.
+1. Drop a real floor-plan PDF into `.data/trace-corpus/` and run
+   `node tools/trace_corpus_test.mjs` — the reader is proven on an image of
+   his own plan, not yet on an architect's PDF here.
 2. Then the depth work in the **Why can't I** list on the Notion hub: the L /
    wrap deck stair, an asymmetric gable on a structure, plywood as a wall
    covering, heat-source clearance to combustibles, and the fact that two
