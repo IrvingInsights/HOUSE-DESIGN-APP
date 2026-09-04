@@ -12,10 +12,10 @@ The three laws, in short:
 2. **GitHub is always current.** Every session ends: tests → `git add -A` →
    `git commit -m "update NNN: <plain sentence>"` → `git push origin HEAD`.
    Never stop with a branch ahead of origin.
-3. **Notion is always current.** Every session ends by updating the *House
-   Design App* section of 🏡 **07 — House**
-   (<https://app.notion.com/p/3a041623f9ca81ebb481c3d55970713c>): current state,
-   one session-log row, and any decision made.
+3. **Photion is always current.** Every session starts with `orient` and
+   `project_snapshot` on the **House Design App** project, and ends with one
+   `record_snapshot` there: current state, decisions, do-not-change, next
+   step. Photion replaced Notion on 2026-09-03.
 
 Then read, in order: `HANDOFF.md` → `STRATEGY.md` → `RESUME.md` → `TESTING.md` →
 the newest `SESSION-HANDOFF-*.md`.

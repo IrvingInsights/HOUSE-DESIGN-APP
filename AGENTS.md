@@ -7,8 +7,7 @@ rules bind you.**
 
 Owner: Daniel Irving. He is a non-coder. Plain language, always.
 Canonical repo: <https://github.com/IrvingInsights/HOUSE-DESIGN-APP>
-Canonical Notion hub: **🏡 07 — House** →
-<https://app.notion.com/p/3a041623f9ca81ebb481c3d55970713c>
+Source of truth for state: **Photion** (the `mcp__photion__*` tools), project **House Design App** (`PRJ-911`). The old Notion hub (🏡 07 — House) is history as of 2026-09-03.
 
 ---
 
@@ -62,26 +61,34 @@ git push origin HEAD
 - Never rewrite pushed history. Never force-push a shared branch.
 - `main` is the trunk. Feature work happens on a branch and merges via PR.
 
-### 3. NOTION IS THE SOURCE OF TRUTH FOR STATE. Update it every session.
+### 3. PHOTION IS THE SOURCE OF TRUTH FOR STATE. Update it every session.
 
-Daniel runs a 6-domain Notion system and Notion is his single source of truth
-across every AI tool he uses. Code lives in git; **the story of the project
-lives in Notion.** Both must be current, or the next agent starts blind.
+Daniel runs one source of truth across every AI tool he uses. From
+2026-09-03 that is **Photion** (his own system of record, reached through the
+`mcp__photion__*` tools). It replaced the Notion hub. Code lives in git;
+**the story of the project lives in Photion.** Both must be current, or the
+next agent starts blind.
 
-**Every working session also ends by updating the Notion hub page**
-(🏡 07 — House → the *House Design App* section):
+**Every working session starts** with `orient` (today's date) and
+`project_snapshot` for **House Design App** (the project record; find it with
+`query_records` on the `house` domain if the key is not in front of you).
 
-1. Update **Current state** — the update number, the branch, whether tests are
-   green, and what is next.
-2. Append one row to the **Session log** — date, update number, one sentence on
-   what changed, and the commit SHA.
-3. If a decision was made (a rename, a chapter split, a rule Daniel laid down),
-   write it down there too. Decisions that live only in a chat transcript are
-   decisions that get re-litigated.
+**Every working session ends** with one `record_snapshot` on that project —
+it is append-only, so write what is true, not what sounds finished:
 
-Use the Notion MCP connector if you have it. If you have no Notion access, write
-the exact block Daniel should paste, and say plainly that you could not write it
-yourself. **Never silently skip the Notion update.**
+1. `current_state` — the update number, the branch, whether tests are green.
+2. `recent_decisions` — anything Daniel decided (a rename, a rule, a cut).
+3. `do_not_change` — what the next session must leave alone, and why.
+4. `next_step` — the single next action.
+
+Every "why can't I—" still gets written down in the finder's own words before
+it is triaged; it goes in the snapshot's `recent_decisions`/`current_state`
+or as a Photion task on the project, not in a chat transcript.
+
+If you have no Photion access, write the exact snapshot text Daniel should
+paste, and say plainly that you could not write it yourself. **Never silently
+skip the Photion update.** Do not write to Notion any more; the old hub page
+(🏡 07 — House) is history.
 
 ---
 
