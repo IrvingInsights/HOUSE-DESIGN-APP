@@ -176,6 +176,56 @@ const upperDeck = (over) => ({ id: 'dk', name: 'Deck', category: 'deck', x: 28, 
   ok(!off || off.blocked || off.placedOff, 'a mark off the end says so rather than pretending');
 }
 
+// ── round the corner: the third way down ──────────────────────────────────
+//
+// The shape exists because the other two can BOTH run out of room on the same
+// deck: a storey of climb is ~17 ft of run, a straight flight needs that much
+// yard, and a tucked flight needs it in one straight edge. A deck that wraps a
+// building has the length — bent round a corner. Daniel asked for exactly this
+// on his own house ("the stairs could have a turn in them and wrap that NE
+// corner"), so the fixture is his SHAPE, built from scratch, not his design.
+{
+  const main = { id: 'a', name: 'Main deck', category: 'deck', x: 0, y: 32, w: 28, d: 7, h: 0.35, level: 2 };
+  const east = { id: 'b', name: 'East deck', category: 'deck', x: 28, y: 0, w: 6, d: 39, h: 0.35, level: 2 };
+  const spec = base([main, east]);
+  const dk = resolveDeck(spec, east);
+  const straight = resolveDeckStairs(spec, { ...east, deckStairShape: 'out', deckStairs: 'east' }, dk);
+  const w = resolveDeckStairs(spec, { ...east, deckStairShape: 'wrap', deckStairs: 'east', deckStairFall: 'south' }, dk);
+  ok(Boolean(w) && !w.blocked && w.shape === 'wrap', 'a wrap resolves on a deck that turns a corner');
+  ok(w.n1 + w.n2 === w.treads, `it keeps every tread (${w.n1}+${w.n2} of ${w.treads})`);
+  ok(Math.abs(w.rise - straight.rise) < 0.001, 'and the same climb as any other shape');
+  ok(w.reach === 0, 'it takes no ground beyond the deck at all');
+  ok(w.secondSide === 'south', 'walking south down the east edge turns at the south corner');
+  // the corner is where the two chosen edges meet — derived, never pointed at
+  ok(Math.abs(w.cornerX - 32.25) < 0.01 && Math.abs(w.cornerZ - 37.25) < 0.01,
+    `and the landing sits in that corner (got ${w.cornerX}, ${w.cornerZ})`);
+  // THE POINT OF THE SHAPE: the second leg carries on across the NEIGHBOURING
+  // deck, because decks that touch at one height are one walking surface. On
+  // the east deck alone there is only 6 ft that way — not a flight.
+  ok(w.botAt < 28, `the second leg runs on across the deck it meets (ends at ${w.botAt.toFixed(1)}, past the 28 ft join)`);
+  ok(w.n2 * 0.9 > 6, 'and is longer than the deck it started on is wide');
+  ok(w.wellLen > 0.5 && w.wellA1 - w.wellA0 > 3, 'it cuts a stairwell to come up through, like any tucked flight');
+  // both legs are checked against what is under the deck
+  const shed = { id: 'shed', name: 'Shed', category: 'outbuilding', x: 0, y: 32, w: 20, d: 7, h: 9, level: 1 };
+  const blockedSpec = base([main, east, shed]);
+  const b = resolveDeckStairs(blockedSpec, { ...east, deckStairShape: 'wrap', deckStairs: 'east', deckStairFall: 'south' }, resolveDeck(blockedSpec, east));
+  ok(Boolean(b) && (b.blocked || b.n2 * 0.9 < 20), 'something standing under the second leg is not ignored');
+  // a deck with no corner to turn onto cannot pretend it has one
+  const lone = { id: 'c', name: 'Lone deck', category: 'deck', x: 28, y: 0, w: 6, d: 39, h: 0.35, level: 2 };
+  const loneSpec = base([lone]);
+  const noCorner = resolveDeckStairs(loneSpec, { ...lone, deckStairShape: 'wrap', deckStairs: 'east', deckStairFall: 'south' }, resolveDeck(loneSpec, lone));
+  ok(Boolean(noCorner) && (noCorner.blocked || noCorner.lopsided),
+    'a deck with no second edge to turn onto says so rather than drawing a stub');
+  // a fall across the edge you are hugging is not a wrap
+  const bad = resolveDeckStairs(spec, { ...east, deckStairShape: 'wrap', deckStairs: 'east', deckStairFall: 'east' }, dk);
+  ok(Boolean(bad) && bad.blocked && bad.badFall, 'you cannot walk off the edge you are hugging');
+  // and a deck too low to walk under refuses, exactly as the tucked shapes do
+  const low = { id: 'd', name: 'Low deck', category: 'deck', x: 0, y: 32, w: 28, d: 7, h: 0.35, level: 1 };
+  const lowSpec = base([low]);
+  const tooLow = resolveDeckStairs(lowSpec, { ...low, deckStairShape: 'wrap', deckStairs: 'south', deckStairFall: 'west' }, resolveDeck(lowSpec, low));
+  ok(Boolean(tooLow) && tooLow.blocked && tooLow.lowDeck, 'and a deck you cannot walk under refuses the shape');
+}
+
 console.log(`deck stairs: ${checks} checks`);
 if (fails.length) {
   console.log(`\n${fails.length} FAILED:`);

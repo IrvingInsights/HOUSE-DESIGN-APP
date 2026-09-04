@@ -83,7 +83,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 246 · Sep 2026';
+const UPDATE_STAMP = 'update 247 · Sep 2026';
 // ONE rendering of the update status, used everywhere it's shown (classic's
 // rz-stamp, site's st-stamp-chip) — a build once sat 8 updates behind with no
 // warning anywhere, because "confirmed current" and "couldn't tell" both
@@ -4643,7 +4643,11 @@ const CLIMB_TOWARD = { north: 'south', south: 'north', east: 'west', west: 'east
 function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt, onTurn, onSplit }) {
   const turnNow = ['north', 'south', 'east', 'west'].includes(String(el.deckStairTurn || '').toLowerCase())
     ? String(el.deckStairTurn).toLowerCase() : '';
-  const shape = String(el.deckStairShape || 'out') === 'along' ? 'along' : 'out';
+  // Every shape is its own answer. This used to read "'along' ? 'along' :
+  // 'out'", so a switchback showed as a straight run: its chip never lit and
+  // the control that says which way you walk could not be reached at all.
+  const shape = Object.keys(DECK_STAIR_SHAPES).includes(String(el.deckStairShape || 'out'))
+    ? String(el.deckStairShape || 'out') : 'out';
   const options = ['north', 'east', 'south', 'west'].map((dir) => {
     const t = resolveDeckStairs(spec, { ...el, deckStairs: dir }, dk);
     const ok = Boolean(t && !t.blocked);
@@ -4653,6 +4657,8 @@ function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt, onTurn, 
       hint: ok
         ? `${Math.round(t.rise * 10) / 10} ft down to ${t.target === 'deck' ? t.targetName : 'the ground'} — you climb ${CLIMB_TOWARD[dir]}ward`
         : t?.obstruction ? `the run would go straight into ${t.obstruction}`
+          : t?.short && t.legHave1 !== undefined
+          ? `${t.legHave1} ft along this side and ${t.legHave2} ft round the corner — a flight this tall needs ${Math.round(t.need)} ft between them${t.under ? `, and ${t.under} stands under the way round` : ''}`
           : t?.short ? `only ${Math.round(t.have)} ft of edge — a flight this tall needs ${Math.round(t.need)}`
             : t?.lowDeck ? 'this deck is too low to walk under'
               : t?.narrow ? `this deck is only ${Math.round(t.have)} ft across — a switchback needs ${t.need}`
@@ -4753,9 +4759,9 @@ function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt, onTurn, 
               </span>
             </div>
           )}
-          {(shape === 'along' || shape === 'u') && (
+          {(shape === 'along' || shape === 'u' || shape === 'wrap') && (
             <div className="rz-field">
-              <span>Which way you walk coming down</span>
+              <span>{shape === 'wrap' ? 'Which way you walk, and so which corner it turns at' : 'Which way you walk coming down'}</span>
               <div className="ctlChips">
                 {(effective === 'north' || effective === 'south' ? ['east', 'west'] : ['north', 'south']).map((f) => (
                   <button key={f} type="button" className={`rz-pick-chip${fallNow === f ? ' on' : ''}`}
@@ -4772,6 +4778,8 @@ function DeckStepControls({ spec, el, dk, onSet, onShape, onFall, onAt, onTurn, 
           : effective && resolved && !resolved.blocked
             ? (resolved.shape === 'u'
               ? `A switchback under the deck: ${resolved.n1} treads out, a landing, ${resolved.n2} back — two ${resolved.legW} ft flights side by side, taking ${Math.round(resolved.need)} ft of the deck's length and no ground at all. You come off the bottom near where you stepped on.`
+              : resolved.shape === 'wrap'
+                ? `It runs along the ${effective} side, turns on a landing at the ${resolved.secondSide} corner and carries on round: ${resolved.n1} treads then ${resolved.n2}, ${Math.round(resolved.rise * 10) / 10} ft in all. It sits under the deck, so it takes no ground at all.${resolved.lopsided ? ' One of the two legs is barely a step — a straight tucked flight may read better here.' : ''}`
               : resolved.shape === 'along'
                 ? `The flight runs along the ${effective} side and sits under the deck, falling toward the ${resolved.fall}: ${Math.round(resolved.rise * 10) / 10} ft, ${resolved.treads} treads, ${Math.round(resolved.runLen)} ft of the deck's length. It takes no ground at all, and the deck keeps the rain off it. The deck needs an opening at the top of the flight to step onto it.`
                 : `The stairs hang off the ${effective} side and run out ${effective}ward, so you walk ${CLIMB_TOWARD[effective]} as you climb: ${Math.round(resolved.rise * 10) / 10} ft, ${resolved.treads} treads, ${resolved.target === 'deck' ? `onto ${resolved.targetName}` : 'down to the ground'}. A flight this tall needs about ${Math.round(resolved.treads * 0.9)} ft of clear ground to land in.`)

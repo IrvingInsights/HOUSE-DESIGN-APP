@@ -950,10 +950,11 @@ export function resolveDeckStairs(spec, el, dkIn = null) {
   if (choice === 'none') return null;
   // WHICH SHAPE. Explicit first.
   const shapeSet = String(el.deckStairShape || '');
-  if (shapeSet === 'along' || shapeSet === 'u') {
+  if (shapeSet === 'along' || shapeSet === 'u' || shapeSet === 'wrap') {
     if (!['north', 'south', 'east', 'west'].includes(choice)) return null;
     const fall = ['north', 'south', 'east', 'west'].includes(el.deckStairFall) ? el.deckStairFall
       : (choice === 'north' || choice === 'south' ? 'east' : 'south');
+    if (shapeSet === 'wrap') return resolveWrapStair(spec, el, dk, choice, fall);
     return shapeSet === 'u'
       ? resolveSwitchbackStair(spec, el, dk, choice, fall)
       : resolveUnderDeckStair(spec, el, dk, choice, fall);
@@ -1214,6 +1215,7 @@ function clearBeyond(spec, el, run) {
 export const DECK_STAIR_SHAPES = {
   out: { label: 'Straight out', note: 'A flight at right angles to the deck, landing out in front of it. Simplest, and it needs clear ground the length of the run.' },
   along: { label: 'Along the deck, underneath', note: 'The flight runs parallel to the deck edge and sits under the deck. Costs no ground, and the deck keeps the weather off it — but the deck has to be long enough, and high enough to walk under.' },
+  wrap: { label: 'Round the corner', note: 'A flight along one edge, a landing at the corner, and a second flight round the next edge. Turns the climb through a right angle without taking any yard — for when neither a straight run nor a single tucked flight has the length.' },
   u: { label: 'Switchback, underneath', note: 'Two flights side by side under the deck with a landing between them, doubling back. The most compact way down there is — it needs barely half the length a straight run does, and no ground at all. It wants a deck at least two flights wide.' }
 };
 const STAIR_SOLID_CATS = new Set(['outbuilding', 'carport', 'porch', 'greenhouse']);
@@ -1386,6 +1388,186 @@ export function resolveSwitchbackStair(spec, el, dk, side, fall) {
     wellLen, wellA0: bandLo, wellA1: bandLo + legW,
     crossMid: (bandLo + bandHi) / 2, gapW: legW * 2,
     mid: (bandLo + bandHi) / 2, gapA0: bandLo, gapA1: bandHi,
+    target: 'grade', targetTop: 0, targetName: 'the ground', up: false
+  };
+}
+
+// ROUND THE CORNER. The third way down, and the one Daniel's own house needs:
+// a flight along one edge, a landing where the deck turns, and a second flight
+// round the next edge. It exists because both of the other shapes can run out
+// of room on the same deck — a storey of climb is about 17 ft of run, a
+// straight flight needs that much yard, and a single tucked flight needs that
+// much edge in ONE line. A deck that wraps a building has two shorter edges
+// meeting at a corner, and that is exactly the length, just bent.
+//
+// Two laws it inherits rather than invents:
+//   · decks that touch at the same height are ONE walking surface, so the
+//     second leg may continue onto a neighbouring deck. That is the whole
+//     point on a wrap-around deck, where each single element is too short.
+//   · the corner is DERIVED, never pointed at: you say which edge the flight
+//     starts on and which way you walk, and the corner is where those two
+//     facts meet. Nothing here names another object.
+export function resolveWrapStair(spec, el, dk, side, fall) {
+  const alongX = side === 'north' || side === 'south';        // the first edge runs east–west
+  const legal = alongX ? ['east', 'west'] : ['north', 'south'];
+  if (!legal.includes(fall)) return { blocked: true, side, shape: 'wrap', badFall: true };
+  if (dk.topFt < STAIR_HEADROOM + 0.8) return { blocked: true, side, shape: 'wrap', lowDeck: true };
+
+  // The walking surface, not the one board you tapped.
+  const group = deckGroupOf(spec, el, dk);
+  const rects = group.map((m) => ({
+    x0: Number(m.el.x) || 0, z0: Number(m.el.y) || 0,
+    x1: (Number(m.el.x) || 0) + Math.max(1, Number(m.el.w) || 10),
+    z1: (Number(m.el.y) || 0) + Math.max(1, Number(m.el.d) || 8)
+  }));
+  const surf = rects.reduce((a, r) => ({
+    x0: Math.min(a.x0, r.x0), z0: Math.min(a.z0, r.z0), x1: Math.max(a.x1, r.x1), z1: Math.max(a.z1, r.z1)
+  }), { x0: Infinity, z0: Infinity, x1: -Infinity, z1: -Infinity });
+
+  // WHERE THE CORNER IS. The first leg hugs `side` and walks toward `fall`;
+  // the corner is that end of that edge, and the second leg hugs the edge it
+  // meets there. Both facts are already on the card, so nothing new is asked.
+  const secondSide = fall;                                    // walking south along the east edge ends at the south edge
+  const W = STAIR_UNDER_WIDTH;
+  const strip1 = alongX                                        // the band the first flight occupies
+    ? { z0: side === 'north' ? surf.z0 : surf.z1 - W, z1: side === 'north' ? surf.z0 + W : surf.z1 }
+    : { x0: side === 'west' ? surf.x0 : surf.x1 - W, x1: side === 'west' ? surf.x0 + W : surf.x1 };
+  const strip2 = alongX
+    ? { x0: fall === 'west' ? surf.x0 : surf.x1 - W, x1: fall === 'west' ? surf.x0 + W : surf.x1 }
+    : { z0: fall === 'north' ? surf.z0 : surf.z1 - W, z1: fall === 'north' ? surf.z0 + W : surf.z1 };
+
+  // How much of each strip is actually DECK, and clear of anything standing
+  // under it. Same free-interval walk the tucked flight uses, run twice.
+  const clearRuns = (band, axisIsX) => {
+    const lo = axisIsX ? surf.x0 : surf.z0;
+    const hi = axisIsX ? surf.x1 : surf.z1;
+    const cLo = axisIsX ? band.z0 : band.x0;
+    const cHi = axisIsX ? band.z1 : band.x1;
+    // deck first: only the parts of the band that have deck over them count
+    let covered = [];
+    for (const r of rects) {
+      const rc0 = axisIsX ? r.z0 : r.x0; const rc1 = axisIsX ? r.z1 : r.x1;
+      if (Math.min(cHi, rc1) - Math.max(cLo, rc0) < W - 0.35) continue;     // must carry the whole flight's width
+      covered.push([axisIsX ? r.x0 : r.z0, axisIsX ? r.x1 : r.z1]);
+    }
+    covered.sort((a, b) => a[0] - b[0]);
+    const merged = [];
+    for (const c of covered) {
+      const last = merged[merged.length - 1];
+      if (last && c[0] <= last[1] + 0.35) last[1] = Math.max(last[1], c[1]);
+      else merged.push([...c]);
+    }
+    let free = merged.length ? merged : [[lo, hi]];
+    for (const r of solidRects(spec, el.id)) {
+      const sc0 = axisIsX ? r.z0 : r.x0; const sc1 = axisIsX ? r.z1 : r.x1;
+      if (Math.min(cHi, sc1) - Math.max(cLo, sc0) <= 0.5) continue;
+      const b0 = axisIsX ? r.x0 : r.z0; const b1 = axisIsX ? r.x1 : r.z1;
+      free = free.flatMap(([f0, f1]) => (b1 <= f0 || b0 >= f1 ? [[f0, f1]]
+        : [...(b0 > f0 ? [[f0, b0]] : []), ...(b1 < f1 ? [[b1, f1]] : [])]));
+    }
+    return free;
+  };
+  // WHAT IS ACTUALLY IN THE WAY. This asked only whether a thing lay in the
+  // strip's CROSS direction, so it happily named a woodshed forty feet up the
+  // site — true of the band, useless to a person. A thing is in the way only
+  // if it stands in the strip both ways, and the nearest one to the corner is
+  // the one worth naming.
+  const blockedBy = (band, axisIsX, near = null) => {
+    const cLo = axisIsX ? band.z0 : band.x0; const cHi = axisIsX ? band.z1 : band.x1;
+    const sLo = axisIsX ? surf.x0 : surf.z0; const sHi = axisIsX ? surf.x1 : surf.z1;
+    const hits = solidRects(spec, el.id).filter((r) => {
+      const sc0 = axisIsX ? r.z0 : r.x0; const sc1 = axisIsX ? r.z1 : r.x1;
+      const b0 = axisIsX ? r.x0 : r.z0; const b1 = axisIsX ? r.x1 : r.z1;
+      return Math.min(cHi, sc1) - Math.max(cLo, sc0) > 0.5 && Math.min(sHi, b1) - Math.max(sLo, b0) > 0.5;
+    });
+    if (!hits.length) return null;
+    if (near === null) return hits[0].name;
+    const distance = (r) => {
+      const b0 = axisIsX ? r.x0 : r.z0; const b1 = axisIsX ? r.x1 : r.z1;
+      return near < b0 ? b0 - near : near > b1 ? near - b1 : 0;
+    };
+    return hits.reduce((a, b) => (distance(b) < distance(a) ? b : a)).name;
+  };
+
+  const rise = dk.topFt;
+  const treads = Math.max(2, Math.ceil(rise / 0.65));
+  const corner = {                                             // the inside corner both legs meet at
+    x: alongX ? (fall === 'west' ? surf.x0 + W / 2 : surf.x1 - W / 2) : (side === 'west' ? surf.x0 + W / 2 : surf.x1 - W / 2),
+    z: alongX ? (side === 'north' ? surf.z0 + W / 2 : surf.z1 - W / 2) : (fall === 'north' ? surf.z0 + W / 2 : surf.z1 - W / 2)
+  };
+  const cornerAlong1 = alongX ? corner.x : corner.z;           // where leg one ends, on its own axis
+  const cornerAlong2 = alongX ? corner.z : corner.x;           // where leg two starts, on its
+
+  // The stretch each leg has: the clear run containing the corner, measured
+  // back from it. A leg with no clear run at its end has nowhere to be.
+  const runs1 = clearRuns(strip1, alongX);
+  const runs2 = clearRuns(strip2, !alongX);
+  const holding = (runs, at) => runs.find(([f0, f1]) => at >= f0 - 0.6 && at <= f1 + 0.6) || null;
+  const seg1 = holding(runs1, cornerAlong1);
+  const seg2 = holding(runs2, cornerAlong2);
+  if (!seg1 || !seg2) {
+    const why = blockedBy(seg1 ? strip2 : strip1, seg1 ? !alongX : alongX, seg1 ? cornerAlong2 : cornerAlong1);
+    return { blocked: true, side, shape: 'wrap', fall,
+      ...(why ? { obstruction: why } : { short: true, need: treads * 0.9 + W, have: 0 }) };
+  }
+  // travel: leg one walks toward `fall`, leg two carries on round the corner
+  const down1 = fall === 'east' || fall === 'south';           // +axis on the first leg
+  const avail1 = Math.max(0, (down1 ? cornerAlong1 - seg1[0] : seg1[1] - cornerAlong1) - W / 2);
+  const dirTo2 = alongX ? (side === 'north' ? 'south' : 'north') : (side === 'west' ? 'east' : 'west');
+  const down2 = dirTo2 === 'east' || dirTo2 === 'south';
+  const avail2 = Math.max(0, (down2 ? seg2[1] - cornerAlong2 : cornerAlong2 - seg2[0]) - W / 2);
+
+  // SPLIT THE CLIMB TO FIT. Half and half is the balanced L, but a wrap is
+  // usually chosen BECAUSE one edge is short — so the split bends to what the
+  // deck actually has before it refuses. It only refuses when even both edges
+  // together are not enough, and then it says the two numbers.
+  const askedSplit = Number(el.deckStairSplit);
+  const split = Number.isFinite(askedSplit) && askedSplit > 0 && askedSplit < 1 ? askedSplit : 0.5;
+  const fits1 = Math.floor(avail1 / 0.9);
+  const fits2 = Math.floor(avail2 / 0.9);
+  if (fits1 + fits2 < treads) {
+    // WHY it is short matters more than the number. A deck can be short
+    // because it is a small deck, or because something is standing under the
+    // part you would have walked down — and those are different problems with
+    // different answers. Name the thing when there is one.
+    const inTheWay = blockedBy(strip1, alongX, cornerAlong1) || blockedBy(strip2, !alongX, cornerAlong2);
+    return { blocked: true, side, shape: 'wrap', fall, short: true,
+      need: treads * 0.9 + W, have: Math.round((avail1 + avail2) * 10) / 10,
+      legHave1: Math.round(avail1 * 10) / 10, legHave2: Math.round(avail2 * 10) / 10,
+      ...(inTheWay ? { under: inTheWay } : {}) };
+  }
+  let n1 = Math.min(fits1, Math.max(1, Math.round(treads * split)));
+  let n2 = treads - n1;
+  if (n2 > fits2) { n2 = fits2; n1 = treads - n2; }             // the short edge decides
+  if (n1 < 1 || n2 < 1 || n1 > fits1) {
+    return { blocked: true, side, shape: 'wrap', fall, short: true, need: treads * 0.9 + W, have: Math.round((avail1 + avail2) * 10) / 10 };
+  }
+
+  const topAt = cornerAlong1 + (down1 ? -1 : 1) * (n1 * 0.9 + W / 2);
+  const botAt = cornerAlong2 + (down2 ? 1 : -1) * (n2 * 0.9 + W / 2);
+  const stepH = rise / treads;
+  // The hole you come up through, at the TOP of the first leg — same law as a
+  // tucked flight: open until the deck clears the treads by a head's height.
+  const wellLen = Math.min(n1 * 0.9, STAIR_HEADROOM / (stepH / 0.9));
+  const wellTo = topAt + (down1 ? wellLen : -wellLen);
+  // A LEG OF TWO TREADS IS NOT A FLIGHT. It fits, so it is not refused —
+  // but the card says it plainly rather than drawing a stub round a corner
+  // and leaving you to notice.
+  const lopsided = Math.min(n1, n2) < 3;
+  return {
+    shape: 'wrap', side, fall, secondSide, rise, treads, n1, n2, legW: W, lopsided,
+    marchAxis: alongX ? 'x' : 'z',                 // the first leg's axis
+    crossAxis: alongX ? 'z' : 'x',                 // the second leg's
+    topAt, cornerAlong1, cornerAlong2, botAt,
+    cornerX: corner.x, cornerZ: corner.z,
+    lane1Lo: alongX ? strip1.z0 : strip1.x0, lane1Hi: alongX ? strip1.z1 : strip1.x1,
+    lane2Lo: alongX ? strip2.x0 : strip2.z0, lane2Hi: alongX ? strip2.x1 : strip2.z1,
+    need: n1 * 0.9 + n2 * 0.9 + W, reach: 0,       // it takes no ground beyond the deck at all
+    wellFrom: Math.min(topAt, wellTo), wellTo: Math.max(topAt, wellTo), wellLen,
+    wellA0: alongX ? strip1.z0 : strip1.x0, wellA1: alongX ? strip1.z1 : strip1.x1,
+    crossMid: alongX ? (strip1.z0 + strip1.z1) / 2 : (strip1.x0 + strip1.x1) / 2,
+    gapW: W, mid: alongX ? (strip1.z0 + strip1.z1) / 2 : (strip1.x0 + strip1.x1) / 2,
+    gapA0: alongX ? strip1.z0 : strip1.x0, gapA1: alongX ? strip1.z1 : strip1.x1,
     target: 'grade', targetTop: 0, targetName: 'the ground', up: false
   };
 }
@@ -5767,7 +5949,7 @@ export function deriveDesign(spec, wallSectionsParam) {
     // far end. The near end stays open — that is the way down.
     const stRail = resolveDeckStairs(spec, el, dk);
     let wellLf = 0;
-    if (stRail && !stRail.blocked && stRail.shape === 'along' && dk.railKey !== 'none') {
+    if (stRail && !stRail.blocked && (stRail.shape === 'along' || stRail.shape === 'u' || stRail.shape === 'wrap') && stRail.wellLen > 0.5 && dk.railKey !== 'none') {
       const ex0 = Number(el.x) || 0; const ey0 = Number(el.y) || 0;
       const ex1 = ex0 + (Number(el.w) || 0); const ey1 = ey0 + (Number(el.d) || 0);
       const onEdge = (v, e) => Math.abs(v - e) < 0.2;

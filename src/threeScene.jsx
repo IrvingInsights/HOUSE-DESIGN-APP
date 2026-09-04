@@ -3323,7 +3323,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // under it and no hole is a deck you cannot get off.
           const stDeck = resolveDeckStairs(spec, element, dk);
           const thickD = dk.placement === 'grade' ? 0.25 : 0.35;
-          const well = stDeck && !stDeck.blocked && (stDeck.shape === 'along' || stDeck.shape === 'u') && stDeck.wellLen > 0.5
+          const well = stDeck && !stDeck.blocked && (stDeck.shape === 'along' || stDeck.shape === 'u' || stDeck.shape === 'wrap') && stDeck.wellLen > 0.5
             ? (stDeck.marchAxis === 'x'
               ? { x0: Math.max(ex0, stDeck.wellFrom), x1: Math.min(ex0 + ew0, stDeck.wellTo), z0: Math.max(ey0, stDeck.wellA0), z1: Math.min(ey0 + ed0, stDeck.wellA1) }
               : { x0: Math.max(ex0, stDeck.wellA0), x1: Math.min(ex0 + ew0, stDeck.wellA1), z0: Math.max(ey0, stDeck.wellFrom), z1: Math.min(ey0 + ed0, stDeck.wellTo) })
@@ -3392,6 +3392,49 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
               };
               rail(st.n1 * 0.9, st.n1 * stepH, (st.topAt + st.turnAt) / 2, st.lane1Lo + 0.12, deckTopY, dir1 > 0);
               rail(st.n2 * 0.9, st.n2 * stepH, (backFrom + st.botAt) / 2, st.lane2Hi - 0.12, landY, dir1 < 0);
+              stepGap = null;
+            } else if (st && !st.blocked && st.shape === 'wrap') {
+              // ROUND THE CORNER: down one edge, a landing where the deck
+              // turns, then on round the next. Both legs sit under the deck in
+              // the same 3.5 ft strip the tucked flight uses, so the yard keeps
+              // every foot of itself and the deck is the roof over both.
+              const alongX = st.marchAxis === 'x';           // leg one's axis
+              const stepH = st.rise / st.treads;
+              const lane1 = (st.lane1Lo + st.lane1Hi) / 2;   // leg one's cross-position
+              const lane2 = (st.lane2Lo + st.lane2Hi) / 2;   // leg two's
+              const dir1 = st.cornerAlong1 > st.topAt ? 1 : -1;
+              const dir2 = st.botAt > st.cornerAlong2 ? 1 : -1;
+              for (let i = 1; i <= st.n1; i += 1) {          // leg one
+                const at = st.topAt + dir1 * (i * 0.9 - 0.45);
+                dp(alongX
+                  ? box(0.9, stepH, st.legW - 0.3, at, deckTopY - i * stepH + stepH / 2, lane1, deckMatD)
+                  : box(st.legW - 0.3, stepH, 0.9, lane1, deckTopY - i * stepH + stepH / 2, at, deckMatD));
+              }
+              const landY = deckTopY - st.n1 * stepH;        // the landing, square, at the corner
+              dp(box(st.legW, 0.35, st.legW, st.cornerX, landY, st.cornerZ, deckMatD));
+              for (let i = 1; i <= st.n2; i += 1) {          // leg two, round the corner
+                const at = st.cornerAlong2 + dir2 * (st.legW / 2 + i * 0.9 - 0.45);
+                dp(alongX
+                  ? box(st.legW - 0.3, stepH, 0.9, lane2, landY - i * stepH + stepH / 2, at, deckMatD)
+                  : box(0.9, stepH, st.legW - 0.3, at, landY - i * stepH + stepH / 2, lane2, deckMatD));
+              }
+              // a handrail down the open side of each leg
+              const wrapRail = (len, riseLeg, ctrAlong, cross, topOfLeg, legAlongX, plus) => {
+                const railLen = Math.hypot(len, riseLeg);
+                const angle = Math.atan2(riseLeg, len);
+                const y = topOfLeg - riseLeg / 2 + 3;
+                let rm;
+                if (legAlongX) { rm = box(railLen, 0.15, 0.15, ctrAlong, y, cross, railMatD); rm.rotation.z = plus ? -angle : angle; }
+                else { rm = box(0.15, 0.15, railLen, cross, y, ctrAlong, railMatD); rm.rotation.x = plus ? angle : -angle; }
+                dp(rm);
+              };
+              const openSide1 = st.lane1Lo < st.lane1Hi && (st.side === 'north' || st.side === 'west')
+                ? st.lane1Hi - 0.12 : st.lane1Lo + 0.12;     // the side away from the deck's edge
+              const openSide2 = (st.secondSide === 'north' || st.secondSide === 'west')
+                ? st.lane2Hi - 0.12 : st.lane2Lo + 0.12;
+              wrapRail(st.n1 * 0.9, st.n1 * stepH, (st.topAt + st.cornerAlong1) / 2, openSide1, deckTopY, alongX, dir1 > 0);
+              wrapRail(st.n2 * 0.9, st.n2 * stepH, (st.cornerAlong2 + st.botAt) / 2, openSide2, landY, !alongX, dir2 > 0);
+              // the perimeter rail stays whole: you step down through the hole.
               stepGap = null;
             } else if (st && !st.blocked && st.shape === 'along') {
               // THE FLIGHT THAT RUNS UNDER THE DECK. Same treads and the same
