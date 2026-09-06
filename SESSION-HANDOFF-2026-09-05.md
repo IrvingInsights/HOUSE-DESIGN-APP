@@ -1,4 +1,4 @@
-# SESSION HANDOFF — 2026-09-05 (update 249)
+# SESSION HANDOFF — 2026-09-05 (updates 249–250)
 
 Read `AGENTS.md` first (it binds you), then `RESUME.md` for where things stand.
 This file is one session: Daniel asked "is it ready for me to try a new house
@@ -89,6 +89,22 @@ not); `normalizeRooms`' outline fit converges; `TESTING.md`'s honest list
 updated (it still claimed there was no wrap stair); README gets a line on
 small buildings.
 
+**250 — a fresh browser can no longer overwrite the shared design with the
+sample house.** Found the hard way, on Daniel's own design, during the live
+test above. A browser with empty storage opened the app while the dev server
+was still warming up. The 400 ms autosave fired before the first
+`/api/projects/current` answer arrived and wrote the SEED into local storage
+with a brand-new timestamp; the reconcile then saw "local is newer than the
+server" and pushed the seed up. Revision 1 of "Untitled Natural Building
+Study" landed on the engine at 23:40:37, over revision 1138 of his house.
+Nothing was lost — the revisions shelf had rev 1138 and "Bring this saved
+moment back" restored it, verified byte-identical to the backup taken before
+the session — but it must never be possible. Fix: `reconciledRef` in App.jsx;
+the autosave does nothing until the first reconcile has finished, whichever
+way it went. This is the same class as the two-windows bug the backups ring
+was built for, one layer down: **a timestamp written by a browser that has
+not yet looked at the engine is not evidence of anything.**
+
 ## VERIFICATION
 
 design_space 14,890 · op_smoke 228 · placement 2,312 · receipts 439 ·
@@ -98,7 +114,10 @@ deck_stair 51 · camera_fit 152 · studio_ask 43 · trace_flags 13 · geom_core
 41 · persistence 11 — all green. `vite build` clean. The three new/extended
 batteries are wired into PROVE-IT.
 
-Live: the app was tested on a NEW design started from empty land (the
+Live (250): storage cleared, page reloaded — the engine's design (19 rooms,
+rev 1138) is adopted and no revision-1 seed is written.
+
+Live (249): the app was tested on a NEW design started from empty land (the
 chooser needs `window.confirm`, which the in-app browser cannot answer, so
 it was stubbed for the test); Daniel's design was auto-saved to the shelf by
 "+ New" and restored afterwards; `.data/projects/reimagine/

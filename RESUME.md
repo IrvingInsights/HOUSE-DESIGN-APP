@@ -14,7 +14,15 @@ Run: `node server.mjs` from this folder (or start.bat — it pulls, moves the
 folder onto the main line, and self-restarts). Port 5184. **Backend `.mjs`
 edits need a server restart** (module cache); the frontend hot-reloads.
 
-## STATE (2026-09-05, update 249)
+## STATE (2026-09-05, update 250)
+- **A fresh browser cannot overwrite the shared design with the sample house
+  (250).** The 400 ms autosave used to run before the first server reconcile;
+  on a slow first load it stamped the seed into local storage as "newer" and
+  the reconcile pushed it up over the real design. Caught live on Daniel's own
+  house (restored from the revisions shelf, byte-identical). `reconciledRef`
+  in App.jsx now holds the autosave until the first look at the engine is
+  over. Rule: a timestamp written by a browser that has not yet asked the
+  engine is not evidence of anything.
 - **The four "still not built" items from July are built (249).** (1) A
   structure's roof is a **shed or a gable**, with a settable pitch and a ridge
   that can sit off-centre — the asymmetric gable; one resolver

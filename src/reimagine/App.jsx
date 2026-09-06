@@ -84,7 +84,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 249 · Sep 2026';
+const UPDATE_STAMP = 'update 250 · Sep 2026';
 // ONE rendering of the update status, used everywhere it's shown (classic's
 // rz-stamp, site's st-stamp-chip) — a build once sat 8 updates behind with no
 // warning anywhere, because "confirmed current" and "couldn't tell" both
@@ -1271,6 +1271,17 @@ export default function App() {
   const lastOwnBackupRef = useRef(Date.now());
   const autosaveOffRef = useRef(false); // the audit battery cycles canned designs — never save those
   const backendReadyRef = useRef(false);
+  // NOTHING SAVES UNTIL THE FIRST LOOK AT THE ENGINE IS OVER. Found on
+  // 2026-09-05 with Daniel's own design: a fresh browser (empty storage)
+  // opened the app while the dev server was still warming up. The 400 ms
+  // autosave fired first and wrote the SAMPLE HOUSE into local storage with
+  // a brand-new timestamp; the server's answer then arrived carrying Daniel's
+  // real design with its older timestamp, the reconcile below read "this
+  // browser is ahead — push up", and the sample house replaced his house on
+  // the engine. (The revisions shelf had the real one, so nothing was lost —
+  // but it should never have been possible.) The autosave now waits for this
+  // flag, which the reconcile sets when it has finished, whichever way it went.
+  const reconciledRef = useRef(false);
   const [backendDown, setBackendDown] = useState(false);
   const [staleOffer, setStaleOffer] = useState(null); // {spec, savedAt} from another window
   const serverSave = async (specToSave) => {
@@ -1309,6 +1320,8 @@ export default function App() {
         }
       } catch {
         if (alive) { backendReadyRef.current = false; setBackendDown(true); }
+      } finally {
+        reconciledRef.current = true;
       }
     })();
     return () => { alive = false; };
@@ -1352,6 +1365,7 @@ export default function App() {
   useEffect(() => {
     const timer = setTimeout(() => {
       if (autosaveOffRef.current) return;
+      if (!reconciledRef.current) return;   // the engine has not been asked yet — see reconciledRef
       try {
         const rawPrev = localStorage.getItem(STORE_KEY);
         if (rawPrev) {
