@@ -18,7 +18,7 @@ import {
   DEFAULT_OUTDOOR_GRID_SIZE_FT, clamp, padExtension, sitePadRect, objectBounds, titleCase, roofProfile, storeyInfo,
   upperPlateRect, resolveOverhangs, FOUNDATION_RUN_TYPES, DEFAULT_MODEL_LAYERS, siteOf, utilitiesOf, getSpecialBimObjects, wallAssemblyProfile,
   WALL_SIDES, resolveWallSide, resolveDeck, resolveDeckStairs, sunspacePartitions, isStair, resolveStair,
-  structureDoorStart, FENCE_TYPES
+  structureDoorStart, FENCE_TYPES, resolveStructureRoof, structureGroups, structureSharedOn, keepOutsideShared, WALL_SKINS
 } from './engine.js';
 
 // Some browsers run with graphics acceleration (WebGL) turned off — locked-
@@ -2953,60 +2953,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
       // ("they should share a roof. Still looks split").
       //
       // THE LAW IS ADJACENCY, NOT A LIST OF NAMES. Structures whose footprints
-      // share an edge are one building — that is true of any building anywhere,
-      // and it needs nothing typed in. One roof over the combined footprint,
-      // one fall, and NO wall on the edge they share; each keeps its own wall
-      // covering, so a poly-walled bay and an insulated room read as different
-      // rooms of the same building. It chains: A against B against C is one
-      // building. `standsAlone` is the exception, and it is a fact about the
-      // one structure — never a pointer at another object.
-      const JOINABLE_CATS = new Set(['outbuilding', 'carport', 'porch']);
-      const STRUCT_TOUCH = 0.35;   // hand-dragged structures never land flush
-      // update_object writes strings, so a switch arrives as 'yes' / '' / '1'.
-      const isYes = (v) => v === true || ['yes', 'true', '1', 'on'].includes(String(v ?? '').toLowerCase());
-      const structuresTouch = (a, b) => {
-        const ax0 = Number(a.x) || 0; const az0 = Number(a.y) || 0;
-        const ax1 = ax0 + (Number(a.w) || 0); const az1 = az0 + (Number(a.d) || 0);
-        const bx0 = Number(b.x) || 0; const bz0 = Number(b.y) || 0;
-        const bx1 = bx0 + (Number(b.w) || 0); const bz1 = bz0 + (Number(b.d) || 0);
-        const overX = Math.min(ax1, bx1) - Math.max(ax0, bx0);
-        const overZ = Math.min(az1, bz1) - Math.max(az0, bz0);
-        return (overX > 1 && overZ > -STRUCT_TOUCH) || (overZ > 1 && overX > -STRUCT_TOUCH);
-      };
-      const joinInfo = (() => {
-        const structures = (spec.elements || []).filter((e) => JOINABLE_CATS.has(e.category) && e.id
-          && !isYes(e.standsAlone) && Number(e.level || 1) === 1);
-        const parent = new Map(structures.map((e) => [e.id, e.id]));
-        const find = (id) => { let r = id; while (parent.get(r) !== r) r = parent.get(r); while (parent.get(id) !== r) { const nx = parent.get(id); parent.set(id, r); id = nx; } return r; };
-        for (let i = 0; i < structures.length; i += 1) {
-          for (let j = i + 1; j < structures.length; j += 1) {
-            if (!structuresTouch(structures[i], structures[j])) continue;
-            const ra = find(structures[i].id); const rb = find(structures[j].id);
-            if (ra !== rb) parent.set(ra, rb);
-          }
-        }
-        const bucket = new Map();
-        for (const e of structures) {
-          const root = find(e.id);
-          if (!bucket.has(root)) bucket.set(root, []);
-          bucket.get(root).push(e);
-        }
-        const info = new Map();
-        for (const members of bucket.values()) {
-          if (members.length < 2) continue;          // one structure is not a join
-          const g = {
-            members,
-            leader: members[0].id,
-            x0: Math.min(...members.map((m) => Number(m.x) || 0)),
-            z0: Math.min(...members.map((m) => Number(m.y) || 0)),
-            x1: Math.max(...members.map((m) => (Number(m.x) || 0) + (Number(m.w) || 0))),
-            z1: Math.max(...members.map((m) => (Number(m.y) || 0) + (Number(m.d) || 0))),
-            h: Math.max(...members.map((m) => Math.max(6, Number(m.h) || 9)))
-          };
-          for (const m of members) info.set(m.id, g);
-        }
-        return info;
-      })();
+      // share an edge are one building — one roof over the combined footprint,
+      // one fall, and NO wall on the edge they share. The law itself lives in
+      // bim-core (structureGroups) so the receipts price by exactly what is
+      // drawn here — the wall between two joined sheds used to be drawn by
+      // nobody and priced twice.
+      const joinInfo = structureGroups(spec);
       const joinOf = (el) => (el && el.id ? joinInfo.get(el.id) || null : null);
 
       [...(spec.elements || []), ...plantAnnexes, ...sunspacePartitions(spec)].forEach((element) => {
@@ -3717,7 +3669,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // how such a building actually goes up. That needs a shed to take a
           // wallCovering the way a canopy already could — so the same field
           // now works on every structure instead of only the open ones.
-          const obWallCov = ROOF_COVERINGS[element.wallCovering] || null;
+          const obWallCov = WALL_SKINS[element.wallCovering] || null;
           const obWallMat = obWallCov
             ? new THREE.MeshStandardMaterial({
               color: obWallCov.color, roughness: obWallCov.translucent ? 0.15 : 0.85,
@@ -3729,7 +3681,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // matter what stood around it, so a polycarbonate bay got a wooden
           // barn door — the one part of the building that ignored the covering
           // you chose. It follows the wall now unless the door says otherwise.
-          const obDoorCov = ROOF_COVERINGS[element.doorCovering] || obWallCov;
+          const obDoorCov = WALL_SKINS[element.doorCovering] || obWallCov;
           const obDoorMat = obDoorCov
             ? new THREE.MeshStandardMaterial({
               color: obDoorCov.color, roughness: obDoorCov.translucent ? 0.18 : 0.75,
@@ -3748,47 +3700,13 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           const obRoofMat = obCover
             ? new THREE.MeshStandardMaterial({ color: obCover.color, roughness: obCover.translucent ? 0.15 : 0.8, transparent: Boolean(obCover.translucent), opacity: obCover.translucent ? 0.32 : 1, metalness: obCover.texture === 'metal' && !obCover.translucent ? 0.5 : 0 })
             : roofMat;
-          const obOv = 1;
-          // Which way THIS building sheds. It follows the house unless the
-          // structure says otherwise — Daniel's carport/workshop drains east
-          // while the house drains north, because of where it sits and where
-          // the water should go. Same field a storey plate already uses.
-          const low = ['north', 'south', 'east', 'west'].includes(element.roofFall)
-            ? element.roofFall : (roofSpec.lowSide || 'north');
-          const fallsAlongZ = low === 'north' || low === 'south';
-          // The roof spans the whole BUILDING — the group's footprint when this
-          // structure is joined to others, its own when it stands alone. One
-          // plane, one fall, one rise, so joined members cannot disagree about
-          // where the water goes.
-          const rx0 = obJoin ? obJoin.x0 : ox0; const rz0 = obJoin ? obJoin.z0 : oz0;
-          const rx1 = obJoin ? obJoin.x1 : ox1; const rz1 = obJoin ? obJoin.z1 : oz1;
-          const roofW = rx1 - rx0; const roofD = rz1 - rz0;
-          const runFt = fallsAlongZ ? roofD + obOv * 2 : roofW + obOv * 2;
-          const rise = Math.max(0.8, runFt * 0.18);
-          // A WALL RISES TO MEET ITS ROOF. Every side was built to one height
-          // and the roof was then tilted above them, which left an open wedge
-          // on the high side and a raking gap down both flanks — Daniel: "none
-          // meet the walls properly". It is the same law the house already
-          // obeys with its north/south wall heights, and the same fix as the
-          // gable-end infill: the walls follow the plane instead of a number.
-          //
-          // The panel is rotated about its own centre, so its mid-plane stands
-          // at obH + rise/2 over the middle of the building and changes by
-          // slope per foot toward the high side. Wall tops track the plane's
-          // UNDERSIDE (half the 0.3 panel below the mid-plane).
-          const obSlope = rise / runFt;                       // tan of the tilt
-          const obCx = (rx0 + rx1) / 2; const obCz = (rz0 + rz1) / 2;
-          const obMid = obH + rise / 2;
-          // Half the panel thickness measured VERTICALLY, not perpendicular —
-          // a tilted 0.3 ft panel hangs a little lower than 0.15 beneath its
-          // own mid-plane, and a wall built to the wrong one pierces the roof.
-          const obUnder = 0.15 * Math.hypot(rise, runFt) / runFt;
-          const roofTopAt = (x, z) => {
-            const u = fallsAlongZ
-              ? (z - obCz) * (low === 'north' ? 1 : -1)
-              : (x - obCx) * (low === 'west' ? 1 : -1);
-            return Math.max(1, obMid + u * obSlope - obUnder);
-          };
+          // WHAT THIS BUILDING WEARS ON TOP — shed or gable, its pitch, its
+          // fall or its ridge — is resolved in ONE place (resolveStructureRoof in
+          // engine.js) for the scene, the receipts and the batteries alike. The
+          // roof spans the whole BUILDING: the group's footprint when this
+          // structure is joined to others, its own when it stands alone.
+          const obRoof = resolveStructureRoof(spec, element, obJoin);
+          const roofTopAt = obRoof.topAt;
           // A wall with a sloping top: a prism, because a box only has one
           // height. Mirrors gablePrism above — same eight corners, same faces,
           // double-sided so it reads from inside the shed as well as out.
@@ -3818,21 +3736,7 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // must not be built — it is the opening between the bay and the room.
           // A small overlap or a hairline gap still counts as touching; two
           // structures dragged together by hand never land exactly flush.
-          const TOUCH = 0.35;
-          const sharedOn = (side) => {
-            if (!obJoin) return [];
-            const out = [];
-            for (const s of obJoin.members) {
-              if (s.id === element.id) continue;
-              const sx0 = Number(s.x) || 0; const sz0 = Number(s.y) || 0;
-              const sx1 = sx0 + (Number(s.w) || 0); const sz1 = sz0 + (Number(s.d) || 0);
-              if (side === 'North' && Math.abs(sz1 - oz0) <= TOUCH) out.push([Math.max(ox0, sx0), Math.min(ox1, sx1)]);
-              if (side === 'South' && Math.abs(sz0 - oz1) <= TOUCH) out.push([Math.max(ox0, sx0), Math.min(ox1, sx1)]);
-              if (side === 'West' && Math.abs(sx1 - ox0) <= TOUCH) out.push([Math.max(oz0, sz0), Math.min(oz1, sz1)]);
-              if (side === 'East' && Math.abs(sx0 - ox1) <= TOUCH) out.push([Math.max(oz0, sz0), Math.min(oz1, sz1)]);
-            }
-            return out.filter(([a, b]) => b - a > 0.05);
-          };
+          const sharedOn = (side) => structureSharedOn(element, obJoin, side);
           // A SIDE CAN BE MISSING. A woodshed is open to the weather it dries
           // in, a carport is a roof on posts, a barn stands open on its working
           // side — and every structure was built with four walls regardless.
@@ -3847,9 +3751,12 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
             const shared = sharedOn(side);
             const inShared = (a) => shared.some(([g0, g1]) => a > g0 && a < g1);
             // whatever is left of [from,to] once the shared stretches are cut
-            const keep = (from, to) => shared.reduce((segs, [g0, g1]) => segs.flatMap(([s0, s1]) => (
-              g1 <= s0 || g0 >= s1 ? [[s0, s1]] : [...(g0 > s0 ? [[s0, g0]] : []), ...(g1 < s1 ? [[g1, s1]] : [])]
-            )), [[from, to]]);
+            // A GABLE END HAS A PEAK IN IT. A prism's top is a straight line
+            // between its two ends, so a wall that runs ACROSS the ridge is
+            // split at the ridge and built as two prisms meeting at the peak.
+            const breaksHere = obRoof.ridge && ((obRoof.axis === 'ew') !== horizontal) ? obRoof.breaks : [];
+            const keep = (from, to) => keepOutsideShared(from, to, shared)
+              .flatMap(([s0, s1]) => breaksHere.reduce((segs, b) => segs.flatMap(([a, c]) => (b > a + 0.05 && b < c - 0.05 ? [[a, b], [b, c]] : [[a, c]])), [[s0, s1]]));
             const topAt = (a) => elevation + (horizontal ? roofTopAt(a, cross) : roofTopAt(cross, a));
             // from→to, standing on yBase, topped by the roof plane at each end.
             const mk = (from, to, yBase) => keep(from, to).forEach(([f, t]) => {
@@ -3877,11 +3784,13 @@ export function ThreeScene({ spec, selectedRoom, layers = DEFAULT_MODEL_LAYERS, 
           // first member, over the whole footprint. The others build only their
           // walls and floor — and their walls already rise to this same plane.
           if (!obJoin || obJoin.leader === element.id) {
-            const panel = box(roofW + obOv * 2, 0.3, roofD + obOv * 2, obCx, elevation + obMid, obCz, obRoofMat);
-            // +x rotation drops the -z (north) edge; mirror it for a south fall.
-            if (fallsAlongZ) panel.rotation.x = Math.atan2(rise, runFt) * (low === 'north' ? -1 : 1);
-            else panel.rotation.z = Math.atan2(rise, runFt) * (low === 'west' ? 1 : -1);
-            obPart(panel);
+            // One panel for a shed; two meeting at the ridge for a gable.
+            for (const p of obRoof.panels) {
+              const panel = box(p.sx, 0.3, p.sz, p.cx, elevation + p.cy, p.cz, obRoofMat);
+              panel.rotation.x = p.rotX;
+              panel.rotation.z = p.rotZ;
+              obPart(panel);
+            }
           }
           const obHandle = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.04, depthWrite: false });
           mesh = box(element.w, obH, element.d, (ox0 + ox1) / 2, elevation + obH / 2, (oz0 + oz1) / 2, obHandle);

@@ -17,6 +17,7 @@
 // Run: node tools/outbuilding_roof_test.mjs
 import * as THREE from 'three';
 import { readFileSync } from 'node:fs';
+import { resolveStructureRoof } from '../src/engine.js';
 
 let checks = 0;
 const fails = [];
@@ -227,6 +228,138 @@ checks++;
 if (!/const joinOf = /.test(sceneSrc)) fail('joinOf is gone — nothing decides which structures are one building');
 checks++;
 if (/joinsId/.test(sceneSrc)) fail('joinsId is back — the building law must be adjacency, not a pointer at another object');
+
+
+// ── THE RESOLVER IS THE FORMULA ─────────────────────────────────────────────
+// The shipped geometry above is replicated by hand. Since update 248 the scene
+// builds from resolveStructureRoof instead; a shed from it must match the
+// hand formula exactly, or the walls the scene builds are not the walls this
+// battery proved.
+for (const low of FALLS) {
+  for (const shape of SHAPES) {
+    const el = { id: 'r', x: 5, y: 7, ...shape, roofFall: low };
+    const g = outbuilding(el, low);
+    const r = resolveStructureRoof({ shell: { roofType: 'gable' } }, el, null);
+    checks++;
+    if (r.shape !== 'shed' || r.low !== low) { fail(`resolver: ${low}/${shape.w}x${shape.d} should be a shed falling ${low}`); continue; }
+    for (const [x, z] of [[g.ox0 + 0.25, g.oz0 + 0.25], [g.ox1 - 0.25, g.oz1 - 0.25], [g.obCx, g.obCz], [g.ox0 + 0.25, g.oz1 - 0.25]]) {
+      checks++;
+      if (Math.abs(r.topAt(x, z) - g.roofTopAt(x, z)) > 1e-9) fail(`resolver: ${low}/${shape.w}x${shape.d} wall top differs from the proven formula at ${x},${z}`);
+    }
+    // and its one panel is the one the scene used to build
+    const p = r.panels[0];
+    checks++;
+    if (r.panels.length !== 1 || Math.abs(p.sx - (shape.w + 2)) > 1e-9 || Math.abs(p.sz - (shape.d + 2)) > 1e-9 || Math.abs(p.cy - g.obMid) > 1e-9) fail(`resolver: ${low}/${shape.w}x${shape.d} shed panel is not the shipped panel`);
+  }
+}
+
+// ── A GABLE ON A STRUCTURE ──────────────────────────────────────────────────
+// Daniel, July 2026: "an asymmetric gable on a structure — a roof shape
+// (shed | gable), a settable pitch, and a ridge off-centre so one slope runs
+// longer than the other." Two panels meeting at a ridge. The truth is again
+// the real panels, positioned and rotated exactly the way the scene does it
+// (box → rotation.x / rotation.z), each solved as a plane; every wall top
+// must sit on the underside of whichever panel is over it, and the two
+// panels must meet at the ridge — no gap and no overlap in height.
+function panelUnderside(p) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(p.sx, 0.3, p.sz));
+  mesh.position.set(p.cx, p.cy, p.cz);
+  mesh.rotation.x = p.rotX; mesh.rotation.z = p.rotZ;
+  mesh.updateMatrixWorld(true);
+  const at = (lx, lz) => new THREE.Vector3(lx, -0.15, lz).applyMatrix4(mesh.matrixWorld);
+  const a = at(-p.sx / 2, -p.sz / 2); const b = at(p.sx / 2, -p.sz / 2); const c = at(-p.sx / 2, p.sz / 2);
+  const n = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).normalize();
+  const plane = (x, z) => a.y - (n.x * (x - a.x) + n.z * (z - a.z)) / n.y;
+  // the panel's horizontal extent, from its MID-plane corners (the underside
+  // corners shift by half a thickness × sin(tilt) — not what reach means)
+  const mid = (lx, lz) => new THREE.Vector3(lx, 0, lz).applyMatrix4(mesh.matrixWorld);
+  const corners = [mid(-p.sx / 2, -p.sz / 2), mid(p.sx / 2, -p.sz / 2), mid(-p.sx / 2, p.sz / 2), mid(p.sx / 2, p.sz / 2)];
+  return { plane, x0: Math.min(...corners.map((v) => v.x)), x1: Math.max(...corners.map((v) => v.x)), z0: Math.min(...corners.map((v) => v.z)), z1: Math.max(...corners.map((v) => v.z)) };
+}
+const GABLES = [
+  { w: 16, d: 12, h: 9 }, { w: 12, d: 16, h: 9 }, { w: 24, d: 18, h: 14 }, { w: 19, d: 5.7, h: 9 }, { w: 8, d: 8, h: 7 }, { w: 30, d: 12, h: 10 }
+];
+let worstGable = 0;
+for (const shape of GABLES) {
+  for (const axis of ['', 'ew', 'ns']) {
+    for (const ridgeFt of [0, 1.5, 3, 6]) {
+      for (const pitch of [0, 0.25, 0.5]) {
+        const el = { id: 'g', x: 5, y: 7, ...shape, roofShape: 'gable', ...(axis ? { roofRidge: axis } : {}), ...(ridgeFt ? { roofRidgeFt: ridgeFt } : {}), ...(pitch ? { roofPitch: pitch } : {}) };
+        const r = resolveStructureRoof({ shell: { roofType: 'gable', roofPitch: 0.32 } }, el, null);
+        checks++;
+        if (r.shape !== 'gable' || r.panels.length !== 2 || !r.ridge) { fail(`gable ${JSON.stringify(shape)} ${axis}/${ridgeFt}/${pitch}: not two panels and a ridge`); continue; }
+        checks++;
+        if (axis && r.axis !== axis) fail(`gable: roofRidge=${axis} ignored`);
+        if (!axis) { checks++; if (r.axis !== (shape.w >= shape.d ? 'ew' : 'ns')) fail(`gable: default ridge should run along the longer side for ${shape.w}x${shape.d}`); }
+        checks++;
+        if (pitch && Math.abs(r.pitch - pitch) > 1e-9) fail('gable: roofPitch ignored');
+        if (!pitch) { checks++; if (Math.abs(r.pitch - 0.32) > 1e-9) fail('gable: default pitch should be the house\'s'); }
+        const span = r.ridge.span;
+        checks++;
+        if (ridgeFt && ridgeFt < span - 1 && Math.abs(r.ridge.fromEdgeFt - ridgeFt) > 1e-9) fail(`gable: ridge at ${ridgeFt} ft not honoured (got ${r.ridge.fromEdgeFt})`);
+        if (ridgeFt && ridgeFt >= span - 1) { checks++; if (r.ridge.fromEdgeFt > span - 1 + 1e-9 || r.ridge.fromEdgeFt < 1 - 1e-9) fail('gable: an over-wide ridge setting must be clamped inside the footprint'); }
+        const [pA, pB] = r.panels.map(panelUnderside);
+        // THE WALL-HEIGHT LAW: the long slope's eave is the wall height —
+        // at the eave line (1 ft past the wall) the roof sits at h.
+        const longIsA = (r.ridge.fromEdgeFt + 1) >= (span - r.ridge.fromEdgeFt + 1);
+        const eaveA = r.axis === 'ew' ? pA.plane(r.x0 + 1, r.z0 - 1) : pA.plane(r.x0 - 1, r.z0 + 1);
+        const eaveB = r.axis === 'ew' ? pB.plane(r.x0 + 1, r.z1 + 1) : pB.plane(r.x1 + 1, r.z0 + 1);
+        const lowEave = longIsA ? eaveA : eaveB;
+        checks++;
+        if (Math.abs(lowEave + 0.15 * Math.hypot(1, r.pitch) - shape.h) > 0.02) fail(`gable ${shape.w}x${shape.d} ${axis}/${ridgeFt}/${pitch}: the long slope's eave should sit at the wall height ${shape.h} (got ${(lowEave + 0.15 * Math.hypot(1, r.pitch)).toFixed(3)})`);
+        checks++;
+        if (ridgeFt && Math.abs(r.ridge.fromEdgeFt - span / 2) > 0.05 && Math.abs(eaveA - eaveB) < 0.05) fail(`gable ${shape.w}x${shape.d}: an off-centre ridge must give two different eave heights`);
+        if (!ridgeFt) { checks++; if (Math.abs(eaveA - eaveB) > 1e-6) fail(`gable ${shape.w}x${shape.d}: a centred ridge must give equal eaves (${eaveA.toFixed(3)} vs ${eaveB.toFixed(3)})`); }
+        // the two panels meet at the ridge
+        const ridgeX = r.axis === 'ns' ? r.ridge.at : r.x0 + shape.w / 2;
+        const ridgeZ = r.axis === 'ew' ? r.ridge.at : r.z0 + shape.d / 2;
+        checks++;
+        if (Math.abs(pA.plane(ridgeX, ridgeZ) - pB.plane(ridgeX, ridgeZ)) > 0.01) fail(`gable ${shape.w}x${shape.d} ${axis}/${ridgeFt}/${pitch}: the panels do not meet at the ridge (${pA.plane(ridgeX, ridgeZ).toFixed(3)} vs ${pB.plane(ridgeX, ridgeZ).toFixed(3)})`);
+        // every wall top on the underside of the panel over it — including
+        // the peak of each gable end, where the wall is split at the ridge
+        const T = 0.5;
+        const sides = [
+          ['North', true, r.z0 + T / 2], ['South', true, r.z1 - T / 2],
+          ['West', false, r.x0 + T / 2], ['East', false, r.x1 - T / 2]
+        ];
+        for (const [side, horizontal, cross] of sides) {
+          const a0 = horizontal ? r.x0 : r.z0;
+          const spanAlong = horizontal ? shape.w : shape.d;
+          const samples = [];
+          for (let t = 0; t <= 1.0001; t += 0.1) samples.push(a0 + spanAlong * t);
+          for (const b of r.breaks) if (b > a0 && b < a0 + spanAlong) samples.push(b);     // the peak itself
+          for (const a of samples) {
+            const x = horizontal ? a : cross; const z = horizontal ? cross : a;
+            const over = (r.axis === 'ew' ? z <= r.ridge.at : x <= r.ridge.at) ? pA : pB;
+            const gap = over.plane(x, z) - r.topAt(x, z);
+            worstGable = Math.max(worstGable, Math.abs(gap));
+            checks++;
+            if (gap < -TOL_PIERCE) fail(`gable ${shape.w}x${shape.d} ${axis}/${ridgeFt}/${pitch} ${side} @${a.toFixed(1)}: wall pierces the roof by ${(-gap).toFixed(3)} ft`);
+            else if (gap > TOL_GAP) fail(`gable ${shape.w}x${shape.d} ${axis}/${ridgeFt}/${pitch} ${side} @${a.toFixed(1)}: ${gap.toFixed(3)} ft of daylight between wall and roof`);
+          }
+        }
+        // the panels reach the eaves: each covers its own side out to the overhang
+        checks++;
+        const reachA = r.axis === 'ew' ? pA.z0 <= r.z0 - 1 + 0.01 : pA.x0 <= r.x0 - 1 + 0.01;
+        const reachB = r.axis === 'ew' ? pB.z1 >= r.z1 + 1 - 0.01 : pB.x1 >= r.x1 + 1 - 0.01;
+        if (!reachA || !reachB) fail(`gable ${shape.w}x${shape.d} ${axis}/${ridgeFt}/${pitch}: a panel stops short of its eave`);
+      }
+    }
+  }
+}
+// A joined building takes ONE gable over the whole footprint, from whichever
+// member carries the setting.
+{
+  const A = { id: 'a', x: 0, y: 0, w: 12, d: 10, h: 9 };
+  const B = { id: 'b', x: 12, y: 0, w: 8, d: 10, h: 10, roofShape: 'gable', roofRidgeFt: 3 };
+  const group = { members: [A, B], leader: 'a', x0: 0, z0: 0, x1: 20, z1: 10, h: 10 };
+  const r = resolveStructureRoof({ shell: {} }, A, group);
+  checks++;
+  if (r.shape !== 'gable' || r.axis !== 'ew' || Math.abs(r.ridge.fromEdgeFt - 3) > 1e-9) fail('a joined building must take the gable set on ANY member, over the whole footprint');
+  checks++;
+  if (Math.abs(r.x1 - 20) > 1e-9 || Math.abs(r.h - 10) > 1e-9) fail('the joined gable spans the group and stands to the group height');
+}
+console.log(`  gable: worst |wall top − roof underside| = ${worstGable.toFixed(5)} ft`);
 
 console.log(`outbuilding roofs: ${checks} checks across ${FALLS.length} fall directions × ${SHAPES.length} shapes`);
 console.log(`  worst |wall top − roof underside| = ${worst.toFixed(5)} ft (${(worst * 12).toFixed(3)} in)`);

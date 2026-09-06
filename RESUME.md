@@ -14,6 +14,29 @@ Run: `node server.mjs` from this folder (or start.bat — it pulls, moves the
 folder onto the main line, and self-restarts). Port 5184. **Backend `.mjs`
 edits need a server restart** (module cache); the frontend hot-reloads.
 
+## STATE (2026-09-05, update 249)
+- **The four "still not built" items from July are built (249).** (1) A
+  structure's roof is a **shed or a gable**, with a settable pitch and a ridge
+  that can sit off-centre — the asymmetric gable; one resolver
+  (`resolveStructureRoof` in engine.js) feeds the 3D scene, the flags and
+  `outbuilding_roof_test`. (2) **Plywood** (and OSB, board & batten) are wall
+  skins: `WALL_SKINS` in bim-core is the roof list plus the wall-only ones;
+  `wallCovering` reads it. (3) **Heat-source clearance to combustibles**:
+  `resolveHeatClearance` measures the heater against the walls around it —
+  36″ open / 12″ shielded for a stove, 4″ for an ASTM E1602 masonry heater —
+  and the flag offers the real remedy (move it; or shield it and move it) or
+  says honestly that it does not fit. Polycarbonate walls get their own
+  sentence. `heat_clearance_test` (33) pins Daniel's 68″ workshop arithmetic.
+  (4) **A shared wall is priced once — never**: the join law moved into
+  bim-core (`structureGroups`), the scene draws by it and the receipts take the
+  shared stretch off the wall third exactly like an open side
+  (`structure_cost_test`, 17). Also: `normalizeRooms`' outline fit now runs to
+  a fixed point (the fuzz found a round house that needed two passes), and the
+  fuzz generator places structures and heaters so the design-space proof
+  covers all of the above.
+- update 248 (another session, same day): a one-click desktop shortcut
+  (`create_desktop_shortcut.bat`).
+
 ## STATE (2026-09-03, update 247)
 - **ONE app, not two.** `src/main.jsx` and `classic.html` — the old parallel
   build — were retired in update 242, after everything they alone could do was
@@ -30,7 +53,11 @@ edits need a server restart** (module cache); the frontend hot-reloads.
   behind); a real **Start on empty land**; the verdict tiles moved to the top
   of the left bar; one history list instead of two.
 - **The 3D view can no longer open blank** (244): a pane measured before it had a width made the camera stand 8,100 ft back, past its own far plane. Fixed at three points and pinned by tools/camera_fit_test.mjs (152 checks, verified to fail when reverted).
-- **All batteries green:** design_space 15,316 · op_smoke 228 · placement
+- **All batteries green (249):** design_space 14,890 · op_smoke 228 · placement
+  2,312 · receipts 439 · golden_numbers 189/0 · capability 272 ·
+  outbuilding_roof 16,215 (now with gables) · heat_clearance 33 ·
+  structure_cost 17 · deck_stair 51 · camera_fit 152 · studio_ask 43.
+- **All batteries green (247):** design_space 15,316 · op_smoke 228 · placement
   2,312 · receipts 439 · golden_numbers 189 pinned / 0 drifted · capability
   272 across 57 capabilities · studio_ask 34 · trace_flags 13 ·
   from_scratch_audit 0 gaps · deck_stair · outbuilding_roof · thermal ·
@@ -60,9 +87,10 @@ edits need a server restart** (module cache); the frontend hot-reloads.
 1. Drop a real floor-plan PDF into `.data/trace-corpus/` and run
    `node tools/trace_corpus_test.mjs` — the reader is proven on an image of
    his own plan, not yet on an architect's PDF here.
-2. Then the depth work on the Photion project (PRJ-911): an asymmetric gable on a structure, plywood as a wall
-   covering, heat-source clearance to combustibles, and the fact that two
-   joined structures are still priced as two.
+2. Then the depth work on the Photion project (PRJ-911): let a deck's wrap
+   stair run outside the deck's footprint (the only version that fits Daniel's
+   own house); price a structure's wall skin; count furniture as a
+   combustible near the heater.
 3. Gate B still stands: a first-time user, an hour, no dead ends. Daniel
    cannot run it — he routes around the rough edges without noticing.
 

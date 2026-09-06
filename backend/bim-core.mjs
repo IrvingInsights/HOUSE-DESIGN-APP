@@ -169,6 +169,131 @@ export function resolveRoofCovering(shell = {}) {
   return ROOF_COVERINGS[shell?.roofCovering] || ROOF_COVERINGS.metal;
 }
 
+// WHAT A STRUCTURE'S WALLS ARE SKINNED IN. A shed, a workshop bay or a carport
+// takes a wallCovering — and until now the only list to pick from was the ROOF
+// list, so the one skin a workshop actually wears (sheets of plywood over the
+// frame) was not on offer at all. Daniel, July 2026: "plywood as a wall
+// covering for the workshop — check whether it is in the covering list at
+// all." It was not. The roof coverings stay valid as skins (poly, metal, cedar
+// are real wall skins), and the wall-only ones join them here.
+//
+// `combustible` is what the heat-source clearance check reads: a stove wants
+// distance from a wood or plastic skin, and polycarbonate is worse than wood —
+// it deforms well below the temperature a shield sees, so it wants a real
+// non-combustible shield, not distance (`softens: true`).
+export const WALL_SKINS = {
+  ...Object.fromEntries(Object.entries(ROOF_COVERINGS).map(([k, c]) => [k, {
+    ...c,
+    combustible: c.texture === 'wood' || c.key === 'thatch' || c.key === 'asphalt' || c.key === 'membrane' || Boolean(c.translucent),
+    softens: Boolean(c.translucent)
+  }])),
+  plywood:  { key: 'plywood',  label: 'Plywood sheets (exterior grade)', costPsf: 3.5, carbonPsf: 2, color: 0xc9a86a, texture: 'wood', wallOnly: true, combustible: true, note: 'Sheets over the frame — the cheapest solid skin and the workshop classic. Wants paint or stain and a drip edge to last.' },
+  osb:      { key: 'osb',      label: 'OSB sheets (painted)',            costPsf: 2.5, carbonPsf: 2, color: 0xb99a63, texture: 'wood', wallOnly: true, combustible: true, note: 'Cheaper than plywood and less weather-proof — keep it painted and off the ground.' },
+  boardbatten: { key: 'boardbatten', label: 'Board & batten',            costPsf: 6.5, carbonPsf: 2, color: 0x8a6f4e, texture: 'wood', wallOnly: true, combustible: true, green: true, note: 'Vertical boards with a batten over every joint — the barn classic.' }
+};
+export function resolveWallSkin(key) {
+  return WALL_SKINS[key] || null;
+}
+
+// ── STRUCTURES THAT TOUCH ARE ONE BUILDING ───────────────────────────────────
+// THE LAW IS ADJACENCY, NOT A LIST OF NAMES. Structures whose footprints share
+// an edge are one building — true of any building anywhere, and it needs
+// nothing typed in. One roof over the combined footprint, one fall, and NO
+// wall on the edge they share. It chains: A against B against C is one
+// building. `standsAlone` is the exception, and it is a fact about the one
+// structure — never a pointer at another object.
+//
+// This used to live only in the 3D scene, so the drawing joined two sheds and
+// the receipts still priced the wall between them — twice, once for each
+// side. Now the scene, the receipts and the batteries all ask this one
+// function, so they cannot disagree about which buildings are one.
+export const JOINABLE_STRUCTURE_CATS = new Set(['outbuilding', 'carport', 'porch']);
+export const STRUCT_TOUCH_FT = 0.35;   // hand-dragged structures never land flush
+export const isYesFlag = (v) => v === true || ['yes', 'true', '1', 'on'].includes(String(v ?? '').toLowerCase());
+export function structuresTouch(a, b) {
+  const ax0 = Number(a.x) || 0; const az0 = Number(a.y) || 0;
+  const ax1 = ax0 + (Number(a.w) || 0); const az1 = az0 + (Number(a.d) || 0);
+  const bx0 = Number(b.x) || 0; const bz0 = Number(b.y) || 0;
+  const bx1 = bx0 + (Number(b.w) || 0); const bz1 = bz0 + (Number(b.d) || 0);
+  const overX = Math.min(ax1, bx1) - Math.max(ax0, bx0);
+  const overZ = Math.min(az1, bz1) - Math.max(az0, bz0);
+  return (overX > 1 && overZ > -STRUCT_TOUCH_FT) || (overZ > 1 && overX > -STRUCT_TOUCH_FT);
+}
+// Map of element id → its building group ({ members, leader, x0, z0, x1, z1, h })
+// for every structure that is part of a group of two or more. A structure
+// that touches nothing is not in the map: one structure is not a join.
+export function structureGroups(spec) {
+  const structures = (spec?.elements || []).filter((e) => JOINABLE_STRUCTURE_CATS.has(e.category) && e.id
+    && !isYesFlag(e.standsAlone) && Number(e.level || 1) === 1);
+  const parent = new Map(structures.map((e) => [e.id, e.id]));
+  const find = (id) => { let r = id; while (parent.get(r) !== r) r = parent.get(r); while (parent.get(id) !== r) { const nx = parent.get(id); parent.set(id, r); id = nx; } return r; };
+  for (let i = 0; i < structures.length; i += 1) {
+    for (let j = i + 1; j < structures.length; j += 1) {
+      if (!structuresTouch(structures[i], structures[j])) continue;
+      const ra = find(structures[i].id); const rb = find(structures[j].id);
+      if (ra !== rb) parent.set(ra, rb);
+    }
+  }
+  const bucket = new Map();
+  for (const e of structures) {
+    const root = find(e.id);
+    if (!bucket.has(root)) bucket.set(root, []);
+    bucket.get(root).push(e);
+  }
+  const info = new Map();
+  for (const members of bucket.values()) {
+    if (members.length < 2) continue;
+    const g = {
+      members,
+      leader: members[0].id,
+      x0: Math.min(...members.map((m) => Number(m.x) || 0)),
+      z0: Math.min(...members.map((m) => Number(m.y) || 0)),
+      x1: Math.max(...members.map((m) => (Number(m.x) || 0) + (Number(m.w) || 0))),
+      z1: Math.max(...members.map((m) => (Number(m.y) || 0) + (Number(m.d) || 0))),
+      h: Math.max(...members.map((m) => Math.max(6, Number(m.h) || 9)))
+    };
+    for (const m of members) info.set(m.id, g);
+  }
+  return info;
+}
+// The stretches of ONE side of a structure that stand against a joined
+// sibling — [from, to] along that side, in plan feet. Those stretches are
+// interior to the building: no wall is built there and none is priced.
+// `side` is 'North' | 'South' | 'West' | 'East'.
+export function structureSharedOn(el, group, side) {
+  if (!group) return [];
+  const ox0 = Number(el.x) || 0; const oz0 = Number(el.y) || 0;
+  const ox1 = ox0 + (Number(el.w) || 0); const oz1 = oz0 + (Number(el.d) || 0);
+  const out = [];
+  for (const s of group.members) {
+    if (s.id === el.id) continue;
+    const sx0 = Number(s.x) || 0; const sz0 = Number(s.y) || 0;
+    const sx1 = sx0 + (Number(s.w) || 0); const sz1 = sz0 + (Number(s.d) || 0);
+    if (side === 'North' && Math.abs(sz1 - oz0) <= STRUCT_TOUCH_FT) out.push([Math.max(ox0, sx0), Math.min(ox1, sx1)]);
+    if (side === 'South' && Math.abs(sz0 - oz1) <= STRUCT_TOUCH_FT) out.push([Math.max(ox0, sx0), Math.min(ox1, sx1)]);
+    if (side === 'West' && Math.abs(sx1 - ox0) <= STRUCT_TOUCH_FT) out.push([Math.max(oz0, sz0), Math.min(oz1, sz1)]);
+    if (side === 'East' && Math.abs(sx0 - ox1) <= STRUCT_TOUCH_FT) out.push([Math.max(oz0, sz0), Math.min(oz1, sz1)]);
+  }
+  return out.filter(([a, b]) => b - a > 0.05);
+}
+// What is left of [from, to] once the shared stretches are cut out of it.
+export function keepOutsideShared(from, to, shared) {
+  return shared.reduce((segs, [g0, g1]) => segs.flatMap(([s0, s1]) => (
+    g1 <= s0 || g0 >= s1 ? [[s0, s1]] : [...(g0 > s0 ? [[s0, g0]] : []), ...(g1 < s1 ? [[g1, s1]] : [])]
+  )), [[from, to]]);
+}
+// Total feet of a structure's perimeter that stand against joined siblings.
+export function structureSharedLf(el, group) {
+  if (!group) return 0;
+  const w = Number(el.w) || 0; const d = Number(el.d) || 0;
+  let lf = 0;
+  for (const [side, a0, span] of [['North', Number(el.x) || 0, w], ['South', Number(el.x) || 0, w], ['West', Number(el.y) || 0, d], ['East', Number(el.y) || 0, d]]) {
+    const kept = keepOutsideShared(a0, a0 + span, structureSharedOn(el, group, side)).reduce((n, [a, b]) => n + (b - a), 0);
+    lf += Math.max(0, span - kept);
+  }
+  return lf;
+}
+
 // ── WHAT GOES IN (AND AROUND) THE HOUSE ─────────────────────────────────────
 // Fixtures, built-ins, appliances, furniture and outdoor pieces. Every one is a
 // normal element (category 'furnishing', kind = the catalog key), so it drags on
@@ -1314,8 +1439,19 @@ function normalizeRooms(spec) {
   if (isRoundFootprint(spec) || hasCustomFootprint(spec)) {
     spec.rooms = spec.rooms.map((room) => {
       if (Number(room.level || 1) !== 1 || OUTDOOR_SPACE_TYPES.has(room.type)) return room;
-      const fitted = fitRoomInsideOutline(spec, room);
-      return fitted ? { ...room, ...fitted } : room;
+      // fitRoomInsideOutline rounds to a tenth of a foot, and on a curve one
+      // rounded step can land a hair outside, so a second pass moved the room
+      // again. A heal must be a fixed point (design_space I6): run it until
+      // it stops, which is one or two steps, never more than four.
+      let fitted = room;
+      for (let pass = 0; pass < 4; pass += 1) {
+        const next = fitRoomInsideOutline(spec, fitted);
+        if (!next) break;
+        const merged = { ...fitted, ...next };
+        if (merged.x === fitted.x && merged.y === fitted.y && merged.w === fitted.w && merged.d === fitted.d) break;
+        fitted = merged;
+      }
+      return fitted;
     });
   }
   if (Array.isArray(spec.elements)) {
@@ -3148,11 +3284,34 @@ export function applyBimOperations(currentSpec, plan) {
         const dv = Number(operation.value);
         if (Number.isFinite(dv) && dv > 0.5) target[operation.field] = clamp(dv, 2, 16);
         else delete target[operation.field];
-      } else if (operation.field === 'wallCovering') {
-        // Skinning an open structure: a carport with poly walls is a garage
-        // that still passes light to whatever stands behind it.
-        if (ROOF_COVERINGS[operation.value]) target.wallCovering = operation.value;
-        else delete target.wallCovering;
+      } else if (operation.field === 'roofRidge') {
+        // A GABLE ON A STRUCTURE: which way its ridge runs. Blank = along
+        // the longer side of the footprint, which is how a builder would
+        // frame it unless told otherwise.
+        if (['ew', 'ns'].includes(operation.value)) target.roofRidge = operation.value;
+        else delete target.roofRidge;
+      } else if (operation.field === 'roofRidgeFt') {
+        // WHERE THE RIDGE SITS across the span — feet in from the north edge
+        // (east–west ridge) or the west edge (north–south ridge). Blank or 0
+        // centres it; anything else is an asymmetric gable, one slope longer
+        // than the other. Clamped to the footprint when the roof is built, so
+        // a ridge set on a wide shed still lands inside a narrowed one.
+        const rv = Number(operation.value);
+        if (Number.isFinite(rv) && rv > 0) target.roofRidgeFt = clamp(rv, 0.5, 200);
+        else delete target.roofRidgeFt;
+      } else if (operation.field === 'heatShield') {
+        // A LISTED CLOSE-CLEARANCE STOVE, OR A VENTILATED SHIELD ON THE WALL.
+        // Either brings the clearance to combustibles down from 36″ to 12″.
+        // A fact about the heater, read by the clearance check.
+        if (isYesFlag(operation.value)) target.heatShield = 'yes';
+        else delete target.heatShield;
+      } else if (operation.field === 'wallCovering' || operation.field === 'doorCovering') {
+        // Skinning a structure: a carport with poly walls is a garage that
+        // still passes light to whatever stands behind it; a workshop in
+        // plywood is a workshop. The list is WALL_SKINS — every roof covering
+        // plus the wall-only ones.
+        if (WALL_SKINS[operation.value]) target[operation.field] = operation.value;
+        else delete target[operation.field];
       } else if (operation.field === 'roofCovering') {
         // A structure can wear a different roof from the house — clear
         // polycarbonate over a carport so the greenhouse behind it still sees

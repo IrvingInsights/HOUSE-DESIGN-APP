@@ -4,6 +4,7 @@ import {
   resolveInsulation, footprintPolygon, footprintEdges, hasCustomFootprint, hasSegmentedFootprint, polygonArea, polygonPerimeter, expandFootprint, rectInFootprint, pointInFootprint,
   isRoundFootprint, ellipseArea, ellipsePerimeter, rectRoundOverlapArea,
   basementInfo, BASEMENT_LEVEL, PARTITION_TYPES, CLADDING_TYPES, ROOF_COVERINGS, resolveRoofCovering, FURNISHINGS, FURNISHING_GROUPS, resolveFurnishing, isDimensionShorthandShellOp, shellShorthandDims, storeyElevationFt, storeyHeightFt,
+  WALL_SKINS, resolveWallSkin, structureGroups, structureSharedOn, structureSharedLf, keepOutsideShared, structuresTouch, JOINABLE_STRUCTURE_CATS, isYesFlag,
   ROOM_ENVELOPES, resolveRoomEnvelope,
   scoreTraceSpecChecks, openingVerticalBand,
   // Single source of truth for the per-wall assembly model — no longer duplicated here.
@@ -1245,6 +1246,249 @@ export function structureDoorStart(el, side, a0, span, wide) {
   return a0 + (span - wide) / 2;
 }
 const DOOR_CLEAR_FT = 4;
+
+// ── A STRUCTURE'S ROOF ───────────────────────────────────────────────────────
+// ONE answer for what a shed, workshop, barn or joined building wears on top,
+// asked by the 3D scene, the receipts and the batteries alike. Until now every
+// structure roof was a single shed plane at a fixed 0.18 — Daniel, July 2026:
+// "an asymmetric gable on a structure — a roof SHAPE (shed | gable), a
+// settable pitch, and a ridge off-centre so one slope runs longer than the
+// other." That is what this resolves.
+//
+// Fields on the structure (any joined member's setting counts; the first one
+// found wins, so it does not matter which part of the building you tapped):
+//   roofShape   'shed' (default) | 'gable'
+//   roofFall    a shed's LOW side: north | south | east | west (default: the
+//               house's own fall)
+//   roofPitch   rise per foot of run. Default 0.18 for a shed (what shipped),
+//               the house's own pitch for a gable.
+//   roofRidge   a gable's ridge direction: 'ew' | 'ns' (default: along the
+//               longer side of the footprint)
+//   roofRidgeFt where the ridge sits, feet in from the north edge (ew ridge)
+//               or the west edge (ns ridge). Blank = centred. Off-centre is
+//               the asymmetric gable — the long slope's eave is the low one.
+//
+// THE WALL-HEIGHT LAW: `h` (the structure's "wall height") is the LOWEST
+// eave. A shed's low wall stands at h and its high wall rises to meet the
+// plane; a gable's long slope lands at h and the short side stands taller.
+// Every wall top follows `topAt(x, z)` — the underside of the roof — so no
+// wall pierces the roof and none leaves daylight (outbuilding_roof_test).
+export function resolveStructureRoof(spec, el, group = null) {
+  const members = group ? group.members : [el];
+  const pick = (field, ok) => { for (const m of members) { if (ok(m?.[field])) return m[field]; } return undefined; };
+  const x0 = group ? group.x0 : (Number(el.x) || 0);
+  const z0 = group ? group.z0 : (Number(el.y) || 0);
+  const x1 = group ? group.x1 : x0 + (Number(el.w) || 0);
+  const z1 = group ? group.z1 : z0 + (Number(el.d) || 0);
+  const w = Math.max(0.1, x1 - x0); const d = Math.max(0.1, z1 - z0);
+  const h = group ? group.h : Math.max(6, Number(el.h) || 9);
+  const ov = 1;                                   // eave reach past the walls
+  const shape = pick('roofShape', (v) => v === 'gable') === 'gable' ? 'gable' : 'shed';
+  const sides = ['north', 'south', 'east', 'west'];
+  const low = pick('roofFall', (v) => sides.includes(v)) || roofProfile(spec?.shell || {}).lowSide || 'north';
+  const pitchSet = Number(pick('roofPitch', (v) => Number(v) > 0));
+  const cx = (x0 + x1) / 2; const cz = (z0 + z1) / 2;
+  if (shape === 'shed') {
+    const fallsAlongZ = low === 'north' || low === 'south';
+    const runFt = (fallsAlongZ ? d : w) + ov * 2;
+    const rise = pitchSet > 0 ? runFt * pitchSet : Math.max(0.8, runFt * 0.18);
+    const slope = rise / runFt;
+    const mid = h + rise / 2;
+    // Half the panel thickness measured VERTICALLY, not perpendicular — a
+    // tilted 0.3 ft panel hangs a little lower than 0.15 beneath its own
+    // mid-plane, and a wall built to the wrong one pierces the roof.
+    const under = 0.15 * Math.hypot(rise, runFt) / runFt;
+    const topAt = (x, z) => {
+      const u = fallsAlongZ ? (z - cz) * (low === 'north' ? 1 : -1) : (x - cx) * (low === 'west' ? 1 : -1);
+      return Math.max(1, mid + u * slope - under);
+    };
+    const tilt = Math.atan2(rise, runFt);
+    return {
+      shape, low, pitch: slope, h, x0, z0, x1, z1, w, d, ov, topAt, breaks: [],
+      eaveLowFt: h, eaveHighFt: h + rise, ridge: null,
+      // +x rotation drops the -z (north) edge; mirror it for a south fall.
+      panels: [{ sx: w + ov * 2, sz: d + ov * 2, cx, cy: mid, cz,
+        rotX: fallsAlongZ ? tilt * (low === 'north' ? -1 : 1) : 0,
+        rotZ: fallsAlongZ ? 0 : tilt * (low === 'west' ? 1 : -1) }]
+    };
+  }
+  // A GABLE. The ridge runs east–west (slopes fall north and south) or
+  // north–south (slopes fall east and west).
+  const axis = pick('roofRidge', (v) => v === 'ew' || v === 'ns') || (w >= d ? 'ew' : 'ns');
+  const span = axis === 'ew' ? d : w;
+  const ridgeFt = Number(pick('roofRidgeFt', (v) => Number(v) > 0));
+  const at = ridgeFt > 0 ? clamp(ridgeFt, Math.min(1, span / 2), Math.max(span - 1, span / 2)) : span / 2;
+  const pitch = pitchSet > 0 ? pitchSet : (Number(spec?.shell?.roofPitch) || 0.32);
+  const runA = at + ov;                     // the north / west slope, eave to ridge
+  const runB = span - at + ov;              // the south / east slope
+  const ridgeY = h + Math.max(runA, runB) * pitch;   // the long slope's eave is h
+  const under = 0.15 * Math.hypot(1, pitch);
+  const ridgeAt = axis === 'ew' ? z0 + at : x0 + at;
+  const topAt = (x, z) => {
+    const dist = axis === 'ew' ? Math.abs(z - ridgeAt) : Math.abs(x - ridgeAt);
+    return Math.max(1, ridgeY - dist * pitch - under);
+  };
+  const tilt = Math.atan(pitch);
+  const slant = (run) => run * Math.hypot(1, pitch);
+  const panels = axis === 'ew'
+    ? [
+      { sx: w + ov * 2, sz: slant(runA), cx, cy: ridgeY - runA * pitch / 2, cz: ridgeAt - runA / 2, rotX: -tilt, rotZ: 0 },
+      { sx: w + ov * 2, sz: slant(runB), cx, cy: ridgeY - runB * pitch / 2, cz: ridgeAt + runB / 2, rotX: tilt, rotZ: 0 }
+    ]
+    : [
+      { sx: slant(runA), sz: d + ov * 2, cx: ridgeAt - runA / 2, cy: ridgeY - runA * pitch / 2, cz, rotX: 0, rotZ: tilt },
+      { sx: slant(runB), sz: d + ov * 2, cx: ridgeAt + runB / 2, cy: ridgeY - runB * pitch / 2, cz, rotX: 0, rotZ: -tilt }
+    ];
+  return {
+    shape, low: null, axis, pitch, h, x0, z0, x1, z1, w, d, ov, topAt,
+    // Walls that run ACROSS the ridge have a peak in their top: split them there.
+    breaks: [ridgeAt],
+    eaveLowFt: h, eaveHighFt: h + Math.abs(runA - runB) * pitch,
+    ridge: { axis, at: ridgeAt, y: ridgeY, fromEdgeFt: at, span },
+    panels
+  };
+}
+
+// ── HEAT-SOURCE CLEARANCE TO COMBUSTIBLES ───────────────────────────────────
+// The app placed a stove anywhere and never asked what stood next to it. A
+// wood stove wants 36″ of air between it and anything that burns; a listed
+// close-clearance stove, or a ventilated shield on the wall, brings that to
+// 12″ (NFPA 211 / the stove's own listing). A masonry heater built to ASTM
+// E1602 — which the kits are — may stand 4″ off. A mini-split needs nothing.
+//
+// Daniel's workshop, worked out by hand in July 2026: 68″ deep inside, a 22″
+// stove plus a 16″ hearth — a standard 36″ rear clearance does not fit; a
+// shielded 12″ does, with 18″ left to walk past. "It fits if he buys the right
+// stove, not any stove." And that room has polycarbonate walls: poly deforms
+// well below the temperature a shield sees, so it wants a real
+// non-combustible shield, not distance. This is that arithmetic, for any
+// heater in any room.
+export const HEAT_CLEARANCE_IN = {
+  wood_stove:  { open: 36, shielded: 12, shieldLabel: 'a listed close-clearance stove, or a ventilated shield on the wall' },
+  rocket_mass: { open: 36, shielded: 12, shieldLabel: 'a ventilated shield behind the barrel' },
+  masonry:     { open: 36, shielded: 4,  shieldLabel: 'a heater built to ASTM E1602 (the kits are)' },
+  minisplit:   null
+};
+// Earthen and concrete assemblies do not burn. Everything else — bales
+// behind plaster, hemp behind lime, studs behind anything — is treated as
+// combustible, which is how an inspector treats it.
+const NONCOMBUSTIBLE_ASSEMBLIES = new Set(['cob', 'rammed-earth', 'icf']);
+export function heaterElements(spec) {
+  return (spec?.elements || []).filter((el) => el.kind === 'heater'
+    || (/(masonry|rocket|mass)\s*(heater|stove|bench)?|heater core|bake oven|wood\s*stove|\bstove\b/i.test(String(el.name || '')) && el.category !== 'foundation'));
+}
+// Distance in feet from an axis-aligned rect to an axis-aligned segment.
+function rectToSegmentFt(hx, hy, hw, hd, x0, y0, x1, y1) {
+  const ax = Math.min(x0, x1); const bx = Math.max(x0, x1);
+  const ay = Math.min(y0, y1); const by = Math.max(y0, y1);
+  const dx = Math.max(ax - (hx + hw), hx - bx, 0);
+  const dy = Math.max(ay - (hy + hd), hy - by, 0);
+  return Math.hypot(dx, dy);
+}
+// The whole answer for one heater: what it stands in, the walls around it,
+// the nearest one it is too close to, and whether a legal spot exists at all.
+// Returns null when there is nothing to check (a mini-split, or a heater
+// standing in the open).
+export function resolveHeatClearance(spec, heat) {
+  const key = resolveHeatSource(utilitiesOf(spec).heatSource);
+  const rule = HEAT_CLEARANCE_IN[key];
+  if (!rule || !heat) return null;
+  const hx = Number(heat.x) || 0; const hy = Number(heat.y) || 0;
+  const hw = Math.max(0.5, Number(heat.w) || 0); const hd = Math.max(0.5, Number(heat.d) || 0);
+  const lvl = Number(heat.level || 1);
+  const ccx = hx + hw / 2; const ccy = hy + hd / 2;
+  const shielded = isYesFlag(heat.heatShield);
+  const needIn = shielded ? rule.shielded : rule.open;
+  const walls = [];
+  let enclosure = null;
+  // Inside a structure? A workshop stove is checked against the workshop.
+  const host = (spec.elements || []).find((s) => JOINABLE_STRUCTURE_CATS.has(s.category) && s.id !== heat.id
+    && Number(s.level || 1) === lvl
+    && ccx >= (Number(s.x) || 0) && ccx <= (Number(s.x) || 0) + (Number(s.w) || 0)
+    && ccy >= (Number(s.y) || 0) && ccy <= (Number(s.y) || 0) + (Number(s.d) || 0));
+  if (host) {
+    const sx0 = Number(host.x) || 0; const sy0 = Number(host.y) || 0;
+    const sx1 = sx0 + (Number(host.w) || 0); const sy1 = sy0 + (Number(host.d) || 0);
+    const skin = WALL_SKINS[host.wallCovering] || null;
+    const group = structureGroups(spec).get(host.id) || null;
+    enclosure = { kind: 'structure', name: host.name || 'the structure', id: host.id, x0: sx0, y0: sy0, x1: sx1, y1: sy1, skin };
+    const runs = [['North', sy0, sy0, sx0, sx1, true], ['South', sy1, sy1, sx0, sx1, true], ['West', sx0, sx0, sy0, sy1, false], ['East', sx1, sx1, sy0, sy1, false]];
+    for (const [side, c0, c1, a0, a1, horizontal] of runs) {
+      if (isYesFlag(host[`open${side}`])) continue;          // no wall at all
+      for (const [f, t] of keepOutsideShared(a0, a1, structureSharedOn(host, group, side))) {
+        walls.push({
+          name: `${host.name || 'the structure'}'s ${side.toLowerCase()} wall`,
+          side: side.toLowerCase(),
+          x0: horizontal ? f : c0, y0: horizontal ? c0 : f, x1: horizontal ? t : c1, y1: horizontal ? c1 : t,
+          // A structure's frame is wood whatever it wears; a metal skin over
+          // studs does not change what is behind it.
+          combustible: true,
+          softens: Boolean(skin?.softens),
+          skinLabel: skin ? skin.label.toLowerCase() : 'framed'
+        });
+      }
+    }
+  } else {
+    // Inside the house?
+    const fp = footprintPolygon(spec);
+    const plate = lvl >= 2 ? upperPlateRect(spec, lvl) : null;
+    const inside = plate
+      ? (ccx >= plate.x && ccx <= plate.x + plate.w && ccy >= plate.y && ccy <= plate.y + plate.d)
+      : pointInFootprint(fp, ccx, ccy);
+    if (!inside) return null;
+    if (plate) {
+      enclosure = { kind: 'house', name: 'the house', x0: plate.x, y0: plate.y, x1: plate.x + plate.w, y1: plate.y + plate.d };
+      const runs = [['north', plate.y, plate.y, plate.x, plate.x + plate.w, true], ['south', plate.y + plate.d, plate.y + plate.d, plate.x, plate.x + plate.w, true],
+        ['west', plate.x, plate.x, plate.y, plate.y + plate.d, false], ['east', plate.x + plate.w, plate.x + plate.w, plate.y, plate.y + plate.d, false]];
+      for (const [side, c0, c1, a0, a1, horizontal] of runs) {
+        const r = resolveWallSide(spec, side, lvl);
+        walls.push({ name: `the ${side} wall`, side, x0: horizontal ? a0 : c0, y0: horizontal ? c0 : a0, x1: horizontal ? a1 : c1, y1: horizontal ? c1 : a1,
+          combustible: !NONCOMBUSTIBLE_ASSEMBLIES.has(r.assembly?.key), softens: false, skinLabel: (r.assembly?.label || 'framed').toLowerCase() });
+      }
+    } else {
+      const xs = fp.map((v) => v[0]); const ys = fp.map((v) => v[1]);
+      enclosure = { kind: 'house', name: 'the house', x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+      for (const e of footprintEdges(spec)) {
+        const r = resolveWallSide(spec, e.facing, 1);
+        if (r.omitted) continue;
+        walls.push({ name: `the ${e.facing} wall`, side: e.facing, x0: e.x0, y0: e.y0, x1: e.x1, y1: e.y1,
+          combustible: !NONCOMBUSTIBLE_ASSEMBLIES.has(r.assembly?.key), softens: false, skinLabel: (r.assembly?.label || 'framed').toLowerCase() });
+      }
+    }
+    // Interior walls on this floor. A partition is a thin rect; its long
+    // axis is the wall line.
+    for (const p of (spec.elements || []).filter((el) => el.category === 'partition' && Number(el.level || 1) === lvl)) {
+      const px = Number(p.x) || 0; const py = Number(p.y) || 0; const pw = Number(p.w) || 0; const pd = Number(p.d) || 0;
+      const alongX = pw >= pd;
+      walls.push({ name: p.name || 'an interior wall', side: 'interior',
+        x0: alongX ? px : px + pw / 2, y0: alongX ? py + pd / 2 : py, x1: alongX ? px + pw : px + pw / 2, y1: alongX ? py + pd / 2 : py + pd,
+        combustible: !NONCOMBUSTIBLE_ASSEMBLIES.has(String(p.construction || '')), softens: false, skinLabel: String(p.construction || 'framed').replace(/-/g, ' ') });
+    }
+  }
+  const measured = walls.map((wall) => ({ ...wall, distIn: rectToSegmentFt(hx, hy, hw, hd, wall.x0, wall.y0, wall.x1, wall.y1) * 12 }))
+    .sort((a, b) => a.distIn - b.distIn);
+  const tooClose = measured.filter((wall) => wall.combustible && wall.distIn < needIn - 0.5);
+  // Can it stand anywhere legal in this room? Inset the enclosure by the
+  // clearance on every combustible side and see whether the heater fits in
+  // what is left — under the open rule, and under the shielded one.
+  const fitUnder = (need) => {
+    const needFt = need / 12;
+    const inset = (side) => (measured.some((wall) => wall.side === side && wall.combustible) ? needFt : 0);
+    const bx0 = enclosure.x0 + inset('west'); const bx1 = enclosure.x1 - inset('east');
+    const by0 = enclosure.y0 + inset('north'); const by1 = enclosure.y1 - inset('south');
+    if (bx1 - bx0 < hw - 0.01 || by1 - by0 < hd - 0.01) return null;
+    return { x: clamp(hx, bx0, bx1 - hw), y: clamp(hy, by0, by1 - hd) };
+  };
+  const fitOpen = fitUnder(rule.open);
+  const fitShielded = fitUnder(rule.shielded);
+  return {
+    key, rule, shielded, needIn, enclosure, walls: measured, tooClose, nearest: tooClose[0] || null,
+    softens: tooClose.some((wall) => wall.softens),
+    fitOpen, fitShielded,
+    roomDepthIn: Math.round(Math.min(enclosure.x1 - enclosure.x0, enclosure.y1 - enclosure.y0) * 12),
+    heaterIn: Math.round(Math.min(hw, hd) * 12)
+  };
+}
 function doorClearZones(spec) {
   const W = Number(spec.shell?.widthFt) || 0; const D = Number(spec.shell?.depthFt) || 0;
   if (!(W > 0 && D > 0)) return [];
@@ -3360,6 +3604,7 @@ export function wallAssemblyProfile(envelopeText = '') {
 export { WALL_SIDES, WALL_ASSEMBLIES, wallAssemblyKeyFromText, resolveWallSide };
 export { isRoundFootprint, ellipseArea, ellipsePerimeter };
 export { ROOM_ENVELOPES, resolveRoomEnvelope };
+export { WALL_SKINS, resolveWallSkin, structureGroups, structureSharedOn, structureSharedLf, keepOutsideShared, structuresTouch, JOINABLE_STRUCTURE_CATS, isYesFlag };
 export const WALL_SIDE_LABELS = { north: 'North', south: 'South', east: 'East', west: 'West' };
 
 
@@ -4169,6 +4414,23 @@ export function applyStructuredDesignPlan(currentSpec, plan) {
       } else if (operation.field === 'roofFall') {
         if (['north', 'south', 'east', 'west'].includes(operation.value)) target.roofFall = operation.value;
         else delete target.roofFall;
+      } else if (operation.field === 'roofRidge') {
+        // Mirror of bim-core: which way a structure's gable ridge runs.
+        if (['ew', 'ns'].includes(operation.value)) target.roofRidge = operation.value;
+        else delete target.roofRidge;
+      } else if (operation.field === 'roofRidgeFt') {
+        // Mirror of bim-core: where the ridge sits across the span; 0 centres.
+        const rv = Number(operation.value);
+        if (Number.isFinite(rv) && rv > 0) target.roofRidgeFt = clamp(rv, 0.5, 200);
+        else delete target.roofRidgeFt;
+      } else if (operation.field === 'heatShield') {
+        // Mirror of bim-core: a listed close-clearance stove or a shield.
+        if (isYesFlag(operation.value)) target.heatShield = 'yes';
+        else delete target.heatShield;
+      } else if (operation.field === 'wallCovering' || operation.field === 'doorCovering') {
+        // Mirror of bim-core: a structure's skin comes from WALL_SKINS.
+        if (WALL_SKINS[operation.value]) target[operation.field] = operation.value;
+        else delete target[operation.field];
       } else if (['roofOverhangNorthFt', 'roofOverhangSouthFt', 'roofOverhangEastFt', 'roofOverhangWestFt'].includes(operation.field)) {
         // Mirror of bim-core: ONE side of this storey's eave. The four eaves of
         // a storey do different jobs — a deep one shades the glass below it,
@@ -4994,6 +5256,65 @@ export function detectIssues(spec) {
           fixId: 'heater-footing', elementId: heat.id,
           fix: 'A masonry heater and its bench weigh a few tons on a small patch of floor. Give it its own reinforced pad, sized a foot past the heater on every side and carried down to undisturbed ground — the Foundation chapter can drop one, or use the button below.'
         });
+      }
+    }
+  }
+  // 1c. THE HEATER STANDS FAR ENOUGH FROM WHAT BURNS. See resolveHeatClearance
+  // for the law; this turns its answer into a flag with a one-tap remedy where
+  // one exists — move it clear, or shield it and move it — and an honest
+  // sentence where none does.
+  for (const heat of heaterElements(spec)) {
+    const hc = resolveHeatClearance(spec, heat);
+    if (!hc || !hc.nearest) continue;
+    const name = heat.name || HEAT_SOURCES[hc.key]?.label || 'The heater';
+    const near = hc.nearest;
+    const where = `${Math.round(near.distIn)}″ from ${near.name}${near.skinLabel ? ` (${near.skinLabel})` : ''}`;
+    const rule = `It needs ${hc.rule.open}″ of clear air to anything that burns, or ${hc.rule.shielded}″ with ${hc.rule.shieldLabel}.`;
+    const poly = hc.softens
+      ? ' That wall is clear polycarbonate, which deforms well below the temperature a shield is rated for — it wants a real non-combustible shield board stood off the wall, not just distance.'
+      : '';
+    const thing = hc.key === 'masonry' ? 'heater' : 'stove';
+    if (hc.shielded) {
+      // Already shielded and still too close.
+      const fits = Boolean(hc.fitShielded);
+      issues.push({
+        severity: 'critical', title: `${name} is too close to ${near.name} even with its shield`, owner: 'Engineer', system: 'heat',
+        ...(fits ? { fixId: 'heater-clearance', elementId: heat.id, fixX: hc.fitShielded.x, fixY: hc.fitShielded.y } : {}),
+        fix: `It stands ${where}. Shielded, it still needs ${hc.rule.shielded}″.${poly}${fits ? ' One tap moves it to the nearest clear spot.' : ` ${hc.enclosure.name} is only ${hc.roomDepthIn}″ across — no spot in it is far enough from every wall. A bigger room, or a different heat source.`}`
+      });
+    } else if (hc.fitOpen) {
+      issues.push({
+        severity: 'critical', title: `${name} is too close to ${near.name}`, owner: 'Engineer', system: 'heat',
+        fixId: 'heater-clearance', elementId: heat.id, fixX: hc.fitOpen.x, fixY: hc.fitOpen.y,
+        fix: `It stands ${where}. ${rule}${poly} One tap moves it to the nearest spot with ${hc.rule.open}″ all round.`
+      });
+    } else if (hc.fitShielded) {
+      issues.push({
+        severity: 'critical', title: `${name} only fits ${hc.enclosure.name} with a shield`, owner: 'Engineer', system: 'heat',
+        fixId: 'heater-shield', elementId: heat.id, fixX: hc.fitShielded.x, fixY: hc.fitShielded.y,
+        fix: `It stands ${where}. ${rule} ${hc.enclosure.name} is ${hc.roomDepthIn}″ across, so ${hc.rule.open}″ each side of a ${hc.heaterIn}″ heater does not fit anywhere — ${hc.rule.shielded}″ does. It fits if you buy the right ${thing}, not any ${thing}.${poly} One tap marks it shielded and moves it clear.`
+      });
+    } else {
+      issues.push({
+        severity: 'critical', title: `${name} does not fit ${hc.enclosure.name} safely`, owner: 'Engineer', system: 'heat',
+        fix: `It stands ${where}. ${rule} ${hc.enclosure.name} is ${hc.roomDepthIn}″ across — even shielded, a ${hc.heaterIn}″ heater cannot stand far enough from every wall.${poly} Give it a bigger room, or heat this one another way.`
+      });
+    }
+  }
+  // 1d. A STRUCTURE'S ROOF STILL HAS TO DRAIN. A settable pitch can be set
+  // nearly flat; say so before it is built.
+  {
+    const groupsForRoof = structureGroups(spec);
+    const seen = new Set();
+    for (const el of (spec.elements || []).filter((e) => e.category === 'outbuilding' && Number(e.level || 1) === 1)) {
+      const g = groupsForRoof.get(el.id) || null;
+      const keyId = g ? g.leader : el.id;
+      if (seen.has(keyId)) continue;
+      seen.add(keyId);
+      const roof = resolveStructureRoof(spec, el, g);
+      if (roof.pitch < 0.04) {
+        issues.push({ severity: 'warning', title: `${el.name || 'A structure'}’s roof is nearly flat`, owner: 'Engineer', system: 'roof',
+          fix: `Its roof rises ${Math.round(roof.pitch * 12 * 10) / 10}″ per foot. Water wants at least ½″ per foot to leave — set its steepness on the structure’s card, or pick a membrane roof that is made for flat.` });
       }
     }
   }
@@ -5887,6 +6208,13 @@ export function deriveDesign(spec, wallSectionsParam) {
   // rather than hidden, because the whole footprint × rate model is coarse —
   // it is nearer the truth than charging for a wall nobody builds.
   const OUTBUILDING_WALL_SHARE = 0.33;
+  // A SHARED EDGE PRICES NO WALL EITHER. Structures that touch are one
+  // building (structureGroups — the same law the 3D scene draws by), and the
+  // drawing has built no wall on the edge they share since July. The receipts
+  // kept charging for it — twice, once on each side. Daniel: "joining changes
+  // the drawing, not the costing." The shared stretch now comes off the wall
+  // third exactly the way an open side does.
+  const structureGroupMap = structureGroups(spec);
   const openWallShare = (element) => {
     const w = Number(element.w) || 0; const d = Number(element.d) || 0;
     const perim = 2 * (w + d);
@@ -5894,7 +6222,8 @@ export function deriveDesign(spec, wallSectionsParam) {
     const isOpen = (side) => ['yes', 'true', '1', 'on'].includes(String(element[`open${side}`] ?? '').toLowerCase());
     const openLf = (isOpen('North') ? w : 0) + (isOpen('South') ? w : 0)
       + (isOpen('West') ? d : 0) + (isOpen('East') ? d : 0);
-    return OUTBUILDING_WALL_SHARE * (openLf / perim);
+    const sharedLf = structureSharedLf(element, structureGroupMap.get(element.id) || null);
+    return OUTBUILDING_WALL_SHARE * Math.min(1, (openLf + sharedLf) / perim);
   };
   const outbuildingCost = (spec.elements || []).filter((element) => element.category === 'outbuilding')
     .reduce((sum, element) => sum + (Number(element.w) * Number(element.d) || 0)
@@ -6312,7 +6641,7 @@ export function deriveDesign(spec, wallSectionsParam) {
         lines.push(rline(item.name, item.cost));
       }
     }
-    if (outbuildingCost > 0) lines.push(rline('Outbuildings', outbuildingCost, null, '', null, 'each footprint × its construction rate'));
+    if (outbuildingCost > 0) lines.push(rline('Outbuildings', outbuildingCost, null, '', null, 'each footprint × its construction rate — less the walls it does not build: open sides, and the edges it shares with a joined structure'));
     if (canopyCost > 0) lines.push(rline('Porch / deck canopies', canopyCost, canopyCost / 14, 'sf covered', 14, 'light roof on posts'));
     for (const b of deckBuckets.surface.values()) {
       const short = b.label.toLowerCase().replace(' patio', '');

@@ -24,6 +24,7 @@ import {
   DECK_SURFACES, DECK_STAIR_SHAPES, resolveDeck, resolveDeckStairs, derivePartitionOps, interiorFixtures, sourceNote,
   isStair, resolveStair, STAIR_SHAPES, STAIR_FACINGS, STAIR_TURNS, STAIR_DEFAULTS, STAIR_FACING_ORDER, HEATER_FACINGS,
   SHADE_DEVICES, ROOM_ENVELOPES, resolveRoomEnvelope, OUTBUILDING_PRESETS, OUTBUILDING_CONSTRUCTION, FENCE_TYPES, emptyLandSpec,
+  WALL_SKINS, resolveStructureRoof, structureGroups, resolveHeatClearance, HEAT_CLEARANCE_IN, heaterElements,
   ensureProjectBrain, compactChatForStorage, cleanSavedChatMessages, zipRegionInfo
 } from '../engine.js';
 import { planObjectMove, planObjectResize, fitShellToRooms, OUTDOOR_TYPES } from '../placement.js';
@@ -83,7 +84,7 @@ const MODEL_SHOW_PRESETS = {
 
 // Bumped on every shell change so Daniel can see at a glance which version
 // his browser is showing (bottom of the Trail).
-const UPDATE_STAMP = 'update 248 · Sep 2026';
+const UPDATE_STAMP = 'update 249 · Sep 2026';
 // ONE rendering of the update status, used everywhere it's shown (classic's
 // rz-stamp, site's st-stamp-chip) — a build once sat 8 updates behind with no
 // warning anywhere, because "confirmed current" and "couldn't tell" both
@@ -1065,7 +1066,9 @@ export default function App() {
     'reduce-south-overhang': 'Trim the south overhang',
     'thicken-bale-wall': 'Thicken that wall',
     'set-stick-frame': 'Add a light frame to carry it',
-    'add-eave-gutter': 'Put a gutter on the low eave'
+    'add-eave-gutter': 'Put a gutter on the low eave',
+    'heater-clearance': 'Move it clear of the wall',
+    'heater-shield': 'Shield it and move it clear'
   };
   const fixFlag = (flag) => {
     const preset = (name) => ROOM_PRESETS.find((p) => p.name === name);
@@ -1115,6 +1118,19 @@ export default function App() {
       }
       case 'set-stick-frame': return void applyOps([{ type: 'set_frame', value: 'stick' }]);
       case 'add-eave-gutter': return void applyOps([{ type: 'set_shell', field: 'gutters', value: 'eaves' }]);
+      case 'heater-clearance':
+      case 'heater-shield': {
+        // The flag already worked out the nearest legal spot (resolveHeatClearance).
+        // ONE dispatch: the shield mark and the move land together, so the
+        // check that re-runs afterwards sees both.
+        const heat = (spec.elements || []).find((e) => e.id === flag.elementId);
+        if (!heat || !Number.isFinite(Number(flag.fixX)) || !Number.isFinite(Number(flag.fixY))) return;
+        applyOps([
+          ...(flag.fixId === 'heater-shield' ? [{ type: 'update_object', targetId: heat.id, name: heat.name, field: 'heatShield', value: 'yes' }] : []),
+          { type: 'move_object', targetId: heat.id, name: heat.name, x: Math.round(Number(flag.fixX) * 10) / 10, y: Math.round(Number(flag.fixY) * 10) / 10 }
+        ]);
+        return;
+      }
       default: return;
     }
   };
@@ -3133,6 +3149,39 @@ export default function App() {
                 onClick={() => padUnder(el)}
               >▣ Reinforced pad under {el.name}</button>
             )}
+            {el && heaterElements(spec).some((h) => h.id === el.id) && HEAT_CLEARANCE_IN[utilitiesOf(spec).heatSource] && (() => {
+              // HOW CLOSE IT MAY STAND TO WHAT BURNS. A stove wants 36″ of air
+              // to anything combustible; a listed close-clearance stove or a
+              // ventilated shield brings that to 12″; a masonry heater built to
+              // ASTM E1602 may stand 4″ off. Decided on the heater's own card,
+              // where the sentence below says what the room around it allows.
+              const rule = HEAT_CLEARANCE_IN[utilitiesOf(spec).heatSource];
+              const shielded = ['yes', 'true', '1', 'on'].includes(String(el.heatShield ?? '').toLowerCase());
+              const hc = resolveHeatClearance(spec, el);
+              const nearest = hc && hc.walls.length ? hc.walls[0] : null;
+              return (
+                <div className="rz-field">
+                  <span>Clearance to what burns</span>
+                  <div className="ctlChips">
+                    <button type="button" className={`rz-pick-chip${shielded ? '' : ' on'}`}
+                      onClick={() => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'heatShield', value: '' }])}
+                    >Standard — {rule.open}″</button>
+                    <button type="button" className={`rz-pick-chip${shielded ? ' on' : ''}`}
+                      title={rule.shieldLabel}
+                      onClick={() => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'heatShield', value: 'yes' }])}
+                    >Shielded or listed — {rule.shielded}″</button>
+                  </div>
+                  <span className="rz-shape-note">
+                    {!hc
+                      ? 'It stands in the open — nothing around it to keep clear of.'
+                      : nearest
+                        ? `Nearest thing that burns: ${nearest.name}, ${Math.round(nearest.distIn)}″ away${hc.nearest ? ` — too close; it needs ${hc.needIn}″.` : ` — fine, it needs ${hc.needIn}″.`}${hc.softens ? ' Polycarbonate deforms below a shield’s working temperature: it wants a real non-combustible shield board stood off the wall.' : ''}`
+                        : `Nothing around it burns.`}
+                    {' '}{rule.shielded}″ means {rule.shieldLabel}.
+                  </span>
+                </div>
+              );
+            })()}
             {el && STRUCTURE_CATS.has(el.category) && (
               // WHAT IT IS BUILT OF, AND HOW TALL IT STANDS. Both were numbers
               // only an operation could set: the engine has six builds spanning
@@ -3175,8 +3224,8 @@ export default function App() {
                   onChange={(e2) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'wallCovering', value: e2.target.value }])}
                 >
                   <option value="">Open on every side</option>
-                  {Object.values(ROOF_COVERINGS).map((c) => (
-                    <option key={c.key} value={c.key}>{c.label}</option>
+                  {Object.values(WALL_SKINS).map((c) => (
+                    <option key={c.key} value={c.key}>{c.green ? '🌿 ' : ''}{c.label}</option>
                   ))}
                 </select>
               </label>
@@ -3273,25 +3322,86 @@ export default function App() {
                 </div>
               );
             })()}
-            {el && STRUCTURE_CATS.has(el.category) && (
-              // WHICH WAY THIS BUILDING SHEDS. It follows the house unless you
-              // say otherwise: a shed tucked against a slope or a bank often
-              // has to throw its water the other way. The same choice a storey
-              // plate has always had, on every structure.
-              <label className="rz-field">
-                <span>Which way its roof drains</span>
-                <select
-                  value={['north', 'south', 'east', 'west'].includes(el.roofFall) ? el.roofFall : ''}
-                  onChange={(e2) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field: 'roofFall', value: e2.target.value }])}
-                >
-                  <option value="">Same way as the house</option>
-                  <option value="north">Drains north</option>
-                  <option value="south">Drains south</option>
-                  <option value="east">Drains east</option>
-                  <option value="west">Drains west</option>
-                </select>
-              </label>
-            )}
+            {el && STRUCTURE_CATS.has(el.category) && (() => {
+              // THE ROOF ON A STRUCTURE. Shed (one slope) or gable (a peak),
+              // its steepness, and — for a gable — which way the ridge runs and
+              // where it sits. Off-centre is the asymmetric gable Daniel asked
+              // for: one slope runs longer than the other, and its eave is the
+              // low one. A joined building has ONE roof, so whichever part you
+              // tap, these settings are the building's. The numbers below come
+              // from the same resolver the 3D scene builds from.
+              const grp = structureGroups(spec).get(el.id) || null;
+              const roof = resolveStructureRoof(spec, el, grp);
+              const setRoof = (field, value) => applyOps([{ type: 'update_object', targetId: el.id, name: el.name, field, value }]);
+              const pitch12 = Math.round(roof.pitch * 12 * 10) / 10;
+              const spanFt = roof.ridge ? roof.ridge.span : 0;
+              const ridgeVal = Number(el.roofRidgeFt) > 0 ? Math.round(Number(el.roofRidgeFt) * 10) / 10 : 0;
+              return (
+                <>
+                  <div className="rz-field">
+                    <span>Roof shape{grp ? ' — one roof over the whole building' : ''}</span>
+                    <div className="ctlChips">
+                      {[['shed', 'Shed — one slope'], ['gable', 'Gable — a peak']].map(([k, label]) => (
+                        <button key={k} type="button" className={`rz-pick-chip${roof.shape === k ? ' on' : ''}`}
+                          onClick={() => setRoof('roofShape', k === 'shed' ? '' : k)}
+                        >{label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <label className="rz-field rz-field-num">
+                    <span>Roof steepness</span>
+                    <NumInput
+                      value={pitch12}
+                      min={0.5} max={18} step={0.5} unit="/12"
+                      onCommit={(v) => setRoof('roofPitch', clamp(v / 12, 0.02, 1.5))}
+                    />
+                  </label>
+                  {roof.shape === 'shed' && (
+                    <label className="rz-field">
+                      <span>Which way its roof drains</span>
+                      <select
+                        value={['north', 'south', 'east', 'west'].includes(el.roofFall) ? el.roofFall : ''}
+                        onChange={(e2) => setRoof('roofFall', e2.target.value)}
+                      >
+                        <option value="">Same way as the house</option>
+                        <option value="north">Drains north</option>
+                        <option value="south">Drains south</option>
+                        <option value="east">Drains east</option>
+                        <option value="west">Drains west</option>
+                      </select>
+                    </label>
+                  )}
+                  {roof.shape === 'gable' && (
+                    <>
+                      <label className="rz-field">
+                        <span>Which way the ridge runs</span>
+                        <select
+                          value={['ew', 'ns'].includes(el.roofRidge) ? el.roofRidge : ''}
+                          onChange={(e2) => setRoof('roofRidge', e2.target.value)}
+                        >
+                          <option value="">Along the longer side ({roof.axis === 'ew' ? 'east–west' : 'north–south'})</option>
+                          <option value="ew">East–west — slopes fall north and south</option>
+                          <option value="ns">North–south — slopes fall east and west</option>
+                        </select>
+                      </label>
+                      <label className="rz-field rz-field-num">
+                        <span>Ridge — feet in from the {roof.axis === 'ew' ? 'north' : 'west'} wall (0 centres it)</span>
+                        <NumInput
+                          value={ridgeVal}
+                          min={0} max={Math.max(1, Math.round(spanFt * 10) / 10)} step={0.5} unit="ft"
+                          onCommit={(v) => setRoof('roofRidgeFt', v)}
+                        />
+                      </label>
+                      <div className="rz-shape-note">
+                        {Math.abs(roof.ridge.fromEdgeFt - spanFt / 2) < 0.05
+                          ? `Centred: both eaves stand at ${Math.round(roof.eaveLowFt * 10) / 10} ft and the ridge peaks at ${Math.round(roof.ridge.y * 10) / 10} ft.`
+                          : `Off-centre: the ${roof.ridge.fromEdgeFt > spanFt / 2 ? (roof.axis === 'ew' ? 'north' : 'west') : (roof.axis === 'ew' ? 'south' : 'east')} slope is the long one and lands at ${Math.round(roof.eaveLowFt * 10) / 10} ft; the short side stands ${Math.round(roof.eaveHighFt * 10) / 10} ft tall; the ridge peaks at ${Math.round(roof.ridge.y * 10) / 10} ft.`}
+                      </div>
+                    </>
+                  )}
+                </>
+              );
+            })()}
             {el && (el.category === 'outbuilding' || el.roofType || el.category === 'carport') && el.category !== 'floor' && (
               <label className="rz-field">
                 <span>What its roof is made of</span>

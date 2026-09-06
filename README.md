@@ -29,6 +29,7 @@ http://localhost:5184
 
 - **Start a design** from the **+ New** button under *designs*: **empty land** (a bare shell, you place the rooms), **the sample house**, or **from a drawing** — hand it a floor-plan PDF or photo and it reads a starting model out of it.
 - **Everything is tappable.** Tap a wall, a room, a window — in the 3D model or the 2D plan — and its controls open on the left. Drag things to move them.
+- **Small buildings are buildings.** A shed, workshop or barn gets walls you can skin (plywood, polycarbonate, metal…), doorways and open sides, and a roof that is a shed or a gable with its own pitch and an off-centre ridge. Two that touch become one building with one roof, no wall between them, and no wall priced there.
 - **Design by system.** The left bar runs in build order: Shape, Storeys, Rooms, Foundation, Walls & openings, Frame, Roof, Outbuildings, Systems, Finishes. Each page leads with plain numbers. A 🌿 leaf marks the natural options; standard ones sit right beside them.
 - **Ask for the big moves** with the **ask** button: "add two bedrooms and a bathroom", "make the shed roof drain north", "clad the west wall in cedar shingles". Simple asks work with no setup at all; the rest want a free AI key (below).
 - **Worth a look**, at the top of the left bar, flags anything that does not add up. Most flags have a button that fixes the thing for you.

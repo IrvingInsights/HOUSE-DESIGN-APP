@@ -95,12 +95,17 @@ write a validated IFC4 file. Everything else works without it.
   checks use the real shape. Frame drawings simplify the roof line on L-shapes.
 - Upper storeys share one ceiling-height setting — a loft and a tower cannot
   have different heights yet.
-- Outbuilding roofs are a single sloped plane: no gable with a ridge, and no
-  asymmetric fall, on a shed or workshop.
-- Deck stairs come straight out, along the deck underneath, or as a
-  switchback. There is no L-shaped wrap around a corner yet.
-- Two structures that touch are treated as one building for the drawing, but
-  the costing still prices them separately, so a shared wall is counted twice.
+- A structure's roof is a shed or a gable (with its own pitch and an
+  off-centre ridge); hips and valleys on an outbuilding are not modeled.
+- Deck stairs come straight out, along the deck underneath, as a switchback,
+  or wrap the deck's own corner. A wrap cannot yet run OUTSIDE the deck's
+  footprint (a flight that turns the corner on the ground).
+- Heat-source clearance is checked to the walls around the heater — the
+  shell, a structure's walls, interior partitions. Furniture and built-ins are
+  not yet counted as combustibles, and the hearth pad in front of a stove is
+  not modeled.
+- A structure's wall skin (plywood, polycarbonate, metal…) is drawn but not
+  priced separately: the structure's construction rate bundles its walls.
 - "From north" and "from west" are the drawing's own north and west, not a
   surveyed bearing — the app does not rotate a design to a compass.
 - The greenhouse renders as real timber-and-glass, but its cost is still a

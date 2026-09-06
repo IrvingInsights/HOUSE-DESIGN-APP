@@ -91,7 +91,34 @@ const STEPS = [
     return [{ type: 'add_room', name, x: rangeOf(rnd, -4, 50), y: rangeOf(rnd, -4, 40), w: rangeOf(rnd, 2, 20), d: rangeOf(rnd, 2, 20), level: pickOf(rnd, [1, 1, 2, 3]), roomType: pickOf(rnd, ['living', 'sleeping', 'wet', 'service', 'storage', 'work', 'plant', 'outdoor']) }];
   } },
   { w: 3, gen: (rnd, ctx, pool) => {
-    const kind = pickOf(rnd, ['deck', 'foundation', 'partition', 'stairs', 'plate']);
+    const kind = pickOf(rnd, ['deck', 'foundation', 'partition', 'stairs', 'plate', 'structure', 'heater']);
+    if (kind === 'structure') {
+      // A shed, workshop or barn — with everything a structure can now carry:
+      // its build, its skin, doors and open sides, and a roof that is a shed
+      // or a gable with its own pitch and an off-centre ridge (update 248).
+      // Placed close enough to the others that some TOUCH and join.
+      const name = `Shed ${Math.floor(rnd() * 90)}`; pool.push(name);
+      const skins = ['', '', 'polycarb', 'plywood', 'metal', 'osb', 'boardbatten', 'cedar'];
+      return [{ type: 'add_element', name, category: 'outbuilding', construction: pickOf(rnd, ['shed', 'pole', 'stick', 'timber', 'strawbale', 'cordwood']),
+        x: rangeOf(rnd, 40, 70), y: rangeOf(rnd, 0, 30), w: rangeOf(rnd, 4, 24), d: rangeOf(rnd, 4, 20), h: rangeOf(rnd, 6, 14), level: 1,
+        ...(rnd() < 0.5 ? { wallCovering: pickOf(rnd, skins) } : {}),
+        ...(rnd() < 0.5 ? { roofShape: pickOf(rnd, ['shed', 'gable', 'flat']) } : {}),
+        ...(rnd() < 0.3 ? { roofFall: pickOf(rnd, WALL_SIDES) } : {}),
+        ...(rnd() < 0.3 ? { roofRidge: pickOf(rnd, ['ew', 'ns', 'junk']) } : {}),
+        ...(rnd() < 0.4 ? { roofRidgeFt: rangeOf(rnd, 0, 30) } : {}),
+        ...(rnd() < 0.3 ? { roofPitch: rangeOf(rnd, 0, 1.6) } : {}),
+        ...(rnd() < 0.3 ? { doorSouthFt: rangeOf(rnd, 0, 8) } : {}),
+        ...(rnd() < 0.2 ? { openNorth: 'yes' } : {}),
+        ...(rnd() < 0.2 ? { standsAlone: 'yes' } : {}) }];
+    }
+    if (kind === 'heater') {
+      // The heat source as a placed object — inside the house, inside a
+      // structure, or in the open — shielded or not, so the clearance law
+      // runs over every kind of room a fuzzed design has.
+      pool.push('Wood Stove');
+      return [{ type: 'add_element', name: 'Wood Stove', kind: 'heater', category: 'thermal', x: rangeOf(rnd, -4, 70), y: rangeOf(rnd, -4, 40), w: 3, d: 2.5, h: 4, level: pickOf(rnd, [1, 1, 2]),
+        ...(rnd() < 0.4 ? { heatShield: 'yes' } : {}) }];
+    }
     if (kind === 'deck') {
       const name = `Deck ${Math.floor(rnd() * 90)}`; pool.push(name);
       return [{ type: 'add_element', name, category: 'deck', x: rangeOf(rnd, -12, 60), y: rangeOf(rnd, -12, 50), w: rangeOf(rnd, 4, 20), d: rangeOf(rnd, 4, 16), h: 0.35, level: pickOf(rnd, [1, 1, 2, 3]),
