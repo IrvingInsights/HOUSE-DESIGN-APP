@@ -15,6 +15,7 @@ where it came from, and commit it.
 
 | Item | Dated | What it is | Came from |
 |---|---|---|---|
+| `Hearthtree-H01-2026-09-10/` | 2026-09-10 | First proposed Hearthtree layout: coordinated seven-sheet plan/section package, editable Blender model, scripts, parameters, neutral review stills, recovery checkpoint and source/decision record. No app-state or app-feature change. | FL0 v4/v5 local and Drive sources; v10.9-v10.12 notes and actual Blender scene; local current-project revision 681 resolved through the app engine. |
 | `peakhinge-freecad-claude-3d-house-design-bim-tp3xch/` | 2026-07-01 | Earlier full prototype: a Python/FreeCAD BIM pipeline with a Flask backend, an AI "design council" (architect, structural engineer, natural-building expert, permaculture, PM), design-intent schema + validator, and geometry/heuristic check suites. Superseded by the current Node/React app, but the council prompts, `design_intent/schema.json` and the checks are worth mining. Includes its own `AGENT_GUIDE.md`, `decisions.md`, `requirements.md`. | Downloads |
 | `peakhinge_ph144_homestead_model_package.zip` | 2026-07-01 | PeakHinge 144 homestead model package. | Downloads |
 | `Treehearth_House___Construction_Drawings.pptx` | 2026-07-02 | Treehearth House construction drawing set. | Downloads |
@@ -44,10 +45,7 @@ where it came from, and commit it.
   was silently ignored) and `start-planner-server-5178.ps1` (started a second,
   orphaned server instance on a port referenced nowhere else in the repo).
 
-## Related material that lives elsewhere on purpose
+## Related material and current records
 
-- **The house design itself** — MACH House v4/v5, Hearthtree House, FL0 House,
-  the Homestead Master Specification — lives in Notion under 🏡 **07 — House**.
-  Notion is the source of truth for the design program and decisions; this repo
-  is the source of truth for the software.
-- **The House domain Drive folder** is linked from the 07 — House page.
+- House design decisions and live financial records are maintained in Photion. The repository AGENTS.md identifies House Design App as PRJ-911; the separate house subject key must be confirmed there. The former Notion hub is historical.
+- Original house drawings remain in their local and Drive source locations. The H01 source/decision record lists exact inspected paths and access gaps. Original sources were preserved.

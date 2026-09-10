@@ -1,0 +1,1 @@
+This native Blender checkpoint predates the final pantry-access, unique-name and coincident-face corrections. It is retained for recovery, not the recommended review model. Open the top-level Hearthtree-H01.blend for the coordinated current proposal.

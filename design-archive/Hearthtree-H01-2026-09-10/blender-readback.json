@@ -1,0 +1,15 @@
+{
+  "source": "Saved Hearthtree-H01.blend reopened in Blender",
+  "blender_version": "5.1.2",
+  "expected_meshes": 960,
+  "actual_meshes": 960,
+  "missing": [],
+  "differing_vertex_counts": [],
+  "differing_faces": [],
+  "maximum_vertex_error_ft": 1.546904794480497e-06,
+  "tolerance_ft": 0.0001,
+  "units": "IMPERIAL",
+  "north": "+Y",
+  "passed": true,
+  "scope": "Mesh identity and coordinate agreement only; no engineering certification."
+}

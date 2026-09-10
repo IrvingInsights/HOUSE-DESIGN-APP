@@ -1,0 +1,68 @@
+{
+  "scope": "Concept geometry only; not a load calculation, code certification, energy simulation or exhaustive accessibility audit.",
+  "objects": 960,
+  "stair_risers": 27,
+  "riser_inches": 7.111111111111111,
+  "going_inches": 11,
+  "nominal_stair_width_inches": 42,
+  "clear_between_rails_inches": 37.199999999999996,
+  "landing_levels_ft": [
+    5.333333333333333,
+    10.666666666666666,
+    16
+  ],
+  "headroom_sample_count": 243,
+  "minimum_stair_headroom_ft": 8.626470588235296,
+  "headroom_lowest": [
+    {
+      "stair": "Tower top landing",
+      "clear_ft": 8.626470588235296,
+      "overhead": "Tower south-high roof east"
+    },
+    {
+      "stair": "Tower top landing",
+      "clear_ft": 8.626470588235296,
+      "overhead": "Tower south-high roof east"
+    },
+    {
+      "stair": "Tower top landing",
+      "clear_ft": 8.6264705882353,
+      "overhead": "Tower south-high roof east"
+    }
+  ],
+  "route_sample_counts": {
+    "Arrival to mud to kitchen to greenhouse": 205,
+    "Living to stair": 27,
+    "Bedrooms to bath via service passage": 105,
+    "Tower to ring deck": 401
+  },
+  "route_body_diameter_inches": 24,
+  "route_obstructions": [],
+  "deck_area_sqft": 552,
+  "deck_top_levels_ft": [
+    16.0
+  ],
+  "deck_nominal_depth_ft": 6,
+  "deck_clear_depth_inside_guard_ft": 5.67,
+  "tower_internal_floor_after_openings_sqft": 142.52777777777777,
+  "main_enclosure_footprint_sqft": 1122,
+  "tower_enclosure_footprint_sqft": 289,
+  "main_inside_outer_walls_sqft": 992,
+  "greenhouse_footprint_sqft": 192,
+  "minimum_sampled_deck_beam_to_roof_gap_ft": 2.099999999999998,
+  "hearth_4ft_front_zone_intrusions": [],
+  "greenhouse_roof_rear_ft": 8.5,
+  "house_clerestory_sill_ft": 9.25,
+  "glazing_vertical_separation_inches": 9,
+  "open_technical_items": [
+    "Final stair nosings, guard strength and handrail continuity at corners",
+    "Deck joist-to-beam seating and structural sizes/connections; post penetrations through the shed roof",
+    "South deck outriggers and rear transfer-beam loads",
+    "Heater and bake oven configuration, all listed clearances and chimney termination",
+    "Flashing, drained door threshold and waterproof separation above occupied rooms",
+    "Whole-house mechanical ventilation, greenhouse controls and condensation management",
+    "Foundation/basement choice after survey, soils, groundwater and servicing",
+    "Low-slope metal roof product approval, snow, drainage and ice control",
+    "Window clear opening/egress and household bedroom count"
+  ]
+}

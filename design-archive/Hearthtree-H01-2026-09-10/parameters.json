@@ -1,0 +1,12 @@
+{
+  "version": "Hearthtree H01 - concept for layout review, 2026-09-10",
+  "units": "feet; exported Blender coordinates are meters (1 foot = 0.3048 m)",
+  "north": "+Y; +X east; +Z up; origin southwest exterior corner of main house",
+  "house": {"width": 33, "depth": 34, "wall": 1, "partition": 0.5, "roof_south": 12, "roof_north": 9.5, "roof_thickness": 0.75},
+  "tower": {"x": 11, "y": 3, "width": 17, "depth": 17, "wall": 1, "floor": 16, "floor_thickness": 0.75, "roof_south": 25.5, "roof_north": 24.5},
+  "deck": {"depth": 6, "floor": 16, "guard_height": 3.5, "guard_inset": 0.333333, "joist_depth": 1, "beam_depth": 0.75},
+  "stair": {"x": 12, "y": 4, "width": 3.5, "going": 0.9166666666666666, "risers_per_flight": 9, "flights": 3, "total_rise": 16, "tread_thickness": 0.15, "planning_headroom": 6.6666666667},
+  "greenhouse": {"x": 1, "y": -8, "width": 24, "depth": 8, "roof_front": 7.25, "roof_rear": 8.5},
+  "heater": {"x": 17.5, "y": 10, "width": 3.5, "depth": 4, "height": 6.75, "front_work_zone": 4, "side_reserve": 1},
+  "notes": ["All dimensions and the two-bedroom program are proposals, not an approved layout.", "Structural sizes, heater assembly, fire clearances, roof systems and foundation are provisional.", "No financial records or live budget are included.", "A basement or walkout remains a site-dependent option; no site or financing rule is assumed."]
+}
