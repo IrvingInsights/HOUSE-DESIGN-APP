@@ -1,0 +1,55 @@
+{
+  "scope": "H03 SE tower placement study",
+  "files": [
+    {
+      "name": "H03_form_study.py",
+      "bytes": 16758,
+      "sha256": "c8bb28cb4db645615fdad6846474d2a657a3926bbcb3cb3e5a4e72a2cc6b6b98"
+    },
+    {
+      "name": "verify_h03.py",
+      "bytes": 2785,
+      "sha256": "5920bbf088c16838f3491f649841b586f81cc36800178e74753f40e7dcb7a3eb"
+    },
+    {
+      "name": "parameters.json",
+      "bytes": 1813,
+      "sha256": "df4f445f39cab7ced4de18489401c092860feda07e6652f9e20815e835e83022"
+    },
+    {
+      "name": "geometry-checks.json",
+      "bytes": 4139,
+      "sha256": "b59325b9bceffea9fb20969666ba5484d5b8fc82e13af37f6e64fa9fc19d9f16"
+    },
+    {
+      "name": "Hearthtree-H03-Form-Study.blend",
+      "bytes": 348754,
+      "sha256": "4b7a454eb38164f31f159ddb356d5910c0f779b40b2bf2b3546e4cdfd2ee455e"
+    },
+    {
+      "name": "H03-southeast.png",
+      "bytes": 2005953,
+      "sha256": "18583da12c4771d168df3d7fae3c9daf0b30d9f66c31a586c7816ad90f835c82"
+    },
+    {
+      "name": "H03-arrival-eye.png",
+      "bytes": 1938178,
+      "sha256": "667e041e02e412f4041d0bdf2263b2bc887716daf5237ade2b9940230fba46e0"
+    },
+    {
+      "name": "H03-south-elevation.png",
+      "bytes": 1771419,
+      "sha256": "ae847f730ca87202ed71adecd2c343434ccffabf07fda5fe7c9aba41897aa698"
+    },
+    {
+      "name": "README.md",
+      "bytes": 7666,
+      "sha256": "2e47622ff77560ea1a9f519180358814dddd89a333bcfffab6a19b45fb78be82"
+    },
+    {
+      "name": "PHOTION-HANDOFF.md",
+      "bytes": 1020,
+      "sha256": "29ca134fdc2c6a94569fc136bdcf5fe42f8c0c8a2a499e185d594e2453e429a8"
+    }
+  ]
+}

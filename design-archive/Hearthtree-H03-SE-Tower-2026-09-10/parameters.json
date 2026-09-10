@@ -1,0 +1,55 @@
+{
+  "status": "H03 southeast tower placement study; Daniel selected forward SE placement on 2026-09-10; room/stair layout still unresolved",
+  "units": "feet; Blender geometry is meters",
+  "north": "+Y; +X east; +Z up",
+  "main": {
+    "width": 30,
+    "depth": 32,
+    "wall": 1,
+    "south_roof": 16,
+    "north_roof": 10
+  },
+  "tower": {
+    "x": 14,
+    "y": 0,
+    "width": 16,
+    "depth": 14,
+    "floor": 19,
+    "south_roof": 27.5,
+    "north_roof": 26.9
+  },
+  "deck": {
+    "depth": 6,
+    "guard": 3.5,
+    "deck_thickness": 0.17,
+    "joist_depth": 0.85,
+    "beam_depth": 0.65
+  },
+  "greenhouse": {
+    "width": 24,
+    "depth": 8,
+    "rear_roof": 9.25,
+    "front_roof": 7.25
+  },
+  "notes": [
+    "Daniel selected an offset tower set forward over the southeast corner. South/east tower walls align with south/east main walls.",
+    "Main and tower dimensions remain study variables, not approved sizes.",
+    "Full six-foot nominal deck ring retained, projecting south over the greenhouse and east over work space.",
+    "Deck and tower floor lifted from 17.5 to 19 feet to clear the south-high shed and provisional deck beams. This increases the unresolved stair climb.",
+    "One deck post passes through a separately modeled greenhouse roof opening. Its flashing, foundation, member sizes and complete load path require technical development.",
+    "Stair choice, main-level room program and upper floor remain unresolved.",
+    "No site, financial or code-compliance assumptions are made."
+  ],
+  "hearth": {
+    "x": 17,
+    "y": 16,
+    "width": 3.5,
+    "depth": 4,
+    "height": 6.5,
+    "chimney_x": 18.5,
+    "chimney_y": 18,
+    "chimney_width": 1.2,
+    "chimney_top": 31,
+    "status": "H02 planning location retained; no appliance, clearance, penetration or load approval"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "status": "H02 exterior form study after Daniel rejected H01; not a resolved floor plan",
+  "units": "feet; Blender geometry is meters",
+  "north": "+Y; +X east; +Z up",
+  "main": {"width": 30, "depth": 32, "wall": 1, "south_roof": 16, "north_roof": 10},
+  "tower": {"x": 16, "y": 13, "width": 16, "depth": 14, "floor": 17.5, "south_roof": 26, "north_roof": 25.4},
+  "deck": {"depth": 6, "guard": 3.5, "deck_thickness": 0.17, "joist_depth": 0.85, "beam_depth": 0.65},
+  "greenhouse": {"width": 24, "depth": 8, "rear_roof": 9.25, "front_roof": 7.25},
+  "notes": ["Dimensions are study variables, not approved sizes.", "Full ring deck retained. Main roof now visible south and west of the offset tower.", "Stair choice, room program and complete load paths remain unresolved; do not infer acceptance from this study.", "No site, financial or code-compliance assumptions are made."]
+}
