@@ -31,4 +31,6 @@ python make_package.py
 
 The article's later material-development and video-tour steps are intentionally after the layout decision. Existing app state and archived source models remain unchanged.
 
-GitHub review branch: `design/hearthtree-h01-20260910` in [IrvingInsights/HOUSE-DESIGN-APP](https://github.com/IrvingInsights/HOUSE-DESIGN-APP/tree/design/hearthtree-h01-20260910/design-archive/Hearthtree-H01-2026-09-10). App update number remains 250 because this is an archived house proposal, with no application changes.
+GitHub destination: [IrvingInsights/HOUSE-DESIGN-APP](https://github.com/IrvingInsights/HOUSE-DESIGN-APP), verified public. Local review branch: `design/hearthtree-h01-20260910`; initial artifact commit `c96647f`. Automatic approval review rejected the push because explicit approval is required to publish these drawings and the editable house model publicly. The branch has not been pushed and no pull request exists. App update number remains 250 because this is an archived house proposal with no application changes.
+
+After Daniel explicitly approves public publication, push from the canonical repository with `git push -u origin design/hearthtree-h01-20260910`, then open a draft pull request to main. Do not merge as part of that step.

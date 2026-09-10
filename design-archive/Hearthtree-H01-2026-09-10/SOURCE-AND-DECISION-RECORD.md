@@ -84,3 +84,7 @@ Daniel should review the proposed two-bedroom main floor and the amount of tower
 ## Photion
 
 Photion tools were not exposed in this session, including after the @PHOTION mention. No `system_health`, `orient`, vocabulary, write or `record_snapshot` call was possible. The app repository identifies PRJ-911; the separate house-design project key must be confirmed from orient output. No financial records were retrieved or copied. See `PHOTION-HANDOFF.md`.
+
+## GitHub publication status
+
+The reviewed artifact files were committed locally on `design/hearthtree-h01-20260910` (initial commit `c96647f`). All 31 staged artifact files matched the reviewed bytes. The destination was verified as Daniel's specified `IrvingInsights/HOUSE-DESIGN-APP` repository, which is public. Automatic approval review rejected the push, stating that publishing the drawings and editable Blender model needs explicit public-publication authorization. No push or pull request has been made. The complete package remains available locally and as the delivered files. Publication is pending Daniel's approval; original model files and the app's current state were not changed.
