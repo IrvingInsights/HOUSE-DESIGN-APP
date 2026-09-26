@@ -1,0 +1,235 @@
+{
+  "date": "2026-09-10",
+  "limitations": [
+    "Gallery reproductions are not independent inspection of every original PDF or PPTX.",
+    "No complete review of all 37 native models; no structural or code certification.",
+    "The east-high variant was not positively identified in this additional review.",
+    "Old financial information was excluded from deliverables."
+  ],
+  "original_text_and_geometry_sources": [
+    {
+      "basis": "Original text read",
+      "path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\ARCHIVE - old app versions (July 2026)\\README - what is in here.md"
+    },
+    {
+      "basis": "Original text read; claims not automatically adopted",
+      "path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\DESIGN GALLERY 2026-09-10\\README.md"
+    },
+    {
+      "basis": "Full inventory parsed",
+      "path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\DESIGN GALLERY 2026-09-10\\INVENTORY.csv"
+    },
+    {
+      "basis": "Original source script read",
+      "path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\ARCHIVE - old app versions (July 2026)\\6-28-26\\FL0-House-BIM-Drawings\\fl0_house_spec.py"
+    },
+    {
+      "basis": "Original text read",
+      "path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\ARCHIVE - old app versions (July 2026)\\6-28-26\\FL0-House-Blender-PE-Review\\FL0-House-v7.4-Finger-Lakes-FPSF-PE-Review-summary.json"
+    },
+    {
+      "basis": "Original text read",
+      "path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\ARCHIVE - old app versions (July 2026)\\6-28-26\\FL0-House-Blender-PE-Review\\FL0-House-v9.0-Stair-Tower-Stack-Review.md"
+    },
+    {
+      "basis": "Original text read",
+      "path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\ARCHIVE - old app versions (July 2026)\\6-28-26\\FL0-House-Blender-PE-Review\\FL0-House-v9.0-Design-Issues-Report.md"
+    },
+    {
+      "basis": "Original text read",
+      "path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\ARCHIVE - old app versions (July 2026)\\6-28-26\\FL0-House-Blender-PE-Review\\FL0-House-v10.9-Hearth-Kitchen-Great-Room-Notes.md"
+    },
+    {
+      "basis": "Original text read",
+      "path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\ARCHIVE - old app versions (July 2026)\\6-28-26\\FL0-House-Blender-PE-Review\\FL0-House-v10.11-Three-Flight-Stair-Notes.md"
+    },
+    {
+      "basis": "Original SVG decoded and inspected",
+      "path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\ARCHIVE - old app versions (July 2026)\\6-28-26\\FL0-House-Blender-PE-Review\\svg\\FL0-House-v7.4-A-102-dimension-room-area-plan.svg"
+    },
+    {
+      "basis": "Original SVG decoded and inspected",
+      "path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\ARCHIVE - old app versions (July 2026)\\6-28-26\\FL0-House-Blender-PE-Review\\svg\\FL0-House-v7.4-S-104-tower-perch-framing-plan.svg"
+    },
+    {
+      "audit": "v74-native-review.json",
+      "basis": "Opened in Blender 5.1.2; scene units and world-space mesh bounds read. Original not saved.",
+      "path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\ARCHIVE - old app versions (July 2026)\\6-28-26\\FL0-House-Blender-PE-Review\\model\\FL0-House-v7.4-Finger-Lakes-FPSF.blend"
+    },
+    {
+      "basis": "First 120 lines read; generic app controls, not an approved program",
+      "path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\ARCHIVE - old app versions (July 2026)\\natural_house_designer\\CONTROL_VARIABLES.md"
+    },
+    {
+      "basis": "Keys inspected only; not used as approved geometry",
+      "path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\ARCHIVE - old app versions (July 2026)\\natural_house_designer\\building_manifest.json"
+    }
+  ],
+  "purpose": "Additional source-context review; no model revision or approval of a layout.",
+  "retained_images": [
+    {
+      "gallery_path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\DESIGN GALLERY 2026-09-10\\09 - 2026-06-29  v10.x  hearth-tree core\\_detail sheets\\1032__2026-06-30__GPT-Plan-Cleanup-Recommendations__2026-06-30__GPT-Plan-Cleanup-Recommendations__file_0000000090d071f5821.jpg",
+      "gallery_path_at_initial_inspection": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\DESIGN GALLERY 2026-09-10\\all-sheets\\0924__2026-06-30__GPT-Plan-Cleanup-Recommendations__2026-06-30__GPT-Plan-Cleanup-Recommendations__file_0000000090d071f5821.jpg",
+      "gallery_reorganisation_note": "Gallery changed during review; old sequence and inspected path retained for traceability. New path resolved by original basename.",
+      "indexed_original_source": "C:\\Users\\danir\\AppData\\Local\\Temp\\claude\\gptfinal\\2026-06-30__GPT-Plan-Cleanup-Recommendations__file_0000000090d071f5821.jpg",
+      "initial_gallery_sequence": 924,
+      "name": "Hearthtree-Handmarked-Plan-Rev19.jpg",
+      "review_basis": "Gallery reproduction viewed; original provenance taken from INVENTORY.csv. Original source is not claimed independently opened for this image.",
+      "seq": 924,
+      "source_page": "1"
+    },
+    {
+      "gallery_path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\DESIGN GALLERY 2026-09-10\\09 - 2026-06-29  v10.x  hearth-tree core\\_detail sheets\\1026__2026-06-29__misc__Scanned_20260629-2227_p04.jpg",
+      "gallery_path_at_initial_inspection": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\DESIGN GALLERY 2026-09-10\\all-sheets\\0918__2026-06-29__misc__Scanned_20260629-2227_p04.jpg",
+      "gallery_reorganisation_note": "Gallery changed during review; old sequence and inspected path retained for traceability. New path resolved by original basename.",
+      "indexed_original_source": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\ARCHIVE - old app versions (July 2026)\\6-29-226\\Scanned_20260629-2227.pdf",
+      "initial_gallery_sequence": 918,
+      "name": "Hearthtree-Original-Loft-Tower-Deck-Study.jpg",
+      "review_basis": "Gallery reproduction viewed; original provenance taken from INVENTORY.csv. Original source is not claimed independently opened for this image.",
+      "seq": 918,
+      "source_page": "4"
+    },
+    {
+      "gallery_path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\DESIGN GALLERY 2026-09-10\\09 - 2026-06-29  v10.x  hearth-tree core\\_detail sheets\\1029__2026-06-30__GPT-Plan-Cleanup-Recommendations__2026-06-30__GPT-Plan-Cleanup-Recommendations__file_000000001ecc722fb04.jpg",
+      "gallery_path_at_initial_inspection": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\DESIGN GALLERY 2026-09-10\\all-sheets\\0921__2026-06-30__GPT-Plan-Cleanup-Recommendations__2026-06-30__GPT-Plan-Cleanup-Recommendations__file_000000001ecc722fb04.jpg",
+      "gallery_reorganisation_note": "Gallery changed during review; old sequence and inspected path retained for traceability. New path resolved by original basename.",
+      "indexed_original_source": "C:\\Users\\danir\\AppData\\Local\\Temp\\claude\\gptfinal\\2026-06-30__GPT-Plan-Cleanup-Recommendations__file_000000001ecc722fb04.jpg",
+      "initial_gallery_sequence": 921,
+      "name": "Hearthtree-Handmarked-Plan-Rev20.jpg",
+      "review_basis": "Gallery reproduction viewed; original provenance taken from INVENTORY.csv. Original source is not claimed independently opened for this image.",
+      "seq": 921,
+      "source_page": "1"
+    },
+    {
+      "gallery_path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\DESIGN GALLERY 2026-09-10\\09 - 2026-06-29  v10.x  hearth-tree core\\_detail sheets\\1033__2026-06-30__GPT-Plan-Cleanup-Recommendations__2026-06-30__GPT-Plan-Cleanup-Recommendations__file_00000000ab9c722fb7b.jpg",
+      "gallery_path_at_initial_inspection": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\DESIGN GALLERY 2026-09-10\\all-sheets\\0925__2026-06-30__GPT-Plan-Cleanup-Recommendations__2026-06-30__GPT-Plan-Cleanup-Recommendations__file_00000000ab9c722fb7b.jpg",
+      "gallery_reorganisation_note": "Gallery changed during review; old sequence and inspected path retained for traceability. New path resolved by original basename.",
+      "indexed_original_source": "C:\\Users\\danir\\AppData\\Local\\Temp\\claude\\gptfinal\\2026-06-30__GPT-Plan-Cleanup-Recommendations__file_00000000ab9c722fb7b.jpg",
+      "initial_gallery_sequence": 925,
+      "name": "Hearthtree-Handdrawn-Plan.jpg",
+      "review_basis": "Gallery reproduction viewed; original provenance taken from INVENTORY.csv. Original source is not claimed independently opened for this image.",
+      "seq": 925,
+      "source_page": "1"
+    },
+    {
+      "gallery_path": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\DESIGN GALLERY 2026-09-10\\02 - 2026-03 to 04  earth-sheltered concepts\\_detail sheets\\0006__2026-03-05__Early-concept__file_00000000687871f596aefc3696d1b4d3.jpg",
+      "gallery_path_at_initial_inspection": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\DESIGN GALLERY 2026-09-10\\all-sheets\\0006__2026-03-05__Early-concept__file_00000000687871f596aefc3696d1b4d3.jpg",
+      "gallery_reorganisation_note": "Gallery changed during review; old sequence and inspected path retained for traceability. New path resolved by original basename.",
+      "indexed_original_source": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\House Design\\file_00000000687871f596aefc3696d1b4d3.png",
+      "initial_gallery_sequence": 6,
+      "name": "Hearthtree-Hillside-Reference.jpg",
+      "review_basis": "Gallery reproduction viewed; original provenance taken from INVENTORY.csv. Original source is not claimed independently opened for this image.",
+      "seq": 6,
+      "source_page": "1"
+    }
+  ],
+  "roots": {
+    "archive": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\ARCHIVE - old app versions (July 2026)",
+    "gallery": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\DESIGN GALLERY 2026-09-10"
+  },
+  "scope": {
+    "archive_blend1_backups": 29,
+    "archive_blend_files": 37,
+    "archive_files_excluding_caches": 665,
+    "date_version_groups": 77,
+    "distinct_indexed_source_paths": 584,
+    "distinct_version_labels": 60,
+    "gallery_key_images": 475,
+    "gallery_other_sheets": 608,
+    "gallery_tiles": 1083,
+    "limited_resolution_tile_ids": [
+      161,
+      162,
+      169,
+      175
+    ],
+    "native_blend_files_opened_this_review": 1,
+    "visual_sample_tile_count": 82,
+    "visual_sample_tile_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      49,
+      161,
+      162,
+      169,
+      175,
+      205,
+      212,
+      218,
+      263,
+      281,
+      282,
+      284,
+      285,
+      306,
+      311,
+      314,
+      316,
+      318,
+      598,
+      599,
+      602,
+      603,
+      621,
+      855,
+      857,
+      867,
+      869,
+      871,
+      873,
+      875,
+      877,
+      879,
+      881,
+      883,
+      885,
+      893,
+      895,
+      897,
+      898,
+      905,
+      906,
+      907,
+      911,
+      912,
+      913,
+      915,
+      916,
+      917,
+      918,
+      919,
+      920,
+      921,
+      922,
+      923,
+      924,
+      925,
+      926,
+      927,
+      928,
+      929,
+      930,
+      931,
+      932,
+      933,
+      934,
+      935,
+      936,
+      937,
+      938,
+      939
+    ],
+    "inventory_timing": "Counts and gallery sample IDs refer to the initial inventory. Gallery folders and some sequence IDs changed during review; current selected-image paths are included alongside the original paths.",
+    "latest_inventory_tile_count": 1203
+  }
+}

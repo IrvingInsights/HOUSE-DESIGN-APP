@@ -1,0 +1,701 @@
+{
+  "source": "P:\\My Drive\\07-HOUSE\\HOMESTEAD\\ARCHIVE - old app versions (July 2026)\\6-28-26\\FL0-House-Blender-PE-Review\\model\\FL0-House-v7.4-Finger-Lakes-FPSF.blend",
+  "blender": "5.1.2",
+  "file_units": {
+    "system": "IMPERIAL",
+    "scale_length_metres_per_blender_unit": 0.30480000376701355,
+    "feet_per_blender_unit": 1.0000000123589683,
+    "conversion": "physical feet = world coordinate * scene.unit_settings.scale_length / 0.3048"
+  },
+  "meshes": 161,
+  "selected_geometry": [
+    {
+      "name": "Carport shed roof placeholder",
+      "collection": [
+        "22 Roof Framing"
+      ],
+      "bbox_ft": [
+        [
+          34.5,
+          -8,
+          8.9
+        ],
+        [
+          54.5,
+          12,
+          9.35
+        ]
+      ]
+    },
+    {
+      "name": "D-04 Tower ground door",
+      "collection": [
+        "40 Openings"
+      ],
+      "bbox_ft": [
+        [
+          23.94,
+          7.7,
+          0
+        ],
+        [
+          24.06,
+          10.7,
+          7
+        ]
+      ]
+    },
+    {
+      "name": "East-west roof purlin Y-0.5",
+      "collection": [
+        "22 Roof Framing"
+      ],
+      "bbox_ft": [
+        [
+          -1,
+          -0.58,
+          16.45
+        ],
+        [
+          25,
+          -0.42,
+          16.75
+        ]
+      ]
+    },
+    {
+      "name": "East-west roof purlin Y14",
+      "collection": [
+        "22 Roof Framing"
+      ],
+      "bbox_ft": [
+        [
+          -1,
+          13.92,
+          12.95
+        ],
+        [
+          25,
+          14.08,
+          13.25
+        ]
+      ]
+    },
+    {
+      "name": "East-west roof purlin Y21",
+      "collection": [
+        "22 Roof Framing"
+      ],
+      "bbox_ft": [
+        [
+          -1,
+          20.92,
+          11.2
+        ],
+        [
+          25,
+          21.08,
+          11.5
+        ]
+      ]
+    },
+    {
+      "name": "East-west roof purlin Y28.5",
+      "collection": [
+        "22 Roof Framing"
+      ],
+      "bbox_ft": [
+        [
+          -1,
+          28.42,
+          9.45
+        ],
+        [
+          25,
+          28.58,
+          9.75
+        ]
+      ]
+    },
+    {
+      "name": "East-west roof purlin Y7",
+      "collection": [
+        "22 Roof Framing"
+      ],
+      "bbox_ft": [
+        [
+          -1,
+          6.92,
+          14.7
+        ],
+        [
+          25,
+          7.08,
+          15
+        ]
+      ]
+    },
+    {
+      "name": "Greenhouse and south entry slab",
+      "collection": [
+        "20 Structure Foundation"
+      ],
+      "bbox_ft": [
+        [
+          0,
+          -8,
+          -0.5
+        ],
+        [
+          24,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "name": "L-shaped tower perch east leg",
+      "collection": [
+        "21 Structure Timber Frame"
+      ],
+      "bbox_ft": [
+        [
+          24,
+          3,
+          10
+        ],
+        [
+          28,
+          13,
+          10.35
+        ]
+      ]
+    },
+    {
+      "name": "L-shaped tower perch south leg",
+      "collection": [
+        "21 Structure Timber Frame"
+      ],
+      "bbox_ft": [
+        [
+          20,
+          3,
+          10
+        ],
+        [
+          28,
+          7,
+          10.35
+        ]
+      ]
+    },
+    {
+      "name": "Main conditioned FPSF slab",
+      "collection": [
+        "20 Structure Foundation"
+      ],
+      "bbox_ft": [
+        [
+          0,
+          0,
+          -0.5
+        ],
+        [
+          24,
+          28,
+          0
+        ]
+      ]
+    },
+    {
+      "name": "Main north-draining roof assembly",
+      "collection": [
+        "22 Roof Framing"
+      ],
+      "bbox_ft": [
+        [
+          -1,
+          -0.8,
+          9.55
+        ],
+        [
+          25,
+          29,
+          17
+        ]
+      ]
+    },
+    {
+      "name": "Metal stack through tower corner",
+      "collection": [
+        "50 Systems Placeholders"
+      ],
+      "bbox_ft": [
+        [
+          17.3,
+          7.7,
+          0
+        ],
+        [
+          17.75,
+          8.15,
+          23
+        ]
+      ]
+    },
+    {
+      "name": "North-south roof rafter line X0",
+      "collection": [
+        "22 Roof Framing"
+      ],
+      "bbox_ft": [
+        [
+          -0.08,
+          -0.8,
+          9.25
+        ],
+        [
+          0.08,
+          29,
+          16.55
+        ]
+      ]
+    },
+    {
+      "name": "North-south roof rafter line X12",
+      "collection": [
+        "22 Roof Framing"
+      ],
+      "bbox_ft": [
+        [
+          11.92,
+          -0.8,
+          9.25
+        ],
+        [
+          12.08,
+          29,
+          16.55
+        ]
+      ]
+    },
+    {
+      "name": "North-south roof rafter line X18",
+      "collection": [
+        "22 Roof Framing"
+      ],
+      "bbox_ft": [
+        [
+          17.92,
+          -0.8,
+          9.25
+        ],
+        [
+          18.08,
+          29,
+          16.55
+        ]
+      ]
+    },
+    {
+      "name": "North-south roof rafter line X24",
+      "collection": [
+        "22 Roof Framing"
+      ],
+      "bbox_ft": [
+        [
+          23.92,
+          -0.8,
+          9.25
+        ],
+        [
+          24.08,
+          29,
+          16.55
+        ]
+      ]
+    },
+    {
+      "name": "North-south roof rafter line X6",
+      "collection": [
+        "22 Roof Framing"
+      ],
+      "bbox_ft": [
+        [
+          5.92,
+          -0.8,
+          9.25
+        ],
+        [
+          6.08,
+          29,
+          16.55
+        ]
+      ]
+    },
+    {
+      "name": "Outdoor kitchen and covered patio slab",
+      "collection": [
+        "20 Structure Foundation"
+      ],
+      "bbox_ft": [
+        [
+          24,
+          -8,
+          -0.5
+        ],
+        [
+          34.5,
+          20,
+          0
+        ]
+      ]
+    },
+    {
+      "name": "Outdoor kitchen patio roof extension",
+      "collection": [
+        "22 Roof Framing"
+      ],
+      "bbox_ft": [
+        [
+          24,
+          -8,
+          11.45
+        ],
+        [
+          34.8,
+          20,
+          16.9
+        ]
+      ]
+    },
+    {
+      "name": "Stair enclosure low wall",
+      "collection": [
+        "11 Architecture Interior"
+      ],
+      "bbox_ft": [
+        [
+          12,
+          9.825,
+          0
+        ],
+        [
+          15,
+          10.175,
+          8.5
+        ]
+      ]
+    },
+    {
+      "name": "Tower floor platform",
+      "collection": [
+        "21 Structure Timber Frame"
+      ],
+      "bbox_ft": [
+        [
+          14,
+          7,
+          9.65
+        ],
+        [
+          24,
+          15,
+          10
+        ]
+      ]
+    },
+    {
+      "name": "Tower perch guardrail east",
+      "collection": [
+        "10 Architecture Shell"
+      ],
+      "bbox_ft": [
+        [
+          27.8,
+          3,
+          10.35
+        ],
+        [
+          28.1,
+          13,
+          13.5
+        ]
+      ]
+    },
+    {
+      "name": "Tower perch guardrail south",
+      "collection": [
+        "10 Architecture Shell"
+      ],
+      "bbox_ft": [
+        [
+          20,
+          2.8,
+          10.35
+        ],
+        [
+          28,
+          3.1,
+          13.5
+        ]
+      ]
+    },
+    {
+      "name": "Tower roof assembly",
+      "collection": [
+        "22 Roof Framing"
+      ],
+      "bbox_ft": [
+        [
+          13.5,
+          6.5,
+          19.375
+        ],
+        [
+          24.5,
+          15.5,
+          21.075
+        ]
+      ]
+    },
+    {
+      "name": "Tower stair tread 01",
+      "collection": [
+        "11 Architecture Interior"
+      ],
+      "bbox_ft": [
+        [
+          12.1,
+          9.8,
+          0.55
+        ],
+        [
+          14.9,
+          10.15,
+          0.73
+        ]
+      ]
+    },
+    {
+      "name": "Tower stair tread 02",
+      "collection": [
+        "11 Architecture Interior"
+      ],
+      "bbox_ft": [
+        [
+          12.1,
+          9.25,
+          1.45
+        ],
+        [
+          14.9,
+          9.6,
+          1.63
+        ]
+      ]
+    },
+    {
+      "name": "Tower stair tread 03",
+      "collection": [
+        "11 Architecture Interior"
+      ],
+      "bbox_ft": [
+        [
+          12.1,
+          8.7,
+          2.35
+        ],
+        [
+          14.9,
+          9.05,
+          2.53
+        ]
+      ]
+    },
+    {
+      "name": "Tower stair tread 04",
+      "collection": [
+        "11 Architecture Interior"
+      ],
+      "bbox_ft": [
+        [
+          12.1,
+          8.15,
+          3.25
+        ],
+        [
+          14.9,
+          8.5,
+          3.43
+        ]
+      ]
+    },
+    {
+      "name": "Tower stair tread 05",
+      "collection": [
+        "11 Architecture Interior"
+      ],
+      "bbox_ft": [
+        [
+          12.1,
+          7.6,
+          4.15
+        ],
+        [
+          14.9,
+          7.95,
+          4.33
+        ]
+      ]
+    },
+    {
+      "name": "Tower stair tread 06",
+      "collection": [
+        "11 Architecture Interior"
+      ],
+      "bbox_ft": [
+        [
+          12.1,
+          7.05,
+          5.05
+        ],
+        [
+          14.9,
+          7.4,
+          5.23
+        ]
+      ]
+    },
+    {
+      "name": "Tower stair tread 07",
+      "collection": [
+        "11 Architecture Interior"
+      ],
+      "bbox_ft": [
+        [
+          12.1,
+          6.5,
+          5.95
+        ],
+        [
+          14.9,
+          6.85,
+          6.13
+        ]
+      ]
+    },
+    {
+      "name": "Tower stair tread 08",
+      "collection": [
+        "11 Architecture Interior"
+      ],
+      "bbox_ft": [
+        [
+          12.1,
+          5.95,
+          6.85
+        ],
+        [
+          14.9,
+          6.3,
+          7.03
+        ]
+      ]
+    },
+    {
+      "name": "Tower stair tread 09",
+      "collection": [
+        "11 Architecture Interior"
+      ],
+      "bbox_ft": [
+        [
+          12.1,
+          5.4,
+          7.75
+        ],
+        [
+          14.9,
+          5.75,
+          7.93
+        ]
+      ]
+    },
+    {
+      "name": "Tower stair tread 10",
+      "collection": [
+        "11 Architecture Interior"
+      ],
+      "bbox_ft": [
+        [
+          12.1,
+          4.85,
+          8.65
+        ],
+        [
+          14.9,
+          5.2,
+          8.83
+        ]
+      ]
+    },
+    {
+      "name": "Tower studio wall enclosure",
+      "collection": [
+        "10 Architecture Shell"
+      ],
+      "bbox_ft": [
+        [
+          14,
+          7,
+          10
+        ],
+        [
+          24,
+          15,
+          21
+        ]
+      ]
+    },
+    {
+      "name": "Two-bay carport slab placeholder",
+      "collection": [
+        "20 Structure Foundation"
+      ],
+      "bbox_ft": [
+        [
+          34.5,
+          -8,
+          -0.5
+        ],
+        [
+          54.5,
+          12,
+          0
+        ]
+      ]
+    },
+    {
+      "name": "W-06 Tower east vent window",
+      "collection": [
+        "40 Openings"
+      ],
+      "bbox_ft": [
+        [
+          23.94,
+          8.5,
+          2.8
+        ],
+        [
+          24.06,
+          11.5,
+          5.8
+        ]
+      ]
+    }
+  ],
+  "limitations": [
+    "Bounding boxes do not establish usable area, headroom, structural adequacy or approval.",
+    "Source was opened read-only; no save to source was performed."
+  ]
+}
