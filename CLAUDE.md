@@ -17,8 +17,15 @@ The three laws, in short:
    `record_snapshot` there: current state, decisions, do-not-change, next
    step. Photion replaced Notion on 2026-09-03.
 
-Then read, in order: `HANDOFF.md` → `STRATEGY.md` → `RESUME.md` → `TESTING.md` →
-the newest `SESSION-HANDOFF-*.md`.
+4. **Latest binding design wins; nothing is deleted.** All House efforts (app,
+   drawings, search, build) are ONE project. The most recent explicit decision
+   supersedes earlier ones — but "latest" means the latest *decision*, not the
+   most recently-touched *file*; earlier material stays a live source until
+   explicitly replaced, and nothing is ever deleted. Full rule + order of
+   authority + where things live: [`UNIFICATION.md`](./UNIFICATION.md).
+
+Then read, in order: `UNIFICATION.md` → `HANDOFF.md` → `STRATEGY.md` →
+`RESUME.md` → `TESTING.md` → the newest `SESSION-HANDOFF-*.md`.
 
 Daniel is a non-coder. Plain language, always. Fix the class, never the
 instance. Never hand-edit his design data. Backend `.mjs` edits need a server
