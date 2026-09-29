@@ -39,9 +39,14 @@ speaks; it does not erase detail it is silent about.
 1. **Daniel's most recent explicit decision.** Binding. (e.g. forward southeast
    tower · full usable deck ring · two enclosed main-level bedrooms · H01
    rejected.)
-2. **The app's current model** — the working geometry the drawings cite
-   (e.g. the deck-ring revision). The software's live source of truth.
-3. **Earlier drawings & studies** — mined for detail; superseded only by 1 or 2.
+2. **The app's model at a *promoted or cited* revision** — a specific revision
+   Daniel has promoted, or that a decision or drawing cites (e.g. the deck-ring
+   revision 681). NOT whatever is merely loaded in the app right now: an
+   unfinished experiment or accidental drift in the live app is not a decision
+   and never supersedes a drawing. Only a named, promoted/cited revision does.
+3. **Earlier drawings & studies** — authoritative for every detail they carry
+   until a level-1 decision, or a promoted/cited level-2 revision, *explicitly*
+   replaces that detail. Mined for detail; superseded on purpose, never by drift.
 4. **Everything else** — every prior version, render, sketch and note. Retained,
    dated, searchable. **Never deleted.**
 
@@ -69,7 +74,9 @@ never by a background sync.
 - **In this repo's `design-archive/`:** only a **July** snapshot (the older
   Treehearth pptx, the FreeCAD `house_design_studio`, prototypes). The September
   Hearthtree work is **not yet committed here** — its GitHub publication was held
-  pending Daniel's approval (the repo is public).
+  pending Daniel's approval (the repo is public). The pending directory is
+  git-ignored (`design-archive/Hearthtree-Source-Context-*/`) so the session-end
+  `git add -A` cannot publish it by accident; on approval, `git add -f` it in.
 - **House search:** Photion `PRJ-34` + the Home Search Console artifact.
 - **Project state:** Photion — `PRJ-911` (the app), `PRJ-34` (the search).
 

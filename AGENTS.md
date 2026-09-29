@@ -103,8 +103,9 @@ must never quietly contradict each other.
   for having a later timestamp.
 - **Nothing is ever deleted.** Every prior version, render, sketch and note is
   retained, dated and searchable — for history and later archaeology.
-- **Order of authority:** Daniel's latest decision → the app's current model →
-  earlier drawings & studies → everything else (retained).
+- **Order of authority:** Daniel's latest decision → the app's model at a
+  *promoted or cited* revision (never mere live drift) → earlier drawings &
+  studies → everything else (retained).
 - **Two sources of truth, kept straight:** the *software* lives in this repo
   (`main`); the *house design* lives in Google Drive + Photion + local
   `design-archive/`. Neither silently overwrites the other; a change crosses

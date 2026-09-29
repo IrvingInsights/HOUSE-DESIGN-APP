@@ -95,7 +95,8 @@ edits need a server restart** (module cache); the frontend hot-reloads.
 All House efforts are one project. **Latest binding design supersedes earlier
 ones; nothing is deleted** — and "latest" means the latest *decision*, not the
 most recently-touched *file*. Order of authority: Daniel's latest decision → the
-app's current model → earlier drawings → everything else (retained). The
+app's *promoted/cited* revision (not mere live drift) → earlier drawings →
+everything else (retained). The
 software's home is this repo; the house design's home is Drive + Photion + local
 `design-archive/`. Full statement: `UNIFICATION.md`.
 

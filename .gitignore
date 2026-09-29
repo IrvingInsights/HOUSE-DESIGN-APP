@@ -12,3 +12,8 @@ _transfer.bundle
 _design-archive.tgz
 _design-archive.zip
 _to_delete/
+
+# UNAPPROVED design sets — held pending Daniel's decision to publish (this repo
+# is PUBLIC). The session-end `git add -A` must never sweep these into a commit.
+# When Daniel approves publication, add with `git add -f <path>` (Law 1).
+design-archive/Hearthtree-Source-Context-*/
