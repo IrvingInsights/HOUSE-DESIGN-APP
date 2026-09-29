@@ -11,7 +11,7 @@ Source of truth for state: **Photion** (the `mcp__photion__*` tools), project **
 
 ---
 
-## THE THREE LAWS
+## THE FOUR LAWS
 
 ### 1. ONE PLACE. This repo is the only place.
 
@@ -89,6 +89,30 @@ If you have no Photion access, write the exact snapshot text Daniel should
 paste, and say plainly that you could not write it yourself. **Never silently
 skip the Photion update.** Do not write to Notion any more; the old hub page
 (🏡 07 — House) is history.
+
+### 4. LATEST BINDING DESIGN WINS. Nothing is deleted.
+
+All House efforts are ONE project — this app, the Hearthtree/Treehearth
+drawings done straight through AI, the house search, the eventual build. They
+must never quietly contradict each other.
+
+- **The most recent explicit decision supersedes earlier ones** — but "latest"
+  means the latest *decision*, not the most recently-touched *file*. An earlier
+  drawing stays a live source for a detail until a later decision **explicitly**
+  replaces it; a recent render never silently overrides an older intention just
+  for having a later timestamp.
+- **Nothing is ever deleted.** Every prior version, render, sketch and note is
+  retained, dated and searchable — for history and later archaeology.
+- **Order of authority:** Daniel's latest decision → the app's model at a
+  *promoted or cited* revision (never mere live drift) → earlier drawings &
+  studies → everything else (retained).
+- **Two sources of truth, kept straight:** the *software* lives in this repo
+  (`main`); the *house design* lives in Google Drive + Photion + local
+  `design-archive/`. Neither silently overwrites the other; a change crosses
+  over only by an explicit step.
+
+Full statement, with where every piece currently lives: **`UNIFICATION.md`**
+(set by Daniel 2026-09-28).
 
 ---
 

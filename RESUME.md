@@ -91,6 +91,15 @@ edits need a server restart** (module cache); the frontend hot-reloads.
   arithmetic now (`parseLocalResize` in ask.js, never the AI), the planner's
   schema says what w and d mean, and the wording never prints a 0.
 
+## THE UNIFICATION RULE (2026-09-28)
+All House efforts are one project. **Latest binding design supersedes earlier
+ones; nothing is deleted** — and "latest" means the latest *decision*, not the
+most recently-touched *file*. Order of authority: Daniel's latest decision → the
+app's *promoted/cited* revision (not mere live drift) → earlier drawings →
+everything else (retained). The
+software's home is this repo; the house design's home is Drive + Photion + local
+`design-archive/`. Full statement: `UNIFICATION.md`.
+
 ## START HERE
 1. Drop a real floor-plan PDF into `.data/trace-corpus/` and run
    `node tools/trace_corpus_test.mjs` — the reader is proven on an image of
